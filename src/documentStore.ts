@@ -161,9 +161,12 @@ function assertDocumentOfflineOperations(
   if (!operations) return;
 
   for (const [operationName, operation] of Object.entries(operations)) {
-    if (operation.tempEntity !== undefined) {
+    if (
+      operation.tempEntity !== undefined ||
+      operation.tempEntities !== undefined
+    ) {
       throw new Error(
-        `Document offline operation "${operationName}" does not support tempEntity`,
+        `Document offline operation "${operationName}" does not support tempEntity or tempEntities`,
       );
     }
   }
@@ -866,8 +869,6 @@ export function createDocumentStore<
      * online, but degrades into durable offline queueing when the session is
      * already offline or the failure is classified as offline/outage. Callers
      * must not assume a successful result always includes the server payload.
-     * Pass one descriptor or an ordered non-empty list to queue multiple
-     * offline operations from the same mutation fallback.
      */
     offline: TOfflineOperations extends null
       ? never

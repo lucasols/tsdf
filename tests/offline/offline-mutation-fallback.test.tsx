@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_boolean, rc_object, rc_string } from 'runcheck';
+import { rc_array, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
@@ -36,10 +36,9 @@ const renameCollectionInputSchema = rc_object({
   id: rc_string,
   name: rc_string,
 });
-const tempCollectionCreateInputSchema = rc_object({
-  name: rc_string,
-  shouldCreateTempRef: rc_boolean,
-});
+const batchCollectionCreateInputSchema = rc_array(
+  rc_object({ name: rc_string }),
+);
 
 function getSingleQueuedMutationData(
   sessionKey: string,
@@ -358,20 +357,41 @@ describe('collection', () => {
       `);
   });
 
-  test('queue multiple offline operations in array order and replay them in that same order', async () => {
+  type BatchCollectionCreateOperations = RenameCollectionItemOperations & {
+    createItems: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { name: string }[],
+      unknown,
+      { id: string; name: string }[]
+    >;
+  };
+
+  test('queue one batch temp-create offline operation and rebind later queued mutations to final payloads', async () => {
     network.setOffline();
-    const sessionKey = 'hybrid-collection-array-session';
-    const storeName = 'hybrid-collection-array-store';
-    const directMutation = vi.fn(() =>
-      Promise.resolve({ value: { name: 'unused' } }),
+    const sessionKey = 'hybrid-collection-batch-temp-session';
+    const storeName = 'hybrid-collection-batch-temp-store';
+    const createItemsExecute = vi.fn(
+      ({ input }: { input: { name: string }[] }) =>
+        Promise.resolve(
+          input.map((item) => ({
+            id: `users||${item.name.toLowerCase()}`,
+            name: item.name,
+          })),
+        ),
     );
-    const execute = vi.fn(
-      ({ input }: { input: { id: string; name: string } }) =>
-        Promise.resolve({ value: { name: input.name } }),
+    const renameItemExecute = vi.fn(
+      ({ input }: { input: { id: string; name: string } }) => {
+        env.apiStore.updateItemState(input.id, () => ({
+          value: { name: input.name },
+        }));
+
+        return Promise.resolve({ value: { name: input.name } });
+      },
     );
     const env = createCollectionStoreTestEnv<
       { name: string },
-      RenameCollectionItemOperations
+      BatchCollectionCreateOperations
     >(
       { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
       {
@@ -388,7 +408,28 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute,
+                execute: renameItemExecute,
+              },
+              createItems: {
+                inputSchema: batchCollectionCreateInputSchema,
+                getEntityRefs: ({ input }) =>
+                  input.map((item) => `temp:${item.name}`),
+                tempEntities: {
+                  buildPendingEntities: (input, tempIds) =>
+                    input.map((item, index) => ({
+                      tempId: tempIds[index]!,
+                      pendingEntity: {
+                        value: { name: `pending:${item.name}` },
+                      },
+                    })),
+                  reconcileServerEntities: (result, tempIds) =>
+                    result.map((item, index) => ({
+                      tempId: tempIds[index]!,
+                      finalPayload: item.id,
+                      finalData: { value: { name: item.name } },
+                    })),
+                },
+                execute: createItemsExecute,
               },
             },
           },
@@ -396,77 +437,89 @@ describe('collection', () => {
       },
     );
 
-    const result = await env.apiStore.performMutation('users||1', {
-      mutation: directMutation,
-      offline: [
-        {
-          operation: 'renameItem',
-          input: { id: 'users||1', name: 'Ada queued' },
-        },
-        {
-          operation: 'renameItem',
-          input: { id: 'users||2', name: 'Grace queued' },
-        },
-      ],
+    const createResult = await env.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve({ ok: true }),
+      offline: {
+        operation: 'createItems',
+        input: [{ name: 'Ada queued' }, { name: 'Grace queued' }],
+      },
     });
 
-    expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
-    expect(directMutation).not.toHaveBeenCalled();
+    expect(createResult).toMatchObject({ ok: true, value: { kind: 'queued' } });
     expect(
-      getOfflineQueueEntries(sessionKey, storeName)
-        .map((entry) => {
-          const data = getOfflineQueueEntryData(entry);
-
-          return {
-            input: data.input,
-            operation: data.operation,
-            queueOrder: data.queueOrder,
-          };
-        })
-        .sort((left, right) => {
-          return Number(left.queueOrder) - Number(right.queueOrder);
-        })
-        .map(({ queueOrder: _queueOrder, ...entry }) => entry),
+      env.apiStore
+        .getOfflineEntities()
+        .map(({ entityKey, tempId }) => ({ entityKey, tempId })),
     ).toMatchInlineSnapshot(`
-      - input: { id: 'users||1', name: 'Ada queued' }
-        operation: 'renameItem'
-      - input: { id: 'users||2', name: 'Grace queued' }
-        operation: 'renameItem'
+      - entityKey: '"temp:Ada queued'
+        tempId: 'temp:Ada queued'
+      - entityKey: '"temp:Grace queued'
+        tempId: 'temp:Grace queued'
     `);
+    expect(
+      env.store.state[getCompositeKey('temp:Ada queued')]?.data,
+    ).toMatchObject({ value: { name: 'pending:Ada queued' } });
+    expect(
+      env.store.state[getCompositeKey('temp:Grace queued')]?.data,
+    ).toMatchObject({ value: { name: 'pending:Grace queued' } });
+
+    await env.apiStore.performMutation('temp:Ada queued', {
+      mutation: () => Promise.resolve({ value: { name: 'Ada rebound' } }),
+      offline: {
+        operation: 'renameItem',
+        input: { id: 'temp:Ada queued', name: 'Ada rebound' },
+      },
+    });
+    await env.apiStore.performMutation('temp:Grace queued', {
+      mutation: () => Promise.resolve({ value: { name: 'Grace rebound' } }),
+      offline: {
+        operation: 'renameItem',
+        input: { id: 'temp:Grace queued', name: 'Grace rebound' },
+      },
+    });
 
     act(() => {
       network.goOnline();
     });
     await advanceTime(250);
-    await waitForMicrotaskCondition(() => execute.mock.calls.length === 2);
+    await waitForMicrotaskCondition(
+      () => renameItemExecute.mock.calls.length === 2,
+    );
 
-    expect(execute.mock.calls.map((call) => call[0].input))
+    expect(createItemsExecute).toHaveBeenCalledTimes(1);
+    expect(renameItemExecute.mock.calls.map((call) => call[0].input))
       .toMatchInlineSnapshot(`
-        - { id: 'users||1', name: 'Ada queued' }
-        - { id: 'users||2', name: 'Grace queued' }
+        - { id: 'users||ada queued', name: 'Ada rebound' }
+        - { id: 'users||grace queued', name: 'Grace rebound' }
       `);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );
+    expect(
+      env.store.state[getCompositeKey('users||ada queued')]?.data,
+    ).toMatchObject({ value: { name: 'Ada rebound' } });
+    expect(
+      env.store.state[getCompositeKey('users||grace queued')]?.data,
+    ).toMatchObject({ value: { name: 'Grace rebound' } });
   });
 
-  type AtomicCollectionBatchOperations = RenameCollectionItemOperations & {
-    createItem: CollectionOfflineOperationDefinition<
+  type InvalidBatchTempCollectionOperations = {
+    createItems: CollectionOfflineOperationDefinition<
       { value: { name: string } },
       string,
-      { name: string; shouldCreateTempRef: boolean },
+      { name: string }[],
       unknown,
-      { id: string; name: string }
+      { id: string; name: string }[]
     >;
   };
 
-  test('do not partially queue a batch when a later offline descriptor is invalid', async () => {
+  test('do not partially queue or apply batch temp entities when temp metadata is invalid', async () => {
     network.setOffline();
-    const sessionKey = 'hybrid-collection-atomic-session';
-    const storeName = 'hybrid-collection-atomic-store';
+    const sessionKey = 'hybrid-collection-invalid-batch-temp-session';
+    const storeName = 'hybrid-collection-invalid-batch-temp-store';
     const env = createCollectionStoreTestEnv<
       { name: string },
-      AtomicCollectionBatchOperations
+      InvalidBatchTempCollectionOperations
     >(
       { 'users||1': { name: 'Ada' } },
       {
@@ -480,28 +533,31 @@ describe('collection', () => {
           offlineMode: {
             network: network.config,
             operations: {
-              renameItem: {
-                inputSchema: renameCollectionInputSchema,
-                getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => ({ value: { name: input.name } }),
-              },
-              createItem: {
-                inputSchema: tempCollectionCreateInputSchema,
+              createItems: {
+                inputSchema: batchCollectionCreateInputSchema,
                 getEntityRefs: ({ input }) =>
-                  input.shouldCreateTempRef ? [`temp:${input.name}`] : [],
-                tempEntity: {
-                  buildPendingEntity: (input) => ({
-                    value: { name: `pending:${input.name}` },
-                  }),
-                  reconcileServerEntity: (result) => ({
-                    finalPayload: result.id,
-                    finalData: { value: { name: result.name } },
-                  }),
+                  input.map((item) => `temp:${item.name}`),
+                tempEntities: {
+                  buildPendingEntities: (input, tempIds) => [
+                    {
+                      tempId: tempIds[0]!,
+                      pendingEntity: {
+                        value: { name: `pending:${input[0]!.name}` },
+                      },
+                    },
+                  ],
+                  reconcileServerEntities: (result, tempIds) =>
+                    result.map((item, index) => ({
+                      tempId: tempIds[index]!,
+                      finalPayload: item.id,
+                      finalData: { value: { name: item.name } },
+                    })),
                 },
-                execute: ({ input }) => ({
-                  id: `users||${input.name.toLowerCase()}`,
-                  name: input.name,
-                }),
+                execute: ({ input }) =>
+                  input.map((item) => ({
+                    id: `users||${item.name.toLowerCase()}`,
+                    name: item.name,
+                  })),
               },
             },
           },
@@ -509,18 +565,12 @@ describe('collection', () => {
       },
     );
 
-    const result = await env.apiStore.performMutation('users||1', {
+    const result = await env.apiStore.performMutation(null, {
       mutation: () => Promise.resolve({ value: { name: 'unused' } }),
-      offline: [
-        {
-          operation: 'renameItem',
-          input: { id: 'users||1', name: 'Ada queued' },
-        },
-        {
-          operation: 'createItem',
-          input: { name: 'Temp', shouldCreateTempRef: false },
-        },
-      ],
+      offline: {
+        operation: 'createItems',
+        input: [{ name: 'Temp A' }, { name: 'Temp B' }],
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -528,7 +578,8 @@ describe('collection', () => {
       `[]`,
     );
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-    expect(env.store.state[getCompositeKey('temp:Temp')]).toBeUndefined();
+    expect(env.store.state[getCompositeKey('temp:Temp A')]).toBeUndefined();
+    expect(env.store.state[getCompositeKey('temp:Temp B')]).toBeUndefined();
   });
 
   test('call the direct mutation while online and skip queueing on success', async () => {

@@ -247,29 +247,26 @@ export function createOfflineStoreController<
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
     input: unknown;
-    tempId?: ValidPayload;
+    tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
+
+  type PendingTempEntity = { tempId: ValidPayload; pendingEntity: unknown };
 
   type PreparedQueuedMutation = {
     currentSessionKey: string;
     operationName: string;
     operation: AnyOfflineOperationDefinition;
     validatedInput: unknown;
-    tempId?: ValidPayload;
+    tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
-  };
-
-  type PreparedMutationBatch = {
-    currentSessionKey: string;
-    mutations: PreparedQueuedMutation[];
   };
 
   type PlannedQueuedMutation = {
     operationName: string;
     validatedInput: unknown;
-    tempId?: ValidPayload;
-    pendingEntity?: unknown;
+    tempIds?: ValidPayload[];
+    pendingEntities: PendingTempEntity[];
     nextEntry?: OfflineQueueEntry;
     removedEntries: OfflineQueueEntry[];
   };
@@ -462,6 +459,60 @@ export function createOfflineStoreController<
     );
   }
 
+  function isTempCreateOperation(operationName: string): boolean {
+    const operation = offlineMode.operations[operationName];
+    return (
+      operation?.tempEntity !== undefined ||
+      operation?.tempEntities !== undefined
+    );
+  }
+
+  function getTempCreateDependencySources(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'tempIds' | 'entityRefs'
+    >,
+  ): TempCreateDependencySource[] {
+    if (!workItem.tempIds || workItem.tempIds.length === 0) return [];
+    if (!isTempCreateOperation(workItem.operation)) return [];
+
+    const itemEntityRefs = workItem.entityRefs.filter(
+      (entityRef) => entityRef.entityKind === 'item',
+    );
+
+    return itemEntityRefs.flatMap((entityRef, index) => {
+      const tempId = workItem.tempIds?.[index];
+      return tempId === undefined
+        ? []
+        : [{ entityKey: entityRef.entityKey, tempId, sourceType: 'queue' }];
+    });
+  }
+
+  function getTempIdForEntityRef(args: {
+    entityRefs: OfflineEntityRef[];
+    tempIds?: ValidPayload[];
+    entityKey: string;
+  }): ValidPayload | undefined {
+    if (!args.tempIds || args.tempIds.length === 0) return undefined;
+
+    let itemIndex = 0;
+    for (const entityRef of args.entityRefs) {
+      if (entityRef.entityKind !== 'item') continue;
+
+      const tempId = args.tempIds[itemIndex];
+      itemIndex += 1;
+
+      if (entityRef.entityKey === args.entityKey) return tempId;
+    }
+
+    return undefined;
+  }
+
+  function castTempLifecyclePayload(value: unknown): ValidPayload {
+    // WORKAROUND: Temp ids and reconciled payloads cross the generic offline controller as unknown values until the store-specific adapter restores the concrete payload type.
+    return __LEGIT_CAST__<ValidPayload, unknown>(value);
+  }
+
   function createResolutionDependencySnapshot(): ResolutionDependencySnapshot {
     const tempDependencySourcesByEntityKey = new Map<
       string,
@@ -474,26 +525,22 @@ export function createOfflineStoreController<
     const blockedResolutionIdsByResolutionId = new Map<string, Set<string>>();
 
     for (const entry of queueEntries.values()) {
-      const entityKey = getTempCreateEntityKey(entry);
-      if (!entityKey) continue;
-
-      tempDependencySourcesByEntityKey.set(entityKey, {
-        entityKey,
-        tempId: entry.tempId,
-        sourceType: 'queue',
-      });
+      for (const source of getTempCreateDependencySources(entry)) {
+        tempDependencySourcesByEntityKey.set(source.entityKey, {
+          ...source,
+          sourceType: 'queue',
+        });
+      }
     }
 
     for (const resolution of resolutions.values()) {
-      const entityKey = getTempCreateEntityKey(resolution);
-      if (!entityKey) continue;
-
-      tempDependencySourcesByEntityKey.set(entityKey, {
-        entityKey,
-        tempId: resolution.tempId,
-        resolutionId: resolution.id,
-        sourceType: 'resolution',
-      });
+      for (const source of getTempCreateDependencySources(resolution)) {
+        tempDependencySourcesByEntityKey.set(source.entityKey, {
+          ...source,
+          resolutionId: resolution.id,
+          sourceType: 'resolution',
+        });
+      }
     }
 
     for (const resolution of resolutions.values()) {
@@ -644,7 +691,12 @@ export function createOfflineStoreController<
           childResolutionCount: childResolutionIds.length,
           createdAt: existing?.createdAt ?? entry.createdAt,
           updatedAt: entry.updatedAt,
-          tempId: entry.tempId ?? existing?.tempId,
+          tempId:
+            getTempIdForEntityRef({
+              entityRefs: entry.entityRefs,
+              tempIds: entry.tempIds,
+              entityKey: ref.entityKey,
+            }) ?? existing?.tempId,
         });
       }
     }
@@ -671,7 +723,12 @@ export function createOfflineStoreController<
           childResolutionCount: childResolutionIds.length,
           createdAt: existing?.createdAt ?? resolution.createdAt,
           updatedAt: resolution.updatedAt,
-          tempId: resolution.tempId ?? existing?.tempId,
+          tempId:
+            getTempIdForEntityRef({
+              entityRefs: resolution.entityRefs,
+              tempIds: resolution.tempIds,
+              entityKey: ref.entityKey,
+            }) ?? existing?.tempId,
         });
       }
     }
@@ -753,7 +810,7 @@ export function createOfflineStoreController<
     input: unknown;
     entityRefs: OfflineEntityRef[];
     queueOrder: number;
-    tempId?: ValidPayload;
+    tempIds?: ValidPayload[];
   }): OfflineQueueEntry {
     const now = Date.now();
 
@@ -771,7 +828,7 @@ export function createOfflineStoreController<
       updatedAt: now,
       lastAttemptAt: null,
       syncState: 'pending',
-      tempId: args.tempId,
+      tempIds: args.tempIds,
     };
   }
 
@@ -787,7 +844,7 @@ export function createOfflineStoreController<
       if (entry.operation !== args.operationName) continue;
       if (entry.syncState !== 'pending') continue;
       if (entry.attempts > 0) continue;
-      if (entry.tempId !== undefined) continue;
+      if (entry.tempIds && entry.tempIds.length > 0) continue;
       if (normalizeEntityRefs(entry.entityRefs) !== normalizedEntityRefs) {
         continue;
       }
@@ -859,7 +916,7 @@ export function createOfflineStoreController<
       entityRefs: entry.entityRefs,
       createdAt: now,
       updatedAt: now,
-      tempId: entry.tempId,
+      tempIds: entry.tempIds,
     };
   }
 
@@ -889,27 +946,6 @@ export function createOfflineStoreController<
     };
   }
 
-  function isTempCreateOperation(operationName: string): boolean {
-    return offlineMode.operations[operationName]?.tempEntity !== undefined;
-  }
-
-  function getTempCreateEntityKey(
-    workItem:
-      | Pick<OfflineQueueEntry, 'operation' | 'tempId' | 'entityRefs'>
-      | Pick<
-          PersistedOfflineResolutionRecord,
-          'operation' | 'tempId' | 'entityRefs'
-        >,
-  ): string | null {
-    if (workItem.tempId === undefined) return null;
-    if (!isTempCreateOperation(workItem.operation)) return null;
-
-    const tempEntityRef = workItem.entityRefs.find(
-      (entityRef) => entityRef.entityKind === 'item',
-    );
-    return tempEntityRef?.entityKey ?? null;
-  }
-
   function hasPayloadReference(value: unknown, target: ValidPayload): boolean {
     if (deepEqual(value, target)) return true;
     if (!Array.isArray(value) && !isObject(value)) return false;
@@ -928,12 +964,14 @@ export function createOfflineStoreController<
   function workItemDependsOnTempCreateSource(args: {
     workItem: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
-      'entityRefs' | 'input' | 'operation' | 'tempId'
+      'entityRefs' | 'input' | 'operation' | 'tempIds'
     >;
     dependencySource: TempCreateDependencySource;
   }): boolean {
     if (
-      getTempCreateEntityKey(args.workItem) === args.dependencySource.entityKey
+      getTempCreateDependencySources(args.workItem).some(
+        (source) => source.entityKey === args.dependencySource.entityKey,
+      )
     ) {
       return false;
     }
@@ -1217,18 +1255,16 @@ export function createOfflineStoreController<
         }
 
         descendantQueueEntries.set(entry.id, entry);
-        const descendantEntityKey = getTempCreateEntityKey(entry);
-        if (!descendantEntityKey || seenEntityKeys.has(descendantEntityKey)) {
-          continue;
-        }
+        for (const descendantSource of getTempCreateDependencySources(entry)) {
+          if (seenEntityKeys.has(descendantSource.entityKey)) continue;
 
-        seenEntityKeys.add(descendantEntityKey);
-        pendingEntityKeys.push(descendantEntityKey);
-        sourcesByEntityKey.set(descendantEntityKey, {
-          entityKey: descendantEntityKey,
-          tempId: entry.tempId,
-          sourceType: 'queue',
-        });
+          seenEntityKeys.add(descendantSource.entityKey);
+          pendingEntityKeys.push(descendantSource.entityKey);
+          sourcesByEntityKey.set(descendantSource.entityKey, {
+            ...descendantSource,
+            sourceType: 'queue',
+          });
+        }
       }
 
       for (const resolution of resolutions.values()) {
@@ -1248,19 +1284,19 @@ export function createOfflineStoreController<
         }
 
         descendantResolutions.set(resolution.id, resolution);
-        const descendantEntityKey = getTempCreateEntityKey(resolution);
-        if (!descendantEntityKey || seenEntityKeys.has(descendantEntityKey)) {
-          continue;
-        }
+        for (const descendantSource of getTempCreateDependencySources(
+          resolution,
+        )) {
+          if (seenEntityKeys.has(descendantSource.entityKey)) continue;
 
-        seenEntityKeys.add(descendantEntityKey);
-        pendingEntityKeys.push(descendantEntityKey);
-        sourcesByEntityKey.set(descendantEntityKey, {
-          entityKey: descendantEntityKey,
-          tempId: resolution.tempId,
-          resolutionId: resolution.id,
-          sourceType: 'resolution',
-        });
+          seenEntityKeys.add(descendantSource.entityKey);
+          pendingEntityKeys.push(descendantSource.entityKey);
+          sourcesByEntityKey.set(descendantSource.entityKey, {
+            ...descendantSource,
+            resolutionId: resolution.id,
+            sourceType: 'resolution',
+          });
+        }
       }
     }
 
@@ -1283,22 +1319,21 @@ export function createOfflineStoreController<
   function rollbackTempCreatePendingEntity(
     workItem: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
-      'operation' | 'input' | 'tempId'
+      'operation' | 'input' | 'tempIds'
     >,
   ): void {
-    if (
-      workItem.tempId === undefined ||
-      !isTempCreateOperation(workItem.operation)
-    ) {
+    if (!workItem.tempIds || !isTempCreateOperation(workItem.operation)) {
       return;
     }
 
-    storeAdapter.rollbackPendingEntity?.({
-      operationName: workItem.operation,
-      input: workItem.input,
-      tempId: workItem.tempId,
-      pendingEntity: undefined,
-    });
+    for (const tempId of workItem.tempIds) {
+      storeAdapter.rollbackPendingEntity?.({
+        operationName: workItem.operation,
+        input: workItem.input,
+        tempId,
+        pendingEntity: undefined,
+      });
+    }
   }
 
   async function promoteBlockedTempCreateDescendants(args: {
@@ -1306,15 +1341,21 @@ export function createOfflineStoreController<
     parentEntry: OfflineQueueEntry;
     parentResolutionId: string;
   }): Promise<void> {
-    const parentEntityKey = getTempCreateEntityKey(args.parentEntry);
-    if (!parentEntityKey) return;
-    const descendants = collectTempCreateDescendants({
-      parentEntityKey,
-      parentTempId: args.parentEntry.tempId,
-      parentResolutionId: args.parentResolutionId,
-    });
+    const descendantQueueEntries = new Map<string, OfflineQueueEntry>();
 
-    for (const dependentEntry of descendants.queueEntries) {
+    for (const source of getTempCreateDependencySources(args.parentEntry)) {
+      const descendants = collectTempCreateDescendants({
+        parentEntityKey: source.entityKey,
+        parentTempId: source.tempId,
+        parentResolutionId: args.parentResolutionId,
+      });
+
+      for (const entry of descendants.queueEntries) {
+        descendantQueueEntries.set(entry.id, entry);
+      }
+    }
+
+    for (const dependentEntry of descendantQueueEntries.values()) {
       await removeEntry(dependentEntry.id, args.current, true);
       await persistResolution(
         buildRetryExhaustedResolutionRecord(args.current, dependentEntry, {
@@ -1355,33 +1396,47 @@ export function createOfflineStoreController<
     current: ActiveSessionState;
     resolution: PersistedOfflineResolutionRecord;
   }): Promise<void> {
-    const parentEntityKey = getTempCreateEntityKey(args.resolution);
-
     await removeResolution(args.resolution.id, args.current, true);
 
-    if (!parentEntityKey) {
+    const parentSources = getTempCreateDependencySources(args.resolution);
+    if (parentSources.length === 0) {
       refreshDerivedState(args.current);
       return;
     }
 
-    const descendants = collectTempCreateDescendants({
-      parentEntityKey,
-      parentTempId: args.resolution.tempId,
-      parentResolutionId: args.resolution.id,
-    });
+    const descendantQueueEntries = new Map<string, OfflineQueueEntry>();
+    const descendantResolutions = new Map<
+      string,
+      PersistedOfflineResolutionRecord
+    >();
 
-    for (const queueEntry of descendants.queueEntries) {
+    for (const source of parentSources) {
+      const descendants = collectTempCreateDescendants({
+        parentEntityKey: source.entityKey,
+        parentTempId: source.tempId,
+        parentResolutionId: args.resolution.id,
+      });
+
+      for (const queueEntry of descendants.queueEntries) {
+        descendantQueueEntries.set(queueEntry.id, queueEntry);
+      }
+      for (const resolution of descendants.resolutions) {
+        descendantResolutions.set(resolution.id, resolution);
+      }
+    }
+
+    for (const queueEntry of descendantQueueEntries.values()) {
       await removeEntry(queueEntry.id, args.current, true);
     }
 
-    for (const resolution of descendants.resolutions) {
+    for (const resolution of descendantResolutions.values()) {
       await removeResolution(resolution.id, args.current, true);
     }
 
-    for (const queueEntry of descendants.queueEntries) {
+    for (const queueEntry of descendantQueueEntries.values()) {
       rollbackTempCreatePendingEntity(queueEntry);
     }
-    for (const resolution of descendants.resolutions) {
+    for (const resolution of descendantResolutions.values()) {
       rollbackTempCreatePendingEntity(resolution);
     }
     rollbackTempCreatePendingEntity(args.resolution);
@@ -1442,39 +1497,53 @@ export function createOfflineStoreController<
       operationName,
       operation,
       validatedInput,
-      tempId: args.tempId,
+      tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
   }
 
-  function normalizeMutationArgs<TName extends keyof TOperations & string>(
-    args: OfflineMutationInput<TOperations, TName>,
-  ): InternalQueuedMutationArgs<TName>[] {
-    if ('operation' in args) {
-      return [{ operation: args.operation, input: args.input }];
-    }
-
-    if (args.length === 0) {
-      throw new Error('Offline mutation list must contain at least one entry');
-    }
-
-    return args.map((entry: { operation: TName; input: unknown }) => ({
-      operation: entry.operation,
-      input: entry.input,
-    }));
+  function findTempIdIndex(
+    tempIds: readonly ValidPayload[],
+    tempId: ValidPayload,
+  ): number {
+    return tempIds.findIndex((candidate) => deepEqual(candidate, tempId));
   }
 
-  function prepareMutationBatchWithSession<
-    TName extends keyof TOperations & string,
-  >(
-    current: ActiveSessionState,
-    args: OfflineMutationInput<TOperations, TName>,
-  ): PreparedMutationBatch {
-    const mutations = normalizeMutationArgs(args).map((entry) =>
-      prepareMutationWithSession(current, entry),
-    );
+  function orderByTempIds<T extends { tempId: ValidPayload }>(args: {
+    operationName: string;
+    label: string;
+    tempIds: readonly ValidPayload[];
+    items: readonly T[];
+  }): T[] {
+    const ordered: Array<T | undefined> = args.tempIds.map(() => undefined);
 
-    return { currentSessionKey: current.sessionKey, mutations };
+    for (const item of args.items) {
+      const index = findTempIdIndex(args.tempIds, item.tempId);
+      if (index === -1) {
+        throw new Error(
+          `${args.label} for "${args.operationName}" must match the resolved temp ids`,
+        );
+      }
+      if (ordered[index] !== undefined) {
+        throw new Error(
+          `${args.label} for "${args.operationName}" must not contain duplicate temp ids`,
+        );
+      }
+
+      ordered[index] = item;
+    }
+
+    const result: T[] = [];
+    for (const item of ordered) {
+      if (!item) {
+        throw new Error(
+          `${args.label} for "${args.operationName}" must match the resolved temp ids`,
+        );
+      }
+      result.push(item);
+    }
+
+    return result;
   }
 
   async function planPreparedMutation(args: {
@@ -1489,7 +1558,7 @@ export function createOfflineStoreController<
         operation,
         operationName,
         validatedInput,
-        tempId: preparedTempId,
+        tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
       },
       queueOrder,
@@ -1497,14 +1566,20 @@ export function createOfflineStoreController<
     } = args;
 
     const tempEntity = operation.tempEntity;
+    const tempEntities = operation.tempEntities;
     if (operation.accumulation && operation.supersedes) {
       throw new Error(
         `Offline operation "${operationName}" cannot configure accumulation and supersedes together`,
       );
     }
-    if (storeType === 'document' && tempEntity) {
+    if (tempEntity && tempEntities) {
       throw new Error(
-        `Document offline operation "${operationName}" does not support tempEntity`,
+        `Offline operation "${operationName}" cannot configure tempEntity and tempEntities together`,
+      );
+    }
+    if (storeType === 'document' && (tempEntity || tempEntities)) {
+      throw new Error(
+        `Document offline operation "${operationName}" does not support tempEntity or tempEntities`,
       );
     }
 
@@ -1519,18 +1594,18 @@ export function createOfflineStoreController<
       ? storeAdapter.normalizeEntityRefs(rawEntityRefs)
       : // WORKAROUND: When no normalizer is provided, entity refs already come from the operation definition, but the controller stores them as unknown[].
         __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
+    const hasTempLifecycle =
+      tempEntity !== undefined || tempEntities !== undefined;
     const entityRefs =
-      tempEntity !== undefined &&
-      preparedTempId !== undefined &&
+      hasTempLifecycle &&
+      preparedTempIds !== undefined &&
       preparedEntityRefs !== undefined
         ? preparedEntityRefs
         : resolvedEntityRefs;
-    const tempId =
-      tempEntity !== undefined
-        ? (preparedTempId ??
-          // WORKAROUND: Single-entity temp ids travel through rawEntityRefs as unknown values until the store adapter converts them back to payload ids.
-          __LEGIT_CAST__<ValidPayload | undefined, unknown>(rawEntityRefs[0]))
-        : preparedTempId;
+    const tempIds = hasTempLifecycle
+      ? (preparedTempIds ??
+        rawEntityRefs.map((entityRef) => castTempLifecyclePayload(entityRef)))
+      : preparedTempIds;
 
     if (tempEntity) {
       if (rawEntityRefs.length !== 1) {
@@ -1546,20 +1621,69 @@ export function createOfflineStoreController<
           `Temp entity operation "${operationName}" must resolve exactly one item ref`,
         );
       }
-      if (entityRefs.length !== 1 || entityRefs[0]?.entityKind !== 'item') {
+      if (
+        entityRefs.length !== 1 ||
+        entityRefs[0]?.entityKind !== 'item' ||
+        tempIds?.length !== 1
+      ) {
         throw new Error(
           `Temp entity operation "${operationName}" must preserve exactly one item ref`,
         );
       }
     }
 
-    const now = Date.now();
-    const pendingEntity =
-      tempId !== undefined && tempEntity && storeAdapter.applyPendingEntity
-        ? tempEntity.buildPendingEntity(validatedInput, tempId)
-        : undefined;
+    if (tempEntities) {
+      if (rawEntityRefs.length === 0) {
+        throw new Error(
+          `Temp entities operation "${operationName}" must resolve at least one entity ref`,
+        );
+      }
+      if (
+        resolvedEntityRefs.length !== rawEntityRefs.length ||
+        resolvedEntityRefs.some((entityRef) => entityRef.entityKind !== 'item')
+      ) {
+        throw new Error(
+          `Temp entities operation "${operationName}" must resolve only item refs`,
+        );
+      }
+      if (
+        entityRefs.length !== tempIds?.length ||
+        entityRefs.some((entityRef) => entityRef.entityKind !== 'item')
+      ) {
+        throw new Error(
+          `Temp entities operation "${operationName}" must preserve the resolved item refs`,
+        );
+      }
+    }
 
-    if (operation.accumulation && tempId === undefined) {
+    const now = Date.now();
+    const pendingEntities = !storeAdapter.applyPendingEntity
+      ? []
+      : tempEntity && tempIds?.[0] !== undefined
+        ? [
+            {
+              tempId: tempIds[0],
+              pendingEntity: tempEntity.buildPendingEntity(
+                validatedInput,
+                tempIds[0],
+              ),
+            },
+          ]
+        : tempEntities && tempIds
+          ? orderByTempIds({
+              operationName,
+              label: 'Temp entities',
+              tempIds,
+              items: tempEntities
+                .buildPendingEntities(validatedInput, tempIds)
+                .map((entry) => ({
+                  tempId: castTempLifecyclePayload(entry.tempId),
+                  pendingEntity: entry.pendingEntity,
+                })),
+            })
+          : [];
+
+    if (operation.accumulation && (!tempIds || tempIds.length === 0)) {
       const existingEntry = findAccumulationCandidate({
         operationName,
         entityRefs,
@@ -1593,8 +1717,8 @@ export function createOfflineStoreController<
         return {
           operationName,
           validatedInput,
-          tempId,
-          pendingEntity,
+          tempIds,
+          pendingEntities,
           nextEntry,
           removedEntries: [existingEntry],
         };
@@ -1616,13 +1740,15 @@ export function createOfflineStoreController<
 
     if (
       operation.supersedes?.dropSelfIfTempLifecycleCancelled &&
-      supersededEntries.some((entry) => entry.tempId !== undefined)
+      supersededEntries.some(
+        (entry) => entry.tempIds !== undefined && entry.tempIds.length > 0,
+      )
     ) {
       return {
         operationName,
         validatedInput,
-        tempId,
-        pendingEntity,
+        tempIds,
+        pendingEntities,
         removedEntries: supersededEntries,
       };
     }
@@ -1633,121 +1759,109 @@ export function createOfflineStoreController<
       input: validatedInput,
       queueOrder,
       entityRefs,
-      tempId,
+      tempIds,
     });
     workingQueue.set(nextEntry.id, nextEntry);
 
     return {
       operationName,
       validatedInput,
-      tempId,
-      pendingEntity,
+      tempIds,
+      pendingEntities,
       nextEntry,
       removedEntries: supersededEntries,
     };
   }
 
   async function queuePreparedMutations(
-    args: PreparedMutationBatch,
+    preparedMutation: PreparedQueuedMutation,
   ): Promise<void> {
     const current = ensureActiveSession();
-    if (!current || current.sessionKey !== args.currentSessionKey) {
+    if (!current || current.sessionKey !== preparedMutation.currentSessionKey) {
       throw offlineSessionUnavailableError;
     }
 
-    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(
-      args.mutations.length,
-    );
-    const workingQueue = new Map(queueEntries);
-    const plannedMutations: PlannedQueuedMutation[] = [];
-
-    for (const [index, mutation] of args.mutations.entries()) {
-      const queueOrder = queueOrders[index];
-      if (queueOrder === undefined) {
-        throw new Error('Missing queue order for prepared offline mutation');
-      }
-
-      plannedMutations.push(
-        await planPreparedMutation({
-          current,
-          preparedMutation: mutation,
-          queueOrder,
-          workingQueue,
-        }),
-      );
+    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
+    const queueOrder = queueOrders[0];
+    if (queueOrder === undefined) {
+      throw new Error('Missing queue order for prepared offline mutation');
     }
+    const workingQueue = new Map(queueEntries);
+    const plannedMutation = await planPreparedMutation({
+      current,
+      preparedMutation,
+      queueOrder,
+      workingQueue,
+    });
 
     const persistedMutations: AppliedQueuedMutation[] = [];
-    const appliedPendingMutations: PlannedQueuedMutation[] = [];
+    const appliedPendingMutations: Array<{
+      operationName: string;
+      validatedInput: unknown;
+      pendingEntities: PendingTempEntity[];
+    }> = [];
     const previousNextQueueOrder = nextQueueOrder;
 
     try {
-      for (const mutation of plannedMutations) {
-        const appliedMutation: AppliedQueuedMutation = {
-          ...mutation,
-          removedEntriesApplied: [],
-          touchedNextEntry: false,
-        };
-        persistedMutations.push(appliedMutation);
+      const appliedMutation: AppliedQueuedMutation = {
+        ...plannedMutation,
+        removedEntriesApplied: [],
+        touchedNextEntry: false,
+      };
+      persistedMutations.push(appliedMutation);
 
-        for (const removedEntry of mutation.removedEntries) {
-          if (mutation.nextEntry?.id === removedEntry.id) {
-            continue;
-          }
-
-          appliedMutation.removedEntriesApplied.push(removedEntry);
-          await removeEntry(removedEntry.id, current, true);
+      for (const removedEntry of plannedMutation.removedEntries) {
+        if (plannedMutation.nextEntry?.id === removedEntry.id) {
+          continue;
         }
 
-        if (mutation.nextEntry) {
-          appliedMutation.touchedNextEntry = true;
-          await persistEntry(mutation.nextEntry, current, true);
-        }
+        appliedMutation.removedEntriesApplied.push(removedEntry);
+        await removeEntry(removedEntry.id, current, true);
+      }
+
+      if (plannedMutation.nextEntry) {
+        appliedMutation.touchedNextEntry = true;
+        await persistEntry(plannedMutation.nextEntry, current, true);
       }
 
       nextQueueOrder = nextQueueOrderValue;
 
-      if (storeAdapter.applyPendingEntity) {
-        for (const mutation of plannedMutations) {
-          if (
-            mutation.tempId === undefined ||
-            mutation.pendingEntity === undefined
-          ) {
-            continue;
-          }
-
+      if (
+        storeAdapter.applyPendingEntity &&
+        plannedMutation.pendingEntities.length > 0
+      ) {
+        for (const pendingEntity of plannedMutation.pendingEntities) {
           storeAdapter.applyPendingEntity({
-            operationName: mutation.operationName,
-            input: mutation.validatedInput,
-            tempId: mutation.tempId,
-            pendingEntity: mutation.pendingEntity,
+            operationName: plannedMutation.operationName,
+            input: plannedMutation.validatedInput,
+            tempId: pendingEntity.tempId,
+            pendingEntity: pendingEntity.pendingEntity,
           });
-          appliedPendingMutations.push(mutation);
         }
+
+        appliedPendingMutations.push({
+          operationName: plannedMutation.operationName,
+          validatedInput: plannedMutation.validatedInput,
+          pendingEntities: plannedMutation.pendingEntities,
+        });
       }
 
-      for (const mutation of plannedMutations) {
-        if (!mutation.nextEntry) continue;
+      if (plannedMutation.nextEntry) {
         storeAdapter.captureQueuedMutationOverlays?.({
           sessionKey: current.sessionKey,
-          entityRefs: mutation.nextEntry.entityRefs,
+          entityRefs: plannedMutation.nextEntry.entityRefs,
         });
       }
     } catch (error) {
       for (const mutation of appliedPendingMutations.reverse()) {
-        if (
-          mutation.tempId === undefined ||
-          mutation.pendingEntity === undefined
-        ) {
-          continue;
+        for (const pendingEntity of [...mutation.pendingEntities].reverse()) {
+          storeAdapter.rollbackPendingEntity?.({
+            operationName: mutation.operationName,
+            input: mutation.validatedInput,
+            tempId: pendingEntity.tempId,
+            pendingEntity: pendingEntity.pendingEntity,
+          });
         }
-
-        storeAdapter.rollbackPendingEntity?.({
-          operationName: mutation.operationName,
-          input: mutation.validatedInput,
-          tempId: mutation.tempId,
-          pendingEntity: mutation.pendingEntity,
-        });
       }
 
       for (const mutation of persistedMutations.reverse()) {
@@ -1837,6 +1951,7 @@ export function createOfflineStoreController<
         nextEntry.syncState === 'needs-confirmation';
       const conflictHandling = operation.conflictHandling;
       const tempEntity = operation.tempEntity;
+      const tempEntities = operation.tempEntities;
       const replayCheckBaseCtx = {
         input: nextEntry.input,
         enqueuedAt: nextEntry.createdAt,
@@ -1906,27 +2021,64 @@ export function createOfflineStoreController<
         });
 
         if (
-          entryToUse.tempId !== undefined &&
+          entryToUse.tempIds?.[0] !== undefined &&
           tempEntity &&
           storeAdapter.reconcileTempEntity
         ) {
           const reconciliation = tempEntity.reconcileServerEntity(
             result,
-            entryToUse.tempId,
+            entryToUse.tempIds[0],
           );
           storeAdapter.reconcileTempEntity({
             operationName: entryToUse.operation,
             input: entryToUse.input,
-            tempId: entryToUse.tempId,
+            tempId: entryToUse.tempIds[0],
             result,
             reconciliation,
           });
           await rebindQueuedEntriesAfterTempReconciliation({
             current,
             entryIdToSkip: entryToUse.id,
-            tempId: entryToUse.tempId,
+            tempId: entryToUse.tempIds[0],
             finalPayload: reconciliation.finalPayload,
           });
+        }
+
+        if (
+          entryToUse.tempIds &&
+          tempEntities &&
+          storeAdapter.reconcileTempEntity
+        ) {
+          const reconciliations = orderByTempIds({
+            operationName: entryToUse.operation,
+            label: 'Temp reconciliations',
+            tempIds: entryToUse.tempIds,
+            items: tempEntities
+              .reconcileServerEntities(result, entryToUse.tempIds)
+              .map((reconciliation) => ({
+                tempId: castTempLifecyclePayload(reconciliation.tempId),
+                finalPayload: castTempLifecyclePayload(
+                  reconciliation.finalPayload,
+                ),
+                finalData: reconciliation.finalData,
+              })),
+          });
+
+          for (const reconciliation of reconciliations) {
+            storeAdapter.reconcileTempEntity({
+              operationName: entryToUse.operation,
+              input: entryToUse.input,
+              tempId: reconciliation.tempId,
+              result,
+              reconciliation,
+            });
+            await rebindQueuedEntriesAfterTempReconciliation({
+              current,
+              entryIdToSkip: entryToUse.id,
+              tempId: reconciliation.tempId,
+              finalPayload: reconciliation.finalPayload,
+            });
+          }
         }
 
         await removeEntry(entryToUse.id, current);
@@ -1997,7 +2149,10 @@ export function createOfflineStoreController<
     }
 
     await queuePreparedMutations(
-      prepareMutationBatchWithSession(current, args),
+      prepareMutationWithSession(current, {
+        operation: args.operation,
+        input: args.input,
+      }),
     );
   }
 
@@ -2010,7 +2165,10 @@ export function createOfflineStoreController<
       throw offlineSessionUnavailableError;
     }
 
-    const prepared = prepareMutationBatchWithSession(current, args);
+    const prepared = prepareMutationWithSession(current, {
+      operation: args.operation,
+      input: args.input,
+    });
     await current.session.refreshNetworkState();
 
     return {
@@ -2030,13 +2188,12 @@ export function createOfflineStoreController<
           return true;
         }
 
-        const firstMutation = prepared.mutations[0];
         const classification = await preparedCurrent.session.classifyFailure(
           error,
           {
             phase: 'mutation',
             storeType,
-            operationName: firstMutation?.operationName,
+            operationName: prepared.operationName,
             sessionKey: preparedCurrent.sessionKey,
           },
         );
@@ -2112,7 +2269,7 @@ export function createOfflineStoreController<
         input: resolutionRecord.input,
         entityRefs: resolutionRecord.entityRefs,
         queueOrder,
-        tempId: resolutionRecord.tempId,
+        tempIds: resolutionRecord.tempIds,
       });
       await removeResolution(resolutionId, current, true);
       await persistEntry(nextEntry, current, true);
@@ -2147,20 +2304,17 @@ export function createOfflineStoreController<
 
     if (requeue) {
       await removeResolution(resolutionId, current, true);
-      await queuePreparedMutations({
-        currentSessionKey: current.sessionKey,
-        mutations: [
-          prepareMutationWithSession(current, {
-            // WORKAROUND: Resolution records persist operation names as plain strings, and requeueing needs to rebind the validated name to the operation-map key type.
-            operation: __LEGIT_CAST__<keyof TOperations & string, string>(
-              resolutionRecord.operation,
-            ),
-            input: requeue.input,
-            tempId: resolutionRecord.tempId,
-            entityRefs: resolutionRecord.entityRefs,
-          }),
-        ],
-      });
+      await queuePreparedMutations(
+        prepareMutationWithSession(current, {
+          // WORKAROUND: Resolution records persist operation names as plain strings, and requeueing needs to rebind the validated name to the operation-map key type.
+          operation: __LEGIT_CAST__<keyof TOperations & string, string>(
+            resolutionRecord.operation,
+          ),
+          input: requeue.input,
+          tempIds: resolutionRecord.tempIds,
+          entityRefs: resolutionRecord.entityRefs,
+        }),
+      );
       return;
     }
 

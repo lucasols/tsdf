@@ -104,6 +104,10 @@ export type {
   OfflineMutationDescriptor,
   OfflineQueueEntry,
   OfflineSyncState,
+  OfflineTempEntitiesConfig,
+  OfflineTempEntitiesReconciliation,
+  OfflineTempEntityConfig,
+  OfflineTempEntityPendingEntry,
 } from './persistentStorage/offline/types';
 
 export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';

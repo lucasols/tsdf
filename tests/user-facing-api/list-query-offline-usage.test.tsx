@@ -1,7 +1,13 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
+import {
+  rc_array,
+  rc_literals,
+  rc_number,
+  rc_object,
+  rc_string,
+} from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -18,6 +24,7 @@ import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
+const renameManyUsersInputSchema = rc_array(userInputSchema);
 const createUserInputSchema = rc_object({ name: rc_string });
 const userConflictSchema = rc_object({ reason: rc_string });
 const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
@@ -124,6 +131,7 @@ type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
   UserPayload,
   {
     renameUser: DefineOfflineOperation<RenameUserInput>;
+    renameManyUsers: DefineOfflineOperation<RenameUserInput[]>;
     skipSyncUser: DefineOfflineOperation<RenameUserInput>;
     conflictUser: DefineOfflineOperation<RenameUserInput, UserConflict>;
     createUser: DefineOfflineOperation<CreateUserInput, unknown, User>;
@@ -202,6 +210,20 @@ test('direct list-query store offline public api', async () => {
                 getUserItemPayload(input.id),
                 (item) => ({ ...item, name: input.name }),
               );
+            },
+          },
+          renameManyUsers: {
+            inputSchema: renameManyUsersInputSchema,
+            getEntityRefs: ({ input }) =>
+              input.map((item) => getUserItemPayload(item.id)),
+            execute: ({ input }) => {
+              for (const item of input) {
+                userState.set(item.id, { id: item.id, name: item.name });
+                listQueryStore.updateItemState(
+                  getUserItemPayload(item.id),
+                  (currentItem) => ({ ...currentItem, name: item.name }),
+                );
+              }
             },
           },
           skipSyncUser: {
@@ -339,10 +361,13 @@ test('direct list-query store offline public api', async () => {
         }));
       },
       mutation: () => Promise.resolve({ ok: true }),
-      offline: [
-        { operation: 'renameUser', input: { id: 1, name: 'Ada second' } },
-        { operation: 'renameUser', input: { id: 2, name: 'Grace offline' } },
-      ],
+      offline: {
+        operation: 'renameManyUsers',
+        input: [
+          { id: 1, name: 'Ada second' },
+          { id: 2, name: 'Grace offline' },
+        ],
+      },
     });
   });
 
@@ -416,7 +441,7 @@ test('direct list-query store offline public api', async () => {
       childResolutionCount: 0,
       childResolutionIds: [],
       entityKey: getCompositeKey(getUserEntityKey(1)),
-      pendingMutations: 3,
+      pendingMutations: 4,
       storeType: 'listQuery',
     },
     {

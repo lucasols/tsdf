@@ -257,7 +257,7 @@ test('direct document store offline public api', async () => {
   assert(setValueResult.ok);
   expect(setValueResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
-  const multiOperationResult = await act(async () => {
+  const patchDocResult = await act(async () => {
     return documentStore.performMutation({
       optimisticUpdate: () => {
         documentStore.updateState((draft) => {
@@ -266,18 +266,15 @@ test('direct document store offline public api', async () => {
         });
       },
       mutation: () => Promise.resolve({ value: 3, label: 'offline label' }),
-      offline: [
-        { operation: 'setValue', input: { value: 3 } },
-        {
-          operation: 'patchDoc',
-          input: { value: undefined, label: 'offline label' },
-        },
-      ],
+      offline: {
+        operation: 'patchDoc',
+        input: { value: 3, label: 'offline label' },
+      },
     });
   });
 
-  assert(multiOperationResult.ok);
-  expect(multiOperationResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
+  assert(patchDocResult.ok);
+  expect(patchDocResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
   const invalidAccumulationResult = await act(async () => {
     return documentStore.performMutation({
@@ -349,7 +346,7 @@ test('direct document store offline public api', async () => {
       childResolutionCount: 0,
       childResolutionIds: [],
       entityKey: 'document',
-      pendingMutations: 5,
+      pendingMutations: 4,
       storeType: 'document',
     },
   ]);

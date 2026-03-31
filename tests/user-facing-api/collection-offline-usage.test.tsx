@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_boolean, rc_object, rc_string } from 'runcheck';
+import { rc_array, rc_boolean, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -19,6 +19,7 @@ import { createOfflineNetworkMock } from '../utils/networkMock';
 const todoSchema = rc_object({ title: rc_string, completed: rc_boolean });
 const todoPayloadSchema = rc_string;
 const todoInputSchema = rc_object({ id: rc_string, title: rc_string });
+const renameManyTodosInputSchema = rc_array(todoInputSchema);
 const createTodoInputSchema = rc_object({ title: rc_string });
 const todoConflictSchema = rc_object({ reason: rc_string });
 const conflictResolutionSchema = z.object({ title: z.string() });
@@ -108,6 +109,7 @@ type DirectCollectionOfflineOperations = DefineCollectionOfflineOperations<
   TodoPayload,
   {
     renameTodo: DefineOfflineOperation<RenameTodoInput>;
+    renameManyTodos: DefineOfflineOperation<RenameTodoInput[]>;
     skipSyncTodo: DefineOfflineOperation<RenameTodoInput>;
     conflictTodo: DefineOfflineOperation<RenameTodoInput, TodoConflict>;
     createTodo: DefineOfflineOperation<
@@ -167,6 +169,19 @@ test('direct collection store offline public api', async () => {
                 ...item,
                 title: input.title,
               }));
+            },
+          },
+          renameManyTodos: {
+            inputSchema: renameManyTodosInputSchema,
+            getEntityRefs: ({ input }) => input.map((item) => item.id),
+            execute: ({ input }) => {
+              for (const item of input) {
+                todoState.set(item.id, { title: item.title, completed: false });
+                collectionStore.updateItemState(item.id, (currentItem) => ({
+                  ...currentItem,
+                  title: item.title,
+                }));
+              }
             },
           },
           skipSyncTodo: {
@@ -309,13 +324,13 @@ test('direct collection store offline public api', async () => {
         }));
       },
       mutation: () => Promise.resolve({ ok: true }),
-      offline: [
-        { operation: 'renameTodo', input: { id: '1', title: 'Todo 1 second' } },
-        {
-          operation: 'renameTodo',
-          input: { id: '2', title: 'Todo 2 offline' },
-        },
-      ],
+      offline: {
+        operation: 'renameManyTodos',
+        input: [
+          { id: '1', title: 'Todo 1 second' },
+          { id: '2', title: 'Todo 2 offline' },
+        ],
+      },
     });
   });
 
@@ -382,7 +397,7 @@ test('direct collection store offline public api', async () => {
       childResolutionCount: 0,
       childResolutionIds: [],
       entityKey: getCompositeKey('1'),
-      pendingMutations: 3,
+      pendingMutations: 4,
       storeType: 'collection',
     },
     {

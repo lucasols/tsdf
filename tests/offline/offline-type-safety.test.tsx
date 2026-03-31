@@ -48,6 +48,7 @@ test('type safety: document test env requires explicit offline operation typing'
 
     void typedEnv.apiStore.performMutation({
       mutation: () => Promise.resolve(2),
+      // @ts-expect-error - offline mutations only accept a single descriptor
       offline: [
         { operation: 'updateValue', input: { value: 2 } },
         { operation: 'updateValue', input: { value: 3 } },
@@ -135,6 +136,7 @@ test('type safety: collection test env requires explicit offline operation typin
 
     void typedEnv.apiStore.performMutation('users||1', {
       mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+      // @ts-expect-error - offline mutations only accept a single descriptor
       offline: [
         { operation: 'renameItem', input: { name: 'Grace' } },
         { operation: 'renameItem', input: { name: 'Linus' } },
@@ -228,6 +230,7 @@ test('type safety: list-query test env requires explicit offline operation typin
 
     void typedEnv.apiStore.performMutation('users||1', {
       mutation: () => Promise.resolve({ name: 'Ada offline' }),
+      // @ts-expect-error - offline mutations only accept a single descriptor
       offline: [
         {
           operation: 'patchUserName',

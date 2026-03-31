@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { ListQueryOfflineOperationDefinition } from '../../src/main';
@@ -441,6 +441,222 @@ describe('list-query replay', () => {
       .     | Ada, Grace, Linus edited  | error        | [query-items, query-items, query-items] ui-changed
       "
     `);
+
+    hook.unmount();
+  });
+
+  type CreateManyListQueryUserOperations = {
+    createUsers: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { name: string }[],
+      unknown,
+      { id: number; name: string }[]
+    >;
+  };
+
+  test('list-query replay remaps queued edits after one batch temp-create operation reconciles multiple items', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-replay-batch-temp-create-session';
+    const storeName = 'offline-replay-batch-temp-create-store';
+    const usersQuery = { tableId: 'users' } as const;
+    let nextUserId = 3;
+    const batchCreateUserInputSchema = rc_array(rc_object({ name: rc_string }));
+    const replayedOperations: Array<{
+      operation: 'createUsers' | 'patchUserName';
+      input: { itemId: string; name: string } | { name: string }[];
+    }> = [];
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateManyListQueryUserOperations & PatchUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUsers: {
+                inputSchema: batchCreateUserInputSchema,
+                getEntityRefs: ({ input }) =>
+                  input.map((item) => `temp:${item.name}`),
+                tempEntities: {
+                  buildPendingEntities: (input, tempIds) =>
+                    input.map((item, index) => ({
+                      tempId: tempIds[index]!,
+                      pendingEntity: { id: -1, name: item.name },
+                    })),
+                  reconcileServerEntities: (result, tempIds) =>
+                    result.map((item, index) => ({
+                      tempId: tempIds[index]!,
+                      finalPayload: `users||${item.id}`,
+                      finalData: item,
+                    })),
+                },
+                execute: ({ input }) => {
+                  replayedOperations.push({ operation: 'createUsers', input });
+                  return input.map((item) => {
+                    const result = { id: nextUserId, name: item.name };
+                    nextUserId += 1;
+                    return result;
+                  });
+                },
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) => {
+                  replayedOperations.push({
+                    operation: 'patchUserName',
+                    input,
+                  });
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                  return { name: input.name };
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+
+      env.trackItemUI('batch-query-items', query.items.join(', '));
+      return query;
+    });
+    await flushAllTimers();
+
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Ada offline',
+            { id: -1, name: 'Ada offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+          env.apiStore.addItemToState(
+            'temp:Linus offline',
+            { id: -1, name: 'Linus offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () => Promise.resolve([]),
+        offline: {
+          operation: 'createUsers',
+          input: [{ name: 'Ada offline' }, { name: 'Linus offline' }],
+        },
+      });
+    });
+
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Ada offline', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Ada offline', (item) => ({
+            ...item,
+            name: 'Ada rebound',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Ada rebound' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'temp:Ada offline', name: 'Ada rebound' },
+        },
+      });
+      await env.apiStore.performMutation('temp:Linus offline', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+            ...item,
+            name: 'Linus rebound',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Linus rebound' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'temp:Linus offline', name: 'Linus rebound' },
+        },
+      });
+    });
+
+    expect(
+      getOfflineQueueEntries(sessionKey, storeName)
+        .map((entry) => {
+          const data = getOfflineQueueEntryData(entry);
+
+          return { input: data.input, operation: String(data.operation) };
+        })
+        .sort((left, right) => {
+          const operationOrder = left.operation.localeCompare(right.operation);
+          if (operationOrder !== 0) return operationOrder;
+
+          return JSON.stringify(left.input).localeCompare(
+            JSON.stringify(right.input),
+          );
+        }),
+    ).toMatchInlineSnapshot(`
+      - input:
+          - name: 'Ada offline'
+          - name: 'Linus offline'
+        operation: 'createUsers'
+      - input: { itemId: 'temp:Ada offline', name: 'Ada rebound' }
+        operation: 'patchUserName'
+      - input: { itemId: 'temp:Linus offline', name: 'Linus rebound' }
+        operation: 'patchUserName'
+    `);
+
+    await act(async () => {
+      network.goOnline();
+      await Promise.resolve();
+      await flushAllTimers();
+      await Promise.resolve();
+    });
+
+    expect(replayedOperations).toMatchInlineSnapshot(`
+      - input:
+          - name: 'Ada offline'
+          - name: 'Linus offline'
+        operation: 'createUsers'
+      - input: { itemId: 'users||3', name: 'Ada rebound' }
+        operation: 'patchUserName'
+      - input: { itemId: 'users||4', name: 'Linus rebound' }
+        operation: 'patchUserName'
+    `);
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Ada rebound'
+    `);
+    expect(env.apiStore.getItemState('users||4')).toMatchInlineSnapshot(`
+      id: 4
+      name: 'Linus rebound'
+    `);
+    expect(env.apiStore.getItemState('temp:Ada offline')).toBeNull();
+    expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
 
     hook.unmount();
   });
