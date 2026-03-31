@@ -1,12 +1,18 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import type {
+  CollectionOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -40,6 +46,8 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
 });
+
+const deleteItemInputSchema = rc_object({ itemId: rc_string });
 
 type UpdateValueExecuteContext = Parameters<
   UpdateValueOperations['updateValue']['execute']
@@ -203,6 +211,14 @@ type RenameCollectionItemOperations = {
   >;
 };
 
+type DeleteCollectionItemOperations = {
+  deleteItem: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { itemId: string }
+  >;
+};
+
 describe('collection overlays', () => {
   test('collection invalidation keeps pending optimistic data visible until replay settles', async () => {
     network.setOffline();
@@ -303,6 +319,101 @@ describe('collection overlays', () => {
     hook.unmount();
   });
 
+  test('collection invalidation keeps pending deletes hidden until replay settles', async () => {
+    network.setOffline();
+
+    const env = createCollectionStoreTestEnv<
+      { name: string },
+      DeleteCollectionItemOperations
+    >(
+      { 'users||1': { name: 'Ada' } },
+      {
+        id: 'offline-collection-delete-overlay-store',
+        getSessionKey: () => 'offline-collection-delete-overlay-session',
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              deleteItem: {
+                inputSchema: deleteItemInputSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.deleteItemState(input.itemId);
+                      resolve(undefined);
+                    }, 2_000);
+                  }),
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        selector: (item) => item?.value.name ?? null,
+      }),
+    );
+    await Promise.resolve();
+
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: () => Promise.resolve(undefined),
+        offline: { operation: 'deleteItem', input: { itemId: 'users||1' } },
+      });
+    });
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      isLoading: '❌'
+      itemStateKey: '"users||1'
+      payload: 'users||1'
+      pendingSync: '✅'
+      status: 'deleted'
+    `);
+
+    act(() => {
+      network.goOnline();
+      env.scheduleFetch('highPriority', 'users||1');
+    });
+    await advanceTime(810);
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      isLoading: '❌'
+      itemStateKey: '"users||1'
+      payload: 'users||1'
+      pendingSync: '✅'
+      status: 'deleted'
+    `);
+
+    await advanceTime(2_000);
+    await flushAllTimers();
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      isLoading: '❌'
+      itemStateKey: '"users||1'
+      payload: 'users||1'
+      pendingSync: '❌'
+      status: 'deleted'
+    `);
+
+    hook.unmount();
+  });
+
   test('collection offline overlay stops deriving once replay requires manual resolution', async () => {
     network.setOffline();
 
@@ -384,6 +495,15 @@ describe('collection overlays', () => {
     hook.unmount();
   });
 });
+
+type DeleteListQueryUserOperations = {
+  deleteUser: ListQueryOfflineOperationDefinition<
+    { id: number; name: string },
+    ListQueryParams,
+    string,
+    { itemId: string }
+  >;
+};
 
 describe('list-query overlays', () => {
   test('list-query invalidation keeps a pending patched row visible until replay settles', async () => {
@@ -496,6 +616,120 @@ describe('list-query overlays', () => {
       payload: { tableId: 'users' }
       pendingSync: '❌'
       queryKey: '{tableId:"users"}'
+      status: 'success'
+    `);
+
+    hook.unmount();
+  });
+
+  test('list-query item invalidation keeps pending optimistic data visible until replay settles', async () => {
+    const usersQuery = { tableId: 'users' } as const;
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PatchUserOperations
+    >(
+      { users: [{ id: 1, name: 'Ada' }] },
+      {
+        id: 'offline-list-item-overlay-store',
+        getSessionKey: () => 'offline-list-item-overlay-session',
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.updateItemState(input.itemId, (item) => ({
+                        ...item,
+                        name: input.name,
+                      }));
+                      resolve({ name: input.name });
+                    }, 2_000);
+                  }),
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        selector: (item) => item?.name ?? null,
+      }),
+    );
+    await flushAllTimers();
+
+    // Exercise the standalone item-fetch path first so the hook is not relying
+    // solely on query-derived cache state when we replay the offline mutation.
+    act(() => {
+      env.scheduleItemFetch('highPriority', 'users||1');
+    });
+    await flushAllTimers();
+    network.setOffline();
+
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||1', (item) => ({
+            ...item,
+            name: 'Ada pending',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Ada replayed' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Ada replayed' },
+        },
+      });
+    });
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: 'Ada pending'
+      error: null
+      isLoading: '❌'
+      itemStateKey: '"users||1'
+      payload: 'users||1'
+      pendingSync: '✅'
+      status: 'success'
+    `);
+
+    act(() => {
+      network.goOnline();
+      env.scheduleItemFetch('highPriority', 'users||1');
+    });
+    await advanceTime(810);
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: 'Ada pending'
+      error: null
+      isLoading: '❌'
+      itemStateKey: '"users||1'
+      payload: 'users||1'
+      pendingSync: '✅'
+      status: 'success'
+    `);
+
+    await advanceTime(2_000);
+    await flushAllTimers();
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: 'Ada replayed'
+      error: null
+      isLoading: '❌'
+      itemStateKey: '"users||1'
+      payload: 'users||1'
+      pendingSync: '❌'
       status: 'success'
     `);
 
@@ -740,6 +974,110 @@ describe('list-query overlays', () => {
       - entityKey: '"temp:Linus blocked'
         requiresResolution: '✅'
         syncState: 'resolution-required'
+    `);
+
+    hook.unmount();
+  });
+
+  test('list-query invalidation keeps pending deletes hidden until replay settles', async () => {
+    network.setOffline();
+    const usersQuery = { tableId: 'users' } as const;
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      DeleteListQueryUserOperations
+    >(
+      { users: [{ id: 1, name: 'Ada' }] },
+      {
+        id: 'offline-list-delete-overlay-store',
+        getSessionKey: () => 'offline-list-delete-overlay-session',
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              deleteUser: {
+                inputSchema: deleteItemInputSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.deleteItemState(input.itemId);
+                      resolve(undefined);
+                    }, 2_000);
+                  }),
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() =>
+      env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      }),
+    );
+    await flushAllTimers();
+
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: () => Promise.resolve(undefined),
+        offline: { operation: 'deleteUser', input: { itemId: 'users||1' } },
+      });
+    });
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      error: { code: 0, id: 'offline', message: 'Offline' }
+      hasMore: '❌'
+      isLoading: '❌'
+      isLoadingMore: '❌'
+      items: []
+      payload: { tableId: 'users' }
+      pendingSync: '❌'
+      queryKey: '{tableId:"users"}'
+      status: 'error'
+    `);
+
+    act(() => {
+      network.goOnline();
+      env.scheduleFetch('highPriority', usersQuery);
+    });
+    await advanceTime(810);
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      isLoading: '❌'
+      isLoadingMore: '❌'
+      items: []
+      payload: { tableId: 'users' }
+      pendingSync: '❌'
+      queryKey: '{tableId:"users"}'
+      status: 'success'
+    `);
+
+    await advanceTime(2_000);
+    await flushAllTimers();
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      isLoading: '❌'
+      isLoadingMore: '❌'
+      items: []
+      payload: { tableId: 'users' }
+      pendingSync: '❌'
+      queryKey: '{tableId:"users"}'
+      status: 'success'
     `);
 
     hook.unmount();

@@ -18,14 +18,25 @@ export function getIsPendingOfflineSync(
   return !!entity && !entity.requiresResolution;
 }
 
-export function getActiveOfflineOverlay<Overlay>(
+/**
+ * Batch-filters offline overlays to only include entries with a pending sync
+ * (entity exists and does not require resolution). Use this instead of calling
+ * {@link getActiveOfflineOverlay} per item when all active overlays are needed
+ * at once.
+ */
+export function filterActiveOfflineOverlays<Overlay>(
   entitiesByKey: ReadonlyMap<string, GlobalOfflineEntity>,
   overlays: Readonly<Record<string, Overlay>>,
-  entityKey: string,
-): Overlay | undefined {
-  return getIsPendingOfflineSync(entitiesByKey.get(entityKey))
-    ? overlays[entityKey]
-    : undefined;
+): Record<string, Overlay> {
+  const result: Record<string, Overlay> = {};
+
+  for (const [entityKey, overlay] of Object.entries(overlays)) {
+    if (getIsPendingOfflineSync(entitiesByKey.get(entityKey))) {
+      result[entityKey] = overlay;
+    }
+  }
+
+  return result;
 }
 
 export type OfflineEntitiesMetadata = {

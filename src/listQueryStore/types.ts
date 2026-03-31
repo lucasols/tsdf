@@ -42,8 +42,8 @@ export type ListQueryOfflineOverlay<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
-  item: ItemState;
-  itemPayload: ItemPayload;
+  item: ItemState | null;
+  itemPayload?: ItemPayload;
   queryMemberships: Record<string, number>;
 };
 

@@ -261,7 +261,6 @@ test('logging back into the same session replays durable offline mutations queue
   hook.unmount();
 });
 
-
 // Each store manages its own offline lifecycle -- a store without offlineMode
 // should never surface pending-sync or offline-entity state from sibling stores.
 test('plain stores do not inherit offline state from other stores in the same session', async () => {

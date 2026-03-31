@@ -11,7 +11,7 @@ import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import {
   createOfflineEntityLookup,
-  getActiveOfflineOverlay,
+  filterActiveOfflineOverlays,
   getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
@@ -117,11 +117,11 @@ export function useMultipleItems<
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
+  partialResources: PartialResourcesConfig<ItemState> | undefined,
   offlineEntities: readonly GlobalOfflineEntity[],
   offlineOverlays: Readonly<
     Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
   >,
-  partialResources?: PartialResourcesConfig<ItemState>,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   const isOffScreenFromContext = useContext(IsOffScreenContext);
 
@@ -198,6 +198,10 @@ export function useMultipleItems<
     () => createOfflineEntityLookup(offlineEntities),
     [offlineEntities],
   );
+  const activeOfflineOverlays = useMemo(
+    () => filterActiveOfflineOverlays(offlineEntitiesByKey, offlineOverlays),
+    [offlineEntitiesByKey, offlineOverlays],
+  );
 
   const resultSelector = useCallback(
     (state: State) => {
@@ -211,17 +215,14 @@ export function useMultipleItems<
           showPartialAsRefetching,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
+          const overlay = activeOfflineOverlays[itemKey];
+          const hasOverlay = overlay !== undefined;
           const itemQuery = state.itemQueries[itemKey];
-          const overlay = getActiveOfflineOverlay(
-            offlineEntitiesByKey,
-            offlineOverlays,
-            itemKey,
-          );
-          const rawItemState = overlay?.item ?? state.items[itemKey];
+          const rawItemState = hasOverlay ? overlay.item : state.items[itemKey];
+          const resolvedItemPayload =
+            overlay?.itemPayload ?? itemQuery?.payload ?? payload;
           const hasCachedDataInState = rawItemState != null;
           const loadedFields = state.itemLoadedFields[itemKey] ?? [];
-          const resolvedPayload =
-            overlay?.itemPayload ?? itemQuery?.payload ?? null;
           let itemState = rawItemState;
           let loadingFields: string[] | undefined;
 
@@ -236,7 +237,7 @@ export function useMultipleItems<
           }
 
           const data = selector
-            ? selector(itemState ?? null, resolvedPayload)
+            ? selector(itemState ?? null, resolvedItemPayload)
             : // WORKAROUND: Runtime selector presence does not narrow Selected, so the unselected path must forward the raw item state through the generic.
               __LEGIT_CAST__<Selected, ItemState | null>(itemState ?? null);
           const resultQueryMetadata =
@@ -245,13 +246,13 @@ export function useMultipleItems<
               queryMetadata,
             );
 
-          if (itemQuery === null) {
+          if (hasOverlay ? overlay.item === null : itemQuery === null) {
             return {
               itemStateKey: itemKey,
               status: 'deleted',
               error: null,
               isLoading: false,
-              payload,
+              payload: resolvedItemPayload,
               data,
               pendingSync: getIsPendingOfflineSync(
                 offlineEntitiesByKey.get(itemKey),
@@ -261,13 +262,28 @@ export function useMultipleItems<
           }
 
           if (!itemQuery) {
+            if (hasOverlay && overlay.item !== null) {
+              return {
+                itemStateKey: itemKey,
+                status: 'success',
+                error: null,
+                isLoading: false,
+                payload: resolvedItemPayload,
+                data,
+                pendingSync: getIsPendingOfflineSync(
+                  offlineEntitiesByKey.get(itemKey),
+                ),
+                queryMetadata: resultQueryMetadata,
+              };
+            }
+
             if (loadFromStateOnly) {
               return {
                 itemStateKey: itemKey,
                 status: 'error',
                 error: cacheMissError,
                 isLoading: false,
-                payload,
+                payload: resolvedItemPayload,
                 data,
                 pendingSync: getIsPendingOfflineSync(
                   offlineEntitiesByKey.get(itemKey),
@@ -293,7 +309,7 @@ export function useMultipleItems<
               ...(pendingLoadingFields
                 ? { loadingFields: pendingLoadingFields }
                 : {}),
-              payload,
+              payload: resolvedItemPayload,
               data,
               pendingSync: getIsPendingOfflineSync(
                 offlineEntitiesByKey.get(itemKey),
@@ -388,11 +404,11 @@ export function useMultipleItems<
             ...(loadingFields ? { loadingFields } : {}),
             data: shouldHideDataWhileLoading
               ? selector
-                ? selector(null, itemQuery.payload)
+                ? selector(null, resolvedItemPayload)
                 : // WORKAROUND: Runtime selector presence does not narrow Selected, so the loading fallback has to re-express the null result.
                   __LEGIT_CAST__<Selected, null>(null)
               : data,
-            payload,
+            payload: resolvedItemPayload,
             pendingSync: getIsPendingOfflineSync(
               offlineEntitiesByKey.get(itemKey),
             ),
@@ -402,9 +418,9 @@ export function useMultipleItems<
       );
     },
     [
+      activeOfflineOverlays,
       loadFromStateOnly,
       offlineEntitiesByKey,
-      offlineOverlays,
       partialResources,
       queriesWithId,
       selector,
@@ -453,11 +469,8 @@ export function useMultipleItems<
 
         if (query && readFallbackItemState) {
           const fallbackItemState = readFallbackItemState(query.itemKey);
-          const overlay = getActiveOfflineOverlay(
-            offlineEntitiesByKey,
-            offlineOverlays,
-            result.itemStateKey,
-          );
+          const overlay = activeOfflineOverlays[result.itemStateKey];
+          const hasOverlay = overlay !== undefined;
           const fallbackLoadedFields = fallbackItemState?.loadedFields ?? [];
           const hasAllRequestedFallbackFields =
             !partialResources ||
@@ -467,13 +480,28 @@ export function useMultipleItems<
 
           if (!hasAllRequestedFallbackFields) return result;
 
-          if (fallbackItemState?.itemQuery === null) {
+          const fallbackItemQuery =
+            hasOverlay &&
+            overlay.item !== null &&
+            fallbackItemState?.itemQuery == null
+              ? {
+                  status: 'success' as const,
+                  wasLoaded: true,
+                  refetchOnMount: false,
+                  error: null,
+                  payload: overlay.itemPayload ?? query.payload,
+                }
+              : fallbackItemState?.itemQuery;
+          const fallbackItemPayload =
+            overlay?.itemPayload ?? fallbackItemQuery?.payload ?? query.payload;
+
+          if (hasOverlay ? overlay.item === null : fallbackItemQuery === null) {
             return {
               itemStateKey: result.itemStateKey,
               status: 'deleted',
               error: null,
               isLoading: false,
-              payload: query.payload,
+              payload: fallbackItemPayload,
               data: selector
                 ? selector(null, null)
                 : // WORKAROUND: Runtime selector presence does not narrow Selected, so the deleted fallback still has to express null through the caller's generic.
@@ -485,20 +513,16 @@ export function useMultipleItems<
             };
           }
 
-          if (
-            (overlay?.itemPayload !== undefined ||
-              fallbackItemState?.itemQuery) &&
-            (overlay?.item !== undefined ||
-              (fallbackItemState?.item !== undefined &&
-                fallbackItemState.item !== null))
-          ) {
-            let itemState = overlay?.item ?? fallbackItemState?.item;
-            const itemPayload =
-              overlay?.itemPayload ?? fallbackItemState?.itemQuery?.payload;
+          const fallbackItem = hasOverlay
+            ? overlay.item
+            : (fallbackItemState?.item ?? undefined);
 
-            if (itemState == null || itemPayload === undefined) {
-              return result;
-            }
+          if (
+            fallbackItemQuery &&
+            fallbackItem !== undefined &&
+            fallbackItem !== null
+          ) {
+            let itemState = fallbackItem;
 
             if (
               partialResources &&
@@ -516,9 +540,9 @@ export function useMultipleItems<
               status: 'success',
               error: null,
               isLoading: false,
-              payload: query.payload,
+              payload: fallbackItemPayload,
               data: selector
-                ? selector(itemState, itemPayload)
+                ? selector(itemState, fallbackItemPayload)
                 : // WORKAROUND: Runtime selector presence does not narrow Selected, so fallback item data still has to flow through the caller's generic unchanged.
                   __LEGIT_CAST__<Selected, ItemState>(itemState),
               pendingSync: getIsPendingOfflineSync(
@@ -533,9 +557,9 @@ export function useMultipleItems<
       },
     );
   }, [
-    offlineEntitiesByKey,
-    offlineOverlays,
     loadFromStateOnly,
+    activeOfflineOverlays,
+    offlineEntitiesByKey,
     partialResources,
     queriesWithId,
     readFallbackItemState,

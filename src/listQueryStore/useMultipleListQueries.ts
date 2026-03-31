@@ -12,8 +12,7 @@ import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import {
   createOfflineEntityLookup,
-  getActiveOfflineOverlay,
-  getIsPendingOfflineSync,
+  filterActiveOfflineOverlays,
   getOfflineEntitiesMetadata,
 } from '../persistentStorage/offline/entityMetadata';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
@@ -219,30 +218,35 @@ export function useMultipleListQueries<
     () => createOfflineEntityLookup(offlineEntities),
     [offlineEntities],
   );
-  const offlineOverlayItemsByQueryKey = useMemo(() => {
-    const overlaysByQueryKey = new Map<
-      string,
-      { itemKey: string; index: number }[]
-    >();
+  const activeOfflineOverlays = useMemo(
+    () => filterActiveOfflineOverlays(offlineEntitiesByKey, offlineOverlays),
+    [offlineEntitiesByKey, offlineOverlays],
+  );
+  const { deletedOverlayItemKeys, overlayItemsByQueryKey } = useMemo(() => {
+    const deleted = new Set<string>();
+    const byQueryKey = new Map<string, { itemKey: string; index: number }[]>();
 
-    for (const [itemKey, overlay] of Object.entries(offlineOverlays)) {
-      if (!getIsPendingOfflineSync(offlineEntitiesByKey.get(itemKey))) continue;
+    for (const [itemKey, overlay] of Object.entries(activeOfflineOverlays)) {
+      if (overlay.item === null) {
+        deleted.add(itemKey);
+        continue;
+      }
 
       for (const [queryKey, index] of Object.entries(
         overlay.queryMemberships,
       )) {
-        const queryItems = overlaysByQueryKey.get(queryKey);
-        const nextItem = { itemKey, index };
+        let queryItems = byQueryKey.get(queryKey);
 
-        if (queryItems) {
-          queryItems.push(nextItem);
-        } else {
-          overlaysByQueryKey.set(queryKey, [nextItem]);
+        if (!queryItems) {
+          queryItems = [];
+          byQueryKey.set(queryKey, queryItems);
         }
+
+        queryItems.push({ itemKey, index });
       }
     }
 
-    for (const queryItems of overlaysByQueryKey.values()) {
+    for (const queryItems of byQueryKey.values()) {
       queryItems.sort((left, right) => {
         if (left.index !== right.index) {
           return left.index - right.index;
@@ -252,8 +256,11 @@ export function useMultipleListQueries<
       });
     }
 
-    return overlaysByQueryKey;
-  }, [offlineEntitiesByKey, offlineOverlays]);
+    return {
+      deletedOverlayItemKeys: deleted,
+      overlayItemsByQueryKey: byQueryKey,
+    };
+  }, [activeOfflineOverlays]);
 
   const selectVisibleItems = useCallback(
     (
@@ -269,18 +276,21 @@ export function useMultipleListQueries<
         | undefined,
     ): SelectedItem[] => {
       return filterAndMap(itemKeys, (itemKey) => {
-        const overlay = getActiveOfflineOverlay(
-          offlineEntitiesByKey,
-          offlineOverlays,
-          itemKey,
-        );
+        const overlay = activeOfflineOverlays[itemKey];
+        if (overlay?.item === null) return false;
         let item = overlay?.item;
         let itemPayload = overlay?.itemPayload;
 
         if (item === undefined || itemPayload === undefined) {
           const currentItemState = getItemState(itemKey);
-          item = currentItemState?.item ?? undefined;
-          itemPayload = currentItemState?.itemPayload;
+
+          if (item === undefined) {
+            item = currentItemState?.item ?? undefined;
+          }
+
+          if (itemPayload === undefined) {
+            itemPayload = currentItemState?.itemPayload;
+          }
         }
 
         if (!item || itemPayload === undefined) {
@@ -301,7 +311,7 @@ export function useMultipleListQueries<
         return __LEGIT_CAST__<SelectedItem, ItemState>(item);
       });
     },
-    [itemSelector, offlineEntitiesByKey, offlineOverlays, partialResources],
+    [activeOfflineOverlays, itemSelector, partialResources],
   );
 
   const getUnresolvedPendingInvalidationFields = useCallback(
@@ -353,14 +363,27 @@ export function useMultipleListQueries<
   );
 
   const getVisibleQueryItemKeys = useCallback(
-    (queryKey: string, itemKeys: readonly string[]): readonly string[] => {
-      const missingOverlayItems = offlineOverlayItemsByQueryKey.get(queryKey);
-      if (!missingOverlayItems || missingOverlayItems.length === 0) {
-        return itemKeys;
+    (queryKey: string, itemKeys: readonly string[]): string[] => {
+      const missingOverlayItems = overlayItemsByQueryKey.get(queryKey);
+      const hasDeletions = deletedOverlayItemKeys.size > 0;
+
+      if (
+        !hasDeletions &&
+        (!missingOverlayItems || missingOverlayItems.length === 0)
+      ) {
+        return [...itemKeys];
       }
 
-      const visibleItemKeys = [...itemKeys];
+      const visibleItemKeys = hasDeletions
+        ? itemKeys.filter((itemKey) => !deletedOverlayItemKeys.has(itemKey))
+        : [...itemKeys];
+
+      if (!missingOverlayItems || missingOverlayItems.length === 0) {
+        return visibleItemKeys;
+      }
+
       const existingItemKeys = new Set(visibleItemKeys);
+
       for (const { itemKey, index } of missingOverlayItems) {
         if (existingItemKeys.has(itemKey)) continue;
 
@@ -374,7 +397,7 @@ export function useMultipleListQueries<
 
       return visibleItemKeys;
     },
-    [offlineOverlayItemsByQueryKey],
+    [deletedOverlayItemKeys, overlayItemsByQueryKey],
   );
 
   const resultSelector = useCallback(

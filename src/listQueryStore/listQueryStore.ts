@@ -1391,11 +1391,11 @@ export function createListQueryStore<
       for (const itemKey of targetItemKeySet) {
         const item = store.state.items[itemKey];
         const itemPayload = store.state.itemQueries[itemKey]?.payload;
-        if (item == null || itemPayload === undefined) continue;
 
         draft[itemKey] = {
-          item: klona(item),
-          itemPayload: klona(itemPayload),
+          item: item == null ? null : klona(item),
+          itemPayload:
+            itemPayload === undefined ? undefined : klona(itemPayload),
           queryMemberships: queryMembershipsByItemKey.get(itemKey) ?? {},
         };
       }
@@ -1820,9 +1820,7 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
-    const offlineOverlays = offlineOverlayStore.useSelectorRC((state) => {
-      return state;
-    });
+    const offlineOverlays = offlineOverlayStore.useSelectorRC((state) => state);
 
     return useMultipleItemsHook<
       ItemState,
@@ -1852,9 +1850,9 @@ export function createListQueryStore<
       itemPendingInvalidationFields,
       globalDisableRefetchOnMount,
       fetchItemFn,
+      partialResources,
       offlineEntities,
       offlineOverlays,
-      partialResources,
     );
   };
 

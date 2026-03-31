@@ -362,7 +362,7 @@ export function createCollectionStore<
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
   type CollectionOfflineOverlay = {
     data: ItemState | null;
-    payload: ItemPayload;
+    payload?: ItemPayload;
   };
 
   let remoteApplyDepth = 0;
@@ -453,11 +453,10 @@ export function createCollectionStore<
     offlineOverlayStore.produceState((draft) => {
       for (const itemKey of targetItemKeys) {
         const item = store.state[itemKey];
-        if (!item?.data) continue;
 
         draft[itemKey] = {
-          data: klona(item.data),
-          payload: klona(item.payload),
+          data: item ? klona(item.data) : null,
+          payload: item ? klona(item.payload) : undefined,
         };
       }
     });
