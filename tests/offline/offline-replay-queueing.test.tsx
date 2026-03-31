@@ -4,6 +4,7 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -11,11 +12,13 @@ import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateUserOperations,
+  deleteItemInputSchema,
   getLocalStorageKeys,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   type UpdateValueConflictOperations,
   type UpdateValueOperations,
+  userPatchSchema,
 } from './offlineReplayTestShared';
 import {
   classifyMutationOutage,
@@ -273,6 +276,138 @@ test('document offline accumulation keeps a single persisted queue entry and rep
   expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
     - value: 3
   `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+});
+
+test('same-entity supersede keeps only the queued delete for a persisted collection item', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-supersede-delete-session';
+  const storeName = 'offline-supersede-delete-store';
+  const patchExecute = vi.fn(
+    ({ input }: { input: { itemId: string; name: string } }) => {
+      env.apiStore.updateItemState(input.itemId, (item) => ({
+        ...item,
+        name: input.name,
+      }));
+
+      return { name: input.name };
+    },
+  );
+  const deleteExecute = vi.fn(({ input }: { input: { itemId: string } }) => {
+    env.apiStore.deleteItemState(input.itemId);
+    return undefined;
+  });
+
+  type SupersedeCollectionOperations = {
+    patchUserName: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+    deleteUser: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string },
+      unknown
+    >;
+  };
+
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    SupersedeCollectionOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offlineMode: {
+          network: network.config,
+          operations: {
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: patchExecute,
+            },
+            deleteUser: {
+              inputSchema: deleteItemInputSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              supersedes: { scope: 'same-entity' },
+              execute: deleteExecute,
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Queue an edit first so the later delete can supersede it.
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (item) => ({
+        ...item,
+        name: 'Ada renamed offline',
+      }));
+    },
+    mutation: () => Promise.resolve({ name: 'Ada renamed offline' }),
+    offline: {
+      operation: 'patchUserName',
+      input: { itemId: 'users||1', name: 'Ada renamed offline' },
+    },
+  });
+
+  // Queue the delete for the same item. The older edit should be pruned.
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.deleteItemState('users||1');
+    },
+    mutation: () => Promise.resolve(undefined),
+    offline: { operation: 'deleteUser', input: { itemId: 'users||1' } },
+  });
+
+  expect(
+    getOfflineQueueEntries(sessionKey, storeName)
+      .map((entry) => {
+        const data = getOfflineQueueEntryData(entry);
+
+        return {
+          input: data.input,
+          operation: data.operation,
+          queueOrder: data.queueOrder,
+        };
+      })
+      .sort((left, right) => Number(left.queueOrder) - Number(right.queueOrder))
+      .map(({ queueOrder: _queueOrder, ...entry }) => entry),
+  ).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1' }
+      operation: 'deleteUser'
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchObject([
+    {
+      entityKey: getCompositeKey('users||1'),
+      pendingMutations: 1,
+      syncState: 'pending',
+    },
+  ]);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(patchExecute).not.toHaveBeenCalled();
+  expect(deleteExecute.mock.calls.map(([ctx]) => ctx.input))
+    .toMatchInlineSnapshot(`
+      - itemId: 'users||1'
+    `);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
     `[]`,
@@ -813,6 +948,96 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
+  expect(env.apiStore.getOfflineEntities()).toMatchObject([
+    { entityKey: 'document', pendingMutations: 2 },
+  ]);
+});
+
+test('same-entity supersede does not prune attempted needs-confirmation entries', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-needs-confirmation-supersede-session';
+  const storeName = 'offline-needs-confirmation-supersede-store';
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValueOnce(new Error('dispatch failed after send'))
+    .mockResolvedValue({ value: 3 });
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: network.config,
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            supersedes: { scope: 'same-entity' },
+            execute,
+            shouldSkipSync: () => false,
+          },
+        },
+      },
+    },
+  });
+
+  // Let the first queued mutation reach needs-confirmation before adding a new one.
+  await env.apiStore.performMutation({
+    mutation: () => Promise.resolve(2),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(1);
+  await Promise.resolve();
+
+  expect(env.apiStore.getOfflineEntities()).toMatchObject([
+    {
+      entityKey: 'document',
+      pendingMutations: 1,
+      syncState: 'needs-confirmation',
+    },
+  ]);
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  // The new superseding entry should not remove the already-attempted one.
+  await env.apiStore.performMutation({
+    mutation: () => Promise.resolve(3),
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+
+  expect(
+    getOfflineQueueEntries(sessionKey, storeName)
+      .map((entry) => {
+        const data = getOfflineQueueEntryData(entry);
+
+        return {
+          input: data.input,
+          operation: data.operation,
+          queueOrder: data.queueOrder,
+          syncState: data.syncState,
+        };
+      })
+      .sort((left, right) => Number(left.queueOrder) - Number(right.queueOrder))
+      .map(({ queueOrder: _queueOrder, ...entry }) => entry),
+  ).toMatchInlineSnapshot(`
+    - input: { value: 2 }
+      operation: 'updateValue'
+      syncState: 'needs-confirmation'
+    - input: { value: 3 }
+      operation: 'updateValue'
+      syncState: 'pending'
+  `);
   expect(env.apiStore.getOfflineEntities()).toMatchObject([
     { entityKey: 'document', pendingMutations: 2 },
   ]);

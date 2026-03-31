@@ -3,12 +3,17 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import type { ListQueryOfflineOperationDefinition } from '../../src/main';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
+  deleteItemInputSchema,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   type PatchUserOperations,
@@ -402,6 +407,183 @@ describe('list-query replay', () => {
       .     | Ada, Grace, Linus edited  | error        | [query-items, query-items, query-items] ui-changed
       "
     `);
+
+    hook.unmount();
+  });
+
+  test('list-query delete can cancel a queued temp lifecycle without replaying anything', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-replay-temp-create-then-delete-session';
+    const storeName = 'offline-replay-temp-create-then-delete-store';
+    const usersQuery = { tableId: 'users' } as const;
+    const replayedOperations: Array<{
+      operation: 'createUser' | 'patchUserName' | 'deleteUser';
+      input:
+        | { itemId: string; name: string }
+        | { itemId: string }
+        | { name: string };
+    }> = [];
+
+    type CreatePatchAndDeleteListQueryUserOperations =
+      CreateListQueryUserOperations &
+        PatchUserOperations & {
+          deleteUser: ListQueryOfflineOperationDefinition<
+            { id: number; name: string },
+            ListQueryParams,
+            string,
+            { itemId: string },
+            unknown
+          >;
+        };
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreatePatchAndDeleteListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: ({ input }) => {
+                  replayedOperations.push({ operation: 'createUser', input });
+                  return { id: 3, name: input.name };
+                },
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) => {
+                  replayedOperations.push({
+                    operation: 'patchUserName',
+                    input,
+                  });
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                  return { name: input.name };
+                },
+              },
+              deleteUser: {
+                inputSchema: deleteItemInputSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                supersedes: {
+                  scope: 'same-entity',
+                  dropSelfIfTempLifecycleCancelled: true,
+                },
+                execute: ({ input }) => {
+                  replayedOperations.push({ operation: 'deleteUser', input });
+                  env.apiStore.deleteItemState(input.itemId);
+                  return undefined;
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+
+      env.trackItemUI('query-status', query.status);
+      env.trackItemUI('query-items', query.items.join(', '));
+      return query;
+    });
+    await flushAllTimers();
+
+    // Start a temp create so the following operations target the optimistic row.
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Linus offline',
+            { id: -1, name: 'Linus offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+      });
+    });
+
+    // Queue a temp-row edit that should also be pruned once delete cancels the lifecycle.
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus offline', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+            ...item,
+            name: 'Linus edited',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Linus edited' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'temp:Linus offline', name: 'Linus edited' },
+        },
+      });
+    });
+
+    // Deleting the temp row should cancel the whole temp lifecycle and drop itself.
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus offline', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('temp:Linus offline');
+        },
+        mutation: () => Promise.resolve(undefined),
+        offline: {
+          operation: 'deleteUser',
+          input: { itemId: 'temp:Linus offline' },
+        },
+      });
+    });
+
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      ['Ada', 'Grace']
+    `);
+    expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(replayedOperations).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
 
     hook.unmount();
   });

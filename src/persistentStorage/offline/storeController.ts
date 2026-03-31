@@ -247,8 +247,13 @@ export function createOfflineStoreController<
     validatedInput: unknown;
     tempId?: ValidPayload;
     pendingEntity?: unknown;
-    nextEntry: OfflineQueueEntry;
-    previousEntry?: OfflineQueueEntry;
+    nextEntry?: OfflineQueueEntry;
+    removedEntries: OfflineQueueEntry[];
+  };
+
+  type AppliedQueuedMutation = PlannedQueuedMutation & {
+    removedEntriesApplied: OfflineQueueEntry[];
+    touchedNextEntry: boolean;
   };
 
   async function loadNamespaceRecords<T extends { id: string }>(
@@ -594,6 +599,48 @@ export function createOfflineStoreController<
     }
 
     return candidate;
+  }
+
+  function isSameEntityRef(
+    left: OfflineEntityRef | undefined,
+    right: OfflineEntityRef | undefined,
+  ): boolean {
+    return (
+      left?.entityKind === right?.entityKind &&
+      left?.entityKey === right?.entityKey
+    );
+  }
+
+  function findSupersededEntries(args: {
+    operationName: string;
+    entityRefs: OfflineEntityRef[];
+    queueOrder: number;
+    entries?: Iterable<OfflineQueueEntry>;
+  }): OfflineQueueEntry[] {
+    if (args.entityRefs.length !== 1) {
+      throw new Error(
+        `Superseding offline operation "${args.operationName}" must resolve exactly one entity ref`,
+      );
+    }
+
+    const targetRef = args.entityRefs[0];
+    if (!targetRef) {
+      throw new Error(
+        `Superseding offline operation "${args.operationName}" is missing its entity ref`,
+      );
+    }
+
+    return [...(args.entries ?? queueEntries.values())]
+      .filter((entry) => {
+        return (
+          entry.syncState === 'pending' &&
+          entry.attempts === 0 &&
+          entry.entityRefs.length === 1 &&
+          getQueueOrder(entry) < args.queueOrder &&
+          isSameEntityRef(entry.entityRefs[0], targetRef)
+        );
+      })
+      .sort(compareQueueEntries);
   }
 
   function buildResolutionRecordBase(
@@ -962,6 +1009,11 @@ export function createOfflineStoreController<
     } = args;
 
     const tempEntity = operation.tempEntity;
+    if (operation.accumulation && operation.supersedes) {
+      throw new Error(
+        `Offline operation "${operationName}" cannot configure accumulation and supersedes together`,
+      );
+    }
     if (storeType === 'document' && tempEntity) {
       throw new Error(
         `Document offline operation "${operationName}" does not support tempEntity`,
@@ -1056,9 +1108,35 @@ export function createOfflineStoreController<
           tempId,
           pendingEntity,
           nextEntry,
-          previousEntry: existingEntry,
+          removedEntries: [existingEntry],
         };
       }
+    }
+
+    const supersededEntries = operation.supersedes
+      ? findSupersededEntries({
+          operationName,
+          entityRefs,
+          queueOrder,
+          entries: workingQueue.values(),
+        })
+      : [];
+
+    for (const entry of supersededEntries) {
+      workingQueue.delete(entry.id);
+    }
+
+    if (
+      operation.supersedes?.dropSelfIfTempLifecycleCancelled &&
+      supersededEntries.some((entry) => entry.tempId !== undefined)
+    ) {
+      return {
+        operationName,
+        validatedInput,
+        tempId,
+        pendingEntity,
+        removedEntries: supersededEntries,
+      };
     }
 
     const nextEntry = buildFreshQueueEntry({
@@ -1071,7 +1149,14 @@ export function createOfflineStoreController<
     });
     workingQueue.set(nextEntry.id, nextEntry);
 
-    return { operationName, validatedInput, tempId, pendingEntity, nextEntry };
+    return {
+      operationName,
+      validatedInput,
+      tempId,
+      pendingEntity,
+      nextEntry,
+      removedEntries: supersededEntries,
+    };
   }
 
   async function queuePreparedMutations(
@@ -1104,14 +1189,32 @@ export function createOfflineStoreController<
       );
     }
 
-    const persistedMutations: PlannedQueuedMutation[] = [];
+    const persistedMutations: AppliedQueuedMutation[] = [];
     const appliedPendingMutations: PlannedQueuedMutation[] = [];
     const previousNextQueueOrder = nextQueueOrder;
 
     try {
       for (const mutation of plannedMutations) {
-        await persistEntry(mutation.nextEntry, current, true);
-        persistedMutations.push(mutation);
+        const appliedMutation: AppliedQueuedMutation = {
+          ...mutation,
+          removedEntriesApplied: [],
+          touchedNextEntry: false,
+        };
+        persistedMutations.push(appliedMutation);
+
+        for (const removedEntry of mutation.removedEntries) {
+          if (mutation.nextEntry?.id === removedEntry.id) {
+            continue;
+          }
+
+          appliedMutation.removedEntriesApplied.push(removedEntry);
+          await removeEntry(removedEntry.id, current, true);
+        }
+
+        if (mutation.nextEntry) {
+          appliedMutation.touchedNextEntry = true;
+          await persistEntry(mutation.nextEntry, current, true);
+        }
       }
 
       nextQueueOrder = nextQueueOrderValue;
@@ -1136,6 +1239,7 @@ export function createOfflineStoreController<
       }
 
       for (const mutation of plannedMutations) {
+        if (!mutation.nextEntry) continue;
         storeAdapter.captureQueuedMutationOverlays?.({
           sessionKey: current.sessionKey,
           entityRefs: mutation.nextEntry.entityRefs,
@@ -1159,12 +1263,23 @@ export function createOfflineStoreController<
       }
 
       for (const mutation of persistedMutations.reverse()) {
-        if (mutation.previousEntry) {
-          await persistEntry(mutation.previousEntry, current, true);
-          continue;
+        const nextEntryReplacesRemovedEntry =
+          mutation.nextEntry !== undefined &&
+          mutation.removedEntries.some(
+            (removedEntry) => removedEntry.id === mutation.nextEntry?.id,
+          );
+
+        if (mutation.touchedNextEntry && mutation.nextEntry) {
+          if (!nextEntryReplacesRemovedEntry) {
+            await removeEntry(mutation.nextEntry.id, current, true);
+          }
         }
 
-        await removeEntry(mutation.nextEntry.id, current, true);
+        for (const removedEntry of nextEntryReplacesRemovedEntry
+          ? [...mutation.removedEntries].reverse()
+          : [...mutation.removedEntriesApplied].reverse()) {
+          await persistEntry(removedEntry, current, true);
+        }
       }
 
       nextQueueOrder = previousNextQueueOrder;

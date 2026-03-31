@@ -444,6 +444,23 @@ export type OfflineAccumulationConfig<TInput> = {
   ) => Promise<TInput> | TInput;
 };
 
+/**
+ * Optional queue-pruning strategy for queued offline mutations.
+ *
+ * `same-entity` only applies to operations that resolve exactly one entity ref.
+ * When enabled, the new operation may remove earlier unattempted pending entries
+ * targeting that same single entity before the new entry is persisted.
+ */
+export type OfflineSupersedeConfig = {
+  /** Drop earlier unattempted pending entries for the same single entity. */
+  scope: 'same-entity';
+  /**
+   * When the pruned entries include a temp-entity lifecycle, drop the current
+   * operation itself instead of persisting a replacement entry.
+   */
+  dropSelfIfTempLifecycleCancelled?: boolean;
+};
+
 /** Shared context passed to offline replay lifecycle hooks. */
 type OperationBaseContext<TInput> = {
   /** Input payload for the queued mutation currently being processed. */
@@ -672,6 +689,12 @@ export type OfflineOperationDefinition<
    */
   accumulation?: OfflineAccumulationConfig<TInput>;
   /**
+   * Optional queue pruning for newer operations that supersede older queued work.
+   *
+   * This is mutually exclusive with `accumulation`.
+   */
+  supersedes?: OfflineSupersedeConfig;
+  /**
    * Executes the queued mutation against the remote source during replay.
    * This may run multiple times when transient failures occur.
    */
@@ -720,6 +743,7 @@ export type AnyOfflineOperationDefinition = {
     __LEGIT_ANY__
   >;
   accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
+  supersedes?: OfflineSupersedeConfig;
   tempEntity?: OfflineTempEntityConfig<
     __LEGIT_ANY__,
     __LEGIT_ANY__,

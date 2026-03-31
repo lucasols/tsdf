@@ -57,6 +57,7 @@ export const userPatchSchema = rc_object({
   itemId: rc_string,
   name: rc_string,
 });
+export const deleteItemInputSchema = rc_object({ itemId: rc_string });
 export const userRowSchema = rc_object({ id: rc_number, name: rc_string });
 
 export function getLocalStorageKeys(): string[] {
