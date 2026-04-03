@@ -305,14 +305,18 @@ export async function executeQueryFetch<
           exception.id === 'offline'
             ? offlineConnectivityError
             : errorNormalizer(unknownToError(exception));
-
         store.produceState(
           (draft) => {
             const query = draft.queries[queryKey];
             if (!query) return;
 
-            query.status = 'error';
-            query.error = error;
+            if (error === offlineConnectivityError && query.wasLoaded) {
+              query.status = 'success';
+              query.error = null;
+            } else {
+              query.status = 'error';
+              query.error = error;
+            }
           },
           { action: 'query-fetch-error' },
         );

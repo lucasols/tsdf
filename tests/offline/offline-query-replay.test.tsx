@@ -205,8 +205,7 @@ describe('list-query replay', () => {
       "
       time | query-items | query-status |
       0    | Ada         | success      | [query-status, query-items] ui-initialized
-      10ms | Ada         | error        | [query-status] ui-changed
-      2s   | Ada pending | error        | [query-items] ui-changed
+      2s   | Ada pending | success      | [query-items] ui-changed
       "
     `);
 
@@ -432,13 +431,12 @@ describe('list-query replay', () => {
       "
       time  | query-items               | query-status |
       0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
-      10ms  | Ada, Grace                | error        | [query-status] ui-changed
-      1.01s | Ada, Grace                | error        | -- queue a temp create while offline
-      .     | Ada, Grace, Linus offline | error        | [query-items] ui-changed
-      .     | Ada, Grace, Linus offline | error        | -- edit the same temp row before reconnecting
-      .     | Ada, Grace, Linus edited  | error        | [query-items] ui-changed
-      .     | Ada, Grace, Linus edited  | error        | -- go back online and replay both queued mutations
-      .     | Ada, Grace, Linus edited  | error        | [query-items, query-items, query-items] ui-changed
+      1.01s | Ada, Grace                | success      | -- queue a temp create while offline
+      .     | Ada, Grace, Linus offline | success      | [query-items] ui-changed
+      .     | Ada, Grace, Linus offline | success      | -- edit the same temp row before reconnecting
+      .     | Ada, Grace, Linus edited  | success      | [query-items] ui-changed
+      .     | Ada, Grace, Linus edited  | success      | -- go back online and replay both queued mutations
+      .     | Ada, Grace, Linus edited  | success      | [query-items, query-items, query-items] ui-changed
       "
     `);
 
@@ -1359,14 +1357,13 @@ describe('list-query replay', () => {
       "
       time   | query-items                    | query-status |
       0      | Ada, Grace                     | success      | [query-items, query-status] ui-initialized
-      10ms   | Ada, Grace                     | error        | [query-status] ui-changed
-      1.01s  | Ada, Grace                     | error        | -- queue the temp create and a dependent edit while offline
-      .      | Ada, Grace, Linus blocked edit | error        | [query-items, query-items] ui-changed
-      21.01s | Ada, Grace, Linus blocked edit | error        | -- go online and let the temp create exhaust replay retries
-      .      | Ada, Grace, Linus blocked edit | error        | -- retry the parent resolution so the temp payload can reconcile
-      .      | Ada, Grace, Linus offline      | error        | [query-items] ui-changed
-      22.01s | Ada, Grace, Linus offline      | error        | -- retry the remapped child resolution
-      .      | Ada, Grace, Linus blocked edit | error        | [query-items] ui-changed
+      1.01s  | Ada, Grace                     | success      | -- queue the temp create and a dependent edit while offline
+      .      | Ada, Grace, Linus blocked edit | success      | [query-items, query-items] ui-changed
+      21.01s | Ada, Grace, Linus blocked edit | success      | -- go online and let the temp create exhaust replay retries
+      .      | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the temp payload can reconcile
+      .      | Ada, Grace, Linus offline      | success      | [query-items] ui-changed
+      22.01s | Ada, Grace, Linus offline      | success      | -- retry the remapped child resolution
+      .      | Ada, Grace, Linus blocked edit | success      | [query-items] ui-changed
       "
     `);
 
@@ -1644,8 +1641,7 @@ describe('list-query replay', () => {
       "
       time  | query-items               | query-status |
       0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
-      10ms  | Ada, Grace                | error        | [query-status] ui-changed
-      1.01s | Ada, Grace, Linus offline | error        | [query-items, query-items, query-items] ui-changed
+      1.01s | Ada, Grace, Linus offline | success      | [query-items, query-items, query-items] ui-changed
       "
     `);
 

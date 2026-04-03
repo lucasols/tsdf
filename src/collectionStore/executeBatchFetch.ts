@@ -98,8 +98,13 @@ export async function executeBatchFetch<
               const item = draft[itemId];
               if (!item) continue;
 
-              item.error = error;
-              item.status = 'error';
+              if (fetchResult.offline && item.wasLoaded) {
+                item.error = null;
+                item.status = 'success';
+              } else {
+                item.error = error;
+                item.status = 'error';
+              }
               results.set(itemId, false);
             }
           },
@@ -208,8 +213,13 @@ export async function executeBatchFetch<
             const item = draft[itemId];
             if (!item) return;
 
-            item.error = error;
-            item.status = 'error';
+            if (fetchResult.offline && item.wasLoaded) {
+              item.error = null;
+              item.status = 'success';
+            } else {
+              item.error = error;
+              item.status = 'error';
+            }
           },
           {
             action: fetchResult.offline ? 'fetch-error-offline' : 'fetch-error',

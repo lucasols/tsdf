@@ -158,8 +158,13 @@ export async function executeItemBatchFetch<
               const itemQuery = draft.itemQueries[itemKey];
               if (!itemQuery) continue;
 
-              itemQuery.error = error;
-              itemQuery.status = 'error';
+              if (fetchResult.offline && itemQuery.wasLoaded) {
+                itemQuery.error = null;
+                itemQuery.status = 'success';
+              } else {
+                itemQuery.error = error;
+                itemQuery.status = 'error';
+              }
               delete draft.itemFieldInvalidationFields[itemKey];
               results.set(itemKey, false);
             }
@@ -270,8 +275,13 @@ export async function executeItemBatchFetch<
               const itemQuery = draft.itemQueries[itemKey];
               if (!itemQuery) return;
 
-              itemQuery.error = error;
-              itemQuery.status = 'error';
+              if (fetchResult.offline && itemQuery.wasLoaded) {
+                itemQuery.error = null;
+                itemQuery.status = 'success';
+              } else {
+                itemQuery.error = error;
+                itemQuery.status = 'error';
+              }
               delete draft.itemFieldInvalidationFields[itemKey];
             },
             {

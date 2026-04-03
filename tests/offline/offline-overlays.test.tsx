@@ -573,7 +573,7 @@ describe('list-query overlays', () => {
     });
 
     expect(hook.result.current).toMatchInlineSnapshot(`
-      error: { code: 0, id: 'offline', message: 'Offline' }
+      error: null
       hasMore: '❌'
       isLoading: '❌'
       isLoadingMore: '❌'
@@ -581,7 +581,7 @@ describe('list-query overlays', () => {
       payload: { tableId: 'users' }
       pendingSync: '✅'
       queryKey: '{tableId:"users"}'
-      status: 'error'
+      status: 'success'
     `);
 
     // A refetch that finishes before replay should not blank or revert the row.
@@ -815,7 +815,7 @@ describe('list-query overlays', () => {
     });
 
     expect(hook.result.current).toMatchInlineSnapshot(`
-      error: { code: 0, id: 'offline', message: 'Offline' }
+      error: null
       hasMore: '❌'
       isLoading: '❌'
       isLoadingMore: '❌'
@@ -823,7 +823,7 @@ describe('list-query overlays', () => {
       payload: { tableId: 'users' }
       pendingSync: '✅'
       queryKey: '{tableId:"users"}'
-      status: 'error'
+      status: 'success'
     `);
 
     // A stale refetch should keep the temp row visible in the same slot.
@@ -1036,7 +1036,7 @@ describe('list-query overlays', () => {
     });
 
     expect(hook.result.current).toMatchInlineSnapshot(`
-      error: { code: 0, id: 'offline', message: 'Offline' }
+      error: null
       hasMore: '❌'
       isLoading: '❌'
       isLoadingMore: '❌'
@@ -1044,7 +1044,7 @@ describe('list-query overlays', () => {
       payload: { tableId: 'users' }
       pendingSync: '❌'
       queryKey: '{tableId:"users"}'
-      status: 'error'
+      status: 'success'
     `);
 
     act(() => {

@@ -511,6 +511,8 @@ export function createFetchApi<
             undefined,
             errorNormalizer,
             partialResources,
+            undefined,
+            offlineController,
           );
           onItemFetchSettled?.({
             requests,

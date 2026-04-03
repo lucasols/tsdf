@@ -578,6 +578,7 @@ export function createDocumentStore<
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
+    const wasLoadedBeforeFetch = currentStatus === 'success';
 
     store.setPartialState(
       {
@@ -602,7 +603,9 @@ export function createDocumentStore<
       if (!result.ok) {
         if (result.offline) {
           store.setPartialState(
-            { error: offlineConnectivityError, status: 'error' },
+            wasLoadedBeforeFetch
+              ? { error: null, status: 'success' }
+              : { error: offlineConnectivityError, status: 'error' },
             { action: 'fetch-error-offline' },
           );
           return false;
