@@ -13,7 +13,6 @@ import type {
   PersistentStorageDataSchema,
   PersistentStorageSchema,
 } from './types';
-
 import { validateWithSchema } from './validateWithSchema';
 
 const persistedDocumentDataSchema = rc_object({ data: rc_unknown });

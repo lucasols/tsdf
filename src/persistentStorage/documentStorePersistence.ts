@@ -2,12 +2,6 @@ import type { Store } from 't-state';
 
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
-import type {
-  DocumentPersistentStorageConfig,
-  PersistedDocumentData,
-  StorageAdapter,
-} from './types';
-
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -21,6 +15,11 @@ import {
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import type {
+  DocumentPersistentStorageConfig,
+  PersistedDocumentData,
+  StorageAdapter,
+} from './types';
 
 /**
  * Synchronously reads a persisted document from localStorage.

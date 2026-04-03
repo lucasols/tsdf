@@ -1,5 +1,4 @@
 import type { StorageAdapter } from '../../src/persistentStorage/types';
-
 import {
   createInMemoryPersistentTestStore,
   type PersistentTestStoreScope,

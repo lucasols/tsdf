@@ -4,7 +4,6 @@ import { afterEach, beforeEach, vi } from 'vitest';
 
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { Row } from '../mocks/listQueryStoreTestEnv';
-
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 export function setupBrowserTabsTestLifecycle(): void {

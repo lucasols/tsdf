@@ -1,19 +1,12 @@
-import type { Store } from 't-state';
-
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import type { Store } from 't-state';
 
 import type {
   TSFDCollectionItem,
   TSFDCollectionState,
 } from '../collectionStore/collectionStore';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
-import type {
-  CollectionPersistentStorageConfig,
-  PersistedCollectionItemData,
-  StorageAdapter,
-} from './types';
-
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -30,6 +23,11 @@ import {
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import type {
+  CollectionPersistentStorageConfig,
+  PersistedCollectionItemData,
+  StorageAdapter,
+} from './types';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;

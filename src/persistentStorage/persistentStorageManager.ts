@@ -6,6 +6,8 @@ import {
   rc_unknown,
 } from 'runcheck';
 
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import { createStorageAdapter } from './storageAdapter';
 import type {
   PersistentStorageBaseConfig,
   PersistentStorageSchema,
@@ -13,9 +15,6 @@ import type {
   StorageBackend,
   StorageCacheEntry,
 } from './types';
-
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import { createStorageAdapter } from './storageAdapter';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEBOUNCE_MS = 1000;

@@ -14,16 +14,15 @@ import { useCallback, useContext, useEffect } from 'react';
 import { unknownToError, type Result } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 
-import type {
-  DocumentPersistentStorageConfig,
-  StorageAdapter,
-} from './persistentStorage/types';
-
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
+import type {
+  DocumentPersistentStorageConfig,
+  StorageAdapter,
+} from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,

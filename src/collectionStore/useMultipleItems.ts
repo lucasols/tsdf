@@ -7,13 +7,6 @@ import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
 
-import type {
-  CollectionUseMultipleItemsQuery,
-  TSFDCollectionItem,
-  TSFDCollectionState,
-  TSFDUseCollectionItemReturn,
-} from './collectionStore';
-
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType } from '../requestScheduler';
@@ -27,6 +20,12 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import type {
+  CollectionUseMultipleItemsQuery,
+  TSFDCollectionItem,
+  TSFDCollectionState,
+  TSFDUseCollectionItemReturn,
+} from './collectionStore';
 
 type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };

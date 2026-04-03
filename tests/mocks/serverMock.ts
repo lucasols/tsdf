@@ -3,7 +3,6 @@ import { sleep } from '@ls-stack/utils/sleep';
 import { evtmitter } from 'evtmitter';
 
 import type { StoreError } from '../../src/utils/storeShared';
-
 import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
