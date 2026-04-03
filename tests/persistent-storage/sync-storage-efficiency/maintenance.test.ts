@@ -370,7 +370,7 @@ describe('sync storage efficiency: maintenance', () => {
     `);
   });
 
-  test('protected dotted-session cleanup keeps the protected entry and snapshots the full manifest scan history', async () => {
+  test('offline dotted-session startup cleanup keeps stale cached entries while pruning invalid stray keys', async () => {
     const staleDurationMs = 8 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
     const offlineNetwork = createOfflineNetworkMock();
@@ -461,12 +461,14 @@ describe('sync storage efficiency: maintenance', () => {
     triggerDocEnv.scheduleFetch('highPriority');
     await advanceTime(1810);
 
-    // Capture the full sweep so the snapshot shows the manifest-only scan and stale-entry removal.
+    // Capture the full sweep so the snapshot shows the manifest-only scan and
+    // confirms offline startup preserves the stale cached entries.
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup(190);
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    // The protected dotted-session entry should survive, while the unprotected stale entry is discarded.
+    // Offline startup should preserve both stale cached documents, while still
+    // pruning the unrelated invalid stray key discovered during the sweep.
     expect({
       invalidStrayExists:
         localStorage.getItem('tsdf.user@example.com.invalid-stray') !== null,
@@ -477,7 +479,7 @@ describe('sync storage efficiency: maintenance', () => {
     }).toMatchInlineSnapshot(`
       invalidStrayExists: '❌'
       protectedEntryExists: '✅'
-      unprotectedEntryExists: '❌'
+      unprotectedEntryExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
@@ -490,37 +492,36 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[3] #4 ✅ tsdf.user@example.com.unprotected-doc (entry data)
       .     | 🔑[4] #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
             |    └ (namespace index)
-      .     | 🔑[5] #6 ✅ tsdf.user@example.com._o_.s (entry data)
-      .     | 🔑[6] #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
-      .     | 🔑[7] #8 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
+      .     | 🔑[5] #6 ✅ tsdf-os:user@example.com
+      .     | 🔑[6] #7 ✅ tsdf.user@example.com._o_.s (entry data)
+      .     | 🔑[7] #8 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
+      .     | 🔑[8] #9 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
             |    └ (entry data, <protected-doc:1736380803620:4fzzzxjy>)
-      .     | 🔑[8] #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+      .     | 🔑[9] #10 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
             |    └ (namespace index)
-      .     | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
+      .     | 🔑[10] #11 ✅ tsdf.user@example.com.protected-doc.oe.document
             |    └ (entry data, <document>)
-      .     | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .     | 🔑[11] #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
             |    └ (namespace index)
-      .     | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
-      .     | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+      .     | 🔑[12] #13 ✅ tsdf.user@example.com.invalid-stray (entry data)
+      .     | 🔑[13] #14 ✅ tsdf.sess-trigger.trigger-doc (entry data)
+      .     | 🔑[14] #15 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index)
       .     | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
             |    └ (namespace index) | 0.07 kb
       .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
             |    └ (namespace index) | 0.05 kb
-      .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
+      .     | 📖 #8 ✅ tsdf._m.r.s:user@example.com._o_.s.m
             |    └ (namespace index) | 0.05 kb
-      .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+      .     | 📖 #10 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
             |    └ (namespace index) | 0.14 kb
-      .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .     | 📖 #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
             |    └ (namespace index) | 0.08 kb
-      .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+      .     | 📖 #15 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index) | 0.05 kb
-      .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 🗑️ #4 ✅->❌ tsdf.user@example.com.unprotected-doc (entry data)
+      .     | 🗑️ #13 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
+      .     | 📖 #7 ✅ tsdf.user@example.com._o_.s (entry data) | 0.51 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
-      .     | 🗑️ #5 ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m
-            |    └ (namespace index)
       "
     `);
     expect(

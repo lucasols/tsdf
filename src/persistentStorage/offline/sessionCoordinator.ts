@@ -1,5 +1,12 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { useCallback, useMemo } from 'react';
+import {
+  rc_literals,
+  rc_number,
+  rc_object,
+  rc_parse,
+  rc_string,
+} from 'runcheck';
 import { Store } from 't-state';
 
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
@@ -7,6 +14,10 @@ import {
   createBrowserTabsCoordinatorWithPriority,
   type BrowserTabsMessageMeta,
 } from '../../utils/browserTabsSync';
+import {
+  createCompactLocalStorageEntry,
+  parseCompactLocalStorageEntry,
+} from '../compactLocalStorageEntry';
 import {
   createPersistentStorageHandle,
   getLocalStorageAdapter,
@@ -27,6 +38,7 @@ import type {
   OfflineOutageModeConfig,
   OfflineRecoveryProbeConfig,
 } from './types';
+import { globalOfflineStatusSchema } from './types';
 
 type SessionStoreState = {
   status: GlobalOfflineStatus;
@@ -62,6 +74,7 @@ type SessionCoordinatorOptions = {
   adapter?: StorageAdapter;
   onPersistentStorageError?: (error: unknown) => void;
   config?: OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>;
+  bootstrapStatusFromLocalStorage?: boolean;
 };
 
 const DEFAULT_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
@@ -74,6 +87,22 @@ const defaultGetIsOffline = () => !navigator.onLine;
 
 const defaultStatusBySession = new Map<string, GlobalOfflineStatus>();
 const registry = new Map<string, SessionOfflineCoordinator>();
+const OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX = 'tsdf-os:';
+const LEGACY_OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX =
+  'tsdf-offline-status:';
+const COMPACT_FLAG = 1 as const;
+const compactOfflineStatusModeStateSchema = rc_object({
+  e: rc_literals(COMPACT_FLAG).optionalKey(),
+  a: rc_literals(COMPACT_FLAG).optionalKey(),
+});
+const compactOfflineStatusSnapshotSchema = rc_object({
+  s: rc_string,
+  n: compactOfflineStatusModeStateSchema.optionalKey(),
+  o: compactOfflineStatusModeStateSchema.optionalKey(),
+  u: rc_number.optionalKey(),
+  lf: rc_number.optionalKey(),
+  lr: rc_number.optionalKey(),
+});
 
 function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
@@ -89,7 +118,185 @@ function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   };
 }
 
-function resolveDefaultStatus(sessionKey: string): GlobalOfflineStatus {
+function getOfflineStatusBootstrapStorageKey(
+  sessionKey: string,
+  prefix = OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX,
+): string {
+  return `${prefix}${sessionKey}`;
+}
+
+function normalizeCompactModeState(value: { e?: 1; a?: 1 } | undefined): {
+  enabled: boolean;
+  active: boolean;
+} {
+  return {
+    enabled: value?.e === COMPACT_FLAG,
+    active: value?.a === COMPACT_FLAG,
+  };
+}
+
+function serializeOfflineStatusSnapshot(status: GlobalOfflineStatus) {
+  return {
+    s: status.sessionKey,
+    n:
+      status.network.enabled || status.network.active
+        ? {
+            ...(status.network.enabled ? { e: COMPACT_FLAG } : {}),
+            ...(status.network.active ? { a: COMPACT_FLAG } : {}),
+          }
+        : undefined,
+    o:
+      status.outage.enabled || status.outage.active
+        ? {
+            ...(status.outage.enabled ? { e: COMPACT_FLAG } : {}),
+            ...(status.outage.active ? { a: COMPACT_FLAG } : {}),
+          }
+        : undefined,
+    u: status.updatedAt,
+    lf: status.lastFailureAt ?? undefined,
+    lr: status.lastRecoveryCheckAt ?? undefined,
+  };
+}
+
+function normalizePersistedOfflineStatus(
+  sessionKey: string,
+  rawStatus: unknown,
+): GlobalOfflineStatus | null {
+  const compactStatus = rc_parse(
+    rawStatus,
+    compactOfflineStatusSnapshotSchema,
+  ).unwrapOrNull();
+  if (compactStatus?.s === sessionKey) {
+    const network = normalizeCompactModeState(compactStatus.n);
+    const outage = normalizeCompactModeState(compactStatus.o);
+    const effectiveOffline = network.active || outage.active;
+
+    return {
+      sessionKey,
+      network,
+      outage,
+      effectiveMode: effectiveOffline ? 'offline' : 'online',
+      effectiveOffline,
+      isLeader: true,
+      updatedAt:
+        typeof compactStatus.u === 'number' ? compactStatus.u : Date.now(),
+      lastFailureAt:
+        typeof compactStatus.lf === 'number' ? compactStatus.lf : null,
+      lastRecoveryCheckAt:
+        typeof compactStatus.lr === 'number' ? compactStatus.lr : null,
+    };
+  }
+
+  const persistedStatus = rc_parse(
+    rawStatus,
+    globalOfflineStatusSchema,
+  ).unwrapOrNull();
+  if (persistedStatus === null || persistedStatus.sessionKey !== sessionKey) {
+    return null;
+  }
+
+  const effectiveOffline =
+    persistedStatus.effectiveOffline ||
+    persistedStatus.network.active ||
+    persistedStatus.outage.active;
+
+  return {
+    sessionKey,
+    network: persistedStatus.network,
+    outage: persistedStatus.outage,
+    effectiveMode: effectiveOffline ? 'offline' : 'online',
+    effectiveOffline,
+    isLeader: true,
+    updatedAt: persistedStatus.updatedAt,
+    lastFailureAt: persistedStatus.lastFailureAt,
+    lastRecoveryCheckAt: persistedStatus.lastRecoveryCheckAt,
+  };
+}
+
+function readPersistedOfflineStatusSnapshot(
+  sessionKey: string,
+): GlobalOfflineStatus | null {
+  if (!isWindowAvailable()) return null;
+
+  try {
+    const keys = [
+      getOfflineStatusBootstrapStorageKey(sessionKey),
+      getOfflineStatusBootstrapStorageKey(
+        sessionKey,
+        LEGACY_OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX,
+      ),
+      `tsdf.${sessionKey}._o_.s`,
+    ];
+
+    for (const key of keys) {
+      const entry = parseCompactLocalStorageEntry(localStorage.getItem(key));
+      if (!entry) continue;
+
+      const rawStatus = entry.value.d ?? null;
+      const normalized = normalizePersistedOfflineStatus(sessionKey, rawStatus);
+      if (normalized !== null) return normalized;
+    }
+  } catch {
+    // Ignore read failures so offline coordination continues to work
+    // even when localStorage is unavailable.
+  }
+
+  return null;
+}
+
+function clearPersistedOfflineStatusSnapshot(sessionKey: string): void {
+  if (!isWindowAvailable()) return;
+
+  try {
+    localStorage.removeItem(getOfflineStatusBootstrapStorageKey(sessionKey));
+    localStorage.removeItem(
+      getOfflineStatusBootstrapStorageKey(
+        sessionKey,
+        LEGACY_OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX,
+      ),
+    );
+  } catch {
+    // Ignore bootstrap snapshot clear failures so offline coordination
+    // continues to work even when localStorage is unavailable or full.
+  }
+}
+
+function syncPersistedOfflineStatusSnapshot(status: GlobalOfflineStatus): void {
+  if (!status.effectiveOffline) {
+    clearPersistedOfflineStatusSnapshot(status.sessionKey);
+    return;
+  }
+
+  if (!isWindowAvailable()) return;
+
+  try {
+    localStorage.setItem(
+      getOfflineStatusBootstrapStorageKey(status.sessionKey),
+      JSON.stringify(
+        createCompactLocalStorageEntry(
+          { d: serializeOfflineStatusSnapshot(status) },
+          undefined,
+        ),
+      ),
+    );
+  } catch {
+    // Ignore bootstrap snapshot write failures so offline coordination
+    // continues to work even when localStorage is unavailable or full.
+  }
+}
+
+function resolveDefaultStatus(
+  sessionKey: string,
+  options: { bootstrapStatusFromLocalStorage?: boolean } = {},
+): GlobalOfflineStatus {
+  if (options.bootstrapStatusFromLocalStorage) {
+    const bootstrapped = readPersistedOfflineStatusSnapshot(sessionKey);
+    if (bootstrapped !== null) {
+      defaultStatusBySession.set(sessionKey, bootstrapped);
+      return bootstrapped;
+    }
+  }
+
   const existing = defaultStatusBySession.get(sessionKey);
   if (existing) return existing;
 
@@ -239,6 +446,7 @@ export class SessionOfflineCoordinator {
     adapter,
     onPersistentStorageError,
     config,
+    bootstrapStatusFromLocalStorage = false,
   }: SessionCoordinatorOptions) {
     const resolvedAdapter = adapter ?? null;
     this.sessionKey = sessionKey;
@@ -257,7 +465,10 @@ export class SessionOfflineCoordinator {
     this.store = new Store<SessionStoreState>({
       debugName: `tsdf-offline:${sessionKey}`,
       state: () => ({
-        status: resolveDefaultStatus(sessionKey),
+        status: resolveDefaultStatus(sessionKey, {
+          bootstrapStatusFromLocalStorage:
+            config !== undefined || bootstrapStatusFromLocalStorage,
+        }),
         entities: [],
         resolutions: [],
       }),
@@ -284,7 +495,9 @@ export class SessionOfflineCoordinator {
 
     this.#refreshLeadership();
     void this.hydrate();
-    this.#refreshNetworkConfig();
+    if (this.#hasCanonicalConfig) {
+      this.#refreshNetworkConfig();
+    }
   }
 
   async hydrate(): Promise<void> {
@@ -302,16 +515,17 @@ export class SessionOfflineCoordinator {
     if (hydrationToken !== this.#hydrationToken) return;
 
     if (persistedStatus) {
+      const hydratedStatus = {
+        ...persistedStatus,
+        isLeader: this.isLeader(),
+        updatedAt: Date.now(),
+      };
+
       this.store.setPartialState(
-        {
-          status: {
-            ...persistedStatus,
-            isLeader: this.isLeader(),
-            updatedAt: Date.now(),
-          },
-        },
+        { status: hydratedStatus },
         { action: 'offline-session-hydrate' },
       );
+      syncPersistedOfflineStatusSnapshot(hydratedStatus);
     }
 
     this.#protectedKeys = [...protectedKeys].sort();
@@ -344,6 +558,8 @@ export class SessionOfflineCoordinator {
       this.#refreshNetworkConfig();
       return;
     }
+
+    if (!this.#hasCanonicalConfig) return;
 
     if (
       import.meta.env.DEV &&
@@ -642,6 +858,7 @@ export class SessionOfflineCoordinator {
       { status: derived },
       { action: 'offline-session-status' },
     );
+    syncPersistedOfflineStatusSnapshot(derived);
     void this.#sessionHandle.saveNow(derived);
     this.#publishSnapshot();
   }
@@ -808,6 +1025,7 @@ export function getOrCreateSessionOfflineCoordinator(
     adapter: options.adapter,
     onPersistentStorageError: options.onPersistentStorageError,
     config: options.config,
+    bootstrapStatusFromLocalStorage: options.bootstrapStatusFromLocalStorage,
   });
   registry.set(sessionKey, created);
   return created;
@@ -821,7 +1039,8 @@ export function getGlobalOfflineStatus(
   sessionKey: string,
 ): GlobalOfflineStatus {
   return (
-    registry.get(sessionKey)?.getStatus() ?? resolveDefaultStatus(sessionKey)
+    registry.get(sessionKey)?.getStatus() ??
+    resolveDefaultStatus(sessionKey, { bootstrapStatusFromLocalStorage: true })
   );
 }
 
@@ -851,12 +1070,15 @@ export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
 
 function useSessionOfflineCoordinator(
   sessionKey: string,
+  bootstrapStatusFromLocalStorage = false,
 ): SessionOfflineCoordinator {
   return useMemo(
     () =>
       registry.get(sessionKey) ??
-      getOrCreateSessionOfflineCoordinator(sessionKey),
-    [sessionKey],
+      getOrCreateSessionOfflineCoordinator(sessionKey, {
+        bootstrapStatusFromLocalStorage,
+      }),
+    [bootstrapStatusFromLocalStorage, sessionKey],
   );
 }
 
@@ -866,7 +1088,7 @@ function useSessionOfflineCoordinator(
 export function useGlobalOfflineStatus(
   sessionKey: string,
 ): GlobalOfflineStatus {
-  const coordinator = useSessionOfflineCoordinator(sessionKey);
+  const coordinator = useSessionOfflineCoordinator(sessionKey, true);
   const statusSelector = useCallback(
     (state: SessionStoreState) => state.status,
     [],
@@ -881,7 +1103,7 @@ export function useGlobalOfflineStatus(
 export function useGlobalOfflineEntities(
   sessionKey: string,
 ): readonly GlobalOfflineEntity[] {
-  const coordinator = useSessionOfflineCoordinator(sessionKey);
+  const coordinator = useSessionOfflineCoordinator(sessionKey, true);
   const entitiesSelector = useCallback(
     (state: SessionStoreState) => state.entities,
     [],
@@ -900,6 +1122,7 @@ export function useOfflineStoreEntities(args: {
 }): readonly GlobalOfflineEntity[] {
   const coordinator = useSessionOfflineCoordinator(
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
+    false,
   );
   const entitiesSelector = useCallback(
     (state: SessionStoreState) => {

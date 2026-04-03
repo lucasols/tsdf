@@ -673,7 +673,7 @@ describe('async storage efficiency: maintenance', () => {
       `);
   });
 
-  test('protected dotted-session cleanup keeps the protected entry and snapshots the full metadata scan history', async () => {
+  test('offline dotted-session startup cleanup keeps stale cached entries while pruning invalid stray keys', async () => {
     const staleDurationMs = 15 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
     const offlineNetwork = createOfflineNetworkMock();
@@ -792,14 +792,16 @@ describe('async storage efficiency: maintenance', () => {
 
     expect(mockAdapter.has(triggerDoc.document.storageKey())).toBe(true);
 
-    // Capture the full sweep so the snapshot shows stale-entry removal.
+    // Capture the full sweep so the snapshot shows offline startup preserving
+    // the stale cached entries while pruning invalid junk.
     const localStorageCapture = startPersistentStorageOperationCapture();
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
     const localStorageOperations = localStorageCapture.finish().timelineString;
 
-    // The protected dotted-session entry should survive, while the unprotected stale entry is discarded.
+    // Offline startup should preserve both stale cached documents, while still
+    // pruning the unrelated invalid stray store discovered during the sweep.
     expect({
       invalidStrayExists: mockAdapter.has(
         invalidStrayDoc.document.storageKey(),
@@ -813,13 +815,13 @@ describe('async storage efficiency: maintenance', () => {
       invalidStrayEntries: []
       invalidStrayExists: '❌'
       protectedEntryExists: '✅'
-      unprotectedEntryExists: '❌'
+      unprotectedEntryExists: '✅'
     `);
     expect(localStorageOperations).toMatchInlineSnapshot(`
       "
       time  |
       130ms | 📖 #1 ✅ tsdf._am.g (async global maintenance) | 0.04 kb
-      139ms | ✍️ #1 ✅->✅ tsdf._am.g
+      142ms | ✍️ #1 ✅->✅ tsdf._am.g
             |    └ (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
@@ -842,30 +844,30 @@ describe('async storage efficiency: maintenance', () => {
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:oe._i.r.json","file:oe.document.p.json","file:oq._i.r.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/unprotected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      135ms | 📖 #1 tsdf/sess-trigger/trigger-doc/d._i.r.json
+      135ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.p.json
+            |    └ (entry data) | 0.50 kb
+      138ms | 📖 #2 tsdf/sess-trigger/trigger-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
-      .     | 📖 #2 tsdf/user%40example.com/_o_.s/d._i.r.json
+      .     | 📖 #3 tsdf/user%40example.com/_o_.s/d._i.r.json
             |    └ (namespace index) | 0.07 kb
-      .     | 📖 #3 tsdf/user%40example.com/invalid-stray/d._i.r.json
+      .     | 📖 #4 tsdf/user%40example.com/invalid-stray/d._i.r.json
             |    └ (namespace index) | 0.02 kb
-      .     | 📖 #4 tsdf/user%40example.com/protected-doc/d._i.r.json
+      .     | 📖 #5 tsdf/user%40example.com/protected-doc/d._i.r.json
             |    └ (namespace index) | 0.09 kb
-      .     | 📖 #5 tsdf/user%40example.com/protected-doc/oe._i.r.json
+      .     | 📖 #6 tsdf/user%40example.com/protected-doc/oe._i.r.json
             |    └ (namespace index) | 0.07 kb
-      .     | 📖 #6 tsdf/user%40example.com/protected-doc/oq._i.r.json
+      .     | 📖 #7 tsdf/user%40example.com/protected-doc/oq._i.r.json
             |    └ (namespace index) | 0.13 kb
-      .     | 📖 #7 tsdf/user%40example.com/unprotected-doc/d._i.r.json
+      .     | 📖 #8 tsdf/user%40example.com/unprotected-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
-      138ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray
+      141ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray
             |    └ (store directory)
-      .     | 🧹 del-dir recursive ✅ tsdf/user%40example.com/unprotected-doc
-            |    └ (store directory)
-      139ms | end
+      142ms | end
       "
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1736985605681`);
+    ).toMatchInlineSnapshot(`lca: 1736985605684`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
     ).toMatchInlineSnapshot(`

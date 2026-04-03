@@ -13,6 +13,7 @@ import {
   assertValidPersistentStoreName,
   createPersistentStorageHandle,
   getLocalStorageAdapter,
+  isOfflineNetworkModeActiveSync,
   getStorageKeyForStore,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
@@ -39,10 +40,16 @@ const documentStorageValueCodec = {
 function readDocumentFromLocalStorageSync(
   key: string,
   version: number | undefined,
+  allowExpiredRead: boolean,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
-  >(key, version, { metadata: 'single' }, documentStorageValueCodec);
+  >(
+    key,
+    version,
+    { allowExpiredRead, metadata: 'single' },
+    documentStorageValueCodec,
+  );
   if (!entry) return { persisted: null, foundEntry: false };
 
   return { persisted: entry.data, foundEntry: true };
@@ -95,6 +102,10 @@ export function setupDocumentPersistence<
   let preloadPromise: Promise<void> | null = null;
   let syncHydrationMissKnown = false;
 
+  function isOfflineNetworkActive(): boolean {
+    return isOfflineNetworkModeActiveSync(config.offlineMode?.network);
+  }
+
   function hydrateFromLocalStorage(): void {
     if (!storeRef) return;
     if (localStorageAdapter === null) return;
@@ -110,6 +121,7 @@ export function setupDocumentPersistence<
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
       key,
       version,
+      isOfflineNetworkActive(),
     );
 
     if (!persisted) {
@@ -158,6 +170,7 @@ export function setupDocumentPersistence<
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
       key,
       version,
+      isOfflineNetworkActive(),
     );
 
     if (!persisted) {

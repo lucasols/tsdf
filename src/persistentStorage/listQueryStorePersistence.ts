@@ -52,6 +52,7 @@ import {
   createPersistentStorageNamespaceHandle,
   getLocalStorageAdapter,
   getLocalStorageMaxAgeMs,
+  isOfflineNetworkModeActiveSync,
   getStoragePrefixForStoreNamespace,
   listAllPersistentStorageNamespaceMetadata,
   mergeLocalStorageOfflineProtection,
@@ -348,6 +349,10 @@ export function setupListQueryPersistence<
   let knownPersistedItemKeys: Set<string> | null = null;
   let knownPersistedQueryKeys: Set<string> | null = null;
   let maintenanceCallbackKey: string | null = null;
+
+  function isOfflineNetworkActive(): boolean {
+    return isOfflineNetworkModeActiveSync(config.offlineMode?.network);
+  }
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -834,7 +839,11 @@ export function setupListQueryPersistence<
     >(
       storageKey,
       version,
-      { metadata: 'namespace', namespacePrefix: prefix },
+      {
+        allowExpiredRead: isOfflineNetworkActive(),
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      },
       itemStorageValueCodec,
     );
 
@@ -1320,9 +1329,11 @@ export function setupListQueryPersistence<
     if (localStorageAdapter !== null && scannedQueryEntries !== null) {
       const managedQueryEntries = scannedQueryEntries.entriesByKey;
       const invalidQueryKeys = scannedQueryEntries.invalidQueryKeys;
+      const skipOfflineExpirationMaintenance = isOfflineNetworkActive();
       const expiredQueryKeys = filterAndMap(
         [...managedQueryEntries.values()],
         ({ queryKey, lastAccessAt, offlineProtected }) => {
+          if (skipOfflineExpirationMaintenance) return false;
           if (offlineProtected) return false;
 
           return Date.now() - lastAccessAt > getLocalStorageMaxAgeMs()

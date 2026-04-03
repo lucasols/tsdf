@@ -14,6 +14,7 @@ import {
 
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
+import { isEffectiveOfflineStatusValue } from './offline/types';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getNamespaceId,
@@ -1553,6 +1554,25 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     >(driver);
     const discoveredScopes = await this.#listDiscoveredCleanupScopes(driver);
     const now = Date.now();
+    const offlineSessions = new Set(
+      (
+        await Promise.all(
+          discoveredScopes.map(async ({ scope }) => {
+            if (scope.storeName !== '_o_.s' || scope.kind !== 'document') {
+              return null;
+            }
+
+            const status = await driver.get(
+              scope,
+              getPayloadRecordKey('document'),
+            );
+            return isEffectiveOfflineStatusValue(status)
+              ? scope.sessionKey
+              : null;
+          }),
+        )
+      ).filter((sessionKey) => sessionKey !== null),
+    );
     const protectedRefsBySession = new Map(
       [...new Set(discoveredScopes.map(({ scope }) => scope.sessionKey))].map(
         (sessionKey) =>
@@ -1610,6 +1630,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             now,
             protectedRefs:
               protectedRefsBySession.get(scope.sessionKey) ?? undefined,
+            skipExpiration: offlineSessions.has(scope.sessionKey),
             scope,
           }),
         ),
@@ -1990,6 +2011,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     knownRecordKeys: string[] | null;
     now: number;
     protectedRefs: Set<string> | undefined;
+    skipExpiration: boolean;
     scope: AsyncStorageNamespaceScope;
   }): Promise<StartupCleanupScopePlan> {
     const rawKeys =
@@ -2056,6 +2078,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       if (!payloadKeys.has(key)) continue;
       if (
         !isProtected &&
+        !args.skipExpiration &&
         args.now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
       ) {
         payloadRecordKeysToRemove.add(getPayloadRecordKey(key));

@@ -1,10 +1,12 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_array,
+  rc_boolean,
   rc_discriminated_union,
   rc_literals,
   rc_number,
   rc_object,
+  rc_parse,
   rc_string,
   rc_unknown,
 } from 'runcheck';
@@ -133,6 +135,11 @@ export type OfflineOutageModeConfig = {
   recoveryProbe?: OfflineRecoveryProbeConfig;
 };
 
+const offlineStatusModeStateSchema = rc_object({
+  enabled: rc_boolean,
+  active: rc_boolean,
+});
+
 /** Effective network/offline state computed by offline coordination. */
 export type OfflineConnectivityState = 'online' | 'offline';
 
@@ -157,6 +164,28 @@ export type GlobalOfflineStatus = {
   /** Timestamp of last recovery probe execution, if any. */
   lastRecoveryCheckAt: number | null;
 };
+
+/** Runtime schema for persisted global offline status records. */
+export const globalOfflineStatusSchema = rc_object({
+  sessionKey: rc_string,
+  network: offlineStatusModeStateSchema,
+  outage: offlineStatusModeStateSchema,
+  effectiveMode: rc_literals('online', 'offline'),
+  effectiveOffline: rc_boolean,
+  isLeader: rc_boolean,
+  updatedAt: rc_number,
+  lastFailureAt: rc_number.orNull(),
+  lastRecoveryCheckAt: rc_number.orNull(),
+});
+
+export function isEffectiveOfflineStatusValue(value: unknown): boolean {
+  const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
+  if (status === null) return false;
+
+  return (
+    status.effectiveOffline || status.network.active || status.outage.active
+  );
+}
 
 /** Queue state of an offline mutation entry. */
 export type OfflineSyncState = 'pending' | 'syncing' | 'needs-confirmation';

@@ -16,6 +16,8 @@ import {
   isCompactListQueryLocalStorageKey,
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
+import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
+import { isEffectiveOfflineStatusValue } from './offline/types';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
@@ -891,6 +893,63 @@ function manifestBelongsToSession(
   );
 }
 
+function getSessionKeyFromStorageIdentity(identity: string): string | null {
+  if (!identity.startsWith('tsdf.')) return null;
+
+  const withoutPrefix = identity.slice('tsdf.'.length);
+  const lastDotIndex = withoutPrefix.lastIndexOf('.');
+  if (lastDotIndex <= 0) return null;
+
+  return withoutPrefix.slice(0, lastDotIndex);
+}
+
+function getSessionKeyForManifestLocation(
+  manifestLocation: ManagedLocalStorageManifestLocation,
+): string | null {
+  if (manifestLocation.kind === 'single') {
+    return getSessionKeyFromStorageIdentity(manifestLocation.payloadKey);
+  }
+
+  const trimmedPrefix = manifestLocation.storagePrefix.endsWith('.')
+    ? manifestLocation.storagePrefix.slice(0, -1)
+    : manifestLocation.storagePrefix;
+  const namespaceRootEnd = trimmedPrefix.lastIndexOf('.');
+  if (namespaceRootEnd === -1) return null;
+
+  return getSessionKeyFromStorageIdentity(
+    trimmedPrefix.slice(0, namespaceRootEnd),
+  );
+}
+
+function getCachedOfflineStatus(
+  sessionKey: string,
+  io: ManagedLocalStorageIo,
+  cache: Map<string, boolean>,
+): boolean {
+  const cached = cache.get(sessionKey);
+  if (cached !== undefined) return cached;
+
+  const result = isSessionOfflineDuringManagedCleanup(sessionKey, io);
+  cache.set(sessionKey, result);
+  return result;
+}
+
+function isSessionOfflineDuringManagedCleanup(
+  sessionKey: string,
+  io: ManagedLocalStorageIo,
+): boolean {
+  const statusEntry = parseCompactLocalStorageEntry(
+    io.getItem(`tsdf.${sessionKey}._o_.s`),
+  );
+  const rawStatus: unknown = statusEntry?.value;
+  const status =
+    isObject(rawStatus) && isObject(rawStatus.d)
+      ? rawStatus.d
+      : (rawStatus ?? null);
+
+  return isEffectiveOfflineStatusValue(status);
+}
+
 export function clearManagedLocalStorageSession(
   sessionKey: string,
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
@@ -1075,6 +1134,7 @@ function runGenericCleanupForManifest(
   manifestKey: string,
   knownKeys: Set<string> | null,
   io: ManagedLocalStorageIo,
+  offlineSessionCache: Map<string, boolean>,
 ): void {
   const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
   if (!manifestLocation) {
@@ -1091,6 +1151,15 @@ function runGenericCleanupForManifest(
   }
 
   const now = Date.now();
+  const sessionKey = getSessionKeyForManifestLocation(manifestLocation);
+  const offlineStatusKey =
+    sessionKey === null ? null : `tsdf.${sessionKey}._o_.s`;
+  const skipExpiration =
+    sessionKey !== null &&
+    offlineStatusKey !== null &&
+    knownKeys !== null &&
+    knownKeys.has(offlineStatusKey) &&
+    getCachedOfflineStatus(sessionKey, io, offlineSessionCache);
   const nextEntries: StoredManagedLocalStorageManifestEntry[] = [];
 
   for (const entry of manifest.entries) {
@@ -1105,6 +1174,7 @@ function runGenericCleanupForManifest(
     if (
       !isOfflinePayloadKey(payloadKey) &&
       !isManagedLocalStorageEntryOfflineProtected(entry.meta) &&
+      !skipExpiration &&
       now - entry.lastAccessAt > managedLocalStorageRuntimeConfig.maxAgeMs
     ) {
       io.removeItem(payloadKey);
@@ -1137,9 +1207,15 @@ export async function runManagedLocalStorageMaintenance(
     ? collectManagedLocalStorageSweepTargets(io)
     : { manifestKeys: [...forcedManifestKeys], knownKeys: null };
   const invokedCallbacks = new Set<() => Promise<void>>();
+  const offlineSessionCache = new Map<string, boolean>();
 
   for (const manifestKey of manifestKeys) {
-    runGenericCleanupForManifest(manifestKey, knownKeys, io);
+    runGenericCleanupForManifest(
+      manifestKey,
+      knownKeys,
+      io,
+      offlineSessionCache,
+    );
 
     const callback = maintenanceCallbacks.get(manifestKey);
     if (!callback || invokedCallbacks.has(callback)) continue;

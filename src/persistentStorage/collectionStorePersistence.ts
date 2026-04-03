@@ -45,6 +45,7 @@ import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
   getLocalStorageAdapter,
+  isOfflineNetworkModeActiveSync,
   getStoragePrefixForStoreNamespace,
   listAllPersistentStorageNamespaceMetadata,
   readManifestPayloadMeta,
@@ -210,6 +211,10 @@ export function setupCollectionPersistence<
   const hydratedPersistedKeys = new Set<string>();
   let knownPersistedKeys: Set<string> | null = null;
   let maintenanceManifestKey: string | null = null;
+
+  function isOfflineNetworkActive(): boolean {
+    return isOfflineNetworkModeActiveSync(config.offlineMode?.network);
+  }
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -399,7 +404,11 @@ export function setupCollectionPersistence<
     >(
       storageKey,
       version,
-      { metadata: 'namespace', namespacePrefix: prefix },
+      {
+        allowExpiredRead: isOfflineNetworkActive(),
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      },
       itemStorageValueCodec,
     );
 

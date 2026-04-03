@@ -10,6 +10,7 @@ import {
   useGlobalOfflineStatus,
 } from '../../src/main';
 import { readManagedLocalStorageSingleEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -36,6 +37,7 @@ import {
 let network = createOfflineNetworkMock();
 
 beforeEach(() => {
+  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
@@ -44,6 +46,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
   localStorage.clear();
@@ -592,6 +595,17 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     effectiveMode: 'offline',
     sessionKey,
   });
+  expect(localStorage.getItem(`tsdf-os:${sessionKey}`)).not.toBeNull();
+
+  // Once the session is back online, the startup bootstrap snapshot should be
+  // cleared so future boots do not resurrect a stale offline state.
+  await act(async () => {
+    network.goOnline();
+    await waitForMicrotaskCondition(
+      () => localStorage.getItem(`tsdf-os:${sessionKey}`) === null,
+    );
+  });
+
   await advanceTime(1010);
   expect(
     readManagedLocalStorageSingleEntryByPayload(
@@ -602,6 +616,54 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   act(() => {
     globalHook.unmount();
   });
+});
+
+// After a restart, the app should recover the previous offline state from
+// localStorage immediately instead of waiting for store hydration to confirm it.
+test('app restart boots global offline status from the persisted localStorage snapshot', () => {
+  const sessionKey = 'offline-startup-bootstrap';
+  localStorage.setItem(
+    `tsdf-os:${sessionKey}`,
+    JSON.stringify({
+      d: { s: sessionKey, n: { e: 1, a: 1 }, u: TEST_INITIAL_TIME },
+    }),
+  );
+
+  expect(
+    pick(getGlobalOfflineStatus(sessionKey), [
+      'effectiveMode',
+      'effectiveOffline',
+      'network',
+      'outage',
+      'sessionKey',
+    ]),
+  ).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'offline-startup-bootstrap'
+  `);
+
+  const hook = renderHook(() =>
+    pick(useGlobalOfflineStatus(sessionKey), [
+      'effectiveMode',
+      'effectiveOffline',
+      'network',
+      'outage',
+      'sessionKey',
+    ]),
+  );
+
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'offline-startup-bootstrap'
+  `);
+
+  hook.unmount();
 });
 
 // Multiple stores sharing the same session key should report a single, consistent

@@ -13,6 +13,7 @@ import {
   setManagedLocalStorageEntryOfflineProtected,
 } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
+import type { OfflineNetworkModeConfig } from './offline/types';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
@@ -201,6 +202,20 @@ export async function touchLocalStorageKeyWithThrottle(
 
 export function getLocalStorageMaxAgeMs(): number {
   return getManagedLocalStorageRuntimeConfig().maxAgeMs;
+}
+
+export function isOfflineNetworkModeActiveSync(
+  networkConfig: OfflineNetworkModeConfig | undefined,
+): boolean {
+  if (!networkConfig?.enabled) return false;
+
+  try {
+    const currentOffline =
+      networkConfig.getIsOffline?.() ?? navigator.onLine === false;
+    return currentOffline === true;
+  } catch {
+    return false;
+  }
 }
 
 export function mergeLocalStorageOfflineProtection(
@@ -989,7 +1004,7 @@ export function createPersistentStorageNamespaceHandle<
 export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number | undefined,
-  options: LocalStorageMetadataOptions,
+  options: LocalStorageMetadataOptions & { allowExpiredRead?: boolean },
   // WORKAROUND: The default local-storage codec is generic over unknown and simply forwards JSON-compatible values, so callers rebind it to their T when no custom codec is supplied.
   valueCodec: LocalStorageValueCodec<T> = __LEGIT_CAST__<
     LocalStorageValueCodec<T>,
@@ -1013,7 +1028,8 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
 
   if (
     Date.now() - metadata.lastAccessAt >
-    getManagedLocalStorageRuntimeConfig().maxAgeMs
+      getManagedLocalStorageRuntimeConfig().maxAgeMs &&
+    !options.allowExpiredRead
   ) {
     return removeAndReturnNull();
   }

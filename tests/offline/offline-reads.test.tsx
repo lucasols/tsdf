@@ -5,8 +5,13 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import {
+  flushAllTimers,
+  pick,
+  waitForScheduledCleanup,
+} from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { userRowSchema } from './offlineReplayTestShared';
 import { docSchema, listQueryQueryPayloadSchema } from './offlineTestShared';
@@ -27,9 +32,11 @@ afterEach(() => {
   localStorage.clear();
 });
 
-test('offline fetches short-circuit to cached data without clearing the last successful snapshot', async () => {
+test('when an already-loaded document refetches while offline, it keeps the last successful data and reports an offline error', async () => {
   network.setOffline();
 
+  // Start from an already successful document snapshot so this exercise is about
+  // what happens during an offline refetch, not an initial load.
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => 'offline-read-cache-session',
     testScenario: 'loaded',
@@ -46,19 +53,25 @@ test('offline fetches short-circuit to cached data without clearing the last suc
   });
   await Promise.resolve();
 
+  // Move the session into offline mode before triggering the refetch.
   env.scheduleFetch('highPriority');
   await flushAllTimers();
 
+  // The refetch should surface the normalized offline error while keeping the
+  // last successful data visible instead of blanking the document state.
   expect(env.store.state).toMatchInlineSnapshot(`
     data: { value: 1 }
     error: { code: 0, id: 'offline', message: 'Offline' }
     refetchOnMount: '❌'
     status: 'error'
   `);
+  // The offline-aware fetch path should short-circuit before touching the server.
   expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
 });
 
-test('offline fetches without cached data return the normalized connectivity error', async () => {
+test('when a document mounts offline with no cached snapshot, it returns the normalized offline error', async () => {
+  // With no prior successful data, an offline read should fail with the shared
+  // offline error shape instead of pretending the document loaded.
   network.setOffline();
 
   const env = createDocumentStoreTestEnv(1, {
@@ -89,7 +102,69 @@ test('offline fetches without cached data return the normalized connectivity err
   expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
 });
 
-test('offline list-query refetches keep the last successful query snapshot visible', async () => {
+test('when the app starts offline, startup cleanup keeps an expired document cache available for offline reads', async () => {
+  // Startup cleanup should not eagerly delete stale document data if that cache
+  // is the only snapshot an offline session can still use.
+  const staleTimestamp = TEST_INITIAL_TIME - 8 * 24 * 60 * 60 * 1000;
+  const sessionKey = 'offline-read-expired-document-session';
+  const storeName = 'offline-read-expired-document';
+  const persistedStore = createMockLocalStorageStore({
+    storeName,
+    sessionKey,
+    initialState: {
+      document: { data: { value: 1 }, timestamp: staleTimestamp },
+    },
+  });
+
+  // Start offline before the store boots so hydration and startup cleanup both
+  // see the same connectivity state a real cold start would.
+  network.setOffline();
+
+  const env = createDocumentStoreTestEnv(2, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: { network: network.config, operations: {} },
+    },
+  });
+
+  // Let startup hydration settle before checking what the delayed cleanup did
+  // to persistence.
+  await flushAllTimers();
+
+  expect(pick(env.store.state, ['data', 'error', 'refetchOnMount', 'status']))
+    .toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+    `);
+
+  // Advance through the one-off startup sweep and confirm it keeps the stale
+  // cached snapshot around for later offline reads.
+  await waitForScheduledCleanup();
+
+  expect({
+    entryStillPersisted: persistedStore.has(
+      persistedStore.document.storageKey(),
+    ),
+    state: pick(env.store.state, ['data', 'error', 'status']),
+  }).toMatchInlineSnapshot(`
+    entryStillPersisted: '✅'
+
+    state:
+      data: { value: 1 }
+      error: null
+      status: 'success'
+  `);
+  expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
+});
+
+test('when a loaded list query refetches while offline, it keeps the last successful items and reports an offline error', async () => {
+  // This covers the list-query version of the document refetch case above: a
+  // failed offline refetch must not blank a previously successful query.
   const usersQuery = { tableId: 'users' } as const;
   const env = createListQueryStoreTestEnv(
     { users: [{ id: 1, name: 'Ada' }] },
@@ -160,7 +235,107 @@ test('offline list-query refetches keep the last successful query snapshot visib
   hook.unmount();
 });
 
-test('offline list-query mounts without cached data return the normalized connectivity error', async () => {
+test('when the app starts offline, startup cleanup keeps an expired list-query cache available for offline reads', async () => {
+  // Startup cleanup should preserve stale list-query snapshots too, otherwise a
+  // cold offline launch would erase the only cached query the UI can show.
+  const staleTimestamp = TEST_INITIAL_TIME - 8 * 24 * 60 * 60 * 1000;
+  const sessionKey = 'offline-read-expired-list-session';
+  const storeName = 'offline-read-expired-list';
+  const usersQuery = { tableId: 'users' } as const;
+  const persistedStore = createMockLocalStorageStore({
+    storeName,
+    sessionKey,
+    initialState: {
+      listQuery: {
+        items: [
+          {
+            tableId: 'users',
+            id: 1,
+            data: { id: 1, name: 'Ada' },
+            timestamp: staleTimestamp,
+          },
+        ],
+        queries: [
+          {
+            params: usersQuery,
+            items: [{ tableId: 'users', id: 1 }],
+            timestamp: staleTimestamp,
+          },
+        ],
+      },
+    },
+  });
+
+  // Match a real cold start where the app opens while the browser is already offline.
+  network.setOffline();
+
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offlineMode: { network: network.config, operations: {} },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+
+    env.trackItemUI('query-status', query.status);
+    env.trackItemUI('query-items', query.items.join(', '));
+
+    return query;
+  });
+
+  // Let the offline refetch settle before checking the delayed cleanup pass.
+  await flushAllTimers();
+
+  expect(pick(hook.result.current, ['error', 'items', 'status']))
+    .toMatchInlineSnapshot(`
+      error: { code: 0, id: 'offline', message: 'Offline' }
+      items: ['Ada']
+      status: 'error'
+    `);
+
+  // The startup sweep should leave both the query snapshot and its cached item
+  // in place so a later offline mount can still reuse them.
+  await waitForScheduledCleanup();
+
+  expect({
+    itemStillPersisted: persistedStore.has(
+      persistedStore.listQuery.itemStorageKey('users', 1),
+    ),
+    queryStillPersisted: persistedStore.has(
+      persistedStore.listQuery.queryStorageKey(usersQuery),
+    ),
+    state: pick(hook.result.current, ['error', 'items', 'status']),
+  }).toMatchInlineSnapshot(`
+    itemStillPersisted: '✅'
+    queryStillPersisted: '✅'
+
+    state:
+      error: { code: 0, id: 'offline', message: 'Offline' }
+      items: ['Ada']
+      status: 'error'
+  `);
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }),
+  ).toMatchInlineSnapshot(`[]`);
+
+  hook.unmount();
+});
+
+test('when a list query mounts offline with no cached snapshot, it returns the normalized offline error', async () => {
+  // Fresh offline mounts should expose the connectivity error directly because
+  // there is no previous query snapshot to keep visible.
   const usersQuery = { tableId: 'users' } as const;
   network.setOffline();
 
