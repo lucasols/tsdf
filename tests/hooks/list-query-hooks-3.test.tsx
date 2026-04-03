@@ -1059,10 +1059,11 @@ test('maxItems keeps active list-query hooks and their items in memory', async (
     3,
   );
   expect(env.apiStore.getQueryState({ tableId: 'orders' })).toBeUndefined();
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({
-    id: 1,
-    name: 'User 1',
-  });
+  expect(pick(env.apiStore.getItemState('users||1'), ['id', 'name']))
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
+    `);
 });
 
 test('maxItems keeps active standalone useItem entries when their source query is evicted', async () => {
@@ -1083,12 +1084,16 @@ test('maxItems keeps active standalone useItem entries when their source query i
   env.scheduleFetch('highPriority', { tableId: 'orders' });
   await flushAllTimers();
 
-  expect(hook.result.current.data).toMatchObject({ id: 1, name: 'User 1' });
+  expect(pick(hook.result.current.data, ['id', 'name'])).toMatchInlineSnapshot(`
+    id: 1
+    name: 'User 1'
+  `);
   expect(env.apiStore.getQueryState({ tableId: 'users' })).toBeUndefined();
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({
-    id: 1,
-    name: 'User 1',
-  });
+  expect(pick(env.apiStore.getItemState('users||1'), ['id', 'name']))
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
+    `);
   expect(env.apiStore.getItemState('users||2')).toBeUndefined();
 });
 
@@ -1120,10 +1125,11 @@ test('maxItems keeps a mounted list item protected after delete and refetch', as
   env.scheduleItemFetch('highPriority', 'users||2');
   await flushAllTimers();
 
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({
-    id: 1,
-    name: 'User 1',
-  });
+  expect(pick(env.apiStore.getItemState('users||1'), ['id', 'name']))
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
+    `);
   expect(env.apiStore.getItemState('users||2')).toBeUndefined();
 });
 
@@ -1154,10 +1160,14 @@ test('maxItems keeps the item matched by useFindItem when inactive queries are e
   env.scheduleFetch('highPriority', { tableId: 'orders' });
   await flushAllTimers();
 
-  expect(hook.result.current).toMatchObject({ id: 1, name: 'User 1' });
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({
-    id: 1,
-    name: 'User 1',
-  });
+  expect(pick(hook.result.current, ['id', 'name'])).toMatchInlineSnapshot(`
+    id: 1
+    name: 'User 1'
+  `);
+  expect(pick(env.apiStore.getItemState('users||1'), ['id', 'name']))
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
+    `);
   expect(env.apiStore.getItemState('users||2')).toBeUndefined();
 });

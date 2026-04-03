@@ -207,9 +207,9 @@ test('collection optimistic updates propagate across tabs', async () => {
 
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
 
   await flushAllTimers();
 
@@ -275,9 +275,9 @@ test('collection failed optimistic mutations revert the synced background state'
 
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
 
   await flushAllTimers();
   const result = await mutationPromise;
@@ -285,9 +285,9 @@ test('collection failed optimistic mutations revert the synced background state'
   expect(result.ok).toBe(false);
   expect(envA.serverTable.fetchHistory).toHaveLength(1);
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Item 1' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 1' }`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1              |
@@ -354,10 +354,9 @@ test('list query optimistic sorting propagates to other tabs', async () => {
   await advanceTime(0);
 
   const queryKey = envB.getQueryKey({ tableId: 'users' });
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    envB.getStoreItemKeyFromRaw('users||2'),
-    envB.getStoreItemKeyFromRaw('users||1'),
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||2', '"users||1']`,
+  );
 
   await flushAllTimers();
 
@@ -427,24 +426,21 @@ test('list query failed optimistic mutations revert the synced background state'
   await advanceTime(0);
 
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
-  const secondItemKey = envB.getStoreItemKeyFromRaw('users||2');
   const queryKey = envB.getQueryKey({ tableId: 'users' });
 
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    secondItemKey,
-    itemKey,
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||2', '"users||1']`,
+  );
 
   await flushAllTimers();
   const result = await mutationPromise;
 
   expect(result.ok).toBe(false);
   expect(envB.store.state.items[itemKey]?.name).toBe('Alice');
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    itemKey,
-    secondItemKey,
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||1', '"users||2']`,
+  );
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "

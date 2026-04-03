@@ -364,9 +364,9 @@ describe('localStorage: document store persistence', () => {
     await env.apiStore.preloadPersistentStorage();
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(
+      pick(onPersistentStorageError.mock.calls[0]?.[0], ['message']),
+    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
   });
 
   test('save is debounced - only final state is saved', async () => {

@@ -15,7 +15,7 @@ import {
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
 import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
   createCollectionItems,
@@ -101,13 +101,21 @@ test('collection resets stay local to the tab that triggered them', async () => 
   envA.apiStore.reset();
   await advanceTime(0);
 
-  expect(envA.store.state).toEqual({});
+  expect(envA.store.state).toMatchInlineSnapshot(`{}`);
   expect(envA.apiStore.getItemState('item1')).toBeUndefined();
-  expect(envB.apiStore.getItemState('item1')).toMatchObject({
-    data: { value: { name: 'Item 1' } },
-    status: 'success',
-    refetchOnMount: false,
-  });
+  expect(
+    pick(envB.apiStore.getItemState('item1'), [
+      'data',
+      'status',
+      'refetchOnMount',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data:
+      value: { name: 'Item 1' }
+
+    refetchOnMount: '❌'
+    status: 'success'
+  `);
 });
 
 test('a fresh collection tab reuses the sibling snapshot without a first local fetch', async () => {
@@ -148,10 +156,13 @@ test('a fresh collection tab reuses the sibling snapshot without a first local f
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     0,
   );
-  expect(envB.apiStore.getItemState('item1')).toMatchObject({
-    data: { value: { name: 'Updated' } },
-    status: 'success',
-  });
+  expect(pick(envB.apiStore.getItemState('item1'), ['data', 'status']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Updated' }
+
+      status: 'success'
+    `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   |
@@ -205,17 +216,23 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
   });
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')).toMatchObject({
-    data: { value: { name: 'Local' } },
-    refetchOnMount: false,
-  });
+  expect(pick(envB.apiStore.getItemState('item1'), ['data', 'refetchOnMount']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Local' }
+
+      refetchOnMount: '❌'
+    `);
 
   await flushAllTimers();
 
-  expect(envB.apiStore.getItemState('item1')).toMatchObject({
-    data: { value: { name: 'Local' } },
-    refetchOnMount: false,
-  });
+  expect(pick(envB.apiStore.getItemState('item1'), ['data', 'refetchOnMount']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Local' }
+
+      refetchOnMount: '❌'
+    `);
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     0,
   );
@@ -292,16 +309,18 @@ test('document resets stay local to the tab that triggered them', async () => {
   envA.apiStore.reset();
   await advanceTime(0);
 
-  expect(envA.store.state).toMatchObject({
-    data: null,
-    status: 'idle',
-    refetchOnMount: 'lowPriority',
-  });
-  expect(envB.store.state).toMatchObject({
-    data: { value: 0 },
-    status: 'success',
-    refetchOnMount: false,
-  });
+  expect(pick(envA.store.state, ['data', 'status', 'refetchOnMount']))
+    .toMatchInlineSnapshot(`
+      data: null
+      refetchOnMount: 'lowPriority'
+      status: 'idle'
+    `);
+  expect(pick(envB.store.state, ['data', 'status', 'refetchOnMount']))
+    .toMatchInlineSnapshot(`
+      data: { value: 0 }
+      refetchOnMount: '❌'
+      status: 'success'
+    `);
 });
 
 test('a fresh document tab still performs its first fetch after a sibling tab fetched earlier', async () => {
@@ -336,10 +355,10 @@ test('a fresh document tab still performs its first fetch after a sibling tab fe
   await flushAllTimers();
 
   expect(envB.serverMock.fetchHistory).toHaveLength(1);
-  expect(envB.store.state).toMatchObject({
-    data: { value: 7 },
-    status: 'success',
-  });
+  expect(pick(envB.store.state, ['data', 'status'])).toMatchInlineSnapshot(`
+    data: { value: 7 }
+    status: 'success'
+  `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -474,19 +493,22 @@ test('list query resets stay local to the tab that triggered them', async () => 
   envA.apiStore.reset();
   await advanceTime(0);
 
-  expect(envA.store.state).toEqual({
-    items: {},
-    queries: {},
-    itemQueries: {},
-    itemLoadedFields: {},
-    itemFieldInvalidationFields: {},
-  });
+  expect(envA.store.state).toMatchInlineSnapshot(`
+    itemFieldInvalidationFields: {}
+
+    itemLoadedFields: {}
+
+    itemQueries: {}
+
+    items: {}
+
+    queries: {}
+  `);
 
   const queryKey = envB.getQueryKey({ tableId: 'users' });
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    envB.getStoreItemKeyFromRaw('users||1'),
-    envB.getStoreItemKeyFromRaw('users||2'),
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||1', '"users||2']`,
+  );
 });
 
 test('a fresh list-query tab still performs its first fetch after a sibling tab fetched earlier', async () => {
@@ -523,10 +545,9 @@ test('a fresh list-query tab still performs its first fetch after a sibling tab 
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     1,
   );
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    envB.getStoreItemKeyFromRaw('users||1'),
-    envB.getStoreItemKeyFromRaw('users||2'),
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||1', '"users||2']`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -584,32 +605,28 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
   await advanceTime(1);
 
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
-  const secondItemKey = envB.getStoreItemKeyFromRaw('users||2');
   const queryKey = envB.getQueryKey({ tableId: 'users' });
 
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    secondItemKey,
-    itemKey,
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||2', '"users||1']`,
+  );
 
   envA.serverTable.setItem('users||1', { id: 1, name: 'Aaron' });
   envA.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' });
   await advanceTime(900);
 
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    secondItemKey,
-    itemKey,
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||2', '"users||1']`,
+  );
 
   await flushAllTimers();
 
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    secondItemKey,
-    itemKey,
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||2', '"users||1']`,
+  );
   expect(envB.store.state.itemQueries[itemKey]?.refetchOnMount).toBe(false);
   expect(envB.store.state.queries[queryKey]?.refetchOnMount).toBe(false);
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
@@ -681,9 +698,13 @@ test('confirmed sibling item fetches do not overwrite a local optimistic list it
   envA.apiStore.scheduleItemFetch('highPriority', 'users||1');
   await advanceTime(900);
 
-  expect(envA.serverTable.fetchHistory).toMatchObject([
-    { type: 'fetch', itemId: 'users||1' },
-  ]);
+  expect(envA.serverTable.fetchHistory).toMatchInlineSnapshot(`
+    - duration: 800
+      itemId: 'users||1'
+      result: { id: 1, name: 'Jane' }
+      startedAt: 10
+      type: 'fetch'
+  `);
   expect(envB.store.state.items[itemKey]?.name).toBe('Jane');
 
   await flushAllTimers();

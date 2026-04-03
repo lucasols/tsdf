@@ -3,8 +3,8 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { serializeProtectedRef } from './asyncStorageAdapter';
 import {
   createCompactLocalStorageEntry,
-  type CompactLocalStorageEntryValue,
   parseCompactLocalStorageEntry,
+  type CompactLocalStorageEntryValue,
 } from './compactLocalStorageEntry';
 import {
   getManagedLocalStorageRuntimeConfig,

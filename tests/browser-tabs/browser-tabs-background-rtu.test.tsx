@@ -350,12 +350,12 @@ test('collection RTU fetch in the active tab updates the background tab without 
   );
   await flushAllTimers();
 
-  expect(envA.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
+  expect(envA.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
@@ -423,9 +423,9 @@ test('collection RTU failures stay local to the fetching tab', async () => {
   );
   await flushAllTimers();
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Item 1' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 1' }`,
+  );
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
@@ -480,12 +480,12 @@ test('collection RTU does not sync across tabs using different store ids', async
   envA.apiStore.invalidateItem('item1', 'realtimeUpdate');
   await flushAllTimers();
 
-  expect(envA.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Item 1' },
-  });
+  expect(envA.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 1' }`,
+  );
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
@@ -554,13 +554,13 @@ test('collection RTU only triggers fetch in the tab that loaded the invalidated 
 
   await flushAllTimers();
 
-  expect(envA.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated 1' },
-  });
+  expect(envA.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 1' }`,
+  );
   // Tab B did not load item1, so it should remain unchanged
-  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
-    value: { name: 'Item 2' },
-  });
+  expect(envB.apiStore.getItemState('item2')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 2' }`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1     |
@@ -634,13 +634,13 @@ test('collection RTU only triggers fetch in both tabs for different loaded items
 
   await flushAllTimers();
 
-  expect(envA.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated 1' },
-  });
+  expect(envA.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 1' }`,
+  );
   // Tab B did not load item1, so it should remain unchanged
-  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
-    value: { name: 'Item 2' },
-  });
+  expect(envB.apiStore.getItemState('item2')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 2' }`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1     |
@@ -712,9 +712,11 @@ test('list query RTU fetch in the active tab updates the background tab without 
   );
   await flushAllTimers();
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Zoe' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Zoe'
+    `);
   expect(
     envB.serverTable.fetchHistory.filter((entry) => entry.type === 'list'),
   ).toHaveLength(0);
@@ -784,9 +786,11 @@ test('list query RTU failures stay local to the fetching tab', async () => {
   );
   await flushAllTimers();
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Alice' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
@@ -859,9 +863,11 @@ test('list query realtime invalidations stay isolated across different store ids
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     0,
   );
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Alice' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
@@ -937,9 +943,11 @@ test('list query background RTU invalidations dedupe to one query fetch when all
   expect(
     envB.serverTable.fetchHistory.filter((entry) => entry.type === 'list'),
   ).toHaveLength(0);
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Zoe' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Zoe'
+    `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
@@ -1017,9 +1025,11 @@ test('list query RTU fetch in the active tab updates the background tab that use
   expect(
     envB.serverTable.fetchHistory.filter((entry) => entry.type === 'list'),
   ).toHaveLength(1);
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Zoe' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Zoe'
+    `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |

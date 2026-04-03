@@ -94,12 +94,12 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
     countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list');
 
   expect(totalBatchFetches).toBe(1);
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
-  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
-    value: { name: 'Updated 2' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
+  expect(envB.apiStore.getItemState('item2')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 2' }`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2     |
@@ -212,21 +212,21 @@ test('collection background RTU batch fetch includes the union of invalidated it
   expect(totalBatchFetches).toBe(1);
 
   // Both tabs should receive all updated data
-  expect(envA.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated 1' },
-  });
-  expect(envA.apiStore.getItemState('item2')?.data).toEqual({
-    value: { name: 'Updated 2' },
-  });
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated 1' },
-  });
-  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
-    value: { name: 'Updated 2' },
-  });
-  expect(envB.apiStore.getItemState('item3')?.data).toEqual({
-    value: { name: 'Updated 3' },
-  });
+  expect(envA.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 1' }`,
+  );
+  expect(envA.apiStore.getItemState('item2')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 2' }`,
+  );
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 1' }`,
+  );
+  expect(envB.apiStore.getItemState('item2')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 2' }`,
+  );
+  expect(envB.apiStore.getItemState('item3')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated 3' }`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1     | item2     |
@@ -318,9 +318,9 @@ test('collection background RTU invalidations dedupe to one per-item fetch when 
   expect(totalItemFetches).toBe(1);
   expect(envA.serverTable.fetchHistory).toHaveLength(1);
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   |
@@ -417,12 +417,16 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
     countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list');
 
   expect(totalBatchFetches).toBe(1);
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Zoe' });
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||2')],
-  ).toEqual({ id: 2, name: 'Yara' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Zoe'
+    `);
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||2')])
+    .toMatchInlineSnapshot(`
+      id: 2
+      name: 'Yara'
+    `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |

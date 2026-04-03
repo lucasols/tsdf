@@ -17,7 +17,12 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  pick,
+  range,
+} from '../utils/genericTestUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -167,7 +172,9 @@ test('user updating the name of a record', async () => {
 
   setName('', 530);
 
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({ name: '' });
+  expect(
+    pick(env.apiStore.getItemState('users||1'), ['name']),
+  ).toMatchInlineSnapshot(`name: ''`);
 
   await advanceTime(263);
   setName('T', 662);
@@ -183,7 +190,9 @@ test('user updating the name of a record', async () => {
 
   await flushAllTimers();
 
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({ name: 'Type' });
+  expect(
+    pick(env.apiStore.getItemState('users||1'), ['name']),
+  ).toMatchInlineSnapshot(`name: 'Type'`);
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
@@ -234,7 +243,9 @@ test('user updating the name of a record, but a RTU is received for a table whil
 
   await flushAllTimers();
 
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({ name: 'RTU' });
+  expect(
+    pick(env.apiStore.getItemState('users||1'), ['name']),
+  ).toMatchInlineSnapshot(`name: 'RTU'`);
   expect(env.serverTable.numOfFinishedFetches).toBeGreaterThanOrEqual(1);
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "

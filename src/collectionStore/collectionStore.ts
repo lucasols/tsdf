@@ -40,6 +40,11 @@ import { createProtectedStorageKey } from '../persistentStorage/persistentStorag
 import type {
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
+  StorageAdapter,
+} from '../persistentStorage/types';
+import type {
+  CollectionPersistentStorageConfig,
+  PersistentStoragePreloadResult,
 } from '../persistentStorage/types';
 import {
   BatchRequest,

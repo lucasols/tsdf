@@ -88,13 +88,13 @@ describe('document hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(dataChanges).toEqual([true, false, false, false]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
 
     const rendersBeforeInvalidation = renders;
 
@@ -137,7 +137,7 @@ describe('document hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
@@ -152,7 +152,7 @@ describe('document hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true, false, false, false]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 });
@@ -186,13 +186,13 @@ describe('collection hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(dataChanges).toEqual([true, false, false, false]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
 
     const rendersBeforeUpdate = renders;
 
@@ -238,7 +238,7 @@ describe('collection hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
@@ -256,7 +256,7 @@ describe('collection hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true, false, false, false]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 
@@ -302,18 +302,20 @@ describe('collection hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([{ result: true, first: true, second: true }]);
+    expect(changes).toMatchInlineSnapshot(
+      `- { first: '✅', result: '✅', second: '✅' }`,
+    );
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(changes).toEqual([
-      { result: true, first: true, second: true },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-    ]);
+    expect(changes).toMatchInlineSnapshot(`
+      - { first: '✅', result: '✅', second: '✅' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+    `);
 
     const rendersBeforeUpdate = renders;
 
@@ -377,7 +379,9 @@ describe('collection hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([{ result: true, first: true, second: true }]);
+    expect(changes).toMatchInlineSnapshot(
+      `- { first: '✅', result: '✅', second: '✅' }`,
+    );
 
     hook.rerender();
     hook.rerender();
@@ -395,12 +399,12 @@ describe('collection hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([
-      { result: true, first: true, second: true },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-    ]);
+    expect(changes).toMatchInlineSnapshot(`
+      - { first: '✅', result: '✅', second: '✅' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+    `);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 
@@ -503,13 +507,13 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(dataChanges).toEqual([true, false, false, false]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
 
     const rendersBeforeUpdate = renders;
 
@@ -552,7 +556,7 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
@@ -567,7 +571,7 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(dataChanges).toEqual([true, false, false, false]);
+    expect(dataChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 
@@ -614,18 +618,20 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([{ result: true, first: true, second: true }]);
+    expect(changes).toMatchInlineSnapshot(
+      `- { first: '✅', result: '✅', second: '✅' }`,
+    );
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(changes).toEqual([
-      { result: true, first: true, second: true },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-    ]);
+    expect(changes).toMatchInlineSnapshot(`
+      - { first: '✅', result: '✅', second: '✅' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+    `);
 
     const rendersBeforeUpdate = renders;
 
@@ -692,7 +698,9 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([{ result: true, first: true, second: true }]);
+    expect(changes).toMatchInlineSnapshot(
+      `- { first: '✅', result: '✅', second: '✅' }`,
+    );
 
     hook.rerender();
     hook.rerender();
@@ -707,12 +715,12 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([
-      { result: true, first: true, second: true },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-      { result: false, first: false, second: false },
-    ]);
+    expect(changes).toMatchInlineSnapshot(`
+      - { first: '✅', result: '✅', second: '✅' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+      - { first: '❌', result: '❌', second: '❌' }
+    `);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 
@@ -738,13 +746,13 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(itemsChanges).toEqual([true]);
+    expect(itemsChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(itemsChanges).toEqual([true, false, false, false]);
+    expect(itemsChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
 
     const rendersBeforeUpdate = renders;
 
@@ -794,7 +802,7 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(itemsChanges).toEqual([true]);
+    expect(itemsChanges).toMatchInlineSnapshot(`['✅']`);
 
     hook.rerender();
     hook.rerender();
@@ -815,7 +823,7 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(itemsChanges).toEqual([true, false, false, false]);
+    expect(itemsChanges).toMatchInlineSnapshot(`['✅', '❌', '❌', '❌']`);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 
@@ -868,18 +876,20 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([{ result: true, users: true, products: true }]);
+    expect(changes).toMatchInlineSnapshot(
+      `- { products: '✅', result: '✅', users: '✅' }`,
+    );
 
     hook.rerender();
     hook.rerender();
     hook.rerender();
 
-    expect(changes).toEqual([
-      { result: true, users: true, products: true },
-      { result: false, users: false, products: false },
-      { result: false, users: false, products: false },
-      { result: false, users: false, products: false },
-    ]);
+    expect(changes).toMatchInlineSnapshot(`
+      - { products: '✅', result: '✅', users: '✅' }
+      - { products: '❌', result: '❌', users: '❌' }
+      - { products: '❌', result: '❌', users: '❌' }
+      - { products: '❌', result: '❌', users: '❌' }
+    `);
 
     const rendersBeforeUpdate = renders;
 
@@ -951,7 +961,9 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([{ result: true, users: true, products: true }]);
+    expect(changes).toMatchInlineSnapshot(
+      `- { products: '✅', result: '✅', users: '✅' }`,
+    );
 
     hook.rerender();
     hook.rerender();
@@ -969,12 +981,12 @@ describe('list-query hook memoization', () => {
 
     await flushAllTimers();
 
-    expect(changes).toEqual([
-      { result: true, users: true, products: true },
-      { result: false, users: false, products: false },
-      { result: false, users: false, products: false },
-      { result: false, users: false, products: false },
-    ]);
+    expect(changes).toMatchInlineSnapshot(`
+      - { products: '✅', result: '✅', users: '✅' }
+      - { products: '❌', result: '❌', users: '❌' }
+      - { products: '❌', result: '❌', users: '❌' }
+      - { products: '❌', result: '❌', users: '❌' }
+    `);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 

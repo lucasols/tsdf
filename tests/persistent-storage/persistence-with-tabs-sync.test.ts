@@ -25,7 +25,7 @@ import {
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
 import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const rowSchema = rc_object({ id: rc_number, name: rc_string });
@@ -220,10 +220,12 @@ describe('persistence + browser tabs sync integration', () => {
       return result;
     });
 
-    expect(nameQuery.result.current).toMatchObject({
-      status: 'success',
-      items: [{ id: 1, name: 'StaleAlice' }],
-    });
+    expect(pick(nameQuery.result.current, ['status', 'items']))
+      .toMatchInlineSnapshot(`
+        items:
+          - { id: 1, name: 'StaleAlice' }
+        status: 'success'
+      `);
     expect(tabB.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
       `[]`,
     );
@@ -272,10 +274,12 @@ describe('persistence + browser tabs sync integration', () => {
       return result;
     });
 
-    expect(ageQuery.result.current).toMatchObject({
-      status: 'success',
-      items: [{ age: 30 }],
-    });
+    expect(pick(ageQuery.result.current, ['status', 'items']))
+      .toMatchInlineSnapshot(`
+        items:
+          - age: 30
+        status: 'success'
+      `);
     expect(ageQueryRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ items: [{age:30}]
@@ -337,10 +341,12 @@ describe('persistence + browser tabs sync integration', () => {
       return result;
     });
 
-    expect(query.result.current).toMatchObject({
-      status: 'success',
-      items: [{ id: 1, name: 'StaleAlice' }],
-    });
+    expect(pick(query.result.current, ['status', 'items']))
+      .toMatchInlineSnapshot(`
+        items:
+          - { id: 1, name: 'StaleAlice' }
+        status: 'success'
+      `);
     expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
       `[]`,
     );
@@ -359,10 +365,12 @@ describe('persistence + browser tabs sync integration', () => {
       -> status: success ⋅ items: [{id:1, name:FreshAlice}]
       "
     `);
-    expect(query.result.current).toMatchObject({
-      status: 'success',
-      items: [{ id: 1, name: 'FreshAlice' }],
-    });
+    expect(pick(query.result.current, ['status', 'items']))
+      .toMatchInlineSnapshot(`
+        items:
+          - { id: 1, name: 'FreshAlice' }
+        status: 'success'
+      `);
     expect(persisted.listQuery.readItemData<Row>('users', 1)?.name).toBe(
       'FreshAlice',
     );

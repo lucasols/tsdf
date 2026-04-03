@@ -7,7 +7,7 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, range } from '../utils/genericTestUtils';
+import { flushAllTimers, pick, range } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -82,13 +82,17 @@ describe('fetch query', () => {
   test('fetch query', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 
-    expect(env.store.state).toEqual({
-      items: {},
-      queries: {},
-      itemQueries: {},
-      itemLoadedFields: {},
-      itemFieldInvalidationFields: {},
-    });
+    expect(env.store.state).toMatchInlineSnapshot(`
+      itemFieldInvalidationFields: {}
+
+      itemLoadedFields: {}
+
+      itemQueries: {}
+
+      items: {}
+
+      queries: {}
+    `);
 
     env.scheduleFetch('lowPriority', usersQueryParams);
 
@@ -104,7 +108,7 @@ describe('fetch query', () => {
       status: 'loading'
       wasLoaded: '❌'
     `);
-    expect(env.store.state.items).toEqual({});
+    expect(env.store.state.items).toMatchInlineSnapshot(`{}`);
 
     await flushAllTimers();
 
@@ -452,7 +456,7 @@ describe('fetch query', () => {
     );
 
     expect(hook.result.current.status).toBe('idle');
-    expect(hook.result.current.items).toEqual([]);
+    expect(hook.result.current.items).toMatchInlineSnapshot(`[]`);
   });
 
   test('maxItems evicts whole inactive queries instead of leaving partial cached queries', async () => {
@@ -527,14 +531,16 @@ describe('fetch query', () => {
     ).toBeUndefined();
     expect(Object.keys(env.store.state.items)).toHaveLength(2);
     expect(env.apiStore.getItemState('users||1')).toBeUndefined();
-    expect(env.apiStore.getItemState('users||2')).toMatchObject({
-      id: 2,
-      name: 'User 2',
-    });
-    expect(env.apiStore.getItemState('users||3')).toMatchObject({
-      id: 3,
-      name: 'User 3',
-    });
+    expect(pick(env.apiStore.getItemState('users||2'), ['id', 'name']))
+      .toMatchInlineSnapshot(`
+        id: 2
+        name: 'User 2'
+      `);
+    expect(pick(env.apiStore.getItemState('users||3'), ['id', 'name']))
+      .toMatchInlineSnapshot(`
+        id: 3
+        name: 'User 3'
+      `);
   });
 
   test('onStateCleanup is called when cache-limit eviction removes queries and orphan items', async () => {
@@ -644,9 +650,9 @@ test('await fetch', async () => {
 
   env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-  expect(env.apiStore.getItemState('users||1')).toMatchObject({
-    name: 'User 1',
-  });
+  expect(
+    pick(env.apiStore.getItemState('users||1'), ['name']),
+  ).toMatchInlineSnapshot(`name: 'User 1'`);
 
   const fetchPromise = env.apiStore.awaitListQueryFetch({ tableId: 'users' });
 
@@ -654,17 +660,21 @@ test('await fetch', async () => {
 
   const fetchResult = await fetchPromise;
 
-  expect(fetchResult).toEqual({
-    items: [
-      { itemPayload: 'users||1', data: { id: 1, name: 'Updated User 1' } },
-      { itemPayload: 'users||2', data: { id: 2, name: 'User 2' } },
-      { itemPayload: 'users||3', data: { id: 3, name: 'User 3' } },
-      { itemPayload: 'users||4', data: { id: 4, name: 'User 4' } },
-      { itemPayload: 'users||5', data: { id: 5, name: 'User 5' } },
-    ],
-    error: null,
-    hasMore: false,
-  });
+  expect(fetchResult).toMatchInlineSnapshot(`
+    error: null
+    hasMore: '❌'
+    items:
+      - data: { id: 1, name: 'Updated User 1' }
+        itemPayload: 'users||1'
+      - data: { id: 2, name: 'User 2' }
+        itemPayload: 'users||2'
+      - data: { id: 3, name: 'User 3' }
+        itemPayload: 'users||3'
+      - data: { id: 4, name: 'User 4' }
+        itemPayload: 'users||4'
+      - data: { id: 5, name: 'User 5' }
+        itemPayload: 'users||5'
+  `);
 
   env.serverTable.setNextListFetchError('error');
 
@@ -677,7 +687,7 @@ test('await fetch', async () => {
 
   const errorResult = await errorFetchPromise;
 
-  expect(errorResult.items).toEqual([]);
+  expect(errorResult.items).toMatchInlineSnapshot(`[]`);
   expect(errorResult.error).toBeDefined();
   expect(errorResult.error?.message).toBe('error');
   expect(errorResult.hasMore).toBe(false);
@@ -733,9 +743,9 @@ describe('fetch item', () => {
 
     env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-    expect(env.apiStore.getItemState('users||1')).toMatchObject({
-      name: 'User 1',
-    });
+    expect(
+      pick(env.apiStore.getItemState('users||1'), ['name']),
+    ).toMatchInlineSnapshot(`name: 'User 1'`);
 
     const fetchPromise = env.apiStore.awaitItemFetch('users||1');
 
@@ -743,10 +753,10 @@ describe('fetch item', () => {
 
     const fetchResult = await fetchPromise;
 
-    expect(fetchResult).toEqual({
-      data: { id: 1, name: 'Updated User 1' },
-      error: null,
-    });
+    expect(fetchResult).toMatchInlineSnapshot(`
+      data: { id: 1, name: 'Updated User 1' }
+      error: null
+    `);
 
     env.serverTable.setNextFetchError('users||1', 'error');
 
@@ -756,10 +766,10 @@ describe('fetch item', () => {
 
     const errorResult = await errorFetchPromise;
 
-    expect(errorResult).toMatchObject({
-      data: null,
-      error: { message: 'error' },
-    });
+    expect(pick(errorResult, ['data', 'error'])).toMatchInlineSnapshot(`
+      data: null
+      error{Error}: { message: 'error', name: 'StoreFetchError' }
+    `);
 
     expect(env.serverTable.numOfFinishedFetches).toEqual(2);
   });
@@ -1190,71 +1200,58 @@ test('invalidate everything does not cause a problem', () => {
     itemPayload: () => true,
   });
 
-  // Store keys have a leading quote from getCompositeKey
-  const k1 = env.getStoreItemKeyFromRaw('users||1');
-  const k2 = env.getStoreItemKeyFromRaw('users||2');
-  const k3 = env.getStoreItemKeyFromRaw('users||3');
-  const k4 = env.getStoreItemKeyFromRaw('users||4');
-  const k5 = env.getStoreItemKeyFromRaw('users||5');
-  const queryKey = env.getQueryKey({ tableId: 'users' });
+  expect(env.store.state).toMatchInlineSnapshot(`
+    itemFieldInvalidationFields: {}
 
-  expect(env.store.state).toEqual({
-    itemQueries: {
-      [k1]: {
-        error: null,
-        payload: 'users||1',
-        refetchOnMount: 'highPriority',
-        status: 'success',
-        wasLoaded: true,
-      },
-      [k2]: {
-        error: null,
-        payload: 'users||2',
-        refetchOnMount: 'highPriority',
-        status: 'success',
-        wasLoaded: true,
-      },
-      [k3]: {
-        error: null,
-        payload: 'users||3',
-        refetchOnMount: 'highPriority',
-        status: 'success',
-        wasLoaded: true,
-      },
-      [k4]: {
-        error: null,
-        payload: 'users||4',
-        refetchOnMount: 'highPriority',
-        status: 'success',
-        wasLoaded: true,
-      },
-      [k5]: {
-        error: null,
-        payload: 'users||5',
-        refetchOnMount: 'highPriority',
-        status: 'success',
-        wasLoaded: true,
-      },
-    },
-    items: {
-      [k1]: { id: 1, name: 'User 1' },
-      [k2]: { id: 2, name: 'User 2' },
-      [k3]: { id: 3, name: 'User 3' },
-      [k4]: { id: 4, name: 'User 4' },
-      [k5]: { id: 5, name: 'User 5' },
-    },
-    queries: {
-      [queryKey]: {
-        error: null,
-        hasMore: false,
-        items: [k1, k2, k3, k4, k5],
-        payload: { tableId: 'users' },
-        refetchOnMount: 'highPriority',
-        status: 'success',
-        wasLoaded: true,
-      },
-    },
-    itemLoadedFields: {},
-    itemFieldInvalidationFields: {},
-  });
+    itemLoadedFields: {}
+
+    itemQueries:
+      "users||1:
+        error: null
+        payload: 'users||1'
+        refetchOnMount: 'highPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      "users||2:
+        error: null
+        payload: 'users||2'
+        refetchOnMount: 'highPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      "users||3:
+        error: null
+        payload: 'users||3'
+        refetchOnMount: 'highPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      "users||4:
+        error: null
+        payload: 'users||4'
+        refetchOnMount: 'highPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      "users||5:
+        error: null
+        payload: 'users||5'
+        refetchOnMount: 'highPriority'
+        status: 'success'
+        wasLoaded: '✅'
+
+    items:
+      "users||1: { id: 1, name: 'User 1' }
+      "users||2: { id: 2, name: 'User 2' }
+      "users||3: { id: 3, name: 'User 3' }
+      "users||4: { id: 4, name: 'User 4' }
+      "users||5: { id: 5, name: 'User 5' }
+
+    queries:
+      {tableId:"users"}:
+        error: null
+        hasMore: '❌'
+        items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+        payload: { tableId: 'users' }
+        refetchOnMount: 'highPriority'
+        status: 'success'
+        wasLoaded: '✅'
+  `);
 });

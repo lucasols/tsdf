@@ -13,7 +13,7 @@ export function range(start: number, end: number): number[] {
 }
 
 export function pick<T extends Record<string, unknown>, K extends keyof T>(
-  obj: T | undefined,
+  obj: T | null | undefined,
   keys: K[],
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};

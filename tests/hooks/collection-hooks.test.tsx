@@ -14,7 +14,7 @@ import {
 
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { flushAllTimers, pick } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -996,14 +996,23 @@ test('fetch error then mount component without error', async () => {
 
   await flushAllTimers();
 
-  expect(env.apiStore.getItemState('1')).toMatchObject({
-    data: null,
-    error: { message: 'error' },
-    payload: '1',
-    refetchOnMount: false,
-    status: 'error',
-    wasLoaded: false,
-  });
+  expect(
+    pick(env.apiStore.getItemState('1'), [
+      'data',
+      'error',
+      'payload',
+      'refetchOnMount',
+      'status',
+      'wasLoaded',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: null
+    error: { code: 500, id: 'fetch-error', message: 'error' }
+    payload: '1'
+    refetchOnMount: '❌'
+    status: 'error'
+    wasLoaded: '❌'
+  `);
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(300);

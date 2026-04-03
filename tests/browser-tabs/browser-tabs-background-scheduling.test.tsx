@@ -13,7 +13,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
   createCollectionItems,
@@ -856,14 +856,19 @@ test('list query first item fetch stays local after a sibling batch item fetch f
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     1,
   );
-  expect(envB.store.state.itemQueries[untouchedItemKey]).toMatchObject({
-    status: 'success',
-    refetchOnMount: false,
-  });
-  expect(envB.store.state.items[untouchedItemKey]).toEqual({
-    id: 2,
-    name: 'Bob',
-  });
+  expect(
+    pick(envB.store.state.itemQueries[untouchedItemKey], [
+      'status',
+      'refetchOnMount',
+    ]),
+  ).toMatchInlineSnapshot(`
+    refetchOnMount: '❌'
+    status: 'success'
+  `);
+  expect(envB.store.state.items[untouchedItemKey]).toMatchInlineSnapshot(`
+    id: 2
+    name: 'Bob'
+  `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
