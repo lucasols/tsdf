@@ -6,6 +6,13 @@
   "printWidth": 80,
   "experimentalSortImports": {},
   "experimentalSortPackageJson": false,
-  "ignorePatterns": ["node_modules", "dist", "build", "*.lock", ".git"],
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    "build",
+    "*.lock",
+    ".git",
+    "pnpm-lock.yaml"
+  ],
   "objectWrap": "collapse"
 }
