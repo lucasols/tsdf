@@ -12,6 +12,7 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { pick } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -310,12 +311,12 @@ describe('collectionStore storeEvents', () => {
     expect(successPayload).toMatchInlineSnapshot(`
       ['item-1', 'item-2']
     `);
-    expect(env.apiStore.getItemState('item-1')).toMatchObject({
-      refetchOnMount: 'highPriority',
-    });
-    expect(env.apiStore.getItemState('item-2')).toMatchObject({
-      refetchOnMount: 'highPriority',
-    });
+    expect(
+      pick(env.apiStore.getItemState('item-1'), ['refetchOnMount']),
+    ).toMatchInlineSnapshot(`refetchOnMount: 'highPriority'`);
+    expect(
+      pick(env.apiStore.getItemState('item-2'), ['refetchOnMount']),
+    ).toMatchInlineSnapshot(`refetchOnMount: 'highPriority'`);
   });
 
   test('no-target mutations pass an empty array and skip item invalidation', async () => {
@@ -338,12 +339,12 @@ describe('collectionStore storeEvents', () => {
     expect(mutationPayload).toMatchInlineSnapshot(`
       []
     `);
-    expect(env.apiStore.getItemState('item-1')).toMatchObject({
-      refetchOnMount: false,
-    });
-    expect(env.apiStore.getItemState('item-2')).toMatchObject({
-      refetchOnMount: false,
-    });
+    expect(
+      pick(env.apiStore.getItemState('item-1'), ['refetchOnMount']),
+    ).toMatchInlineSnapshot(`refetchOnMount: '❌'`);
+    expect(
+      pick(env.apiStore.getItemState('item-2'), ['refetchOnMount']),
+    ).toMatchInlineSnapshot(`refetchOnMount: '❌'`);
   });
 });
 
@@ -574,10 +575,20 @@ describe('listQueryStore storeEvents', () => {
       []
     `);
     expect(
-      env.apiStore.store.state.itemQueries[env.apiStore.getItemKey('users||1')],
-    ).toMatchObject({ refetchOnMount: false });
+      pick(
+        env.apiStore.store.state.itemQueries[
+          env.apiStore.getItemKey('users||1')
+        ],
+        ['refetchOnMount'],
+      ),
+    ).toMatchInlineSnapshot(`refetchOnMount: '❌'`);
     expect(
-      env.apiStore.store.state.itemQueries[env.apiStore.getItemKey('users||2')],
-    ).toMatchObject({ refetchOnMount: false });
+      pick(
+        env.apiStore.store.state.itemQueries[
+          env.apiStore.getItemKey('users||2')
+        ],
+        ['refetchOnMount'],
+      ),
+    ).toMatchInlineSnapshot(`refetchOnMount: '❌'`);
   });
 });

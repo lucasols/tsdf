@@ -41,7 +41,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -75,7 +75,7 @@ test('simple mutation with optimistic update', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -105,7 +105,7 @@ test('simple mutation without optimistic update', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -195,7 +195,7 @@ test('multiple mutations with revalidation in sequence', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -250,7 +250,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.serverMock.numOfStartedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -336,7 +336,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2, 3, 4]`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -426,7 +426,7 @@ test('multiple mutations with revalidation in sequence 3', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2, 3, 4]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.serverMock.numOfStartedFetches).toBe(5);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -490,7 +490,7 @@ test('high priority fetch during mutation', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -539,8 +539,8 @@ test('multiple concurrent mutations with revalidation', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.serverMock.history).toEqual([0, 1, 2]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -744,7 +744,7 @@ test('multiple mutations with low priority fetch between', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   // Mutation revalidations properly coalesce into 1 fetch
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -807,7 +807,7 @@ test('very slow mutation revalidation then mutation', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -851,7 +851,7 @@ test('fetch error', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 'error']);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 'error']`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toContain('fetch-error');
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -895,7 +895,7 @@ test('low priority fetch during mutation outside throttle window', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -944,7 +944,7 @@ test('low priority fetch during mutation inside throttle window', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "

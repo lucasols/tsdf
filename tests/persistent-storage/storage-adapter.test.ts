@@ -9,9 +9,8 @@ import {
   vi,
 } from 'vitest';
 
-import type { StorageAdapter } from '../../src/persistentStorage/types';
-
 import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
+import type { StorageAdapter } from '../../src/persistentStorage/types';
 
 beforeAll(() => {
   vi.useFakeTimers();

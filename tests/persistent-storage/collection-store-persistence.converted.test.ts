@@ -17,7 +17,6 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';

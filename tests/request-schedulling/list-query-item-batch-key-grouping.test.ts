@@ -57,18 +57,18 @@ describe('batch key grouping', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table1||2')).toEqual({
-      id: 2,
-      name: 'Item 2',
-    });
-    expect(env.apiStore.getItemState('table1||3')).toEqual({
-      id: 3,
-      name: 'Item 3',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table1||2')).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Item 2'
+    `);
+    expect(env.apiStore.getItemState('table1||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Item 3'
+    `);
 
     // All items with same batch key should be in one batch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -102,14 +102,14 @@ describe('batch key grouping', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table2||10')).toEqual({
-      id: 10,
-      name: 'Item 10',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table2||10')).toMatchInlineSnapshot(`
+      id: 10
+      name: 'Item 10'
+    `);
 
     // Items should be split into two separate batch fetches by table
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -155,14 +155,14 @@ describe('batch key grouping', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table2||10')).toEqual({
-      id: 10,
-      name: 'Item 10',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table2||10')).toMatchInlineSnapshot(`
+      id: 10
+      name: 'Item 10'
+    `);
 
     // table1 items batched, table2||10 individual fetch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -203,22 +203,22 @@ describe('batch key grouping', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table1||2')).toEqual({
-      id: 2,
-      name: 'Item 2',
-    });
-    expect(env.apiStore.getItemState('table2||10')).toEqual({
-      id: 10,
-      name: 'Item 10',
-    });
-    expect(env.apiStore.getItemState('table2||20')).toEqual({
-      id: 20,
-      name: 'Item 20',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table1||2')).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Item 2'
+    `);
+    expect(env.apiStore.getItemState('table2||10')).toMatchInlineSnapshot(`
+      id: 10
+      name: 'Item 10'
+    `);
+    expect(env.apiStore.getItemState('table2||20')).toMatchInlineSnapshot(`
+      id: 20
+      name: 'Item 20'
+    `);
 
     // table1 items batched together, table2 items fetched individually
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`

@@ -18,7 +18,6 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -311,8 +310,6 @@ describe('localStorage: converted list query store persistence', () => {
         },
       },
     });
-    const itemKey = mockStore.listQuery.itemKey('users', 1);
-
     // Keep an older cached item to prove failed writes do not replace it.
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
@@ -347,9 +344,9 @@ describe('localStorage: converted list query store persistence', () => {
       .toMatchInlineSnapshot(`
         tableId: 'users'
       `);
-    expect(mockStore.listQuery.readQueryEntry(usersQuery).data.items).toEqual([
-      itemKey,
-    ]);
+    expect(
+      mockStore.listQuery.readQueryEntry(usersQuery).data.items,
+    ).toMatchInlineSnapshot(`['"users||1']`);
     expect(mockStore.listQuery.readQueryEntry(usersQuery).data.hasMore).toBe(
       false,
     );

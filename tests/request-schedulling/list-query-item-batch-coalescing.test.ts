@@ -48,18 +48,18 @@ describe('batch coalescing basic behavior', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table1||2')).toEqual({
-      id: 2,
-      name: 'Item 2',
-    });
-    expect(env.apiStore.getItemState('table1||3')).toEqual({
-      id: 3,
-      name: 'Item 3',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table1||2')).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Item 2'
+    `);
+    expect(env.apiStore.getItemState('table1||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Item 3'
+    `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -97,10 +97,10 @@ describe('batch coalescing basic behavior', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
 
     // Single item uses fetchFn, not batch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -215,22 +215,22 @@ describe('maxItemBatchSize behavior', () => {
 
     await flushAllTimers();
 
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table1||2')).toEqual({
-      id: 2,
-      name: 'Item 2',
-    });
-    expect(env.apiStore.getItemState('table1||3')).toEqual({
-      id: 3,
-      name: 'Item 3',
-    });
-    expect(env.apiStore.getItemState('table1||4')).toEqual({
-      id: 4,
-      name: 'Item 4',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table1||2')).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Item 2'
+    `);
+    expect(env.apiStore.getItemState('table1||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Item 3'
+    `);
+    expect(env.apiStore.getItemState('table1||4')).toMatchInlineSnapshot(`
+      id: 4
+      name: 'Item 4'
+    `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -373,10 +373,10 @@ describe('mutation handling', () => {
     await flushAllTimers();
 
     // item2 should have been fetched separately since item1 was under mutation
-    expect(env.apiStore.getItemState('table1||2')).toEqual({
-      id: 2,
-      name: 'Item 2',
-    });
+    expect(env.apiStore.getItemState('table1||2')).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Item 2'
+    `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - duration: 800
@@ -463,7 +463,10 @@ describe('awaitItemFetch with batch', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({ data: { id: 3, name: 'Item 3' }, error: null });
+    expect(result).toMatchInlineSnapshot(`
+      data: { id: 3, name: 'Item 3' }
+      error: null
+    `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -545,9 +548,18 @@ describe('awaitItemFetch with batch', () => {
       promise3,
     ]);
 
-    expect(result1).toEqual({ data: { id: 1, name: 'Item 1' }, error: null });
-    expect(result2).toEqual({ data: { id: 1, name: 'Item 1' }, error: null });
-    expect(result3).toEqual({ data: { id: 1, name: 'Item 1' }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { id: 1, name: 'Item 1' }
+      error: null
+    `);
+    expect(result2).toMatchInlineSnapshot(`
+      data: { id: 1, name: 'Item 1' }
+      error: null
+    `);
+    expect(result3).toMatchInlineSnapshot(`
+      data: { id: 1, name: 'Item 1' }
+      error: null
+    `);
 
     // Only one fetch (single item, so uses fetchFn)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -580,8 +592,14 @@ describe('awaitItemFetch with batch', () => {
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
-    expect(result1).toEqual({ data: { id: 1, name: 'Item 1' }, error: null });
-    expect(result2).toEqual({ data: { id: 2, name: 'Item 2' }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { id: 1, name: 'Item 1' }
+      error: null
+    `);
+    expect(result2).toMatchInlineSnapshot(`
+      data: { id: 2, name: 'Item 2' }
+      error: null
+    `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -721,14 +739,14 @@ describe('batch with UI hooks', () => {
     await flushAllTimers();
 
     // UI should still show the values
-    expect(env.apiStore.getItemState('table1||1')).toEqual({
-      id: 1,
-      name: 'Item 1',
-    });
-    expect(env.apiStore.getItemState('table1||2')).toEqual({
-      id: 2,
-      name: 'Item 2',
-    });
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+    expect(env.apiStore.getItemState('table1||2')).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Item 2'
+    `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'

@@ -15,7 +15,6 @@ import {
 
 import type { ListQueryStore } from '../../src/listQueryStore/listQueryStore';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-
 import {
   createListQueryStoreTestEnv,
   type Row,
@@ -1432,8 +1431,25 @@ describe('await* preload with partial resources', () => {
 
     await flushAllTimers();
 
-    await expect(awaitItemPromise).resolves.toMatchObject({ error: null });
-    await expect(awaitListPromise).resolves.toMatchObject({ error: null });
+    await expect(awaitItemPromise).resolves.toMatchInlineSnapshot(`
+      data: { address: 'Address 2', age: 20, country: 'Country 2', id: 2, name: 'User 2' }
+      error: null
+    `);
+    await expect(awaitListPromise).resolves.toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items:
+        - data: { address: 'Address 1', age: 10, country: 'Country 1', id: 1, name: 'User 1' }
+          itemPayload: 'users||1'
+        - data: { address: 'Address 2', age: 20, country: 'Country 2', id: 2, name: 'User 2' }
+          itemPayload: 'users||2'
+        - data: { address: 'Address 3', age: 30, country: 'Country 3', id: 3, name: 'User 3' }
+          itemPayload: 'users||3'
+        - data: { address: 'Address 4', age: 40, country: 'Country 4', id: 4, name: 'User 4' }
+          itemPayload: 'users||4'
+        - data: { address: 'Address 5', age: 50, country: 'Country 5', id: 5, name: 'User 5' }
+          itemPayload: 'users||5'
+    `);
 
     // All fetches should have no fields (fields '*' = no projection)
     expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(`

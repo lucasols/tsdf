@@ -27,7 +27,10 @@ describe('awaitFetch basic behavior', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({ data: { value: 42 }, error: null });
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
@@ -67,7 +70,7 @@ describe('awaitFetch basic behavior', () => {
     });
 
     // Initial data is already present
-    expect(env.store.state.data).toEqual({ value: 0 });
+    expect(env.store.state.data).toMatchInlineSnapshot(`value: 0`);
 
     // Change server data
     env.setServerData(999);
@@ -79,7 +82,10 @@ describe('awaitFetch basic behavior', () => {
     const result = await resultPromise;
 
     // Should have fetched new data from server
-    expect(result).toEqual({ data: { value: 999 }, error: null });
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 999 }
+      error: null
+    `);
   });
 });
 
@@ -104,9 +110,18 @@ describe('awaitFetch coalescing behavior', () => {
     ]);
 
     // All should return the same data
-    expect(result1).toEqual({ data: { value: 42 }, error: null });
-    expect(result2).toEqual({ data: { value: 42 }, error: null });
-    expect(result3).toEqual({ data: { value: 42 }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
+    expect(result2).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
+    expect(result3).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
 
     // Only one fetch should have been executed
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -140,8 +155,14 @@ describe('awaitFetch coalescing behavior', () => {
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
-    expect(result1).toEqual({ data: { value: 42 }, error: null });
-    expect(result2).toEqual({ data: { value: 42 }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
+    expect(result2).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
@@ -172,8 +193,14 @@ describe('awaitFetch coalescing behavior', () => {
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
-    expect(result1).toEqual({ data: { value: 42 }, error: null });
-    expect(result2).toEqual({ data: { value: 42 }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
+    expect(result2).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
 
     // Two fetches: first one completes, second one scheduled during first
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
@@ -202,7 +229,10 @@ describe('awaitFetch edge cases', () => {
     await flushAllTimers();
     const result1 = await promise1;
 
-    expect(result1).toEqual({ data: { value: 1 }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+    `);
 
     // Change server data
     env.setServerData(2);
@@ -212,7 +242,10 @@ describe('awaitFetch edge cases', () => {
     await flushAllTimers();
     const result2 = await promise2;
 
-    expect(result2).toEqual({ data: { value: 2 }, error: null });
+    expect(result2).toMatchInlineSnapshot(`
+      data: { value: 2 }
+      error: null
+    `);
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
   });
 
@@ -236,7 +269,10 @@ describe('awaitFetch edge cases', () => {
     const result = await fetchPromise;
 
     // Should have the data that was present when fetch completed
-    expect(result).toEqual({ data: { value: 999 }, error: null });
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 999 }
+      error: null
+    `);
   });
 
   test('awaitFetch with immediate error', async () => {
@@ -276,10 +312,13 @@ describe('awaitFetch edge cases', () => {
     // First successful fetch
     const result1 = env.apiStore.awaitFetch();
     await flushAllTimers();
-    expect(await result1).toEqual({ data: { value: 42 }, error: null });
+    expect(await result1).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
 
     // Verify data is in store
-    expect(env.store.state.data).toEqual({ value: 42 });
+    expect(env.store.state.data).toMatchInlineSnapshot(`value: 42`);
 
     // Second fetch fails
     env.errorInNextFetch({
@@ -301,14 +340,14 @@ describe('awaitFetch edge cases', () => {
     expect(errorResult.error?.method).toBe('GET');
 
     // But store still has the previous data
-    expect(env.store.state.data).toEqual({ value: 42 });
-    expect(env.store.state.error).toEqual({
-      code: 404,
-      id: 'fetch-error',
-      message: 'Fetch failed',
-      path: '/api/documents/42',
-      method: 'GET',
-    });
+    expect(env.store.state.data).toMatchInlineSnapshot(`value: 42`);
+    expect(env.store.state.error).toMatchInlineSnapshot(`
+      code: 404
+      id: 'fetch-error'
+      message: 'Fetch failed'
+      method: 'GET'
+      path: '/api/documents/42'
+    `);
   });
 });
 
@@ -393,7 +432,10 @@ describe('awaitFetch timing', () => {
     const result = await fetchPromise;
     await mutationPromise;
 
-    expect(result).toEqual({ data: { value: 1 }, error: null });
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+    `);
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
@@ -436,9 +478,18 @@ describe('awaitFetch timing', () => {
     ]);
 
     // All return the final data since server data changed before fetches completed
-    expect(result1).toEqual({ data: { value: 3 }, error: null });
-    expect(result2).toEqual({ data: { value: 3 }, error: null });
-    expect(result3).toEqual({ data: { value: 3 }, error: null });
+    expect(result1).toMatchInlineSnapshot(`
+      data: { value: 3 }
+      error: null
+    `);
+    expect(result2).toMatchInlineSnapshot(`
+      data: { value: 3 }
+      error: null
+    `);
+    expect(result3).toMatchInlineSnapshot(`
+      data: { value: 3 }
+      error: null
+    `);
 
     // Two fetches: first one, then second+third coalesced during ongoing fetch
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
@@ -515,7 +566,10 @@ describe('awaitFetch timeout', () => {
     const result = await resultPromise;
 
     // Should succeed since fetch completed before timeout
-    expect(result).toEqual({ data: { value: 42 }, error: null });
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
   });
 
   test('awaitFetch with zero timeout times out immediately', async () => {
@@ -561,6 +615,9 @@ describe('awaitFetch timeout', () => {
     // Complete the fetch
     await flushAllTimers();
     const result2 = await promise2;
-    expect(result2).toEqual({ data: { value: 42 }, error: null });
+    expect(result2).toMatchInlineSnapshot(`
+      data: { value: 42 }
+      error: null
+    `);
   });
 });

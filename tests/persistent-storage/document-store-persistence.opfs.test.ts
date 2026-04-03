@@ -15,7 +15,6 @@ import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -108,7 +107,9 @@ describe('opfs: document store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.sess1.opfs-version-mismatch']`,
+    );
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -131,13 +132,15 @@ describe('opfs: document store persistence', () => {
     await preloadPromise;
     await advanceTime(3000);
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-cleanup']`,
+    );
     expect(mockAdapter.has(key)).toBe(false);
   });
 
   test('loads cached data on first read and refetches on mount', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
-    const key = populateStorage(mockAdapter, 'opfs-doc', 'session1', {
+    populateStorage(mockAdapter, 'opfs-doc', 'session1', {
       name: 'cached',
       value: 42,
     });
@@ -167,7 +170,9 @@ describe('opfs: document store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-doc']`,
+    );
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "

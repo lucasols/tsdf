@@ -29,7 +29,6 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -37,7 +36,7 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -1323,12 +1322,12 @@ describe('localStorage: list query store persistence', () => {
     `);
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(2);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
-    expect(onPersistentStorageError.mock.calls[1]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(
+      pick(onPersistentStorageError.mock.calls[0]?.[0], ['message']),
+    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
+    expect(
+      pick(onPersistentStorageError.mock.calls[1]?.[0], ['message']),
+    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
   });
 
   test('invalid cached query entries are cleaned up only after a direct read', async () => {

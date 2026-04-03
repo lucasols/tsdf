@@ -19,15 +19,14 @@ import {
   vi,
 } from 'vitest';
 
+import { createDocumentStore } from '../../src/documentStore';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
-import { createDocumentStore } from '../../src/documentStore';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const cacheEntryTimestampSchema = rc_object({
   data: rc_unknown,
@@ -264,9 +263,9 @@ describe('localStorage: document store persistence', () => {
     await env.apiStore.preloadPersistentStorage();
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(
+      pick(onPersistentStorageError.mock.calls[0]?.[0], ['message']),
+    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
   });
 
   test('save is debounced - only final state is saved', async () => {

@@ -10,7 +10,6 @@ import {
 } from 'vitest';
 
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-
 import {
   createListQueryStoreTestEnv,
   Row,

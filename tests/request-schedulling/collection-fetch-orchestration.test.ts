@@ -36,7 +36,10 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([{ item1: { v: 0 } }, { item1: { v: 1 } }]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`
+    - item1: { v: 0 }
+    - item1: { v: 1 }
+  `);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -72,7 +75,10 @@ test('simple mutation with optimistic update', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([{ item1: { v: 0 } }, { item1: { v: 1 } }]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`
+    - item1: { v: 0 }
+    - item1: { v: 1 }
+  `);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -195,11 +201,13 @@ test('mutation on one item does not affect fetch state of another item', async (
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([
-    { item1: { v: 0 } },
-    { item1: { v: 0 }, item2: { v: 0 } },
-    { item1: { v: 1 }, item2: { v: 0 } },
-  ]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`
+    - item1: { v: 0 }
+    - item1: { v: 0 }
+      item2: { v: 0 }
+    - item1: { v: 1 }
+      item2: { v: 0 }
+  `);
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -283,7 +291,7 @@ test('error on one item does not affect other items', async () => {
   expect(item1State?.error?.message).toBe('Network error');
 
   expect(item2State?.status).toBe('success');
-  expect(item2State?.data?.value).toEqual({ v: 2 });
+  expect(item2State?.data?.value).toMatchInlineSnapshot(`v: 2`);
 });
 
 test('coalesces multiple fetches for the same item', async () => {
@@ -296,5 +304,7 @@ test('coalesces multiple fetches for the same item', async () => {
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
-  expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
+  expect(env.apiStore.getItemState('item1')?.data?.value).toMatchInlineSnapshot(
+    `v: 1`,
+  );
 });

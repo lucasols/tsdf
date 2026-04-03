@@ -13,7 +13,6 @@ import {
 
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
-
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
@@ -53,7 +52,7 @@ test('load data', async () => {
 
   expect(result.current.status).toBe('success');
   expect(result.current.isLoading).toBe(false);
-  expect(result.current.data?.value).toEqual({ hello: 'world' });
+  expect(result.current.data?.value).toMatchInlineSnapshot(`hello: 'world'`);
 
   unmount();
 });
@@ -66,7 +65,7 @@ test('invalidate data', async () => {
 
   const { result } = renderHook(() => env.apiStore.useDocument());
 
-  expect(result.current.data?.value).toEqual({ hello: 'world' });
+  expect(result.current.data?.value).toMatchInlineSnapshot(`hello: 'world'`);
 
   act(() => {
     env.setServerData({ hello: 'was invalidated' });
@@ -75,7 +74,9 @@ test('invalidate data', async () => {
 
   await flushAllTimers();
 
-  expect(result.current.data?.value).toEqual({ hello: 'was invalidated' });
+  expect(result.current.data?.value).toMatchInlineSnapshot(
+    `hello: 'was invalidated'`,
+  );
 });
 
 test('revalidation with multiple components do not trigger multiple fetches', async () => {
@@ -97,7 +98,9 @@ test('revalidation with multiple components do not trigger multiple fetches', as
 
   await flushAllTimers();
 
-  expect(result.current.data?.value).toEqual({ hello: 'was invalidated' });
+  expect(result.current.data?.value).toMatchInlineSnapshot(
+    `hello: 'was invalidated'`,
+  );
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 });
 

@@ -248,7 +248,9 @@ test('maxItems keeps active hook items and allows protected overflow', async () 
   env.scheduleFetch('highPriority', '3');
   await flushAllTimers();
 
-  expect(Object.keys(env.store.state).sort()).toEqual(['"1', '"2']);
+  expect(Object.keys(env.store.state).sort()).toMatchInlineSnapshot(
+    `['"1', '"2']`,
+  );
   expect(env.apiStore.getItemState('1')?.data?.value.title).toBe('one');
   expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('two');
   expect(env.apiStore.getItemState('3')).toBeUndefined();

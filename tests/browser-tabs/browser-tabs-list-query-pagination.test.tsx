@@ -2,7 +2,6 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 
 import type { OffsetPaginationConfig } from '../../src/listQueryStore/types';
-
 import {
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,

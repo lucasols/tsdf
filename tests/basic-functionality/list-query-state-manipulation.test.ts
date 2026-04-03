@@ -205,81 +205,67 @@ describe('update state functions', () => {
       },
     );
 
-    const k1 = env.getStoreItemKeyFromRaw('users||1');
-    const k2 = env.getStoreItemKeyFromRaw('users||2');
-    const k3 = env.getStoreItemKeyFromRaw('users||3');
-    const k4 = env.getStoreItemKeyFromRaw('users||4');
-    const k5 = env.getStoreItemKeyFromRaw('users||5');
-    const k20 = env.getStoreItemKeyFromRaw('users||20');
-    const queryKey = env.getQueryKey({ tableId: 'users' });
+    expect(env.store.state).toMatchInlineSnapshot(`
+      itemFieldInvalidationFields: {}
 
-    expect(env.store.state).toEqual({
-      itemQueries: {
-        [k1]: {
-          error: null,
-          payload: 'users||1',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k2]: {
-          error: null,
-          payload: 'users||2',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k20]: {
-          error: null,
-          payload: 'users||20',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k3]: {
-          error: null,
-          payload: 'users||3',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k4]: {
-          error: null,
-          payload: 'users||4',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k5]: {
-          error: null,
-          payload: 'users||5',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-      },
-      items: {
-        [k1]: { id: 1, name: 'User 1' },
-        [k2]: { id: 2, name: 'User 2' },
-        [k20]: { id: 20, name: 'item users||20' },
-        [k3]: { id: 3, name: 'User 3' },
-        [k4]: { id: 4, name: 'User 4' },
-        [k5]: { id: 5, name: 'User 5' },
-      },
-      queries: {
-        [queryKey]: {
-          error: null,
-          hasMore: false,
-          items: [k20, k1, k2, k3, k4, k5],
-          payload: { tableId: 'users' },
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-      },
-      itemLoadedFields: {},
-      itemFieldInvalidationFields: {},
-    });
+      itemLoadedFields: {}
+
+      itemQueries:
+        "users||1:
+          error: null
+          payload: 'users||1'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||2:
+          error: null
+          payload: 'users||2'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||20:
+          error: null
+          payload: 'users||20'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||3:
+          error: null
+          payload: 'users||3'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||4:
+          error: null
+          payload: 'users||4'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||5:
+          error: null
+          payload: 'users||5'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+
+      items:
+        "users||1: { id: 1, name: 'User 1' }
+        "users||2: { id: 2, name: 'User 2' }
+        "users||20: { id: 20, name: 'item users||20' }
+        "users||3: { id: 3, name: 'User 3' }
+        "users||4: { id: 4, name: 'User 4' }
+        "users||5: { id: 5, name: 'User 5' }
+
+      queries:
+        {tableId:"users"}:
+          error: null
+          hasMore: '❌'
+          items: ['"users||20', '"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+          payload: { tableId: 'users' }
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+    `);
   });
 
   test('addItemToState with existing items and addItemToQueries', () => {
@@ -297,72 +283,60 @@ describe('update state functions', () => {
       },
     );
 
-    const k1 = env.getStoreItemKeyFromRaw('users||1');
-    const k2 = env.getStoreItemKeyFromRaw('users||2');
-    const k3 = env.getStoreItemKeyFromRaw('users||3');
-    const k4 = env.getStoreItemKeyFromRaw('users||4');
-    const k5 = env.getStoreItemKeyFromRaw('users||5');
-    const queryKey = env.getQueryKey({ tableId: 'users' });
+    expect(env.store.state).toMatchInlineSnapshot(`
+      itemFieldInvalidationFields: {}
 
-    expect(env.store.state).toEqual({
-      itemQueries: {
-        [k1]: {
-          error: null,
-          payload: 'users||1',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k2]: {
-          error: null,
-          payload: 'users||2',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k3]: {
-          error: null,
-          payload: 'users||3',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k4]: {
-          error: null,
-          payload: 'users||4',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        [k5]: {
-          error: null,
-          payload: 'users||5',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-      },
-      items: {
-        [k1]: { id: 20, name: 'item users||20' },
-        [k2]: { id: 2, name: 'User 2' },
-        [k3]: { id: 3, name: 'User 3' },
-        [k4]: { id: 4, name: 'User 4' },
-        [k5]: { id: 5, name: 'User 5' },
-      },
-      queries: {
-        [queryKey]: {
-          error: null,
-          hasMore: false,
-          items: [k1, k2, k3, k4, k5],
-          payload: { tableId: 'users' },
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-      },
-      itemLoadedFields: {},
-      itemFieldInvalidationFields: {},
-    });
+      itemLoadedFields: {}
+
+      itemQueries:
+        "users||1:
+          error: null
+          payload: 'users||1'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||2:
+          error: null
+          payload: 'users||2'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||3:
+          error: null
+          payload: 'users||3'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||4:
+          error: null
+          payload: 'users||4'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||5:
+          error: null
+          payload: 'users||5'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+
+      items:
+        "users||1: { id: 20, name: 'item users||20' }
+        "users||2: { id: 2, name: 'User 2' }
+        "users||3: { id: 3, name: 'User 3' }
+        "users||4: { id: 4, name: 'User 4' }
+        "users||5: { id: 5, name: 'User 5' }
+
+      queries:
+        {tableId:"users"}:
+          error: null
+          hasMore: '❌'
+          items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+          payload: { tableId: 'users' }
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+    `);
   });
 
   test('delete item state', async () => {
@@ -381,53 +355,59 @@ describe('update state functions', () => {
     // Wait for coalescing window
     await vi.advanceTimersByTimeAsync(15);
 
-    const k1 = env.getStoreItemKeyFromRaw('users||1');
-    const k2 = env.getStoreItemKeyFromRaw('users||2');
-    const k3 = env.getStoreItemKeyFromRaw('users||3');
-    const k4 = env.getStoreItemKeyFromRaw('users||4');
-    const k5 = env.getStoreItemKeyFromRaw('users||5');
-    const queryKey = env.getQueryKey({ tableId: 'users' });
+    expect(env.store.state).toMatchInlineSnapshot(`
+      itemFieldInvalidationFields: {}
 
-    const defaultItemQueryProps = {
-      error: null,
-      refetchOnMount: false,
-      status: 'success',
-      wasLoaded: true,
-    };
-    expect(env.store.state).toEqual({
-      itemQueries: {
-        [k1]: {
-          error: null,
-          payload: 'users||1',
-          refetchOnMount: false,
-          status: 'loading',
-          wasLoaded: false,
-        },
-        [k2]: { ...defaultItemQueryProps, payload: 'users||2' },
-        [k3]: { ...defaultItemQueryProps, payload: 'users||3' },
-        [k4]: { ...defaultItemQueryProps, payload: 'users||4' },
-        [k5]: { ...defaultItemQueryProps, payload: 'users||5' },
-      },
-      items: {
-        [k1]: null,
-        [k2]: { id: 2, name: 'User 2' },
-        [k3]: { id: 3, name: 'User 3' },
-        [k4]: { id: 4, name: 'User 4' },
-        [k5]: { id: 5, name: 'User 5' },
-      },
-      queries: {
-        [queryKey]: {
-          error: null,
-          hasMore: false,
-          items: [k2, k3, k4, k5],
-          payload: { tableId: 'users' },
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-      },
-      itemLoadedFields: {},
-      itemFieldInvalidationFields: {},
-    });
+      itemLoadedFields: {}
+
+      itemQueries:
+        "users||1:
+          error: null
+          payload: 'users||1'
+          refetchOnMount: '❌'
+          status: 'loading'
+          wasLoaded: '❌'
+        "users||2:
+          error: null
+          payload: 'users||2'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||3:
+          error: null
+          payload: 'users||3'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||4:
+          error: null
+          payload: 'users||4'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        "users||5:
+          error: null
+          payload: 'users||5'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+
+      items:
+        "users||1: null
+        "users||2: { id: 2, name: 'User 2' }
+        "users||3: { id: 3, name: 'User 3' }
+        "users||4: { id: 4, name: 'User 4' }
+        "users||5: { id: 5, name: 'User 5' }
+
+      queries:
+        {tableId:"users"}:
+          error: null
+          hasMore: '❌'
+          items: ['"users||2', '"users||3', '"users||4', '"users||5']
+          payload: { tableId: 'users' }
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+    `);
   });
 });

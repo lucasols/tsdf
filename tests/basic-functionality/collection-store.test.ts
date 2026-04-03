@@ -4,7 +4,7 @@ import { createCollectionStore } from '../../src/collectionStore/collectionStore
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 
@@ -224,7 +224,9 @@ test('maxItems evicts the least recently used inactive item from memory', async 
   expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('second');
   expect(env.apiStore.getItemState('3')?.data?.value.title).toBe('third');
   expect(env.store.state['1']).toBeUndefined();
-  expect(Object.keys(env.store.state).sort()).toEqual(['"2', '"3']);
+  expect(Object.keys(env.store.state).sort()).toMatchInlineSnapshot(
+    `['"2', '"3']`,
+  );
 });
 
 test('maxItems throttles repeated cache-limit evictions after the first overflow', async () => {
@@ -305,18 +307,21 @@ test('await fetch', async () => {
 
   serverTable.setItem('1', { title: 'new title', completed: false });
 
-  expect(apiStore.getItemState('1')).toMatchObject({
-    data: { value: { title: 'todo', completed: false } },
-  });
+  expect(pick(apiStore.getItemState('1'), ['data'])).toMatchInlineSnapshot(`
+    data:
+      value: { completed: '❌', title: 'todo' }
+  `);
 
   const fetchPromise = apiStore.awaitFetch('1');
   await flushAllTimers();
   const result = await fetchPromise;
 
-  expect(result).toEqual({
-    data: { value: { title: 'new title', completed: false } },
-    error: null,
-  });
+  expect(result).toMatchInlineSnapshot(`
+    data:
+      value: { completed: '❌', title: 'new title' }
+
+    error: null
+  `);
 
   serverTable.setNextFetchError('1', 'error');
 
@@ -368,23 +373,70 @@ test('multiple fetches with different payloads not cancel each other, but cancel
 
   expect(env.serverTable.numOfFinishedFetches).toBe(7);
 
-  const defaultState = {
-    data: { value: defaultTodo },
-    error: null,
-    refetchOnMount: false as const,
-    status: 'success' as const,
-    wasLoaded: true,
-  };
+  expect(env.store.state).toMatchInlineSnapshot(`
+    "1:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
 
-  expect(env.store.state).toEqual({
-    '"1': { ...defaultState, payload: '1' },
-    '"2': { ...defaultState, payload: '2' },
-    '"3': { ...defaultState, payload: '3' },
-    '"4': { ...defaultState, payload: '4' },
-    '"5': { ...defaultState, payload: '5' },
-    '"6': { ...defaultState, payload: '6' },
-    '"7': { ...defaultState, payload: '7' },
-  });
+    "2:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '2'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+
+    "3:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '3'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+
+    "4:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '4'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+
+    "5:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '5'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+
+    "6:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '6'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+
+    "7:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '7'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+  `);
 });
 
 describe('update state functions', () => {
@@ -403,17 +455,17 @@ describe('update state functions', () => {
         usesRealTimeUpdates: true,
       });
 
-      expect(apiStore.getItemState('1')?.data).toEqual({
-        value: { completed: true, title: 'todo' },
-      });
+      expect(apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
+        `value: { completed: '✅', title: 'todo' }`,
+      );
 
       apiStore.updateItemState('1', (data) => {
         data.value.title = 'new title';
       });
 
-      expect(apiStore.getItemState('1')?.data).toEqual({
-        value: { completed: true, title: 'new title' },
-      });
+      expect(apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
+        `value: { completed: '✅', title: 'new title' }`,
+      );
     });
 
     test('update multiple items state', () => {
@@ -430,12 +482,11 @@ describe('update state functions', () => {
         apiStore.getItemState(['1', '2', '3']).map((item) => {
           return { id: item.payload, ...item.data?.value };
         }),
-      ).toEqual([
-        { completed: false, id: '1', title: 'new title 2' },
-        { completed: false, id: '2', title: 'new title 2' },
-        // 3 is not updated
-        { completed: false, id: '3', title: 'todo' },
-      ]);
+      ).toMatchInlineSnapshot(`
+        - { completed: '❌', id: '1', title: 'new title 2' }
+        - { completed: '❌', id: '2', title: 'new title 2' }
+        - { completed: '❌', id: '3', title: 'todo' }
+      `);
     });
 
     test('update multiple items state with filter fn', () => {
@@ -458,13 +509,13 @@ describe('update state functions', () => {
           .map((item) => {
             return { id: item.payload, ...item.data?.value };
           }),
-      ).toEqual([
-        { completed: false, id: '1', title: 'modified' },
-        { completed: false, id: '2', title: 'modified' },
-        { completed: false, id: '3', title: 'todo' },
-        { completed: false, id: '4', title: 'todo' },
-        { completed: false, id: '5', title: 'todo' },
-      ]);
+      ).toMatchInlineSnapshot(`
+        - { completed: '❌', id: '1', title: 'modified' }
+        - { completed: '❌', id: '2', title: 'modified' }
+        - { completed: '❌', id: '3', title: 'todo' }
+        - { completed: '❌', id: '4', title: 'todo' }
+        - { completed: '❌', id: '5', title: 'todo' }
+      `);
     });
 
     test('create if not exist', () => {
@@ -494,14 +545,16 @@ describe('update state functions', () => {
 
       expect(storeUpdates).toBe(1);
 
-      expect(apiStore.getItemState('6')).toEqual({
-        data: { value: { completed: false, title: 'item 6' } },
-        error: null,
-        payload: '6',
-        refetchOnMount: false,
-        status: 'success',
-        wasLoaded: true,
-      });
+      expect(apiStore.getItemState('6')).toMatchInlineSnapshot(`
+        data:
+          value: { completed: '❌', title: 'item 6' }
+
+        error: null
+        payload: '6'
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+      `);
     });
 
     test('create multiple if not exist', () => {
@@ -534,32 +587,29 @@ describe('update state functions', () => {
 
       expect(storeUpdates).toBe(1);
 
-      expect(apiStore.getItemState(['6', '7', '5'])).toEqual([
-        {
-          data: { value: { completed: false, title: 'item 6' } },
-          error: null,
-          payload: '6',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        {
-          data: { value: { completed: false, title: 'item 7' } },
-          error: null,
-          payload: '7',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-        {
-          data: { value: { completed: false, title: 'todo' } },
-          error: null,
-          payload: '5',
-          refetchOnMount: false,
-          status: 'success',
-          wasLoaded: true,
-        },
-      ]);
+      expect(apiStore.getItemState(['6', '7', '5'])).toMatchInlineSnapshot(`
+        - data:
+            value: { completed: '❌', title: 'item 6' }
+          error: null
+          payload: '6'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        - data:
+            value: { completed: '❌', title: 'item 7' }
+          error: null
+          payload: '7'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+        - data:
+            value: { completed: '❌', title: 'todo' }
+          error: null
+          payload: '5'
+          refetchOnMount: '❌'
+          status: 'success'
+          wasLoaded: '✅'
+      `);
     });
   });
 

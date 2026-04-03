@@ -155,12 +155,12 @@ test('collection state methods are applied to background tabs', async () => {
   envA.apiStore.deleteItemState('item2');
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Updated' },
-  });
-  expect(envB.apiStore.getItemState('item3')?.data).toEqual({
-    value: { name: 'Item 3' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Updated' }`,
+  );
+  expect(envB.apiStore.getItemState('item3')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 3' }`,
+  );
   expect(envB.apiStore.getItemState('item2')).toBeNull();
 });
 
@@ -200,9 +200,9 @@ test('collection state changes emitted during an in-flight mutation sync immedia
   });
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'During mutation' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'During mutation' }`,
+  );
 
   await flushAllTimers();
   await mutationPromise;
@@ -239,19 +239,22 @@ test('list query state methods are applied to background tabs', async () => {
   await advanceTime(0);
 
   const queryKey = envB.getQueryKey({ tableId: 'users' });
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Zoe' });
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||3')],
-  ).toEqual({ id: 3, name: 'Cara' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Zoe'
+    `);
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||3')])
+    .toMatchInlineSnapshot(`
+      id: 3
+      name: 'Cara'
+    `);
   expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||2')]).toBe(
     null,
   );
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    envB.getStoreItemKeyFromRaw('users||1'),
-    envB.getStoreItemKeyFromRaw('users||3'),
-  ]);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||1', '"users||3']`,
+  );
 });
 
 test('list query state changes emitted during an in-flight mutation sync immediately to background tabs', async () => {
@@ -290,9 +293,11 @@ test('list query state changes emitted during an in-flight mutation sync immedia
   });
   await advanceTime(0);
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'During mutation' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'During mutation'
+    `);
 
   await flushAllTimers();
   await mutationPromise;
@@ -331,12 +336,12 @@ test('local collection eviction does not broadcast deletion-like snapshots to ba
   await advanceTime(0);
 
   expect(envA.apiStore.getItemState('item1')).toBeUndefined();
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Item 1' },
-  });
-  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
-    value: { name: 'Item 2' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 1' }`,
+  );
+  expect(envB.apiStore.getItemState('item2')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 2' }`,
+  );
 });
 
 test('collection delete tombstones still reject delayed older snapshots', async () => {
@@ -510,9 +515,9 @@ test('collection state updates do not sync to tabs without an active session key
   });
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Item 1' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 1' }`,
+  );
 });
 
 test('collection state sync starts only after tabs share the same session key', async () => {
@@ -543,9 +548,9 @@ test('collection state sync starts only after tabs share the same session key', 
   });
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Item 1' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Item 1' }`,
+  );
 
   tabBSessionKey = 'account-a';
   envA.apiStore.updateItemState('item1', (draft) => {
@@ -553,9 +558,9 @@ test('collection state sync starts only after tabs share the same session key', 
   });
   await advanceTime(0);
 
-  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
-    value: { name: 'Second update' },
-  });
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Second update' }`,
+  );
 });
 
 test('list query state updates do not sync to tabs without an active session key', async () => {
@@ -584,9 +589,11 @@ test('list query state updates do not sync to tabs without an active session key
   });
   await advanceTime(0);
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Alice' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
 });
 
 test('list query state sync starts only after tabs share the same session key', async () => {
@@ -616,9 +623,11 @@ test('list query state sync starts only after tabs share the same session key', 
   });
   await advanceTime(0);
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Alice' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
 
   tabBSessionKey = 'account-a';
   envA.apiStore.updateItemState('users||1', (draft) => {
@@ -626,7 +635,9 @@ test('list query state sync starts only after tabs share the same session key', 
   });
   await advanceTime(0);
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({ id: 1, name: 'Second update' });
+  expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')])
+    .toMatchInlineSnapshot(`
+      id: 1
+      name: 'Second update'
+    `);
 });

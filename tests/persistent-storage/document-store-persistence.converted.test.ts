@@ -13,7 +13,6 @@ import {
 } from 'vitest';
 
 import type { ConvertedPersistentStorageDataSchema } from '../../src/persistentStorage/types';
-
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';

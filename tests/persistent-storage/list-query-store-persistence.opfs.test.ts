@@ -22,7 +22,6 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import {
   createListQueryStoreTestEnv,
   type Row,
@@ -30,7 +29,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -851,23 +850,26 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery)).toMatchObject({
-      data: {
-        items: [
-          mockAdapter.listQuery.itemKey('users', 1),
-          mockAdapter.listQuery.itemKey('users', 2),
-        ],
-      },
-    });
+    expect(pick(mockAdapter.listQuery.readQueryEntry(usersQuery), ['data']))
+      .toMatchInlineSnapshot(`
+        data:
+          hasMore: '❌'
+          items: ['"users||1', '"users||2']
+          payload: { tableId: 'users' }
+      `);
 
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery)).toMatchObject({
-      data: { items: [mockAdapter.listQuery.itemKey('users', 2)] },
-    });
+    expect(pick(mockAdapter.listQuery.readQueryEntry(usersQuery), ['data']))
+      .toMatchInlineSnapshot(`
+        data:
+          hasMore: '❌'
+          items: ['"users||2']
+          payload: { tableId: 'users' }
+      `);
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {

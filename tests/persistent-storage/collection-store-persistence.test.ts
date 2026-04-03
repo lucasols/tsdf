@@ -16,10 +16,9 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -288,10 +287,9 @@ describe('localStorage: collection store persistence', () => {
     await flushAllTimers();
 
     expect(localStorage.getItem('tsdf.sess1.col-entries')).toBeNull();
-    expect(listStoredItemKeys('col-entries', 'sess1').sort()).toEqual([
-      itemKey('a'),
-      itemKey('b'),
-    ]);
+    expect(
+      listStoredItemKeys('col-entries', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['"a', '"b']`);
   });
 
   test('ignoreItems predicate skips matching payloads and removes stale cached entries on flush', async () => {
@@ -318,14 +316,12 @@ describe('localStorage: collection store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredItemPayloads('col-ignore', 'sess1').sort()).toEqual([
-      'keep:cached',
-      'keep:live',
-    ]);
-    expect(listStoredItemKeys('col-ignore', 'sess1').sort()).toEqual([
-      itemKey('keep:cached'),
-      itemKey('keep:live'),
-    ]);
+    expect(
+      listStoredItemPayloads('col-ignore', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['keep:cached', 'keep:live']`);
+    expect(
+      listStoredItemKeys('col-ignore', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['"keep:cached', '"keep:live']`);
   });
 
   test('when maxItems is exceeded, pinnedItems keeps that payload in storage', async () => {
@@ -354,14 +350,12 @@ describe('localStorage: collection store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredItemPayloads('col-max-items', 'sess1').sort()).toEqual([
-      'a',
-      'd',
-    ]);
-    expect(listStoredItemKeys('col-max-items', 'sess1').sort()).toEqual([
-      itemKey('a'),
-      itemKey('d'),
-    ]);
+    expect(
+      listStoredItemPayloads('col-max-items', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['a', 'd']`);
+    expect(
+      listStoredItemKeys('col-max-items', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['"a', '"d']`);
   });
 
   test('when maxItems is exceeded, a cached item read by a hook is kept over an unread older entry', async () => {
@@ -406,11 +400,10 @@ describe('localStorage: collection store persistence', () => {
 
     expect(
       listStoredItemPayloads('col-max-items-read', 'sess1').sort(),
-    ).toEqual(['a', 'c']);
-    expect(listStoredItemKeys('col-max-items-read', 'sess1').sort()).toEqual([
-      itemKey('a'),
-      itemKey('c'),
-    ]);
+    ).toMatchInlineSnapshot(`['a', 'c']`);
+    expect(
+      listStoredItemKeys('col-max-items-read', 'sess1').sort(),
+    ).toMatchInlineSnapshot(`['"a', '"c']`);
   });
 
   test('preload reports unavailable async preload through persistent storage error handler', async () => {
@@ -427,9 +420,9 @@ describe('localStorage: collection store persistence', () => {
     `);
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(
+      pick(onPersistentStorageError.mock.calls[0]?.[0], ['message']),
+    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
   });
 
   test('invalid cached entries are cleaned up only after the item is read', async () => {

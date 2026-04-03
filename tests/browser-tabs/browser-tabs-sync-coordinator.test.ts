@@ -1,7 +1,6 @@
 import { expect, test } from 'vitest';
 
 import type { BrowserTabsTabStatusMessage } from '../../src/utils/browserTabsPriority';
-
 import {
   createBrowserTabsCoordinator,
   type BrowserTabsMessageMeta,
@@ -73,7 +72,7 @@ test('browser tabs coordinator ignores messages from a different session key', (
 
   transport.deliver(createRemoteStatusMessage(1, 'account-b'));
 
-  expect(receivedMessageIds).toEqual([]);
+  expect(receivedMessageIds).toMatchInlineSnapshot(`[]`);
 });
 
 test('browser tabs coordinator disables publish and receive when session key is false', () => {
@@ -100,8 +99,8 @@ test('browser tabs coordinator disables publish and receive when session key is 
   transport.deliver(createRemoteStatusMessage(1));
 
   expect(published).toBeNull();
-  expect(receivedMessageIds).toEqual([]);
-  expect(transport.getPostedMessages()).toEqual([]);
+  expect(receivedMessageIds).toMatchInlineSnapshot(`[]`);
+  expect(transport.getPostedMessages()).toMatchInlineSnapshot(`[]`);
 });
 
 test('browser tabs coordinator clears duplicate suppression when the session key changes', () => {
@@ -123,7 +122,9 @@ test('browser tabs coordinator clears duplicate suppression when the session key
   sessionKey = 'account-b';
   transport.deliver(createRemoteStatusMessage(1, 'account-b'));
 
-  expect(receivedMessageIds).toEqual(['remote-tab:1', 'remote-tab:1']);
+  expect(receivedMessageIds).toMatchInlineSnapshot(
+    `['remote-tab:1', 'remote-tab:1']`,
+  );
 });
 
 test('browser tabs coordinator keeps duplicate suppression bounded during long-lived status traffic', () => {

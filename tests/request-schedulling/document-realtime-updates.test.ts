@@ -66,7 +66,7 @@ test('dynamically throttle realtime updates', async () => {
 
   await flushAllTimers();
 
-  expect(env.uiChanges).toEqual([0, 1, 3, 4]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 3, 4]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -144,7 +144,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
     { comment: '^^^ throttle ends, delayed fetch runs ^^^', deltaMs: 500 },
   ]);
 
-  expect(env.uiChanges).toEqual([0, 1, 3]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 3]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -204,8 +204,8 @@ test('simple mutation that triggers a RTU', async () => {
 
   await flushAllTimers();
 
-  expect(env.serverMock.history).toEqual([0, 1]);
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1]`);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toContain('scheduled-rt-fetch-started');
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -277,8 +277,8 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
     { comment: '^^^ throttle ends, follow-up fetch runs ^^^', deltaMs: 200 },
   ]);
 
-  expect(env.serverMock.history).toEqual([0, 1, 2]);
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1, 2]`);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -359,8 +359,8 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
     { comment: 'mutation 2 completes, new RTU fetch starts' },
   ]);
 
-  expect(env.serverMock.history).toEqual([0, 1, 2]);
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1, 2]`);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.serverMock.numOfStartedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -439,8 +439,8 @@ test('slow mutation then new mutation while prev mutation is running', async () 
     { comment: 'mutation 2 completes, RTU fetch can start', deltaMs: 360 },
   ]);
 
-  expect(env.serverMock.history).toEqual([0, 1, 2]);
-  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1, 2]`);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1, 2]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -518,8 +518,8 @@ test('rtu mutations without optimistic updates', async () => {
     { comment: 'mutation 2 completes, RTU fetch updates UI' },
   ]);
 
-  expect(env.serverMock.history).toEqual([0, 1, 2]);
-  expect(env.uiChanges).toEqual([0, 2]);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1, 2]`);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 2]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.serverMock.numOfStartedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -595,8 +595,8 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
     },
   ]);
 
-  expect(env.serverMock.history).toEqual([0, 1]);
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.serverMock.history).toMatchInlineSnapshot(`[0, 1]`);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -673,7 +673,7 @@ test('mutation that triggers multiple rtu updates', async () => {
     },
   ]);
 
-  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.uiChanges).toMatchInlineSnapshot(`[0, 1]`);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`

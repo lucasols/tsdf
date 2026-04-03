@@ -13,14 +13,13 @@ import {
 } from 'vitest';
 
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-
 import {
   createListQueryStoreTestEnv,
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
@@ -213,11 +212,12 @@ test('useItem: cache miss still reports loading with showPartialAsRefetching ena
   );
   await advanceTime(0);
 
-  expect(hook.result.current).toMatchObject({
-    status: 'loading',
-    data: null,
-    loadingFields: ['id', 'name'],
-  });
+  expect(pick(hook.result.current, ['status', 'data', 'loadingFields']))
+    .toMatchInlineSnapshot(`
+      data: null
+      loadingFields: ['id', 'name']
+      status: 'loading'
+    `);
 
   hook.unmount();
   await flushAllTimers();

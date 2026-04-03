@@ -13,7 +13,7 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
   createFocusChangeCoordinator,
@@ -152,7 +152,9 @@ test('list query partial-resource snapshots do not seed an untouched sibling ite
   const envAFetchEntries = envA.serverTable.fetchHistory.filter(
     (e) => e.type === 'fetch',
   );
-  expect(envAFetchEntries[0]).toMatchObject({ fields: ['name'] });
+  expect(pick(envAFetchEntries[0], ['fields'])).toMatchInlineSnapshot(
+    `fields: ['name']`,
+  );
   const messages = getNonStatusMessages(transport.getMessages());
   expect(messages.length).toBeGreaterThan(0);
   expect(getPublisherTabIds(messages).size).toBe(1);
@@ -215,15 +217,19 @@ test('a fresh partial-resource list-query tab still performs its first fetch aft
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     1,
   );
-  expect(envBQuery.result.current).toMatchObject({
-    status: 'success',
-    items: [{ name: 'Alice' }, { name: 'Bob' }],
-  });
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    envB.getStoreItemKeyFromRaw('users||1'),
-    envB.getStoreItemKeyFromRaw('users||2'),
-  ]);
-  expect(envB.store.state.itemLoadedFields[itemKey]).toEqual(['name']);
+  expect(pick(envBQuery.result.current, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - name: 'Alice'
+        - name: 'Bob'
+      status: 'success'
+    `);
+  expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
+    `['"users||1', '"users||2']`,
+  );
+  expect(envB.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
+    `['name']`,
+  );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -271,10 +277,11 @@ test('list query partial-resources field metadata updates an already-loaded sibl
   });
   await advanceTime(0);
 
-  expect(envBNameHook.result.current).toMatchObject({
-    status: 'loading',
-    data: null,
-  });
+  expect(pick(envBNameHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: null
+      status: 'loading'
+    `);
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     envBFetchCountBeforeHook,
   );
@@ -292,15 +299,19 @@ test('list query partial-resources field metadata updates an already-loaded sibl
   // tab A's fetch, without running its own second request.
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
-  expect(envB.store.state.items[itemKey]).toEqual({ age: 30, name: 'Alicia' });
+  ).toMatchInlineSnapshot(`['age', 'name']`);
+  expect(envB.store.state.items[itemKey]).toMatchInlineSnapshot(`
+    age: 30
+    name: 'Alicia'
+  `);
 
   // Mounting a hook that only needs the remotely satisfied field should read
   // from the merged cache and remain a fetch-free cache hit.
-  expect(envBNameHook.result.current).toMatchObject({
-    status: 'success',
-    data: { name: 'Alicia' },
-  });
+  expect(pick(envBNameHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alicia' }
+      status: 'success'
+    `);
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     envBFetchCountBeforeHook,
   );
@@ -355,21 +366,24 @@ test('focused partial-resource item refetch updates the matching background hook
 
   // The focused tab seeds the name field first; the background tab then mounts
   // both hooks and only performs the extra fetch needed to satisfy age.
-  expect(envANameHook.result.current).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice' },
-  });
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 30 },
-  });
+  expect(pick(envANameHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30 }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
 
   const envBFetchCountBeforeFocusedRefetch = countFetchHistoryEntries(
     envB.serverTable.fetchHistory,
@@ -379,7 +393,9 @@ test('focused partial-resource item refetch updates the matching background hook
   const envBFetchEntries = envB.serverTable.fetchHistory.filter(
     (e) => e.type === 'fetch',
   );
-  expect(envBFetchEntries[0]).toMatchObject({ fields: ['age', 'name'] });
+  expect(pick(envBFetchEntries[0], ['fields'])).toMatchInlineSnapshot(
+    `fields: ['age', 'name']`,
+  );
 
   // A focused-tab name-only refetch should update the matching background hook
   // from the incoming item snapshot without making the background tab refetch.
@@ -395,18 +411,23 @@ test('focused partial-resource item refetch updates the matching background hook
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     envBFetchCountBeforeFocusedRefetch,
   );
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alicia' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 30 },
-  });
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30 }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
-  expect(envB.store.state.items[itemKey]).toEqual({ age: 30, name: 'Alicia' });
+  ).toMatchInlineSnapshot(`['age', 'name']`);
+  expect(envB.store.state.items[itemKey]).toMatchInlineSnapshot(`
+    age: 30
+    name: 'Alicia'
+  `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | age-hook | name-hook |
@@ -462,21 +483,24 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   await flushAllTimers();
 
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
-  expect(envAHook.result.current).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice', age: 30 },
-  });
-  expect(envBHooks.result.current.nameAge).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice', age: 30 },
-  });
-  expect(envBHooks.result.current.city).toMatchObject({
-    status: 'success',
-    data: { city: 'London' },
-  });
+  expect(pick(envAHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30, name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.nameAge, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30, name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.city, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { city: 'London' }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'city', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'city', 'name']`);
 
   const envAFetchCountBeforeRTU = countFetchHistoryEntries(
     envA.serverTable.fetchHistory,
@@ -515,28 +539,35 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     envBFetchCountBeforeRTU + 1,
   );
-  expect(envAFetchEntries.at(-1)).toMatchObject({ fields: ['age', 'name'] });
-  expect(envBFetchEntries.at(-1)).toMatchObject({ fields: ['city'] });
-  expect(envAHook.result.current).toMatchObject({
-    status: 'success',
-    data: { name: 'Alicia', age: 31 },
-  });
-  expect(envBHooks.result.current.nameAge).toMatchObject({
-    status: 'success',
-    data: { name: 'Alicia', age: 31 },
-  });
-  expect(envBHooks.result.current.city).toMatchObject({
-    status: 'success',
-    data: { city: 'Lisbon' },
-  });
+  expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['age', 'name']`,
+  );
+  expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['city']`,
+  );
+  expect(pick(envAHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.nameAge, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.city, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { city: 'Lisbon' }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'city', 'name']);
-  expect(envB.store.state.items[itemKey]).toEqual({
-    age: 31,
-    city: 'Lisbon',
-    name: 'Alicia',
-  });
+  ).toMatchInlineSnapshot(`['age', 'city', 'name']`);
+  expect(envB.store.state.items[itemKey]).toMatchInlineSnapshot(`
+    age: 31
+    city: 'Lisbon'
+    name: 'Alicia'
+  `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | name-age-hook |
@@ -639,8 +670,12 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     envBFetchCountBeforeRTU + 1,
   );
-  expect(envAFetchEntries.at(-1)).toMatchObject({ fields: ['age', 'name'] });
-  expect(envBFetchEntries.at(-1)).toMatchObject({ fields: ['city'] });
+  expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['age', 'name']`,
+  );
+  expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['city']`,
+  );
   expect(envAHook.result.current).toBe('Alicia:31');
   expect(envBHooks.result.current).toBe('Alicia:31:Lisbon');
 
@@ -822,14 +857,18 @@ test('list query partial-resources remote query snapshots satisfy affected field
   });
   await advanceTime(0);
 
-  expect(envBQueries.result.current.name).toMatchObject({
-    status: 'success',
-    items: [{ name: 'Alice' }],
-  });
-  expect(envBQueries.result.current.age).toMatchObject({
-    status: 'success',
-    items: [{ age: 30 }],
-  });
+  expect(pick(envBQueries.result.current.name, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - name: 'Alice'
+      status: 'success'
+    `);
+  expect(pick(envBQueries.result.current.age, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - age: 30
+      status: 'success'
+    `);
 
   act(() => {
     envB.apiStore.invalidateQueryAndItems({
@@ -840,14 +879,18 @@ test('list query partial-resources remote query snapshots satisfy affected field
     });
   });
 
-  expect(envBQueries.result.current.name).toMatchObject({
-    status: 'success',
-    items: [{ name: 'Alice' }],
-  });
-  expect(envBQueries.result.current.age).toMatchObject({
-    status: 'refetching',
-    items: [{ age: 30 }],
-  });
+  expect(pick(envBQueries.result.current.name, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - name: 'Alice'
+      status: 'success'
+    `);
+  expect(pick(envBQueries.result.current.age, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - age: 30
+      status: 'refetching'
+    `);
 
   envA.serverTable.setItem('users||1', { id: 1, name: 'Alice', age: 31 });
   void envA.apiStore.scheduleListQueryFetch(
@@ -861,14 +904,18 @@ test('list query partial-resources remote query snapshots satisfy affected field
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     envBListFetchCountBeforeInvalidation,
   );
-  expect(envBQueries.result.current.name).toMatchObject({
-    status: 'success',
-    items: [{ name: 'Alice' }],
-  });
-  expect(envBQueries.result.current.age).toMatchObject({
-    status: 'success',
-    items: [{ age: 31 }],
-  });
+  expect(pick(envBQueries.result.current.name, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - name: 'Alice'
+      status: 'success'
+    `);
+  expect(pick(envBQueries.result.current.age, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - age: 31
+      status: 'success'
+    `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -967,14 +1014,18 @@ test('list query partial-resources full-resource list hooks refetch in one tab a
     envBListFetchCountBeforeInvalidation + 1,
   );
   expect(envB.store.state.itemFieldInvalidationFields[itemKey]).toBeUndefined();
-  expect(envAQuery.result.current).toMatchObject({
-    status: 'success',
-    items: [{ id: 1, name: 'Alice', age: 31 }],
-  });
-  expect(envBQuery.result.current).toMatchObject({
-    status: 'success',
-    items: [{ id: 1, name: 'Alice', age: 31 }],
-  });
+  expect(pick(envAQuery.result.current, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - { age: 31, id: 1, name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBQuery.result.current, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - { age: 31, id: 1, name: 'Alice' }
+      status: 'success'
+    `);
 
   // The timelines make the roles explicit: tab B fetches after invalidation,
   // and tab A only receives confirmed query snapshots.
@@ -1018,7 +1069,7 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
 
   act(() => {
     envB.apiStore.invalidateQueryAndItems({
@@ -1032,10 +1083,12 @@ test('list query partial-resources remote snapshots clear satisfied local invali
 
   // Only the invalidated field becomes stale locally; the sibling snapshot will
   // later need to restore that field and clear the invalidation marker.
-  expect(envB.store.state.itemLoadedFields[itemKey]).toEqual(['name']);
-  expect(envB.store.state.itemFieldInvalidationFields[itemKey]).toEqual([
-    'age',
-  ]);
+  expect(envB.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
+    `['name']`,
+  );
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKey],
+  ).toMatchInlineSnapshot(`['age']`);
 
   // disableRefetches keeps these hooks from scheduling their own fetches so the
   // test only observes the sibling snapshot coming from tab A.
@@ -1066,18 +1119,21 @@ test('list query partial-resources remote snapshots clear satisfied local invali
 
   // Before tab A refetches, unaffected hooks should stay readable and the full
   // hook should continue exposing the cached object instead of dropping to loading.
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 30 },
-  });
-  expect(envBHooks.result.current.full).toMatchObject({
-    status: 'success',
-    data: { age: 30, name: 'Alice' },
-  });
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30 }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.full, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30, name: 'Alice' }
+      status: 'success'
+    `);
 
   envA.serverTable.setItem('users||1', { id: 1, name: 'Alice', age: 31 });
   void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
@@ -1092,20 +1148,23 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   );
   expect(
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
   expect(envB.store.state.itemFieldInvalidationFields[itemKey]).toBeUndefined();
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 31 },
-  });
-  expect(envBHooks.result.current.full).toMatchObject({
-    status: 'success',
-    data: { age: 31, name: 'Alice' },
-  });
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31 }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.full, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, name: 'Alice' }
+      status: 'success'
+    `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | age-hook | full-hook | name-hook |
@@ -1152,17 +1211,19 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   });
   await advanceTime(0);
 
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 30 },
-  });
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30 }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
 
   // Tab B invalidates both fields, but disableRefetches keeps the hooks pinned to
   // their cached values until sibling snapshots arrive.
@@ -1176,18 +1237,22 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   });
   await advanceTime(0);
 
-  expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual([]);
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toMatchInlineSnapshot(
+    `[]`,
+  );
   expect(
     [...(envB.store.state.itemFieldInvalidationFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 30 },
-  });
+  ).toMatchInlineSnapshot(`['age', 'name']`);
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alice' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30 }
+      status: 'success'
+    `);
 
   // Tab A refetches only 'name'. The incoming snapshot should clear the name
   // invalidation on tab B, update only the matching hook, and leave the age
@@ -1201,19 +1266,26 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     1,
   );
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alicia' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 30 },
-  });
-  expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual(['name']);
-  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
-    'age',
-  ]);
-  expect(envB.store.state.items[itemKeyB]).toEqual({ age: 30, name: 'Alicia' });
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30 }
+      status: 'success'
+    `);
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toMatchInlineSnapshot(
+    `['name']`,
+  );
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toMatchInlineSnapshot(`['age']`);
+  expect(envB.store.state.items[itemKeyB]).toMatchInlineSnapshot(`
+    age: 30
+    name: 'Alicia'
+  `);
 
   // A second fetch from tab A for 'age' clears the remaining invalidation and
   // updates the remaining stale hook.
@@ -1225,21 +1297,26 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     1,
   );
-  expect(envBHooks.result.current.name).toMatchObject({
-    status: 'success',
-    data: { name: 'Alicia' },
-  });
-  expect(envBHooks.result.current.age).toMatchObject({
-    status: 'success',
-    data: { age: 31 },
-  });
+  expect(pick(envBHooks.result.current.name, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHooks.result.current.age, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31 }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
   expect(
     envB.store.state.itemFieldInvalidationFields[itemKeyB],
   ).toBeUndefined();
-  expect(envB.store.state.items[itemKeyB]).toEqual({ age: 31, name: 'Alicia' });
+  expect(envB.store.state.items[itemKeyB]).toMatchInlineSnapshot(`
+    age: 31
+    name: 'Alicia'
+  `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -1289,7 +1366,7 @@ test('failed partial-resource list query fetch does not broadcast stale metadata
   const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
 
   envB.apiStore.invalidateQueryAndItems({
     queryPayload: false,
@@ -1299,10 +1376,12 @@ test('failed partial-resource list query fetch does not broadcast stale metadata
   });
   await advanceTime(0);
 
-  expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual(['name']);
-  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
-    'age',
-  ]);
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toMatchInlineSnapshot(
+    `['name']`,
+  );
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toMatchInlineSnapshot(`['age']`);
 
   const envAQuery = renderHook(() => {
     const query = envA.apiStore.useListQuery(
@@ -1340,10 +1419,12 @@ test('failed partial-resource list query fetch does not broadcast stale metadata
   });
   await advanceTime(0);
 
-  expect(envBQuery.result.current).toMatchObject({
-    status: 'refetching',
-    items: [{ name: 'Alice', age: 30 }],
-  });
+  expect(pick(envBQuery.result.current, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - { age: 30, name: 'Alice' }
+      status: 'refetching'
+    `);
 
   const messagesBeforeFailedFetch = getNonStatusMessages(
     transport.getMessages(),
@@ -1376,24 +1457,31 @@ test('failed partial-resource list query fetch does not broadcast stale metadata
     'list-query-snapshot',
   );
 
-  expect(envAQuery.result.current).toMatchObject({
-    status: 'error',
-    items: [{ name: 'Alice', age: 30 }],
-  });
-  expect(envAQuery.result.current.error).toMatchObject({
-    message: 'Network error',
-  });
-  expect(envBQuery.result.current).toMatchObject({
-    status: 'refetching',
-    items: [{ name: 'Alice', age: 30 }],
-  });
+  expect(pick(envAQuery.result.current, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - { age: 30, name: 'Alice' }
+      status: 'error'
+    `);
+  expect(
+    pick(envAQuery.result.current.error, ['message']),
+  ).toMatchInlineSnapshot(`message: 'Network error'`);
+  expect(pick(envBQuery.result.current, ['status', 'items']))
+    .toMatchInlineSnapshot(`
+      items:
+        - { age: 30, name: 'Alice' }
+      status: 'refetching'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['name']);
-  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
-    'age',
-  ]);
-  expect(envB.store.state.items[itemKeyB]).toEqual({ age: 30, name: 'Alice' });
+  ).toMatchInlineSnapshot(`['name']`);
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toMatchInlineSnapshot(`['age']`);
+  expect(envB.store.state.items[itemKeyB]).toMatchInlineSnapshot(`
+    age: 30
+    name: 'Alice'
+  `);
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     1,
   );
@@ -1480,10 +1568,12 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
   });
   await advanceTime(0);
 
-  expect(envA.store.state.itemLoadedFields[itemKeyA]).toEqual(['name']);
-  expect(envA.store.state.itemFieldInvalidationFields[itemKeyA]).toEqual([
-    'age',
-  ]);
+  expect(envA.store.state.itemLoadedFields[itemKeyA]).toMatchInlineSnapshot(
+    `['name']`,
+  );
+  expect(
+    envA.store.state.itemFieldInvalidationFields[itemKeyA],
+  ).toMatchInlineSnapshot(`['age']`);
 
   const messagesBeforeFailedFetch = getNonStatusMessages(
     transport.getMessages(),
@@ -1514,31 +1604,38 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
 
   // After the error, tab A clears the invalidation marker but age remains
   // missing from loaded fields.
-  expect(envAHook.result.current).toMatchObject({
-    status: 'error',
-    data: { name: 'Alice', age: 30 },
-  });
-  expect(envAHook.result.current.error).toMatchObject({
-    message: 'Network error',
-  });
-  expect(envA.store.state.itemLoadedFields[itemKeyA]).toEqual(['name']);
+  expect(pick(envAHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30, name: 'Alice' }
+      status: 'error'
+    `);
+  expect(
+    pick(envAHook.result.current.error, ['message']),
+  ).toMatchInlineSnapshot(`message: 'Network error'`);
+  expect(envA.store.state.itemLoadedFields[itemKeyA]).toMatchInlineSnapshot(
+    `['name']`,
+  );
   expect(
     envA.store.state.itemFieldInvalidationFields[itemKeyA],
   ).toBeUndefined();
 
   // Tab B must be completely unaffected — no error snapshot is broadcast, and
   // the sibling's field metadata stays intact.
-  expect(envBHook.result.current).toMatchObject({
-    status: 'success',
-    data: { name: 'Alice', age: 30 },
-  });
+  expect(pick(envBHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 30, name: 'Alice' }
+      status: 'success'
+    `);
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
   expect(
     envB.store.state.itemFieldInvalidationFields[itemKeyB],
   ).toBeUndefined();
-  expect(envB.store.state.items[itemKeyB]).toEqual({ age: 30, name: 'Alice' });
+  expect(envB.store.state.items[itemKeyB]).toMatchInlineSnapshot(`
+    age: 30
+    name: 'Alice'
+  `);
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     1,
   );
@@ -1592,7 +1689,7 @@ test('item deletion on one tab cleans up partial-resource field metadata on sibl
 
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
+  ).toMatchInlineSnapshot(`['age', 'name']`);
   expect(envB.store.state.queries[queryKeyB]?.items).toContain(itemKeyB);
 
   // Invalidate age on tab B so we can verify the invalidation metadata is also
@@ -1605,9 +1702,9 @@ test('item deletion on one tab cleans up partial-resource field metadata on sibl
   });
   await advanceTime(0);
 
-  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
-    'age',
-  ]);
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toMatchInlineSnapshot(`['age']`);
 
   // Advance time so the deletion snapshot has a strictly newer sentAt than any
   // previously recorded sync version on tab B.

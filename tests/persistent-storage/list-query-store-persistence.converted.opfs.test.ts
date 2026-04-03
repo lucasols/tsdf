@@ -18,7 +18,6 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -303,8 +302,6 @@ describe('opfs: converted list query store persistence', () => {
         },
       },
     });
-    const usersItemKey = mockAdapter.listQuery.itemKey('users', 1);
-
     // Keep an older cached item so the test proves failed writes do not replace it.
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
@@ -340,9 +337,9 @@ describe('opfs: converted list query store persistence', () => {
       .toMatchInlineSnapshot(`
         tableId: 'users'
       `);
-    expect(readStoredQuery(mockAdapter, usersQuery).items).toEqual([
-      usersItemKey,
-    ]);
+    expect(
+      readStoredQuery(mockAdapter, usersQuery).items,
+    ).toMatchInlineSnapshot(`['"users||1']`);
     expect(readStoredQuery(mockAdapter, usersQuery).hasMore).toBe(false);
   });
 });

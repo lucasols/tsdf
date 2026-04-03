@@ -47,7 +47,7 @@ describe('documentStore performMutation debounce', () => {
     });
 
     await advanceTime(299);
-    expect(mutationCalls).toEqual([]);
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
 
     await advanceTime(1);
 
@@ -56,7 +56,7 @@ describe('documentStore performMutation debounce', () => {
       secondPromise,
     ]);
 
-    expect(mutationCalls).toEqual(['second']);
+    expect(mutationCalls).toMatchInlineSnapshot(`['second']`);
     assert(!firstResult.ok);
     expect(firstResult.error).toBe(true);
     assert(secondResult.ok);
@@ -84,7 +84,7 @@ describe('documentStore performMutation debounce', () => {
     });
 
     await advanceTime(299);
-    expect(mutationCalls).toEqual([]);
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
 
     await advanceTime(1);
 
@@ -93,7 +93,9 @@ describe('documentStore performMutation debounce', () => {
       secondPromise,
     ]);
 
-    expect(mutationCalls.toSorted()).toEqual(['first', 'second']);
+    expect(mutationCalls.toSorted()).toMatchInlineSnapshot(
+      `['first', 'second']`,
+    );
     assert(firstResult.ok);
     expect(firstResult.value).toBe('first');
     assert(secondResult.ok);
@@ -125,7 +127,7 @@ describe('collectionStore performMutation debounce', () => {
     });
 
     await advanceTime(299);
-    expect(mutationCalls).toEqual([]);
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
 
     await advanceTime(1);
 
@@ -134,7 +136,7 @@ describe('collectionStore performMutation debounce', () => {
       secondPromise,
     ]);
 
-    expect(mutationCalls).toEqual(['second']);
+    expect(mutationCalls).toMatchInlineSnapshot(`['second']`);
     assert(!firstResult.ok);
     expect(firstResult.error).toBe(true);
     assert(secondResult.ok);
@@ -165,7 +167,7 @@ describe('collectionStore performMutation debounce', () => {
     });
 
     await advanceTime(299);
-    expect(mutationCalls).toEqual([]);
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
 
     await advanceTime(1);
 
@@ -174,7 +176,9 @@ describe('collectionStore performMutation debounce', () => {
       secondPromise,
     ]);
 
-    expect(mutationCalls.toSorted()).toEqual(['first', 'second']);
+    expect(mutationCalls.toSorted()).toMatchInlineSnapshot(
+      `['first', 'second']`,
+    );
     assert(firstResult.ok);
     expect(firstResult.value).toBe('first');
     assert(secondResult.ok);
@@ -208,7 +212,7 @@ describe('listQueryStore performMutation debounce', () => {
     });
 
     await advanceTime(299);
-    expect(mutationCalls).toEqual([]);
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
 
     await advanceTime(1);
 
@@ -217,7 +221,7 @@ describe('listQueryStore performMutation debounce', () => {
       secondPromise,
     ]);
 
-    expect(mutationCalls).toEqual(['second']);
+    expect(mutationCalls).toMatchInlineSnapshot(`['second']`);
     assert(!firstResult.ok);
     expect(firstResult.error).toBe(true);
     assert(secondResult.ok);
@@ -250,7 +254,7 @@ describe('listQueryStore performMutation debounce', () => {
     });
 
     await advanceTime(299);
-    expect(mutationCalls).toEqual([]);
+    expect(mutationCalls).toMatchInlineSnapshot(`[]`);
 
     await advanceTime(1);
 
@@ -259,7 +263,9 @@ describe('listQueryStore performMutation debounce', () => {
       secondPromise,
     ]);
 
-    expect(mutationCalls.toSorted()).toEqual(['first', 'second']);
+    expect(mutationCalls.toSorted()).toMatchInlineSnapshot(
+      `['first', 'second']`,
+    );
     assert(firstResult.ok);
     expect(firstResult.value).toBe('first');
     assert(secondResult.ok);
