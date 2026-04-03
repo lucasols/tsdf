@@ -94,9 +94,11 @@ describe('mockBrowserOpfs', () => {
     await resolveAfterAllTimers(docsDir.removeEntry('entry.json'));
 
     const textPromise = savedFile.text();
-    const rejectedRead = expect(textPromise).rejects.toMatchObject({
-      name: 'NotFoundError',
-    });
+    const rejectedRead = expect(textPromise).rejects.toMatchInlineSnapshot(`
+      Error#:
+        message: 'A requested file or directory could not be found at the time an operation was processed.'
+        name: 'NotFoundError'
+    `);
     await advanceTime(2);
     await rejectedRead;
 
@@ -134,9 +136,11 @@ describe('mockBrowserOpfs', () => {
     await resolveAfterAllTimers(secondWritable.close());
 
     const textPromise = savedFile.text();
-    const rejectedRead = expect(textPromise).rejects.toMatchObject({
-      name: 'NotReadableError',
-    });
+    const rejectedRead = expect(textPromise).rejects.toMatchInlineSnapshot(`
+      Error#:
+        message: 'The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.'
+        name: 'NotReadableError'
+    `);
     await advanceTime(2);
     await rejectedRead;
 

@@ -231,10 +231,18 @@ test('direct document store offline public api', async () => {
       pendingSync: '❌'
       status: 'success'
     `);
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-offline-session'
+    updatedAt: 1735689600010
+  `);
 
   act(() => {
     network.goOffline();
@@ -339,25 +347,54 @@ test('direct document store offline public api', async () => {
       pendingSync: '✅'
       status: 'success'
     `);
-  expect(documentStore.getOfflineEntities()).toMatchObject([
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: 'document',
-      pendingMutations: 4,
-      storeType: 'document',
-    },
-  ]);
-  expect(getGlobalOfflineEntities(sessionKey)).toMatchObject([
-    { storeName: 'direct-document-offline' },
-  ]);
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    network: { active: true, enabled: true },
-  });
+
+  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'direct-document-offline-session:direct-document-offline:document'
+      pendingMutations: 4
+      requiresResolution: '❌'
+      sessionKey: 'direct-document-offline-session'
+      storeName: 'direct-document-offline'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689602000
+  `);
+
+  expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'direct-document-offline-session:direct-document-offline:document'
+      pendingMutations: 4
+      requiresResolution: '❌'
+      sessionKey: 'direct-document-offline-session'
+      storeName: 'direct-document-offline'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689602000
+  `);
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-offline-session'
+    updatedAt: 1735689602000
+  `);
 
   await act(async () => {
     network.goOnline();
@@ -369,32 +406,64 @@ test('direct document store offline public api', async () => {
   expect(documentHook.result.current.pendingSync).toBe(false);
 
   const [conflict] = documentStore.getOfflineResolutions();
-  expect(conflict).toMatchObject({
-    blockedByResolutionIds: [],
-    blockedResolutionCount: 0,
-    childResolutionCount: 0,
-    childResolutionIds: [],
-    conflict: { reason: 'stale-server-value' },
-    entityRefs: [{ entityKey: 'document', entityKind: 'document' }],
-    input: { value: 6 },
-    operation: 'conflictValue',
-    sessionKey,
-    storeName: 'direct-document-offline',
-    storeType: 'document',
-  });
-  expect(documentStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: 'document',
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      requiresResolution: true,
-      pendingMutations: 0,
-      storeType: 'document',
-      syncState: 'resolution-required',
-    },
-  ]);
+  if (!conflict || conflict.kind !== 'conflict') {
+    throw new Error('Expected a conflict resolution');
+  }
+
+  expect({
+    ...pick(conflict, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    conflict: conflict.conflict,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 0
+    childResolutionIds: []
+    conflict: { reason: 'stale-server-value' }
+    createdAt: 1735689607000
+    enqueuedAt: 1735689602000
+    entityRefs:
+      - { entityKey: 'document', entityKind: 'document' }
+    input: { value: 6 }
+    kind: 'conflict'
+    operation: 'conflictValue'
+    sessionKey: 'direct-document-offline-session'
+    storeName: 'direct-document-offline'
+    storeType: 'document'
+    updatedAt: 1735689607000
+  `);
+
+  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689607000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'direct-document-offline-session:direct-document-offline:document'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'direct-document-offline-session'
+      storeName: 'direct-document-offline'
+      storeType: 'document'
+      syncState: 'resolution-required'
+      updatedAt: 1735689607000
+  `);
   expect(skipSyncReplayOrder).toMatchInlineSnapshot(
     `['getServerSnapshot', 'shouldSkipSync']`,
   );
@@ -403,7 +472,7 @@ test('direct document store offline public api', async () => {
   );
 
   await act(async () => {
-    await documentStore.resolveOfflineResolution(conflict!.id, { value: 7 });
+    await documentStore.resolveOfflineResolution(conflict.id, { value: 7 });
     await flushAllTimers();
   });
 
@@ -416,11 +485,18 @@ test('direct document store offline public api', async () => {
       pendingSync: '❌'
       status: 'success'
     `);
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-    network: { active: false, enabled: true },
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-offline-session'
+    updatedAt: 1735689602010
+  `);
 
   documentHook.unmount();
 });

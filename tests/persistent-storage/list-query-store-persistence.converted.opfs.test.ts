@@ -291,7 +291,7 @@ describe('opfs: converted list query store persistence', () => {
 
   test('write conversion errors are reported without overwriting item entries', async () => {
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    createOpfsPersistentStorageTestStore({
       initialState: {
         storeName: 'lq-opfs-save-error',
         sessionKey: 'sess1',
@@ -302,13 +302,6 @@ describe('opfs: converted list query store persistence', () => {
         },
       },
     });
-    const persistedQuery = listQueryScope(
-      mockAdapter,
-      'lq-opfs-save-error',
-      'sess1',
-    );
-    const usersItemKey = persistedQuery.itemKey('users', 1);
-
     // Keep an older cached item so the test proves failed writes do not replace it.
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
@@ -344,7 +337,8 @@ describe('opfs: converted list query store persistence', () => {
     const storedQuery = getParsedOpfsFileData(
       'tsdf/sess1/lq-opfs-save-error/lq.<{tableId:"users"}>.p.json',
     );
-    expect(storedQuery).toMatchObject({ i: [usersItemKey] });
+
+    expect(storedQuery).toMatchInlineSnapshot(`i: ['"users||1']`);
     expect(storedQuery).not.toHaveProperty('p');
     expect(storedQuery).not.toHaveProperty('h');
     expect(getParsedOpfsFileData('tsdf/sess1/lq-opfs-save-error/lq._i.r.json'))

@@ -137,9 +137,24 @@ test('stores unregister their previous offline session when the session key beco
     });
   });
 
-  expect(getGlobalOfflineEntities('offline-session-cleanup')).toMatchObject([
-    { entityKey: 'document', storeName: 'offline-session-cleanup-doc' },
-  ]);
+  expect(getGlobalOfflineEntities('offline-session-cleanup'))
+    .toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-session-cleanup:offline-session-cleanup-doc:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-session-cleanup'
+      storeName: 'offline-session-cleanup-doc'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689600000
+  `);
 
   // Simulate logout so the store no longer belongs to the previous session.
   currentSessionKey = false;
@@ -397,24 +412,80 @@ test('global and store offline entities expose temp-create dependency metadata o
     .getOfflineResolutions()
     .find((resolution) => resolution.operation === 'patchUserName');
 
-  expect(storeEntity).toMatchObject({
-    blockedByResolutionIds: [parentResolution?.id],
-    blockedResolutionCount: 1,
-    childResolutionCount: 1,
-    childResolutionIds: [childResolution?.id],
-    entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
-    requiresResolution: true,
-    syncState: 'resolution-required',
-  });
-  expect(globalEntity).toMatchObject({
-    blockedByResolutionIds: [parentResolution?.id],
-    blockedResolutionCount: 1,
-    childResolutionCount: 1,
-    childResolutionIds: [childResolution?.id],
-    entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
-    requiresResolution: true,
-    storeName: 'offline-session-temp-create-dependencies-store',
-  });
+  expect(storeEntity?.blockedByResolutionIds).toHaveLength(1);
+  expect(storeEntity?.blockedByResolutionIds[0]).toBe(parentResolution?.id);
+  expect(storeEntity?.childResolutionIds).toHaveLength(1);
+  expect(storeEntity?.childResolutionIds[0]).toBe(childResolution?.id);
+  expect(
+    pick(storeEntity, [
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'createdAt',
+      'entityKey',
+      'entityKind',
+      'id',
+      'pendingMutations',
+      'requiresResolution',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'syncState',
+      'tempId',
+      'updatedAt',
+    ]),
+  ).toMatchInlineSnapshot(`
+    blockedResolutionCount: 1
+    childResolutionCount: 1
+    createdAt: 1735689620000
+    entityKey: '"temp:Linus offline'
+    entityKind: 'item'
+    id: 'offline-session-temp-create-dependencies:offline-session-temp-create-dependencies-store:"temp:Linus offline'
+    pendingMutations: 0
+    requiresResolution: '✅'
+    sessionKey: 'offline-session-temp-create-dependencies'
+    storeName: 'offline-session-temp-create-dependencies-store'
+    storeType: 'listQuery'
+    syncState: 'resolution-required'
+    tempId: 'temp:Linus offline'
+    updatedAt: 1735689620000
+  `);
+  expect(globalEntity?.blockedByResolutionIds).toHaveLength(1);
+  expect(globalEntity?.blockedByResolutionIds[0]).toBe(parentResolution?.id);
+  expect(globalEntity?.childResolutionIds).toHaveLength(1);
+  expect(globalEntity?.childResolutionIds[0]).toBe(childResolution?.id);
+  expect(
+    pick(globalEntity, [
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'createdAt',
+      'entityKey',
+      'entityKind',
+      'id',
+      'pendingMutations',
+      'requiresResolution',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'syncState',
+      'tempId',
+      'updatedAt',
+    ]),
+  ).toMatchInlineSnapshot(`
+    blockedResolutionCount: 1
+    childResolutionCount: 1
+    createdAt: 1735689620000
+    entityKey: '"temp:Linus offline'
+    entityKind: 'item'
+    id: 'offline-session-temp-create-dependencies:offline-session-temp-create-dependencies-store:"temp:Linus offline'
+    pendingMutations: 0
+    requiresResolution: '✅'
+    sessionKey: 'offline-session-temp-create-dependencies'
+    storeName: 'offline-session-temp-create-dependencies-store'
+    storeType: 'listQuery'
+    syncState: 'resolution-required'
+    tempId: 'temp:Linus offline'
+    updatedAt: 1735689620000
+  `);
 });
 
 // Each store manages its own offline lifecycle -- a store without offlineMode
@@ -527,9 +598,10 @@ test('offline mutations fail fast when no session key is available', async () =>
   });
 
   expect(mutationResult.ok).toBe(false);
-  expect(mutationResult.error).toMatchObject({
-    id: 'offline-session-unavailable',
-  });
+
+  expect(mutationResult.error).toMatchInlineSnapshot(
+    `Error#: { message: 'Offline session unavailable', name: 'Error' }`,
+  );
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 1
   `);
@@ -543,10 +615,18 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   const sessionKey = 'offline-global-hook-session';
 
   const globalHook = renderHook(() => useGlobalOfflineStatus(sessionKey));
-  expect(globalHook.result.current).toMatchObject({
-    effectiveOffline: false,
-    sessionKey,
-  });
+
+  expect(globalHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'offline-global-hook-session'
+    updatedAt: 1735689600000
+  `);
 
   let mutationOk = false;
   await act(async () => {
@@ -590,11 +670,18 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   });
 
   expect(mutationOk).toBe(true);
-  expect(globalHook.result.current).toMatchObject({
-    effectiveOffline: true,
-    effectiveMode: 'offline',
-    sessionKey,
-  });
+
+  expect(globalHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'offline-global-hook-session'
+    updatedAt: 1735689600000
+  `);
   expect(localStorage.getItem(`tsdf-os:${sessionKey}`)).not.toBeNull();
 
   // Once the session is back online, the startup bootstrap snapshot should be
@@ -607,11 +694,16 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   });
 
   await advanceTime(1010);
+
   expect(
     readManagedLocalStorageSingleEntryByPayload(
       `tsdf.${sessionKey}.offline-global-hook-doc`,
     ),
-  ).toMatchObject({ meta: { o: true } });
+  ).toMatchInlineSnapshot(`
+    lastAccessAt: 1735689601000
+    meta: { o: '✅' }
+    payloadKey: 'tsdf.offline-global-hook-session.offline-global-hook-doc'
+  `);
 
   act(() => {
     globalHook.unmount();
@@ -775,18 +867,61 @@ test('global and per-store offline entity selectors aggregate queued work across
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
-  expect(getGlobalOfflineEntities(sessionKey)).toMatchObject([
-    { entityKey: 'document', pendingMutations: 1, storeName: 'offline-doc-a' },
-    { entityKey: 'document', pendingMutations: 1, storeName: 'offline-doc-b' },
-  ]);
+  expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'shared-offline-entities:offline-doc-a:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'shared-offline-entities'
+      storeName: 'offline-doc-a'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689600000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'shared-offline-entities:offline-doc-b:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'shared-offline-entities'
+      storeName: 'offline-doc-b'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689600000
+  `);
 
   const globalHook = renderHook(() => useGlobalOfflineEntities(sessionKey));
   expect(globalHook.result.current).toHaveLength(2);
   globalHook.unmount();
 
   const storeHook = renderHook(() => envA.apiStore.useOfflineEntities());
-  expect(storeHook.result.current).toMatchObject([
-    { entityKey: 'document', pendingMutations: 1, storeName: 'offline-doc-a' },
-  ]);
+
+  expect(storeHook.result.current).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'shared-offline-entities:offline-doc-a:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'shared-offline-entities'
+      storeName: 'offline-doc-a'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689600000
+  `);
   storeHook.unmount();
 });

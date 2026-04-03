@@ -113,7 +113,9 @@ describe('opfs: document store persistence', () => {
     await resolveAfterAllTimers(preloadPromise);
     await flushAllTimers();
 
-    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(
+      `['tsdf.sess1.opfs-version-mismatch']`,
+    );
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -138,13 +140,15 @@ describe('opfs: document store persistence', () => {
     await resolveAfterAllTimers(preloadPromise);
     await flushAllTimers();
 
-    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-cleanup']`,
+    );
     expect(mockAdapter.has(key)).toBe(false);
   });
 
   test('loads cached data on first read and refetches on mount', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({});
-    const key = populateStorage(mockAdapter, 'opfs-doc', 'session1', {
+    populateStorage(mockAdapter, 'opfs-doc', 'session1', {
       name: 'cached',
       value: 42,
     });
@@ -174,7 +178,9 @@ describe('opfs: document store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-doc']`,
+    );
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -224,7 +230,7 @@ describe('opfs: document store persistence', () => {
 
   test('remount does not reread OPFS after the document is already hydrated in memory', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({});
-    const key = populateStorage(mockAdapter, 'opfs-remount', 'session1', {
+    populateStorage(mockAdapter, 'opfs-remount', 'session1', {
       name: 'cached',
       value: 7,
     });
@@ -245,7 +251,9 @@ describe('opfs: document store persistence', () => {
     );
     await flushAllTimers();
 
-    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-remount']`,
+    );
 
     firstHook.unmount();
 
@@ -257,7 +265,9 @@ describe('opfs: document store persistence', () => {
     );
     await flushAllTimers();
 
-    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-remount']`,
+    );
   });
 
   test('reset prevents stale OPFS hydration from modifying store', async () => {

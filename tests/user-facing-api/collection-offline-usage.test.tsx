@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_array, rc_boolean, rc_object, rc_string } from 'runcheck';
@@ -191,7 +190,10 @@ test('direct collection store offline public api', async () => {
               throw new Error(`dispatch failed after send ${input.title}`);
             },
             shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
-              expect(input).toMatchObject({ id: '1', title: 'Todo 1 skip' });
+              expect(input).toMatchInlineSnapshot(`
+                id: '1'
+                title: 'Todo 1 skip'
+              `);
               expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
               return true;
             },
@@ -214,7 +216,10 @@ test('direct collection store offline public api', async () => {
                 updatedAt,
               }) => {
                 expect(input.id).toBe('1');
-                expect(conflict).toMatchObject({ reason: 'server-changed' });
+
+                expect(conflict).toMatchInlineSnapshot(
+                  `reason: 'server-changed'`,
+                );
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
                 const parsedResolution =
                   conflictResolutionSchema.parse(resolution);
@@ -281,10 +286,18 @@ test('direct collection store offline public api', async () => {
       payload: '2'
       status: 'success'
     `);
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-collection-offline-session'
+    updatedAt: 1735689600010
+  `);
 
   act(() => {
     network.goOffline();
@@ -390,46 +403,72 @@ test('direct collection store offline public api', async () => {
       pendingSync: '✅'
       status: 'success'
     `);
-  expect(collectionStore.getOfflineEntities()).toMatchObject([
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey('1'),
-      pendingMutations: 4,
-      storeType: 'collection',
-    },
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey('2'),
-      pendingMutations: 1,
-      storeType: 'collection',
-    },
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey('temp:Todo 3 offline'),
-      pendingMutations: 1,
-      storeType: 'collection',
-      tempId: 'temp:Todo 3 offline',
-    },
-  ]);
+
+  expect(collectionStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: '"1'
+      entityKind: 'item'
+      id: 'direct-collection-offline-session:direct-collection-offline:"1'
+      pendingMutations: 4
+      requiresResolution: '❌'
+      sessionKey: 'direct-collection-offline-session'
+      storeName: 'direct-collection-offline'
+      storeType: 'collection'
+      syncState: 'pending'
+      updatedAt: 1735689602000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: '"2'
+      entityKind: 'item'
+      id: 'direct-collection-offline-session:direct-collection-offline:"2'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'direct-collection-offline-session'
+      storeName: 'direct-collection-offline'
+      storeType: 'collection'
+      syncState: 'pending'
+      updatedAt: 1735689602000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: '"temp:Todo 3 offline'
+      entityKind: 'item'
+      id: 'direct-collection-offline-session:direct-collection-offline:"temp:Todo 3 offline'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'direct-collection-offline-session'
+      storeName: 'direct-collection-offline'
+      storeType: 'collection'
+      syncState: 'pending'
+      tempId: 'temp:Todo 3 offline'
+      updatedAt: 1735689602000
+  `);
   expect(getGlobalOfflineEntities(sessionKey)).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ storeName: 'direct-collection-offline' }),
     ]),
   );
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    network: { active: true, enabled: true },
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-collection-offline-session'
+    updatedAt: 1735689602000
+  `);
 
   await act(async () => {
     network.goOnline();
@@ -438,31 +477,65 @@ test('direct collection store offline public api', async () => {
   });
 
   const [conflict] = collectionStore.getOfflineResolutions();
-  expect(conflict).toMatchObject({
-    blockedByResolutionIds: [],
-    blockedResolutionCount: 0,
-    childResolutionCount: 0,
-    childResolutionIds: [],
-    conflict: { reason: 'server-changed' },
-    input: { id: '1', title: 'Todo 1 conflict' },
-    operation: 'conflictTodo',
-    sessionKey,
-    storeName: 'direct-collection-offline',
-    storeType: 'collection',
-  });
-  expect(collectionStore.getOfflineEntities()).toMatchObject([
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey('1'),
-      requiresResolution: true,
-      pendingMutations: 0,
-      storeType: 'collection',
-      syncState: 'resolution-required',
-    },
-  ]);
+  if (!conflict || conflict.kind !== 'conflict') {
+    throw new Error('Expected a conflict resolution');
+  }
+
+  expect({
+    ...pick(conflict, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    conflict: conflict.conflict,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 0
+    childResolutionIds: []
+    conflict: { reason: 'server-changed' }
+    createdAt: 1735689607000
+    enqueuedAt: 1735689602000
+    entityRefs:
+      - entityKey: '"1'
+        entityKind: 'item'
+    input: { id: '1', title: 'Todo 1 conflict' }
+    kind: 'conflict'
+    operation: 'conflictTodo'
+    sessionKey: 'direct-collection-offline-session'
+    storeName: 'direct-collection-offline'
+    storeType: 'collection'
+    updatedAt: 1735689607000
+  `);
+
+  expect(collectionStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689607000
+      entityKey: '"1'
+      entityKind: 'item'
+      id: 'direct-collection-offline-session:direct-collection-offline:"1'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'direct-collection-offline-session'
+      storeName: 'direct-collection-offline'
+      storeType: 'collection'
+      syncState: 'resolution-required'
+      updatedAt: 1735689607000
+  `);
   expect(todoTwoHook.result.current.data).toMatchInlineSnapshot(`
     completed: '❌'
     title: 'Todo 2 offline'
@@ -478,7 +551,7 @@ test('direct collection store offline public api', async () => {
     `);
 
   await act(async () => {
-    await collectionStore.resolveOfflineResolution(conflict!.id, {
+    await collectionStore.resolveOfflineResolution(conflict.id, {
       title: 'Todo 1 resolved',
     });
     await flushAllTimers();
@@ -505,11 +578,18 @@ test('direct collection store offline public api', async () => {
       pendingSync: '❌'
       status: 'success'
     `);
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-    network: { active: false, enabled: true },
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-collection-offline-session'
+    updatedAt: 1735689608010
+  `);
 
   const onlineRenameResult = await act(async () => {
     return await renameTodo('1', 'Todo 1 online');

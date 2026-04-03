@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import {
@@ -233,7 +232,10 @@ test('direct list-query store offline public api', async () => {
               throw new Error(`dispatch failed after send ${input.name}`);
             },
             shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
-              expect(input).toMatchObject({ id: 1, name: 'Ada skip' });
+              expect(input).toMatchInlineSnapshot(`
+                id: 1
+                name: 'Ada skip'
+              `);
               expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
               return true;
             },
@@ -256,7 +258,10 @@ test('direct list-query store offline public api', async () => {
                 updatedAt,
               }) => {
                 expect(input.id).toBe(1);
-                expect(conflict).toMatchObject({ reason: 'server-changed' });
+
+                expect(conflict).toMatchInlineSnapshot(
+                  `reason: 'server-changed'`,
+                );
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
                 const parsedResolution =
                   conflictResolutionSchema.parse(resolution);
@@ -324,10 +329,18 @@ test('direct list-query store offline public api', async () => {
     queryKey: '["users"]'
     status: 'success'
   `);
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-list-query-offline-session'
+    updatedAt: 1735689600010
+  `);
 
   act(() => {
     network.goOffline();
@@ -371,10 +384,13 @@ test('direct list-query store offline public api', async () => {
     });
   });
 
-  expect(multiRenameResult).toMatchObject({
-    ok: true,
-    value: { kind: 'queued' },
-  });
+  expect({
+    ok: multiRenameResult.ok,
+    value: multiRenameResult.ok ? multiRenameResult.value : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { kind: 'queued' }
+  `);
 
   await act(async () => {
     await listQueryStore.performMutation(userOnePayload, {
@@ -429,51 +445,84 @@ test('direct list-query store offline public api', async () => {
       status: 'success'
     `);
   const firstQuery = multiHook.result.current[0];
-  expect(firstQuery).toMatchObject({
-    pendingSync: true,
-    items: ['Ada conflict', 'Grace offline'],
-    status: 'success',
-  });
-  expect(listQueryStore.getOfflineEntities()).toMatchObject([
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey(getUserEntityKey(1)),
-      pendingMutations: 4,
-      storeType: 'listQuery',
-    },
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey(getUserEntityKey(2)),
-      pendingMutations: 1,
-      storeType: 'listQuery',
-    },
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey('temp:Linus offline'),
-      pendingMutations: 1,
-      storeType: 'listQuery',
-      tempId: 'temp:Linus offline',
-    },
-  ]);
+
+  expect(firstQuery).toMatchInlineSnapshot(`
+    error: null
+    hasMore: '❌'
+    isLoading: '❌'
+    isLoadingMore: '❌'
+    items: ['Ada conflict', 'Grace offline']
+    payload: { tableId: 'users' }
+    pendingSync: '✅'
+    queryKey: '["users"]'
+    status: 'success'
+  `);
+
+  expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: '"["users",1]'
+      entityKind: 'item'
+      id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",1]'
+      pendingMutations: 4
+      requiresResolution: '❌'
+      sessionKey: 'direct-list-query-offline-session'
+      storeName: 'direct-list-query-offline'
+      storeType: 'listQuery'
+      syncState: 'pending'
+      updatedAt: 1735689602000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: '"["users",2]'
+      entityKind: 'item'
+      id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",2]'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'direct-list-query-offline-session'
+      storeName: 'direct-list-query-offline'
+      storeType: 'listQuery'
+      syncState: 'pending'
+      updatedAt: 1735689602000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689602000
+      entityKey: '"temp:Linus offline'
+      entityKind: 'item'
+      id: 'direct-list-query-offline-session:direct-list-query-offline:"temp:Linus offline'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'direct-list-query-offline-session'
+      storeName: 'direct-list-query-offline'
+      storeType: 'listQuery'
+      syncState: 'pending'
+      tempId: 'temp:Linus offline'
+      updatedAt: 1735689602000
+  `);
   expect(getGlobalOfflineEntities(sessionKey)).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ storeName: 'direct-list-query-offline' }),
     ]),
   );
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    network: { active: true, enabled: true },
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-list-query-offline-session'
+    updatedAt: 1735689602000
+  `);
 
   await act(async () => {
     network.goOnline();
@@ -482,31 +531,65 @@ test('direct list-query store offline public api', async () => {
   });
 
   const [conflict] = listQueryStore.getOfflineResolutions();
-  expect(conflict).toMatchObject({
-    blockedByResolutionIds: [],
-    blockedResolutionCount: 0,
-    childResolutionCount: 0,
-    childResolutionIds: [],
-    conflict: { reason: 'server-changed' },
-    input: { id: 1, name: 'Ada conflict' },
-    operation: 'conflictUser',
-    sessionKey,
-    storeName: 'direct-list-query-offline',
-    storeType: 'listQuery',
-  });
-  expect(listQueryStore.getOfflineEntities()).toMatchObject([
-    {
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionCount: 0,
-      childResolutionIds: [],
-      entityKey: getCompositeKey(getUserEntityKey(1)),
-      requiresResolution: true,
-      pendingMutations: 0,
-      storeType: 'listQuery',
-      syncState: 'resolution-required',
-    },
-  ]);
+  if (!conflict || conflict.kind !== 'conflict') {
+    throw new Error('Expected a conflict resolution');
+  }
+
+  expect({
+    ...pick(conflict, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    conflict: conflict.conflict,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 0
+    childResolutionIds: []
+    conflict: { reason: 'server-changed' }
+    createdAt: 1735689607000
+    enqueuedAt: 1735689602000
+    entityRefs:
+      - entityKey: '"["users",1]'
+        entityKind: 'item'
+    input: { id: 1, name: 'Ada conflict' }
+    kind: 'conflict'
+    operation: 'conflictUser'
+    sessionKey: 'direct-list-query-offline-session'
+    storeName: 'direct-list-query-offline'
+    storeType: 'listQuery'
+    updatedAt: 1735689607000
+  `);
+
+  expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689607000
+      entityKey: '"["users",1]'
+      entityKind: 'item'
+      id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",1]'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'direct-list-query-offline-session'
+      storeName: 'direct-list-query-offline'
+      storeType: 'listQuery'
+      syncState: 'resolution-required'
+      updatedAt: 1735689607000
+  `);
 
   const createdUserHook = renderHook(() =>
     listQueryStore.useItem(getUserItemPayload(3)),
@@ -521,7 +604,7 @@ test('direct list-query store offline public api', async () => {
   `);
 
   await act(async () => {
-    await listQueryStore.resolveOfflineResolution(conflict!.id, {
+    await listQueryStore.resolveOfflineResolution(conflict.id, {
       name: 'Ada resolved',
     });
     await flushAllTimers();
@@ -536,16 +619,30 @@ test('direct list-query store offline public api', async () => {
       pendingSync: '❌'
       status: 'success'
     `);
-  expect(multiHook.result.current[0]).toMatchObject({
-    pendingSync: false,
-    items: ['Ada resolved', 'Grace offline'],
-    status: 'success',
-  });
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-    network: { active: false, enabled: true },
-  });
+
+  expect(multiHook.result.current[0]).toMatchInlineSnapshot(`
+    error: null
+    hasMore: '❌'
+    isLoading: '❌'
+    isLoadingMore: '❌'
+    items: ['Ada resolved', 'Grace offline']
+    payload: { tableId: 'users' }
+    pendingSync: '❌'
+    queryKey: '["users"]'
+    status: 'success'
+  `);
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-list-query-offline-session'
+    updatedAt: 1735689608010
+  `);
 
   listHook.unmount();
   multiHook.unmount();

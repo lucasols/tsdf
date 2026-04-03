@@ -9,7 +9,7 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
@@ -1040,23 +1040,137 @@ describe('list-query replay', () => {
 
     expect(createChildUserExecute).not.toHaveBeenCalled();
     expect(patchUserExecute).not.toHaveBeenCalled();
-    expect(parentResolution).toMatchObject({
-      blockedByResolutionIds: [],
-      childResolutionIds: [childCreateResolution.id],
-      operation: 'createUser',
-    });
-    expect(childCreateResolution).toMatchObject({
-      blockedByResolutionIds: [parentResolution.id],
-      childResolutionIds: [grandchildResolution.id],
-      input: { name: 'Child offline', parentId: 'temp:Parent offline' },
-      operation: 'createChildUser',
-    });
-    expect(grandchildResolution).toMatchObject({
-      blockedByResolutionIds: [childCreateResolution.id],
-      childResolutionIds: [],
-      input: { itemId: 'temp:Child offline', name: 'Child blocked edit' },
-      operation: 'patchUserName',
-    });
+
+    expect(parentResolution.blockedByResolutionIds).toMatchInlineSnapshot(`[]`);
+    expect(parentResolution.childResolutionIds).toHaveLength(1);
+    expect(parentResolution.childResolutionIds[0]).toBe(
+      childCreateResolution.id,
+    );
+    expect({
+      ...pick(parentResolution, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'enqueuedAt',
+        'entityRefs',
+        'input',
+        'kind',
+        'operation',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'tempIds',
+        'updatedAt',
+      ]),
+      lastReplayError:
+        parentResolution.kind === 'retry-exhausted'
+          ? parentResolution.lastReplayError
+          : null,
+    }).toMatchInlineSnapshot(`
+      blockedResolutionCount: 0
+      childResolutionCount: 1
+      createdAt: 1735689621010
+      enqueuedAt: 1735689601010
+      entityRefs:
+        - entityKey: '"temp:Parent offline'
+          entityKind: 'item'
+      input: { name: 'Parent offline' }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'create replay failed' }
+      operation: 'createUser'
+      sessionKey: 'offline-replay-nested-temp-create-chain-session'
+      storeName: 'offline-replay-nested-temp-create-chain-store'
+      storeType: 'listQuery'
+      tempIds: ['temp:Parent offline']
+      updatedAt: 1735689621010
+    `);
+    expect(childCreateResolution.blockedByResolutionIds).toHaveLength(1);
+    expect(childCreateResolution.blockedByResolutionIds[0]).toBe(
+      parentResolution.id,
+    );
+    expect(childCreateResolution.childResolutionIds).toHaveLength(1);
+    expect(childCreateResolution.childResolutionIds[0]).toBe(
+      grandchildResolution.id,
+    );
+    expect({
+      ...pick(childCreateResolution, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'enqueuedAt',
+        'entityRefs',
+        'input',
+        'kind',
+        'operation',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'tempIds',
+        'updatedAt',
+      ]),
+      lastReplayError:
+        childCreateResolution.kind === 'retry-exhausted'
+          ? childCreateResolution.lastReplayError
+          : null,
+    }).toMatchInlineSnapshot(`
+      blockedResolutionCount: 1
+      childResolutionCount: 1
+      createdAt: 1735689621010
+      enqueuedAt: 1735689601010
+      entityRefs:
+        - entityKey: '"temp:Child offline'
+          entityKind: 'item'
+      input: { name: 'Child offline', parentId: 'temp:Parent offline' }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'Blocked by unresolved temp create dependency' }
+      operation: 'createChildUser'
+      sessionKey: 'offline-replay-nested-temp-create-chain-session'
+      storeName: 'offline-replay-nested-temp-create-chain-store'
+      storeType: 'listQuery'
+      tempIds: ['temp:Child offline']
+      updatedAt: 1735689621010
+    `);
+    expect(grandchildResolution.blockedByResolutionIds).toHaveLength(1);
+    expect(grandchildResolution.blockedByResolutionIds[0]).toBe(
+      childCreateResolution.id,
+    );
+    expect(grandchildResolution.childResolutionIds).toMatchInlineSnapshot(`[]`);
+    expect({
+      ...pick(grandchildResolution, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'enqueuedAt',
+        'entityRefs',
+        'input',
+        'kind',
+        'operation',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'updatedAt',
+      ]),
+      lastReplayError:
+        grandchildResolution.kind === 'retry-exhausted'
+          ? grandchildResolution.lastReplayError
+          : null,
+    }).toMatchInlineSnapshot(`
+      blockedResolutionCount: 1
+      childResolutionCount: 0
+      createdAt: 1735689621010
+      enqueuedAt: 1735689601010
+      entityRefs:
+        - entityKey: '"temp:Child offline'
+          entityKind: 'item'
+      input: { itemId: 'temp:Child offline', name: 'Child blocked edit' }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'Blocked by unresolved temp create dependency' }
+      operation: 'patchUserName'
+      sessionKey: 'offline-replay-nested-temp-create-chain-session'
+      storeName: 'offline-replay-nested-temp-create-chain-store'
+      storeType: 'listQuery'
+      updatedAt: 1735689621010
+    `);
     const parentEntity = env.apiStore
       .getOfflineEntities()
       .find(
@@ -1070,15 +1184,50 @@ describe('list-query replay', () => {
         (entity) =>
           entity.entityKey === env.getStoreItemKeyFromRaw('temp:Child offline'),
       );
-    expect(parentEntity).toMatchObject({
-      childResolutionIds: [childCreateResolution.id],
-      requiresResolution: true,
-    });
+
+    expect(parentEntity?.blockedByResolutionIds).toMatchInlineSnapshot(`[]`);
+    expect(parentEntity?.childResolutionIds).toHaveLength(1);
+    expect(parentEntity?.childResolutionIds[0]).toBe(childCreateResolution.id);
+    expect(
+      pick(parentEntity, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'entityKey',
+        'entityKind',
+        'id',
+        'pendingMutations',
+        'requiresResolution',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'syncState',
+        'tempId',
+        'updatedAt',
+      ]),
+    ).toMatchInlineSnapshot(`
+      blockedResolutionCount: 0
+      childResolutionCount: 1
+      createdAt: 1735689621010
+      entityKey: '"temp:Parent offline'
+      entityKind: 'item'
+      id: 'offline-replay-nested-temp-create-chain-session:offline-replay-nested-temp-create-chain-store:"temp:Parent offline'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'offline-replay-nested-temp-create-chain-session'
+      storeName: 'offline-replay-nested-temp-create-chain-store'
+      storeType: 'listQuery'
+      syncState: 'resolution-required'
+      tempId: 'temp:Parent offline'
+      updatedAt: 1735689621010
+    `);
     expect(childEntity?.requiresResolution).toBe(true);
     expect(childEntity?.blockedByResolutionIds).toEqual(
       expect.arrayContaining([parentResolution.id, childCreateResolution.id]),
     );
-    expect(childEntity?.childResolutionIds).toEqual([grandchildResolution.id]);
+
+    expect(childEntity?.childResolutionIds).toHaveLength(1);
+    expect(childEntity?.childResolutionIds[0]).toBe(grandchildResolution.id);
 
     // Discarding the parent should clear every nested descendant and roll back
     // both optimistic temp items from the query and item state.
@@ -1254,34 +1403,124 @@ describe('list-query replay', () => {
       throw new Error('Expected temp-create parent and child resolutions');
     }
 
-    expect(parentResolution).toMatchObject({
-      blockedByResolutionIds: [],
-      childResolutionCount: 1,
-      childResolutionIds: [childResolution.id],
-      input: { name: 'Linus offline' },
-      kind: 'retry-exhausted',
-      operation: 'createUser',
-    });
-    expect(childResolution).toMatchObject({
-      blockedByResolutionIds: [parentResolution.id],
-      blockedResolutionCount: 1,
-      childResolutionIds: [],
-      input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
-      kind: 'retry-exhausted',
-      operation: 'patchUserName',
-    });
-    expect(env.apiStore.getOfflineEntities()).toMatchObject([
-      {
-        blockedByResolutionIds: [parentResolution.id],
-        blockedResolutionCount: 1,
-        childResolutionCount: 1,
-        childResolutionIds: [childResolution.id],
-        entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
-        pendingMutations: 0,
-        requiresResolution: true,
-        syncState: 'resolution-required',
-      },
-    ]);
+    expect(parentResolution.blockedByResolutionIds).toMatchInlineSnapshot(`[]`);
+    expect(parentResolution.childResolutionIds).toHaveLength(1);
+    expect(parentResolution.childResolutionIds[0]).toBe(childResolution.id);
+    expect({
+      ...pick(parentResolution, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'enqueuedAt',
+        'entityRefs',
+        'input',
+        'kind',
+        'operation',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'tempIds',
+        'updatedAt',
+      ]),
+      lastReplayError:
+        parentResolution.kind === 'retry-exhausted'
+          ? parentResolution.lastReplayError
+          : null,
+    }).toMatchInlineSnapshot(`
+      blockedResolutionCount: 0
+      childResolutionCount: 1
+      createdAt: 1735689621010
+      enqueuedAt: 1735689601010
+      entityRefs:
+        - entityKey: '"temp:Linus offline'
+          entityKind: 'item'
+      input: { name: 'Linus offline' }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'create replay failed' }
+      operation: 'createUser'
+      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
+      storeName: 'offline-replay-temp-create-resolution-chain-store'
+      storeType: 'listQuery'
+      tempIds: ['temp:Linus offline']
+      updatedAt: 1735689621010
+    `);
+    expect(childResolution.blockedByResolutionIds).toHaveLength(1);
+    expect(childResolution.blockedByResolutionIds[0]).toBe(parentResolution.id);
+    expect(childResolution.childResolutionIds).toMatchInlineSnapshot(`[]`);
+    expect({
+      ...pick(childResolution, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'enqueuedAt',
+        'entityRefs',
+        'input',
+        'kind',
+        'operation',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'updatedAt',
+      ]),
+      lastReplayError:
+        childResolution.kind === 'retry-exhausted'
+          ? childResolution.lastReplayError
+          : null,
+    }).toMatchInlineSnapshot(`
+      blockedResolutionCount: 1
+      childResolutionCount: 0
+      createdAt: 1735689621010
+      enqueuedAt: 1735689601010
+      entityRefs:
+        - entityKey: '"temp:Linus offline'
+          entityKind: 'item'
+      input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'Blocked by unresolved temp create dependency' }
+      operation: 'patchUserName'
+      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
+      storeName: 'offline-replay-temp-create-resolution-chain-store'
+      storeType: 'listQuery'
+      updatedAt: 1735689621010
+    `);
+    const [tempEntity] = env.apiStore.getOfflineEntities();
+    expect(tempEntity?.blockedByResolutionIds).toHaveLength(1);
+    expect(tempEntity?.blockedByResolutionIds[0]).toBe(parentResolution.id);
+    expect(tempEntity?.childResolutionIds).toHaveLength(1);
+    expect(tempEntity?.childResolutionIds[0]).toBe(childResolution.id);
+    expect(
+      pick(tempEntity, [
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'createdAt',
+        'entityKey',
+        'entityKind',
+        'id',
+        'pendingMutations',
+        'requiresResolution',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'syncState',
+        'tempId',
+        'updatedAt',
+      ]),
+    ).toMatchInlineSnapshot(`
+      blockedResolutionCount: 1
+      childResolutionCount: 1
+      createdAt: 1735689621010
+      entityKey: '"temp:Linus offline'
+      entityKind: 'item'
+      id: 'offline-replay-temp-create-resolution-chain-session:offline-replay-temp-create-resolution-chain-store:"temp:Linus offline'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
+      storeName: 'offline-replay-temp-create-resolution-chain-store'
+      storeType: 'listQuery'
+      syncState: 'resolution-required'
+      tempId: 'temp:Linus offline'
+      updatedAt: 1735689621010
+    `);
     expect(patchUserExecute).not.toHaveBeenCalled();
 
     // The blocked child must not become independently resolvable before the
@@ -1314,14 +1553,47 @@ describe('list-query replay', () => {
       .getOfflineResolutions()
       .find((resolution) => resolution.operation === 'patchUserName');
     expect(env.apiStore.getOfflineResolutions()).toHaveLength(1);
-    expect(remappedChildResolution).toMatchObject({
-      blockedByResolutionIds: [],
-      blockedResolutionCount: 0,
-      childResolutionIds: [],
-      input: { itemId: 'users||3', name: 'Linus blocked edit' },
-      kind: 'retry-exhausted',
-      operation: 'patchUserName',
-    });
+
+    expect({
+      ...pick(remappedChildResolution, [
+        'blockedByResolutionIds',
+        'blockedResolutionCount',
+        'childResolutionCount',
+        'childResolutionIds',
+        'createdAt',
+        'enqueuedAt',
+        'entityRefs',
+        'input',
+        'kind',
+        'operation',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'updatedAt',
+      ]),
+      lastReplayError:
+        remappedChildResolution?.kind === 'retry-exhausted'
+          ? remappedChildResolution.lastReplayError
+          : null,
+    }).toMatchInlineSnapshot(`
+      blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689621010
+      enqueuedAt: 1735689601010
+      entityRefs:
+        - entityKey: '"users||3'
+          entityKind: 'item'
+      input: { itemId: 'users||3', name: 'Linus blocked edit' }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'Blocked by unresolved temp create dependency' }
+      operation: 'patchUserName'
+      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
+      storeName: 'offline-replay-temp-create-resolution-chain-store'
+      storeType: 'listQuery'
+      updatedAt: 1735689621010
+    `);
 
     // Once the child is remapped onto the final payload, it becomes eligible for
     // retry and should apply cleanly against the server-backed item.
@@ -1613,13 +1885,25 @@ describe('list-query replay', () => {
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       ['Ada', 'Grace', 'Linus offline']
     `);
-    expect(env.apiStore.getOfflineEntities()).toMatchObject([
-      {
-        entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
-        pendingMutations: 1,
-        storeType: 'listQuery',
-      },
-    ]);
+
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689601010
+        entityKey: '"temp:Linus offline'
+        entityKind: 'item'
+        id: 'offline-replay-temp-list-query-session:list-query-1:"temp:Linus offline'
+        pendingMutations: 1
+        requiresResolution: '❌'
+        sessionKey: 'offline-replay-temp-list-query-session'
+        storeName: 'list-query-1'
+        storeType: 'listQuery'
+        syncState: 'pending'
+        tempId: 'temp:Linus offline'
+        updatedAt: 1735689601010
+    `);
 
     act(() => {
       network.goOnline();

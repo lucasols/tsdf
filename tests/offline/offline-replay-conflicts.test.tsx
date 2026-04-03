@@ -8,7 +8,7 @@ import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { type UpdateValueConflictOperations } from './offlineReplayTestShared';
 import {
@@ -83,10 +83,14 @@ test('offline conflicts are detected before execute, surface through selectors, 
                   enqueuedAt,
                 }) => {
                   expect(input.value).toBe(2);
-                  expect(conflict).toMatchObject({ reason: 'server-changed' });
-                  expect(resolution).toMatchObject({
-                    resolution: 'accept-local',
-                  });
+
+                  expect(conflict).toMatchInlineSnapshot(
+                    `reason: 'server-changed'`,
+                  );
+
+                  expect(resolution).toMatchInlineSnapshot(
+                    `resolution: 'accept-local'`,
+                  );
                   resolveEnqueuedAt = enqueuedAt;
                   return undefined;
                 },
@@ -216,9 +220,10 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
       resolution: unknown;
       enqueuedAt: number;
     }) => {
-      expect(conflict).toMatchObject({ reason: 'server-changed' });
+      expect(conflict).toMatchInlineSnapshot(`reason: 'server-changed'`);
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      expect(resolution).toMatchObject({ value: 7 });
+
+      expect(resolution).toMatchInlineSnapshot(`value: 7`);
 
       if (typeof resolution !== 'object' || resolution === null) {
         throw new Error('Expected a numeric conflict resolution payload');
@@ -368,8 +373,13 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
                 detectConflict: ({ input }) =>
                   input.name === 'Ada' ? { reason: 'server-changed' } : false,
                 resolveConflict: ({ conflict, resolution }) => {
-                  expect(conflict).toMatchObject({ reason: 'server-changed' });
-                  expect(resolution).toMatchObject({ name: 'Ada resolved' });
+                  expect(conflict).toMatchInlineSnapshot(
+                    `reason: 'server-changed'`,
+                  );
+
+                  expect(resolution).toMatchInlineSnapshot(
+                    `name: 'Ada resolved'`,
+                  );
 
                   return { requeue: { input: { name: 'Ada resolved' } } };
                 },
@@ -404,12 +414,28 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   });
   await flushAllTimers();
 
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    { entityKey: getCompositeKey('temp:Ada'), tempId: 'temp:Ada' },
-  ]);
-  expect(env.store.state[getCompositeKey('temp:Ada')]?.data).toMatchObject({
-    value: { name: 'pending:Ada' },
-  });
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: '"temp:Ada'
+      entityKind: 'item'
+      id: 'offline-conflict-temp-requeue-session:collection-1:"temp:Ada'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-conflict-temp-requeue-session'
+      storeName: 'collection-1'
+      storeType: 'collection'
+      syncState: 'pending'
+      tempId: 'temp:Ada'
+      updatedAt: 1735689600000
+  `);
+
+  expect(
+    env.store.state[getCompositeKey('temp:Ada')]?.data,
+  ).toMatchInlineSnapshot(`value: { name: 'pending:Ada' }`);
 
   // Replay the queued create. The first online attempt should stop at the
   // conflict instead of executing the mutation.
@@ -466,9 +492,10 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
+
   expect(
     env.store.state[getCompositeKey('users||ada-resolved')]?.data,
-  ).toMatchObject({ value: { name: 'Ada resolved' } });
+  ).toMatchInlineSnapshot(`value: { name: 'Ada resolved' }`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | temp:Ada             |
@@ -528,7 +555,11 @@ test('conflict handling still works for mutations queued via fallback', async ()
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
-  expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
+  expect({ ok: result.ok, value: result.ok ? result.value : null })
+    .toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { kind: 'queued' }
+  `);
 
   await act(async () => {
     await advanceTime(1);
@@ -538,12 +569,45 @@ test('conflict handling still works for mutations queued via fallback', async ()
   );
 
   expect(execute).not.toHaveBeenCalled();
-  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
-    {
-      kind: 'conflict',
-      conflict: { reason: 'server-changed' },
-      input: { value: 2 },
-      operation: 'updateValue',
-    },
-  ]);
+
+  expect(
+    env.apiStore
+      .getOfflineResolutions()
+      .map((resolution) => ({
+        ...pick(resolution, [
+          'blockedByResolutionIds',
+          'blockedResolutionCount',
+          'childResolutionCount',
+          'childResolutionIds',
+          'createdAt',
+          'enqueuedAt',
+          'entityRefs',
+          'input',
+          'kind',
+          'operation',
+          'sessionKey',
+          'storeName',
+          'storeType',
+          'updatedAt',
+        ]),
+        conflict: resolution.kind === 'conflict' ? resolution.conflict : null,
+      })),
+  ).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      conflict: { reason: 'server-changed' }
+      createdAt: 1735689600001
+      enqueuedAt: 1735689600000
+      entityRefs:
+        - { entityKey: 'document', entityKind: 'document' }
+      input: { value: 2 }
+      kind: 'conflict'
+      operation: 'updateValue'
+      sessionKey: 'hybrid-conflict-session'
+      storeName: 'document-2'
+      storeType: 'document'
+      updatedAt: 1735689600001
+  `);
 });

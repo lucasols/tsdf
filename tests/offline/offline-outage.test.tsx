@@ -33,12 +33,11 @@ test('async outage classification promotes the session into outage mode after a 
         sessionKey: string;
       },
     ) => {
-      expect(ctx).toMatchObject({
-        phase: 'fetch',
-        operationName: undefined,
-        sessionKey,
-        storeType: 'document',
-      });
+      expect(ctx).toMatchInlineSnapshot(`
+        phase: 'fetch'
+        sessionKey: 'outage-session'
+        storeType: 'document'
+      `);
 
       await Promise.resolve();
       return 'outage' as const;
@@ -61,31 +60,42 @@ test('async outage classification promotes the session into outage mode after a 
   // The fetch failure should stay online until the async classifier settles.
   env.serverMock.setNextFetchError('boom');
   env.apiStore.scheduleFetch('highPriority');
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-    outage: { active: false },
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'outage-session'
+    updatedAt: 1735689600000
+  `);
 
   // Once the classifier resolves, the session should switch fully into outage mode.
   await advanceTime(25);
 
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(recoveryCheck).not.toHaveBeenCalled();
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    network: { active: false, enabled: false },
-    outage: { active: true, enabled: true },
-    lastFailureAt: expect.any(Number),
-    lastRecoveryCheckAt: null,
-    sessionKey,
-  });
-  expect(env.store.state.error).toEqual({
-    code: 0,
-    id: 'offline',
-    message: 'Offline',
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'outage-session'
+    updatedAt: 1735689600010
+  `);
+
+  expect(env.store.state.error).toMatchInlineSnapshot(`
+    code: 0
+    id: 'offline'
+    message: 'Offline'
+  `);
 });
 
 test('recovery probes back off and stop after a successful recovery check', async () => {
@@ -133,11 +143,17 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   env.apiStore.scheduleFetch('highPriority');
   await advanceTime(25);
 
-  expect(statusHook.result.current).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    outage: { active: true, enabled: true },
-  });
+  expect(statusHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'recovery-probe-session'
+    updatedAt: 1735689600010
+  `);
   expect(recoveryCheck).toHaveBeenCalledTimes(0);
 
   // The first recovery probe should fail and keep the session in outage mode.
@@ -147,11 +163,18 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   await advanceTime(100);
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
-  expect(statusHook.result.current).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    outage: { active: true, enabled: true },
-  });
+
+  expect(statusHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: 1735689600110
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'recovery-probe-session'
+    updatedAt: 1735689600110
+  `);
 
   // The next probe should succeed, clear outage mode, and stop the backoff loop.
   env.addTimelineComments('beforeNextAction', [
@@ -160,12 +183,18 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   await advanceTime(200);
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
-  expect(statusHook.result.current).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-    outage: { active: false, enabled: true },
-    lastRecoveryCheckAt: expect.any(Number),
-  });
+
+  expect(statusHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: 1735689600310
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '✅' }
+    sessionKey: 'recovery-probe-session'
+    updatedAt: 1735689600310
+  `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui                                |
@@ -233,11 +262,17 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   env.apiStore.scheduleFetch('highPriority');
   await advanceTime(25);
 
-  expect(statusHook.result.current).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    outage: { active: true, enabled: true },
-  });
+  expect(statusHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'recovery-probe-reject-session'
+    updatedAt: 1735689600010
+  `);
   expect(recoveryCheck).toHaveBeenCalledTimes(0);
 
   // A rejected probe should still record the attempt and keep the retry loop alive.
@@ -247,12 +282,18 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   await advanceTime(60);
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
-  expect(statusHook.result.current).toMatchObject({
-    effectiveMode: 'offline',
-    effectiveOffline: true,
-    outage: { active: true, enabled: true },
-    lastRecoveryCheckAt: expect.any(Number),
-  });
+
+  expect(statusHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'offline'
+    effectiveOffline: '✅'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: 1735689600060
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'recovery-probe-reject-session'
+    updatedAt: 1735689600060
+  `);
 
   // The next probe can still recover the session after the earlier rejection.
   env.addTimelineComments('beforeNextAction', [
@@ -261,12 +302,18 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   await advanceTime(60);
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
-  expect(statusHook.result.current).toMatchObject({
-    effectiveMode: 'online',
-    effectiveOffline: false,
-    outage: { active: false, enabled: true },
-    lastRecoveryCheckAt: expect.any(Number),
-  });
+
+  expect(statusHook.result.current).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: 1735689600010
+    lastRecoveryCheckAt: 1735689600110
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '✅' }
+    sessionKey: 'recovery-probe-reject-session'
+    updatedAt: 1735689600110
+  `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui                                |
@@ -306,20 +353,20 @@ test('stale async outage classifications are ignored after a newer failure settl
     .mockImplementationOnce(
       (_error, ctx) =>
         new Promise<'outage' | 'ignore'>((resolve) => {
-          expect(ctx).toMatchObject({
-            phase: 'fetch',
-            sessionKey,
-            storeType: 'document',
-          });
+          expect(ctx).toMatchInlineSnapshot(`
+            phase: 'fetch'
+            sessionKey: 'stale-outage-session'
+            storeType: 'document'
+          `);
           resolveFirstClassification = resolve;
         }),
     )
     .mockImplementationOnce((_error, ctx) => {
-      expect(ctx).toMatchObject({
-        phase: 'fetch',
-        sessionKey,
-        storeType: 'document',
-      });
+      expect(ctx).toMatchInlineSnapshot(`
+        phase: 'fetch'
+        sessionKey: 'stale-outage-session'
+        storeType: 'document'
+      `);
       return Promise.resolve('ignore' as const);
     });
 
@@ -354,12 +401,18 @@ test('stale async outage classifications are ignored after a newer failure settl
 
   expect(classifyFailure).toHaveBeenCalledTimes(2);
   expect(recoveryCheck).not.toHaveBeenCalled();
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveOffline: false,
-    effectiveMode: 'online',
-    outage: { active: false },
-    lastRecoveryCheckAt: null,
-  });
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'stale-outage-session'
+    updatedAt: 1735689600035
+  `);
   expect(staleClassificationEnv.store.state.error?.id ?? null).not.toBe(
     'offline',
   );
@@ -370,11 +423,17 @@ test('stale async outage classifications are ignored after a newer failure settl
   await Promise.resolve();
   await Promise.resolve();
 
-  expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
-    effectiveOffline: false,
-    effectiveMode: 'online',
-    outage: { active: false },
-  });
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'online'
+    effectiveOffline: '❌'
+    isLeader: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'stale-outage-session'
+    updatedAt: 1735689600035
+  `);
   expect(staleClassificationEnv.store.state.error?.id ?? null).not.toBe(
     'offline',
   );

@@ -998,27 +998,24 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
+
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchObject({
-      i: [
-        listQueryScope.itemKey('users', 1),
-        listQueryScope.itemKey('users', 2),
-      ],
-    });
+    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
 
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
+
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchObject({ i: [listQueryScope.itemKey('users', 2)] });
+    ).toMatchInlineSnapshot(`i: ['"users||2']`);
   });
 
   test('cold persisted query items can be evicted during unrelated maxItems cleanup and later hydrate with missing items filtered out', async () => {
@@ -1534,7 +1531,10 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-max-query-size/lq.%7BtableId%3A%22users%22%7D.p.json',
       ),
-    ).toMatchObject({ i: ['"users||1', '"users||2'] });
+    ).toMatchInlineSnapshot(`
+      h: '✅'
+      i: ['"users||1', '"users||2']
+    `);
     expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 1))).toBe(
       true,
     );

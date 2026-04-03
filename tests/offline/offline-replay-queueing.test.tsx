@@ -1,4 +1,3 @@
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
@@ -8,7 +7,7 @@ import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateUserOperations,
@@ -127,13 +126,25 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   });
 
   expect(queued.ok).toBe(true);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: getCompositeKey('temp:Ada'),
-      pendingMutations: 2,
-      tempId: 'temp:Ada',
-    },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: '"temp:Ada'
+      entityKind: 'item'
+      id: 'offline-temp-id-session:collection-1:"temp:Ada'
+      pendingMutations: 2
+      requiresResolution: '❌'
+      sessionKey: 'offline-temp-id-session'
+      storeName: 'collection-1'
+      storeType: 'collection'
+      syncState: 'pending'
+      tempId: 'temp:Ada'
+      updatedAt: 1735689600000
+  `);
 
   act(() => {
     network.goOnline();
@@ -394,13 +405,24 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
     - input: { itemId: 'users||1' }
       operation: 'deleteUser'
   `);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: getCompositeKey('users||1'),
-      pendingMutations: 1,
-      syncState: 'pending',
-    },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: '"users||1'
+      entityKind: 'item'
+      id: 'offline-supersede-delete-session:offline-supersede-delete-store:"users||1'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-supersede-delete-session'
+      storeName: 'offline-supersede-delete-store'
+      storeType: 'collection'
+      syncState: 'pending'
+      updatedAt: 1735689600000
+  `);
 
   act(() => {
     network.goOnline();
@@ -643,24 +665,68 @@ test('healthy replay failures are retried 5 times and then move into the resolut
   await flushAllTimers();
 
   expect(execute).toHaveBeenCalledTimes(5);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: 'document',
-      pendingMutations: 0,
-      requiresResolution: true,
-      sessionKey: 'retry-exhaustion-session',
-      storeType: 'document',
-      syncState: 'resolution-required',
-    },
-  ]);
-  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
-    {
-      kind: 'retry-exhausted',
-      input: { value: 2 },
-      lastReplayError: { message: 'replay failed' },
-      operation: 'updateValue',
-    },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689620000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'retry-exhaustion-session:document-4:document'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'retry-exhaustion-session'
+      storeName: 'document-4'
+      storeType: 'document'
+      syncState: 'resolution-required'
+      updatedAt: 1735689620000
+  `);
+
+  expect(
+    env.apiStore
+      .getOfflineResolutions()
+      .map((resolution) => ({
+        ...pick(resolution, [
+          'blockedByResolutionIds',
+          'blockedResolutionCount',
+          'childResolutionCount',
+          'childResolutionIds',
+          'createdAt',
+          'enqueuedAt',
+          'entityRefs',
+          'input',
+          'kind',
+          'operation',
+          'sessionKey',
+          'storeName',
+          'storeType',
+          'updatedAt',
+        ]),
+        lastReplayError:
+          resolution.kind === 'retry-exhausted'
+            ? resolution.lastReplayError
+            : null,
+      })),
+  ).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689620000
+      enqueuedAt: 1735689600000
+      entityRefs:
+        - { entityKey: 'document', entityKind: 'document' }
+      input: { value: 2 }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'replay failed' }
+      operation: 'updateValue'
+      sessionKey: 'retry-exhaustion-session'
+      storeName: 'document-4'
+      storeType: 'document'
+      updatedAt: 1735689620000
+  `);
 });
 
 test('retry-exhausted resolutions can retry or discard queued work', async () => {
@@ -713,18 +779,68 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   await flushAllTimers();
 
   const [resolution] = env.apiStore.getOfflineResolutions();
-  expect(resolution).toMatchObject({ kind: 'retry-exhausted' });
-  if (!resolution) {
+  if (!resolution || resolution.kind !== 'retry-exhausted') {
     throw new Error('Expected a retry-exhausted resolution');
   }
 
+  expect({
+    ...pick(resolution, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    lastReplayError: resolution.lastReplayError,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 0
+    childResolutionIds: []
+    createdAt: 1735689620000
+    enqueuedAt: 1735689600000
+    entityRefs:
+      - { entityKey: 'document', entityKind: 'document' }
+    input: { value: 2 }
+    kind: 'retry-exhausted'
+    lastReplayError: { message: 'replay failed' }
+    operation: 'updateValue'
+    sessionKey: 'retry-resolution-actions-session'
+    storeName: 'document-5'
+    storeType: 'document'
+    updatedAt: 1735689620000
+  `);
   await env.apiStore.resolveOfflineResolution(resolution.id, {
     action: 'retry',
   });
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    { entityKey: 'document', pendingMutations: 1, syncState: 'pending' },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689620000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'retry-resolution-actions-session:document-5:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'retry-resolution-actions-session'
+      storeName: 'document-5'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689620000
+  `);
 
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 6);
   await flushAllTimers();
@@ -748,11 +864,46 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   await flushAllTimers();
 
   const [discardResolution] = env.apiStore.getOfflineResolutions();
-  expect(discardResolution).toMatchObject({ kind: 'retry-exhausted' });
-  if (!discardResolution) {
-    throw new Error('Expected a retry-exhausted resolution');
+  if (!discardResolution || discardResolution.kind !== 'retry-exhausted') {
+    throw new Error('Expected a retry-exhausted discard resolution');
   }
 
+  expect({
+    ...pick(discardResolution, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    lastReplayError: discardResolution.lastReplayError,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 0
+    childResolutionIds: []
+    createdAt: 1735689640000
+    enqueuedAt: 1735689620000
+    entityRefs:
+      - { entityKey: 'document', entityKind: 'document' }
+    input: { value: 2 }
+    kind: 'retry-exhausted'
+    lastReplayError: { message: 'replay failed' }
+    operation: 'updateValue'
+    sessionKey: 'retry-resolution-actions-session'
+    storeName: 'document-5'
+    storeType: 'document'
+    updatedAt: 1735689640000
+  `);
   await env.apiStore.resolveOfflineResolution(discardResolution.id, {
     action: 'discard',
   });
@@ -819,13 +970,24 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: 'document',
-      pendingMutations: 1,
-      syncState: 'needs-confirmation',
-    },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'retry-outage-session:document-6:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'retry-outage-session'
+      storeName: 'document-6'
+      storeType: 'document'
+      syncState: 'needs-confirmation'
+      updatedAt: 1735689600050
+  `);
 });
 
 test('going offline again resets the healthy replay failure budget', async () => {
@@ -888,9 +1050,49 @@ test('going offline again resets the healthy replay failure budget', async () =>
   }
   await flushAllTimers();
 
-  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
-    { kind: 'retry-exhausted', input: { value: 2 }, operation: 'updateValue' },
-  ]);
+  expect(
+    env.apiStore
+      .getOfflineResolutions()
+      .map((resolution) => ({
+        ...pick(resolution, [
+          'blockedByResolutionIds',
+          'blockedResolutionCount',
+          'childResolutionCount',
+          'childResolutionIds',
+          'createdAt',
+          'enqueuedAt',
+          'entityRefs',
+          'input',
+          'kind',
+          'operation',
+          'sessionKey',
+          'storeName',
+          'storeType',
+          'updatedAt',
+        ]),
+        lastReplayError:
+          resolution.kind === 'retry-exhausted'
+            ? resolution.lastReplayError
+            : null,
+      })),
+  ).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689630000
+      enqueuedAt: 1735689600000
+      entityRefs:
+        - { entityKey: 'document', entityKind: 'document' }
+      input: { value: 2 }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'healthy failure 8' }
+      operation: 'updateValue'
+      sessionKey: 'retry-budget-reset-session'
+      storeName: 'document-7'
+      storeType: 'document'
+      updatedAt: 1735689630000
+  `);
 });
 
 test('needs-confirmation entries do not accept new accumulation before shouldSkipSync runs', async () => {
@@ -934,13 +1136,23 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
   await advanceTime(1);
   await Promise.resolve();
 
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: 'document',
-      pendingMutations: 1,
-      syncState: 'needs-confirmation',
-    },
-  ]);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-needs-confirmation-accumulation-session:document-8:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-needs-confirmation-accumulation-session'
+      storeName: 'document-8'
+      storeType: 'document'
+      syncState: 'needs-confirmation'
+      updatedAt: 1735689600000
+  `);
 
   act(() => {
     network.goOffline();
@@ -952,9 +1164,23 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    { entityKey: 'document', pendingMutations: 2 },
-  ]);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-needs-confirmation-accumulation-session:document-8:document'
+      pendingMutations: 2
+      requiresResolution: '❌'
+      sessionKey: 'offline-needs-confirmation-accumulation-session'
+      storeName: 'document-8'
+      storeType: 'document'
+      syncState: 'needs-confirmation'
+      updatedAt: 1735689600001
+  `);
 });
 
 test('same-entity supersede does not prune attempted needs-confirmation entries', async () => {
@@ -1001,13 +1227,23 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
   await advanceTime(1);
   await Promise.resolve();
 
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: 'document',
-      pendingMutations: 1,
-      syncState: 'needs-confirmation',
-    },
-  ]);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-needs-confirmation-supersede-session:offline-needs-confirmation-supersede-store:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-needs-confirmation-supersede-session'
+      storeName: 'offline-needs-confirmation-supersede-store'
+      storeType: 'document'
+      syncState: 'needs-confirmation'
+      updatedAt: 1735689600000
+  `);
 
   act(() => {
     network.goOffline();
@@ -1042,9 +1278,24 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
       operation: 'updateValue'
       syncState: 'pending'
   `);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    { entityKey: 'document', pendingMutations: 2 },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-needs-confirmation-supersede-session:offline-needs-confirmation-supersede-store:document'
+      pendingMutations: 2
+      requiresResolution: '❌'
+      sessionKey: 'offline-needs-confirmation-supersede-session'
+      storeName: 'offline-needs-confirmation-supersede-store'
+      storeType: 'document'
+      syncState: 'needs-confirmation'
+      updatedAt: 1735689600001
+  `);
 });
 
 test('needs-confirmation entries keep retrying shouldSkipSync while the session stays online', async () => {
@@ -1119,13 +1370,24 @@ test('needs-confirmation entries keep retrying shouldSkipSync while the session 
   );
   expect(execute).toHaveBeenCalledTimes(1);
   expect(shouldSkipSync).toHaveBeenCalledTimes(0);
-  expect(env.apiStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: 'document',
-      pendingMutations: 1,
-      syncState: 'needs-confirmation',
-    },
-  ]);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'online-needs-confirmation-retry-session:document-9:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'online-needs-confirmation-retry-session'
+      storeName: 'document-9'
+      storeType: 'document'
+      syncState: 'needs-confirmation'
+      updatedAt: 1735689600000
+  `);
 
   await advanceTime(5_000);
   await flushAllTimers();
@@ -1250,17 +1512,24 @@ describe('basic replay lifecycle', () => {
     expect(env.store.state.data).toMatchInlineSnapshot(`
       value: 2
     `);
-    expect(env.apiStore.getOfflineEntities()).toMatchObject([
-      {
-        entityKey: 'document',
-        entityKind: 'document',
-        requiresResolution: false,
-        pendingMutations: 1,
-        sessionKey: 'offline-doc-session',
-        storeName: 'offline-doc-store',
-        storeType: 'document',
-      },
-    ]);
+
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600000
+        entityKey: 'document'
+        entityKind: 'document'
+        id: 'offline-doc-session:offline-doc-store:document'
+        pendingMutations: 1
+        requiresResolution: '❌'
+        sessionKey: 'offline-doc-session'
+        storeName: 'offline-doc-store'
+        storeType: 'document'
+        syncState: 'pending'
+        updatedAt: 1735689600000
+    `);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
 
     // The optimistic value should stay visible while replay is still pending.
@@ -1368,11 +1637,42 @@ describe('hybrid fallback integration', () => {
       value: 3
     `);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
     expect(
-      getOfflineQueueEntryData(
-        getOfflineQueueEntries(sessionKey, storeName)[0]!,
+      pick(
+        getOfflineQueueEntryData(
+          getOfflineQueueEntries(sessionKey, storeName)[0]!,
+        ),
+        [
+          'attempts',
+          'createdAt',
+          'entityRefs',
+          'input',
+          'lastAttemptAt',
+          'operation',
+          'queueOrder',
+          'sessionKey',
+          'storeName',
+          'storeType',
+          'syncState',
+          'updatedAt',
+        ],
       ),
-    ).toMatchObject({ input: { value: 3 } });
+    ).toMatchInlineSnapshot(`
+      attempts: 0
+      createdAt: 1735689600000
+      entityRefs:
+        - { entityKey: 'document', entityKind: 'document' }
+      input: { value: 3 }
+      lastAttemptAt: null
+      operation: 'updateValue'
+      queueOrder: 1735689600000
+      sessionKey: 'hybrid-accumulation-session'
+      storeName: 'hybrid-accumulation-store'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689600000
+    `);
   });
 
   test('mutations queued via hybrid fallback enter the resolution queue after replay retries are exhausted', async () => {
@@ -1419,7 +1719,11 @@ describe('hybrid fallback integration', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
-    expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+      ok: '✅'
+      value: { kind: 'queued' }
+    `);
 
     await advanceTime(1);
     await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
@@ -1429,13 +1733,48 @@ describe('hybrid fallback integration', () => {
       () => env.apiStore.getOfflineResolutions().length === 1,
     );
 
-    expect(env.apiStore.getOfflineResolutions()).toMatchObject([
-      {
-        kind: 'retry-exhausted',
-        input: { value: 2 },
-        lastReplayError: { message: 'replay failed' },
-        operation: 'updateValue',
-      },
-    ]);
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) => ({
+          ...pick(resolution, [
+            'blockedByResolutionIds',
+            'blockedResolutionCount',
+            'childResolutionCount',
+            'childResolutionIds',
+            'createdAt',
+            'enqueuedAt',
+            'entityRefs',
+            'input',
+            'kind',
+            'operation',
+            'sessionKey',
+            'storeName',
+            'storeType',
+            'updatedAt',
+          ]),
+          lastReplayError:
+            resolution.kind === 'retry-exhausted'
+              ? resolution.lastReplayError
+              : null,
+        })),
+    ).toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600002
+        enqueuedAt: 1735689600000
+        entityRefs:
+          - { entityKey: 'document', entityKind: 'document' }
+        input: { value: 2 }
+        kind: 'retry-exhausted'
+        lastReplayError: { message: 'replay failed' }
+        operation: 'updateValue'
+        sessionKey: 'hybrid-retry-exhaustion-session'
+        storeName: 'document-10'
+        storeType: 'document'
+        updatedAt: 1735689600002
+    `);
   });
 });
