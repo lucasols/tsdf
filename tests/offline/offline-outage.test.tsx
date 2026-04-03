@@ -181,6 +181,107 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   statusHook.unmount();
 });
 
+test('recovery probes keep retrying after a rejected recovery check', async () => {
+  const sessionKey = 'recovery-probe-reject-session';
+  let probeCount = 0;
+  const recoveryCheck = vi
+    .fn<({ sessionKey }: { sessionKey: string }) => Promise<boolean>>()
+    .mockImplementationOnce(({ sessionKey: resolvedSessionKey }) => {
+      expect(resolvedSessionKey).toBe(sessionKey);
+      probeCount += 1;
+      return Promise.reject(new Error('probe failed'));
+    })
+    .mockImplementationOnce(({ sessionKey: resolvedSessionKey }) => {
+      expect(resolvedSessionKey).toBe(sessionKey);
+      probeCount += 1;
+      return Promise.resolve(true);
+    });
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        outage: {
+          enabled: true,
+          classifyFailure: () => 'outage' as const,
+          recoveryCheck,
+          recoveryProbe: {
+            intervalMs: 50,
+            maxIntervalMs: 50,
+            backoffMultiplier: 1,
+            jitterRatio: 0,
+          },
+        },
+        operations: {},
+      },
+    },
+  });
+  const statusHook = renderHook(() => {
+    const status = useGlobalOfflineStatus(sessionKey);
+    env.trackUIChanges(
+      `mode:${status.effectiveMode} outage:${status.outage.active ? 'on' : 'off'} probes:${probeCount}`,
+    );
+    return status;
+  });
+
+  // Trigger outage mode through a real fetch failure instead of toggling the
+  // coordinator directly.
+  env.serverMock.setNextFetchError('boom');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(25);
+
+  expect(statusHook.result.current).toMatchObject({
+    effectiveMode: 'offline',
+    effectiveOffline: true,
+    outage: { active: true, enabled: true },
+  });
+  expect(recoveryCheck).toHaveBeenCalledTimes(0);
+
+  // A rejected probe should still record the attempt and keep the retry loop alive.
+  env.addTimelineComments('beforeNextAction', [
+    'the first recovery probe rejects, so outage mode should stay active and schedule another retry',
+  ]);
+  await advanceTime(60);
+
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+  expect(statusHook.result.current).toMatchObject({
+    effectiveMode: 'offline',
+    effectiveOffline: true,
+    outage: { active: true, enabled: true },
+    lastRecoveryCheckAt: expect.any(Number),
+  });
+
+  // The next probe can still recover the session after the earlier rejection.
+  env.addTimelineComments('beforeNextAction', [
+    'the second recovery probe succeeds and should restore online mode',
+  ]);
+  await advanceTime(60);
+
+  expect(recoveryCheck).toHaveBeenCalledTimes(2);
+  expect(statusHook.result.current).toMatchObject({
+    effectiveMode: 'online',
+    effectiveOffline: false,
+    outage: { active: false, enabled: true },
+    lastRecoveryCheckAt: expect.any(Number),
+  });
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui                                |
+    0     | "mode:online outage:off probes:0" | ui-initialized
+    10ms  | "mode:online outage:off probes:0" | 🔴 >fetch-started
+    .     | "mode:online outage:off probes:0" | 🔴 <fetch-error (value: "error")
+    .     | "mode:offline outage:on probes:0" | ui-changed
+    60ms  | "mode:offline outage:on probes:0" | -- the first recovery probe rejects, so outage mode should stay active and schedule another retry
+    .     | "mode:offline outage:on probes:1" | ui-changed
+    110ms | "mode:offline outage:on probes:1" | -- the second recovery probe succeeds and should restore online mode
+    .     | "mode:online outage:off probes:2" | ui-changed
+    "
+  `);
+  statusHook.unmount();
+});
+
 // Protects against race conditions where a slow classifier could override a
 // newer, already-settled classification.
 test('stale async outage classifications are ignored after a newer failure settles first', async () => {
