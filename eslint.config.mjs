@@ -56,6 +56,11 @@ export default lsStackEslintCfg({
             message:
               'Avoid .toMatchInlineSnapshot with array values. Only pass a string argument.',
           },
+          {
+            selector:
+              ':matches(PropertyDefinition, MethodDefinition)[accessibility="private"]',
+            message: 'Use #private instead',
+          },
         ],
         '@ls-stack/require-usage-explanation': [
           'error',
@@ -76,14 +81,6 @@ export default lsStackEslintCfg({
             functions: [
               { name: '__LEGIT_CAST__', minGenerics: 2, disallowTypeOf: true },
             ],
-          },
-        ],
-        'no-restricted-syntax': [
-          'error',
-          {
-            selector:
-              ':matches(PropertyDefinition, MethodDefinition)[accessibility="private"]',
-            message: 'Use #private instead',
           },
         ],
       },
