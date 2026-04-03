@@ -82,7 +82,7 @@ export function parsePersistedObject(raw: string): Record<string, unknown> {
 }
 
 export const quickRecoveryProbe = {
-  intervalMs: 1,
+  initialIntervalMs: 1,
   maxIntervalMs: 1,
   backoffMultiplier: 1,
   jitterRatio: 0,

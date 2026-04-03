@@ -51,7 +51,8 @@ test('async outage classification promotes the session into outage mode after a 
       adapter: 'local-sync',
       schema: docSchema,
       offlineMode: {
-        outage: { enabled: true, classifyFailure, recoveryCheck },
+        classifyFailure,
+        outage: { enabled: true, recoveryCheck },
         operations: {},
       },
     },
@@ -115,12 +116,12 @@ test('recovery probes back off and stop after a successful recovery check', asyn
       adapter: 'local-sync',
       schema: docSchema,
       offlineMode: {
+        classifyFailure: () => 'outage' as const,
         outage: {
           enabled: true,
-          classifyFailure: () => 'outage' as const,
           recoveryCheck,
           recoveryProbe: {
-            intervalMs: 100,
+            initialIntervalMs: 100,
             maxIntervalMs: 400,
             backoffMultiplier: 2,
             jitterRatio: 0,
@@ -211,6 +212,104 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   statusHook.unmount();
 });
 
+test('default outage recovery probes use the slower backend-friendly cadence', async () => {
+  const sessionKey = 'default-recovery-probe-session';
+  let probeCount = 0;
+  const recoveryCheck = vi.fn<
+    ({ sessionKey }: { sessionKey: string }) => boolean
+  >(({ sessionKey: resolvedSessionKey }) => {
+    expect(resolvedSessionKey).toBe(sessionKey);
+    probeCount += 1;
+    return false;
+  });
+  const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        classifyFailure: () => 'outage' as const,
+        outage: { enabled: true, recoveryCheck },
+        operations: {},
+      },
+    },
+  });
+
+  try {
+    const statusHook = renderHook(() => {
+      const status = useGlobalOfflineStatus(sessionKey);
+      env.trackUIChanges(
+        `mode:${status.effectiveMode} outage:${status.outage.active ? 'on' : 'off'} probes:${probeCount}`,
+      );
+      return status;
+    });
+
+    // Enter outage mode through a real fetch failure, then verify the built-in
+    // recovery probe defaults wait longer before touching the backend again.
+    env.serverMock.setNextFetchError('boom');
+    env.apiStore.scheduleFetch('highPriority');
+    await advanceTime(25);
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(0);
+
+    env.addTimelineComments('beforeNextAction', [
+      'the default outage recovery delay should avoid probing again before 30 seconds',
+    ]);
+    await advanceTime(29_000);
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(0);
+
+    env.addTimelineComments('beforeNextAction', [
+      'the first default outage recovery probe should run at 30 seconds',
+    ]);
+    await advanceTime(1_000);
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(1);
+    expect(statusHook.result.current).toMatchInlineSnapshot(`
+      effectiveMode: 'offline'
+      effectiveOffline: '✅'
+      isLeader: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: 1735689630010
+      network: { active: '❌', enabled: '❌' }
+      outage: { active: '✅', enabled: '✅' }
+      sessionKey: 'default-recovery-probe-session'
+      updatedAt: 1735689630010
+    `);
+
+    env.addTimelineComments('beforeNextAction', [
+      'the second default outage recovery probe should back off to 60 seconds',
+    ]);
+    await advanceTime(59_000);
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(1);
+
+    await advanceTime(1_000);
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(2);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | ui                                |
+      0      | "mode:online outage:off probes:0" | ui-initialized
+      10ms   | "mode:online outage:off probes:0" | 🔴 >fetch-started
+      .      | "mode:online outage:off probes:0" | 🔴 <fetch-error (value: "error")
+      .      | "mode:offline outage:on probes:0" | ui-changed
+      30.01s | "mode:offline outage:on probes:0" | -- the default outage recovery delay should avoid probing again before 30 seconds
+      .      | "mode:offline outage:on probes:0" | -- the first default outage recovery probe should run at 30 seconds
+      .      | "mode:offline outage:on probes:1" | ui-changed
+      90.01s | "mode:offline outage:on probes:1" | -- the second default outage recovery probe should back off to 60 seconds
+      .      | "mode:offline outage:on probes:2" | ui-changed
+      "
+    `);
+
+    statusHook.unmount();
+  } finally {
+    randomSpy.mockRestore();
+  }
+});
+
 test('recovery probes keep retrying after a rejected recovery check', async () => {
   const sessionKey = 'recovery-probe-reject-session';
   let probeCount = 0;
@@ -233,12 +332,12 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
       adapter: 'local-sync',
       schema: docSchema,
       offlineMode: {
+        classifyFailure: () => 'outage' as const,
         outage: {
           enabled: true,
-          classifyFailure: () => 'outage' as const,
           recoveryCheck,
           recoveryProbe: {
-            intervalMs: 50,
+            initialIntervalMs: 50,
             maxIntervalMs: 50,
             backoffMultiplier: 1,
             jitterRatio: 0,
@@ -335,7 +434,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
 test('stale async outage classifications are ignored after a newer failure settles first', async () => {
   const sessionKey = 'stale-outage-session';
   let resolveFirstClassification:
-    | ((result: 'outage' | 'ignore') => void)
+    | ((result: 'outage' | 'network' | 'ignore') => void)
     | undefined;
   const recoveryCheck = vi.fn(() => false);
   const classifyFailure = vi
@@ -348,11 +447,11 @@ test('stale async outage classifications are ignored after a newer failure settl
           operationName?: string;
           sessionKey: string;
         },
-      ) => Promise<'outage' | 'ignore'>
+      ) => Promise<'outage' | 'network' | 'ignore'>
     >()
     .mockImplementationOnce(
       (_error, ctx) =>
-        new Promise<'outage' | 'ignore'>((resolve) => {
+        new Promise<'outage' | 'network' | 'ignore'>((resolve) => {
           expect(ctx).toMatchInlineSnapshot(`
             phase: 'fetch'
             sessionKey: 'stale-outage-session'
@@ -378,7 +477,8 @@ test('stale async outage classifications are ignored after a newer failure settl
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
-          outage: { enabled: true, classifyFailure, recoveryCheck },
+          classifyFailure,
+          outage: { enabled: true, recoveryCheck },
           operations: {},
         },
       },

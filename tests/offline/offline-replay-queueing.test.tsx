@@ -933,17 +933,17 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
       schema: docSchema,
       offlineMode: {
         network: { enabled: true },
+        classifyFailure: (error, ctx) =>
+          ctx.phase === 'sync' &&
+          error instanceof Error &&
+          error.message === 'outage'
+            ? 'outage'
+            : 'ignore',
         outage: {
           enabled: true,
-          classifyFailure: (error, ctx) =>
-            ctx.phase === 'sync' &&
-            error instanceof Error &&
-            error.message === 'outage'
-              ? 'outage'
-              : 'ignore',
           recoveryCheck,
           recoveryProbe: {
-            intervalMs: 50,
+            initialIntervalMs: 50,
             maxIntervalMs: 50,
             backoffMultiplier: 1,
             jitterRatio: 0,
@@ -1591,10 +1591,10 @@ describe('hybrid fallback integration', () => {
         schema: docSchema,
         offlineMode: {
           network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           outage: {
             enabled: true,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             recoveryCheck: () => false,
             recoveryProbe: quickRecoveryProbe,
           },
@@ -1692,10 +1692,10 @@ describe('hybrid fallback integration', () => {
         schema: docSchema,
         offlineMode: {
           network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           outage: {
             enabled: true,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             recoveryCheck: () => true,
             recoveryProbe: quickRecoveryProbe,
           },

@@ -161,9 +161,9 @@ describe('testScenario persistent storage seeding', () => {
 
     expect(scope.listQuery.readItemData<Row>('users', 1))
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Ada'
-    `);
+        id: 1
+        name: 'Ada'
+      `);
     expect(
       pick(scope.listQuery.readQueryEntry(usersQuery), ['data', 'timestamp']),
     ).toMatchInlineSnapshot(`

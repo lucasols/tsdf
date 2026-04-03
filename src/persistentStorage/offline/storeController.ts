@@ -396,6 +396,10 @@ export function createOfflineStoreController<
       entityNamespace,
     };
 
+    if (!session.getStatus().effectiveOffline && session.isLeader()) {
+      void ensureReplayScheduled();
+    }
+
     return activeSession;
   }
 
@@ -2092,7 +2096,7 @@ export function createOfflineStoreController<
         });
 
         if (
-          classification === 'outage' ||
+          classification !== 'ignore' ||
           current.session.getStatus().effectiveOffline
         ) {
           entryToUse = {
@@ -2199,7 +2203,7 @@ export function createOfflineStoreController<
         );
 
         return (
-          classification === 'outage' ||
+          classification !== 'ignore' ||
           preparedCurrent.session.getStatus().effectiveOffline
         );
       },

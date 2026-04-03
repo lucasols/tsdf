@@ -30,13 +30,15 @@ import {
   setSessionProtectedKeysSnapshot,
 } from './sessionProtectionRegistry';
 import type {
+  OfflineFailureClassification,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
   OfflineFailureContext,
   OfflineModeConfig,
+  OfflineNetworkModeConfig,
+  OfflineRecoveryProbeConfig,
   OfflineOperationSchemaShape,
   OfflineOutageModeConfig,
-  OfflineRecoveryProbeConfig,
 } from './types';
 import { globalOfflineStatusSchema } from './types';
 
@@ -77,8 +79,14 @@ type SessionCoordinatorOptions = {
   bootstrapStatusFromLocalStorage?: boolean;
 };
 
-const DEFAULT_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
-  intervalMs: 5_000,
+const DEFAULT_OUTAGE_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
+  initialIntervalMs: 30_000,
+  maxIntervalMs: 300_000,
+  backoffMultiplier: 2,
+  jitterRatio: 0.2,
+};
+const DEFAULT_NETWORK_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
+  initialIntervalMs: 5_000,
   maxIntervalMs: 60_000,
   backoffMultiplier: 2,
   jitterRatio: 0.2,
@@ -325,26 +333,37 @@ function arraysEqual(left: string[], right: string[]): boolean {
 
 function normalizeRecoveryProbe(
   config: OfflineRecoveryProbeConfig | undefined,
+  defaults: Required<OfflineRecoveryProbeConfig>,
 ): Required<OfflineRecoveryProbeConfig> {
   return {
-    intervalMs: config?.intervalMs ?? DEFAULT_RECOVERY_PROBE.intervalMs,
-    maxIntervalMs:
-      config?.maxIntervalMs ?? DEFAULT_RECOVERY_PROBE.maxIntervalMs,
-    backoffMultiplier:
-      config?.backoffMultiplier ?? DEFAULT_RECOVERY_PROBE.backoffMultiplier,
-    jitterRatio: config?.jitterRatio ?? DEFAULT_RECOVERY_PROBE.jitterRatio,
+    initialIntervalMs: config?.initialIntervalMs ?? defaults.initialIntervalMs,
+    maxIntervalMs: config?.maxIntervalMs ?? defaults.maxIntervalMs,
+    backoffMultiplier: config?.backoffMultiplier ?? defaults.backoffMultiplier,
+    jitterRatio: config?.jitterRatio ?? defaults.jitterRatio,
   };
 }
+
+type SessionRecoveryMode = 'network' | 'outage';
+
+type SessionRecoveryTarget = {
+  mode: SessionRecoveryMode;
+  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+  recoveryProbe: Required<OfflineRecoveryProbeConfig>;
+};
 
 type SessionCanonicalConfig = {
   adapter: StorageAdapter | null;
   networkEnabled: boolean;
   networkListenToBrowserEvents: boolean;
   getIsOffline?: () => boolean | Promise<boolean>;
+  networkRecoveryCheck?: OfflineNetworkModeConfig['recoveryCheck'];
+  networkRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
   outageEnabled: boolean;
-  classifyFailure?: OfflineOutageModeConfig['classifyFailure'];
-  recoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
-  recoveryProbe: Required<OfflineRecoveryProbeConfig>;
+  classifyFailure?: OfflineModeConfig<
+    Record<string, OfflineOperationSchemaShape>
+  >['classifyFailure'];
+  outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
+  outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
 
 function toCanonicalConfig(
@@ -359,10 +378,18 @@ function toCanonicalConfig(
     networkListenToBrowserEvents:
       config?.network?.listenToBrowserEvents ?? true,
     getIsOffline: config?.network?.getIsOffline,
+    networkRecoveryCheck: config?.network?.recoveryCheck,
+    networkRecoveryProbe: normalizeRecoveryProbe(
+      config?.network?.recoveryProbe,
+      DEFAULT_NETWORK_RECOVERY_PROBE,
+    ),
     outageEnabled: config?.outage?.enabled ?? false,
-    classifyFailure: config?.outage?.classifyFailure,
-    recoveryCheck: config?.outage?.recoveryCheck,
-    recoveryProbe: normalizeRecoveryProbe(config?.outage?.recoveryProbe),
+    classifyFailure: config?.classifyFailure,
+    outageRecoveryCheck: config?.outage?.recoveryCheck,
+    outageRecoveryProbe: normalizeRecoveryProbe(
+      config?.outage?.recoveryProbe,
+      DEFAULT_OUTAGE_RECOVERY_PROBE,
+    ),
   };
 }
 
@@ -376,6 +403,18 @@ function createNoopPersistentStorageHandle<T>(): PersistentStorageHandle<T> {
   };
 }
 
+function sameProbeConfig(
+  left: Required<OfflineRecoveryProbeConfig>,
+  right: Required<OfflineRecoveryProbeConfig>,
+): boolean {
+  return (
+    left.initialIntervalMs === right.initialIntervalMs &&
+    left.maxIntervalMs === right.maxIntervalMs &&
+    left.backoffMultiplier === right.backoffMultiplier &&
+    left.jitterRatio === right.jitterRatio
+  );
+}
+
 function sameCanonicalConfig(
   left: SessionCanonicalConfig,
   right: SessionCanonicalConfig,
@@ -385,14 +424,12 @@ function sameCanonicalConfig(
     left.networkEnabled === right.networkEnabled &&
     left.networkListenToBrowserEvents === right.networkListenToBrowserEvents &&
     left.getIsOffline === right.getIsOffline &&
+    left.networkRecoveryCheck === right.networkRecoveryCheck &&
+    sameProbeConfig(left.networkRecoveryProbe, right.networkRecoveryProbe) &&
     left.outageEnabled === right.outageEnabled &&
     left.classifyFailure === right.classifyFailure &&
-    left.recoveryCheck === right.recoveryCheck &&
-    left.recoveryProbe.intervalMs === right.recoveryProbe.intervalMs &&
-    left.recoveryProbe.maxIntervalMs === right.recoveryProbe.maxIntervalMs &&
-    left.recoveryProbe.backoffMultiplier ===
-      right.recoveryProbe.backoffMultiplier &&
-    left.recoveryProbe.jitterRatio === right.recoveryProbe.jitterRatio
+    left.outageRecoveryCheck === right.outageRecoveryCheck &&
+    sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
   );
 }
 
@@ -436,7 +473,9 @@ export class SessionOfflineCoordinator {
   #networkStateToken = 0;
   #lastRemoteSnapshotAt = 0;
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
+  #classifiedNetworkActive = false;
   #hydrated = false;
   #hydrationToken = 0;
   #protectedKeys: string[] = [];
@@ -473,6 +512,7 @@ export class SessionOfflineCoordinator {
         resolutions: [],
       }),
     });
+    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
 
     this.#browserTabs =
       createBrowserTabsCoordinatorWithPriority<OfflineSessionMessage>({
@@ -525,6 +565,8 @@ export class SessionOfflineCoordinator {
         { status: hydratedStatus },
         { action: 'offline-session-hydrate' },
       );
+      this.#syncClassifiedNetworkStateFromStatus(hydratedStatus);
+      this.#syncRecoveryProbe();
       syncPersistedOfflineStatusSnapshot(hydratedStatus);
     }
 
@@ -596,7 +638,6 @@ export class SessionOfflineCoordinator {
   registerStore(registration: SessionRegistration): () => void {
     this.#registrations.set(registration.storeName, registration);
     this.#refreshLeadership();
-    this.#maybeStartRecoveryProbe();
 
     return () => {
       this.#registrations.delete(registration.storeName);
@@ -649,75 +690,103 @@ export class SessionOfflineCoordinator {
     return this.#browserTabs.priority.getPriorityRank() <= 1;
   }
 
+  #browserReportsOnline(): boolean {
+    return !isWindowAvailable() || navigator.onLine !== false;
+  }
+
+  #syncClassifiedNetworkStateFromStatus(status: GlobalOfflineStatus): void {
+    this.#classifiedNetworkActive =
+      status.network.active && this.#browserReportsOnline();
+  }
+
+  #handleConnectivityChange(wasEffectivelyOffline: boolean): void {
+    this.#syncRecoveryProbe();
+
+    if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
+      this.#notifyOfflineCycle();
+      return;
+    }
+
+    if (wasEffectivelyOffline && !this.store.state.status.effectiveOffline) {
+      this.#notifyGreenCycle();
+    }
+  }
+
   async refreshNetworkState(): Promise<boolean> {
     if (!this.#canonicalConfig.networkEnabled) {
-      this.#updateStatus((current) => ({
-        ...current,
-        network: { enabled: false, active: false },
-      }));
+      this.setNetworkActive(false, { classified: false });
       return false;
     }
 
     const token = ++this.#networkStateToken;
-    const next = await this.#getCurrentOfflineState();
+    const detectedOffline = await this.#getCurrentOfflineState();
     if (token !== this.#networkStateToken) {
       return this.store.state.status.network.active;
     }
-    this.setNetworkActive(next);
-    return next;
+
+    if (detectedOffline) {
+      this.setNetworkActive(true, { classified: false });
+      return true;
+    }
+
+    if (
+      this.#classifiedNetworkActive &&
+      this.#browserReportsOnline() &&
+      this.#canonicalConfig.networkRecoveryCheck
+    ) {
+      this.#syncRecoveryProbe();
+      return true;
+    }
+
+    this.setNetworkActive(false, { classified: false });
+    return false;
   }
 
-  setNetworkActive(active: boolean): void {
+  setNetworkActive(
+    active: boolean,
+    options: {
+      classified?: boolean;
+      recordFailureAt?: boolean;
+      recoveryCheckAt?: number;
+    } = {},
+  ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    this.#classifiedNetworkActive = active
+      ? (options.classified ?? this.#classifiedNetworkActive)
+      : false;
 
     this.#updateStatus((current) => ({
       ...current,
       network: { enabled: this.#canonicalConfig.networkEnabled, active },
+      lastFailureAt:
+        active && options.recordFailureAt ? Date.now() : current.lastFailureAt,
+      lastRecoveryCheckAt:
+        options.recoveryCheckAt ?? current.lastRecoveryCheckAt,
     }));
-
-    if (active) {
-      this.#stopRecoveryProbe();
-      if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
-        this.#notifyOfflineCycle();
-      }
-      return;
-    }
-
-    this.#maybeStartRecoveryProbe();
-    this.#notifyGreenCycle();
+    this.#handleConnectivityChange(wasEffectivelyOffline);
   }
 
-  setOutageActive(active: boolean): void {
+  setOutageActive(
+    active: boolean,
+    options: { recoveryCheckAt?: number } = {},
+  ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
 
     this.#updateStatus((current) => ({
       ...current,
       outage: { enabled: this.#canonicalConfig.outageEnabled, active },
       lastFailureAt: active ? Date.now() : current.lastFailureAt,
+      lastRecoveryCheckAt:
+        options.recoveryCheckAt ?? current.lastRecoveryCheckAt,
     }));
-
-    if (active) {
-      this.#maybeStartRecoveryProbe();
-      if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
-        this.#notifyOfflineCycle();
-      }
-      return;
-    }
-
-    this.#stopRecoveryProbe();
-    this.#notifyGreenCycle();
+    this.#handleConnectivityChange(wasEffectivelyOffline);
   }
 
   async classifyFailure(
     error: unknown,
     ctx: OfflineFailureContext,
-  ): Promise<'outage' | 'ignore'> {
-    if (
-      !this.#canonicalConfig.outageEnabled ||
-      !this.#canonicalConfig.classifyFailure
-    ) {
-      return 'ignore';
-    }
+  ): Promise<OfflineFailureClassification> {
+    if (!this.#canonicalConfig.classifyFailure) return 'ignore';
 
     const token = this.getClassificationToken();
     const result = await this.#canonicalConfig.classifyFailure(error, ctx);
@@ -727,10 +796,18 @@ export class SessionOfflineCoordinator {
     }
 
     if (result === 'outage') {
+      if (!this.#canonicalConfig.outageEnabled) return 'ignore';
       this.setOutageActive(true);
+      return 'outage';
     }
 
-    return result;
+    if (result === 'network') {
+      if (!this.#canonicalConfig.networkEnabled) return 'ignore';
+      this.setNetworkActive(true, { classified: true, recordFailureAt: true });
+      return 'network';
+    }
+
+    return 'ignore';
   }
 
   #notifyGreenCycle(): void {
@@ -787,7 +864,7 @@ export class SessionOfflineCoordinator {
     const initial = this.#getCurrentOfflineState();
 
     if (typeof initial === 'boolean') {
-      this.setNetworkActive(initial);
+      this.setNetworkActive(initial, { classified: false });
     }
   }
 
@@ -896,6 +973,7 @@ export class SessionOfflineCoordinator {
       },
       { action: 'offline-session-remote' },
     );
+    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
     this.#refreshLeadership();
   }
 
@@ -911,13 +989,14 @@ export class SessionOfflineCoordinator {
       this.#notifyGreenCycle();
     }
 
-    this.#maybeStartRecoveryProbe();
+    this.#syncRecoveryProbe();
   }
 
-  #getRecoveryProbeDelay(): number {
-    const probeConfig = this.#canonicalConfig.recoveryProbe;
+  #getRecoveryProbeDelay(
+    probeConfig: Required<OfflineRecoveryProbeConfig>,
+  ): number {
     const baseDelay = Math.min(
-      probeConfig.intervalMs *
+      probeConfig.initialIntervalMs *
         Math.max(1, probeConfig.backoffMultiplier ** this.#recoveryAttempt),
       probeConfig.maxIntervalMs,
     );
@@ -929,59 +1008,105 @@ export class SessionOfflineCoordinator {
     );
   }
 
-  #scheduleRecoveryProbe(): void {
+  #getDesiredRecoveryTarget(): SessionRecoveryTarget | null {
+    if (!this.isLeader() || this.#registrations.size === 0) {
+      return null;
+    }
+
+    if (
+      this.store.state.status.network.active &&
+      this.#classifiedNetworkActive &&
+      this.#browserReportsOnline() &&
+      this.#canonicalConfig.networkEnabled &&
+      this.#canonicalConfig.networkRecoveryCheck
+    ) {
+      return {
+        mode: 'network',
+        recoveryCheck: this.#canonicalConfig.networkRecoveryCheck,
+        recoveryProbe: this.#canonicalConfig.networkRecoveryProbe,
+      };
+    }
+
+    if (
+      this.store.state.status.outage.active &&
+      !this.store.state.status.network.active &&
+      this.#canonicalConfig.outageEnabled &&
+      this.#canonicalConfig.outageRecoveryCheck
+    ) {
+      return {
+        mode: 'outage',
+        recoveryCheck: this.#canonicalConfig.outageRecoveryCheck,
+        recoveryProbe: this.#canonicalConfig.outageRecoveryProbe,
+      };
+    }
+
+    return null;
+  }
+
+  #scheduleRecoveryProbe(target: SessionRecoveryTarget): void {
+    this.#scheduledRecoveryMode = target.mode;
     this.#recoveryTimer = setTimeout(async () => {
       this.#recoveryTimer = null;
+      this.#scheduledRecoveryMode = null;
 
-      if (
-        !this.store.state.status.outage.active ||
-        this.store.state.status.network.active ||
-        !this.isLeader()
-      ) {
+      const nextTarget = this.#getDesiredRecoveryTarget();
+      if (nextTarget === null || nextTarget.mode !== target.mode) {
         return;
       }
 
       let recovered = false;
 
       try {
-        recovered =
-          (await this.#canonicalConfig.recoveryCheck?.({
-            sessionKey: this.sessionKey,
-          })) ?? false;
+        recovered = await nextTarget.recoveryCheck({
+          sessionKey: this.sessionKey,
+        });
       } catch {
         recovered = false;
       }
 
-      this.#updateStatus((current: GlobalOfflineStatus) => ({
-        ...current,
-        lastRecoveryCheckAt: Date.now(),
-      }));
+      const recoveryCheckAt = Date.now();
 
       if (recovered) {
         this.#recoveryAttempt = 0;
-        this.setOutageActive(false);
+        if (target.mode === 'network') {
+          this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+          return;
+        }
+
+        this.setOutageActive(false, { recoveryCheckAt });
         return;
       }
 
+      this.#updateStatus((current: GlobalOfflineStatus) => ({
+        ...current,
+        lastRecoveryCheckAt: recoveryCheckAt,
+      }));
+
       this.#recoveryAttempt += 1;
-      this.#scheduleRecoveryProbe();
-    }, this.#getRecoveryProbeDelay());
+      const nextProbeTarget = this.#getDesiredRecoveryTarget();
+      if (nextProbeTarget !== null && nextProbeTarget.mode === target.mode) {
+        this.#scheduleRecoveryProbe(nextProbeTarget);
+      }
+    }, this.#getRecoveryProbeDelay(target.recoveryProbe));
   }
 
-  #maybeStartRecoveryProbe(): void {
+  #syncRecoveryProbe(): void {
+    const target = this.#getDesiredRecoveryTarget();
+
+    if (target === null) {
+      this.#stopRecoveryProbe();
+      return;
+    }
+
     if (
-      !this.#canonicalConfig.outageEnabled ||
-      !this.#canonicalConfig.recoveryCheck ||
-      !this.store.state.status.outage.active ||
-      this.store.state.status.network.active ||
-      !this.isLeader() ||
-      this.#registrations.size === 0 ||
-      this.#recoveryTimer !== null
+      this.#recoveryTimer !== null &&
+      this.#scheduledRecoveryMode === target.mode
     ) {
       return;
     }
 
-    this.#scheduleRecoveryProbe();
+    this.#stopRecoveryProbe();
+    this.#scheduleRecoveryProbe(target);
   }
 
   #stopRecoveryProbe(): void {
@@ -989,6 +1114,7 @@ export class SessionOfflineCoordinator {
       clearTimeout(this.#recoveryTimer);
       this.#recoveryTimer = null;
     }
+    this.#scheduledRecoveryMode = null;
     this.#recoveryAttempt = 0;
   }
 

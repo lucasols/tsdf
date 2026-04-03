@@ -173,10 +173,10 @@ describe('document', () => {
         schema: docSchema,
         offlineMode: {
           network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           outage: {
             enabled: true,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             recoveryCheck: () => false,
             recoveryProbe: quickRecoveryProbe,
           },
@@ -237,10 +237,10 @@ describe('document', () => {
         schema: docSchema,
         offlineMode: {
           network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           outage: {
             enabled: true,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             recoveryCheck: () => false,
             recoveryProbe: quickRecoveryProbe,
           },
@@ -691,10 +691,10 @@ describe('collection', () => {
           payloadSchema: rc_string,
           offlineMode: {
             network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             outage: {
               enabled: true,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
               recoveryCheck: () => false,
               recoveryProbe: quickRecoveryProbe,
             },
@@ -764,10 +764,10 @@ describe('collection', () => {
           payloadSchema: rc_string,
           offlineMode: {
             network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             outage: {
               enabled: true,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
               recoveryCheck: () => false,
               recoveryProbe: quickRecoveryProbe,
             },
@@ -985,10 +985,10 @@ describe('list-query', () => {
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offlineMode: {
             network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             outage: {
               enabled: true,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
               recoveryCheck: () => false,
               recoveryProbe: quickRecoveryProbe,
             },
@@ -1061,10 +1061,10 @@ describe('list-query', () => {
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offlineMode: {
             network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             outage: {
               enabled: true,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
               recoveryCheck: () => false,
               recoveryProbe: quickRecoveryProbe,
             },
@@ -1105,10 +1105,10 @@ test('fallback queueing does not reapply the optimistic update', async () => {
       schema: docSchema,
       offlineMode: {
         network: network.config,
+        classifyFailure: (error, ctx) =>
+          classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
         outage: {
           enabled: true,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           recoveryCheck: () => false,
           recoveryProbe: quickRecoveryProbe,
         },
@@ -1169,10 +1169,10 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
         payloadSchema: rc_string,
         offlineMode: {
           network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           outage: {
             enabled: true,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             recoveryCheck: () => true,
             recoveryProbe: quickRecoveryProbe,
           },

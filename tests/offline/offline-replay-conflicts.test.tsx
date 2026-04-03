@@ -525,10 +525,10 @@ test('conflict handling still works for mutations queued via fallback', async ()
         schema: docSchema,
         offlineMode: {
           network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
           outage: {
             enabled: true,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
             recoveryCheck: () => true,
             recoveryProbe: quickRecoveryProbe,
           },

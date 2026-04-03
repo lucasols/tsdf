@@ -19,7 +19,7 @@ export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
 /** Phase where a failure occurred during offline-enabled operation flow. */
 export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
 /** High-level classification used by outage detection. */
-export type OfflineFailureClassification = 'outage' | 'ignore';
+export type OfflineFailureClassification = 'outage' | 'network' | 'ignore';
 /** Kinds of entities participating in offline conflict/sync tracking. */
 export type OfflineEntityKind = 'document' | 'item' | 'query';
 
@@ -84,51 +84,71 @@ export type OfflineFailureContext = {
   sessionKey: string;
 };
 
-/** Re-check strategy when outage recovery is enabled. */
-export type OfflineRecoveryProbeConfig = {
-  /** Initial recovery check delay, in milliseconds. */
+/** Fixed replay retry policy for healthy online replay failures. Omitted fields use built-in defaults. */
+export type OfflineReplayRetryConfig = {
+  /**
+   * Max counted failures before manual resolution is required.
+   * @default 5
+   */
+  maxFailures?: number;
+  /**
+   * Fixed delay between replay retries, in milliseconds.
+   * @default 5000
+   */
   intervalMs?: number;
-  /** Maximum recovery probe delay, in milliseconds. */
-  maxIntervalMs?: number;
-  /** Multiplicative backoff between recovery probes. */
-  backoffMultiplier?: number;
-  /** Jitter ratio (0-1) applied to the recovery probe delay. */
-  jitterRatio?: number;
 };
 
-/** Fixed replay retry policy for healthy online replay failures. */
-export type OfflineReplayRetryConfig = {
-  /** Max counted failures before manual resolution is required. */
-  maxFailures?: number;
-  /** Fixed delay between replay retries, in milliseconds. */
-  intervalMs?: number;
+/** Re-check strategy for recovery probing. Omitted fields use built-in defaults (which differ between network and outage modes). */
+export type OfflineRecoveryProbeConfig = {
+  /**
+   * Initial recovery check delay, in milliseconds.
+   * @default 5_000 (network) / 30_000 (outage)
+   */
+  initialIntervalMs?: number;
+  /**
+   * Maximum recovery check delay, in milliseconds.
+   * @default 60_000 (network) / 300_000 (outage)
+   */
+  maxIntervalMs?: number;
+  /**
+   * Multiplicative backoff between recovery probes.
+   * @default 2
+   */
+  backoffMultiplier?: number;
+  /**
+   * Jitter ratio (0-1) applied to the recovery probe delay.
+   * @default 0.2
+   */
+  jitterRatio?: number;
 };
 
 /** Network availability mode configuration for offline controls. */
 export type OfflineNetworkModeConfig = {
-  /** Enable network outage checks and tracking. */
+  /** Enable network connectivity detection and tracking. */
   enabled: boolean;
-  /** If true, subscribe to browser `online` / `offline` events. */
+  /**
+   * If true, subscribe to browser `online` / `offline` events.
+   * @default true
+   */
   listenToBrowserEvents?: boolean;
   /**
    * Optional override for network connectivity checks.
    * Return `true` when network should be considered offline.
    */
   getIsOffline?: () => boolean | Promise<boolean>;
+  /**
+   * Probe whether classified network recovery has completed.
+   * Return `true` when the session should leave network offline mode.
+   */
+  recoveryCheck?: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+  /** Optional probe config to tune classified network recovery behavior. */
+  recoveryProbe?: OfflineRecoveryProbeConfig;
 };
 
 /** Server outage detection and recovery configuration. */
 export type OfflineOutageModeConfig = {
   /** Enable outage mode logic and confirmation retry flow. */
   enabled: boolean;
-  /**
-   * Classify a remote failure as `outage` or `ignore`.
-   * `outage` activates offline recovery behavior.
-   */
-  classifyFailure: (
-    error: unknown,
-    ctx: OfflineFailureContext,
-  ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
   /** Probe the remote service to confirm outage recovery. */
   recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
   /** Optional probe config to tune recovery behavior. */
@@ -1339,11 +1359,26 @@ export type OperationConflict<
 export type OfflineModeConfig<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
-  /** Network detection strategy and browser integration. */
+  /**
+   * Classify a remote failure as `outage`, `network`, or `ignore`.
+   * `outage` activates outage recovery behavior.
+   * `network` activates network offline handling only when `network.enabled` is true.
+   */
+  classifyFailure?: (
+    error: unknown,
+    ctx: OfflineFailureContext,
+  ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
+  /**
+   * Network detection strategy and browser integration.
+   */
   network?: OfflineNetworkModeConfig;
-  /** Outage detection and recovery strategy for remote failures. */
+  /**
+   * Outage detection and recovery strategy for remote failures.
+   */
   outage?: OfflineOutageModeConfig;
-  /** Fixed retry policy for healthy online replay failures. */
+  /**
+   * Fixed retry policy for healthy online replay failures.
+   */
   replayRetry?: OfflineReplayRetryConfig;
   /** Mutation operation definitions keyed by operation name. */
   operations: TOperations;
