@@ -45,6 +45,7 @@ test('async outage classification promotes the session into outage mode after a 
     },
   );
   const recoveryCheck = vi.fn(() => true);
+
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => sessionKey,
     persistentStorage: {
