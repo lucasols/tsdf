@@ -24,6 +24,38 @@ export default lsStackEslintCfg({
             ],
           },
         ],
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector:
+              'CallExpression[callee.property.name="toEqual"][arguments.0.type="ObjectExpression"]',
+            message:
+              'Avoid .toEqual with object values. Use .toMatchInlineSnapshot() instead.',
+          },
+          {
+            selector:
+              'CallExpression[callee.property.name="toEqual"][arguments.0.type="ArrayExpression"]',
+            message:
+              'Avoid .toEqual with array values. Use .toMatchInlineSnapshot() instead.',
+          },
+          {
+            selector: 'CallExpression[callee.property.name="toMatchObject"]',
+            message:
+              'Avoid .toMatchObject. Use pick/omit to filter fields and .toMatchInlineSnapshot() instead.',
+          },
+          {
+            selector:
+              'CallExpression[callee.property.name="toMatchInlineSnapshot"][arguments.0.type="ObjectExpression"]',
+            message:
+              'Avoid .toMatchInlineSnapshot with object values. Only pass a string argument.',
+          },
+          {
+            selector:
+              'CallExpression[callee.property.name="toMatchInlineSnapshot"][arguments.0.type="ArrayExpression"]',
+            message:
+              'Avoid .toMatchInlineSnapshot with array values. Only pass a string argument.',
+          },
+        ],
         '@ls-stack/require-usage-explanation': [
           'error',
           {
