@@ -139,22 +139,22 @@ test('stores unregister their previous offline session when the session key beco
 
   expect(getGlobalOfflineEntities('offline-session-cleanup'))
     .toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-session-cleanup:offline-session-cleanup-doc:document'
-      pendingMutations: 1
-      requiresResolution: '❌'
-      sessionKey: 'offline-session-cleanup'
-      storeName: 'offline-session-cleanup-doc'
-      storeType: 'document'
-      syncState: 'pending'
-      updatedAt: 1735689600000
-  `);
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600000
+        entityKey: 'document'
+        entityKind: 'document'
+        id: 'offline-session-cleanup:offline-session-cleanup-doc:document'
+        pendingMutations: 1
+        requiresResolution: '❌'
+        sessionKey: 'offline-session-cleanup'
+        storeName: 'offline-session-cleanup-doc'
+        storeType: 'document'
+        syncState: 'pending'
+        updatedAt: 1735689600000
+    `);
 
   // Simulate logout so the store no longer belongs to the previous session.
   currentSessionKey = false;

@@ -34,6 +34,7 @@ import {
   getNextStoreId,
   registerMockStoreInstance,
 } from './browserTabsTestUtils';
+import { seedListQueryScenarioPersistentStorage } from './seedScenarioPersistentStorage';
 import {
   createServerTableMock,
   createSharedServerTableState,
@@ -688,6 +689,14 @@ export function createListQueryStoreTestEnv<
 
   bindFocusController?.onWindowBlur(() => {
     addAction('🔕 window-blurred');
+  });
+
+  seedListQueryScenarioPersistentStorage({
+    storeName: id,
+    sessionKey: getSessionKey(),
+    persistentStorage: resolvedPersistentStorage ?? null,
+    initialData: testOptions?.initialData,
+    timestamp: testOptions?.initialLastFetchStartTime,
   });
 
   return env;

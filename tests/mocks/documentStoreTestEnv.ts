@@ -17,6 +17,7 @@ import {
   getNextStoreId,
   registerMockStoreInstance,
 } from './browserTabsTestUtils';
+import { seedDocumentScenarioPersistentStorage } from './seedScenarioPersistentStorage';
 import {
   createServerMock,
   type FetchErrorConfig,
@@ -227,6 +228,14 @@ export function createDocumentStoreTestEnv<
     unregisterMockStoreInstance();
     throw error;
   }
+
+  seedDocumentScenarioPersistentStorage({
+    storeName: id,
+    sessionKey: getSessionKey(),
+    persistentStorage: resolvedPersistentStorage ?? null,
+    initialData: testOptions?.initialData,
+    timestamp: testOptions?.initialLastFetchStartTime,
+  });
 
   if (usesRealTimeUpdates) {
     serverMock.wsEvents.on('data_changed', () => {

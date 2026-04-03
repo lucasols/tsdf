@@ -557,9 +557,9 @@ test('conflict handling still works for mutations queued via fallback', async ()
 
   expect({ ok: result.ok, value: result.ok ? result.value : null })
     .toMatchInlineSnapshot(`
-    ok: '✅'
-    value: { kind: 'queued' }
-  `);
+      ok: '✅'
+      value: { kind: 'queued' }
+    `);
 
   await act(async () => {
     await advanceTime(1);

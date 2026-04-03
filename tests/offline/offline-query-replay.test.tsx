@@ -203,9 +203,9 @@ describe('list-query replay', () => {
     `);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time | query-items | query-status |
-      0    | Ada         | success      | [query-status, query-items] ui-initialized
-      2s   | Ada pending | success      | [query-items] ui-changed
+      time  | query-items | query-status |
+      0     | Ada         | success      | [query-status, query-items] ui-initialized
+      3.01s | Ada pending | success      | [query-items] ui-changed
       "
     `);
 
@@ -431,7 +431,7 @@ describe('list-query replay', () => {
       "
       time  | query-items               | query-status |
       0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
-      1.01s | Ada, Grace                | success      | -- queue a temp create while offline
+      3.01s | Ada, Grace                | success      | -- queue a temp create while offline
       .     | Ada, Grace, Linus offline | success      | [query-items] ui-changed
       .     | Ada, Grace, Linus offline | success      | -- edit the same temp row before reconnecting
       .     | Ada, Grace, Linus edited  | success      | [query-items] ui-changed
@@ -1069,8 +1069,8 @@ describe('list-query replay', () => {
     }).toMatchInlineSnapshot(`
       blockedResolutionCount: 0
       childResolutionCount: 1
-      createdAt: 1735689621010
-      enqueuedAt: 1735689601010
+      createdAt: 1735689623010
+      enqueuedAt: 1735689603010
       entityRefs:
         - entityKey: '"temp:Parent offline'
           entityKind: 'item'
@@ -1082,7 +1082,7 @@ describe('list-query replay', () => {
       storeName: 'offline-replay-nested-temp-create-chain-store'
       storeType: 'listQuery'
       tempIds: ['temp:Parent offline']
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     expect(childCreateResolution.blockedByResolutionIds).toHaveLength(1);
     expect(childCreateResolution.blockedByResolutionIds[0]).toBe(
@@ -1115,8 +1115,8 @@ describe('list-query replay', () => {
     }).toMatchInlineSnapshot(`
       blockedResolutionCount: 1
       childResolutionCount: 1
-      createdAt: 1735689621010
-      enqueuedAt: 1735689601010
+      createdAt: 1735689623010
+      enqueuedAt: 1735689603010
       entityRefs:
         - entityKey: '"temp:Child offline'
           entityKind: 'item'
@@ -1128,7 +1128,7 @@ describe('list-query replay', () => {
       storeName: 'offline-replay-nested-temp-create-chain-store'
       storeType: 'listQuery'
       tempIds: ['temp:Child offline']
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     expect(grandchildResolution.blockedByResolutionIds).toHaveLength(1);
     expect(grandchildResolution.blockedByResolutionIds[0]).toBe(
@@ -1157,8 +1157,8 @@ describe('list-query replay', () => {
     }).toMatchInlineSnapshot(`
       blockedResolutionCount: 1
       childResolutionCount: 0
-      createdAt: 1735689621010
-      enqueuedAt: 1735689601010
+      createdAt: 1735689623010
+      enqueuedAt: 1735689603010
       entityRefs:
         - entityKey: '"temp:Child offline'
           entityKind: 'item'
@@ -1169,7 +1169,7 @@ describe('list-query replay', () => {
       sessionKey: 'offline-replay-nested-temp-create-chain-session'
       storeName: 'offline-replay-nested-temp-create-chain-store'
       storeType: 'listQuery'
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     const parentEntity = env.apiStore
       .getOfflineEntities()
@@ -1208,7 +1208,7 @@ describe('list-query replay', () => {
     ).toMatchInlineSnapshot(`
       blockedResolutionCount: 0
       childResolutionCount: 1
-      createdAt: 1735689621010
+      createdAt: 1735689623010
       entityKey: '"temp:Parent offline'
       entityKind: 'item'
       id: 'offline-replay-nested-temp-create-chain-session:offline-replay-nested-temp-create-chain-store:"temp:Parent offline'
@@ -1219,7 +1219,7 @@ describe('list-query replay', () => {
       storeType: 'listQuery'
       syncState: 'resolution-required'
       tempId: 'temp:Parent offline'
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     expect(childEntity?.requiresResolution).toBe(true);
     expect(childEntity?.blockedByResolutionIds).toEqual(
@@ -1429,8 +1429,8 @@ describe('list-query replay', () => {
     }).toMatchInlineSnapshot(`
       blockedResolutionCount: 0
       childResolutionCount: 1
-      createdAt: 1735689621010
-      enqueuedAt: 1735689601010
+      createdAt: 1735689623010
+      enqueuedAt: 1735689603010
       entityRefs:
         - entityKey: '"temp:Linus offline'
           entityKind: 'item'
@@ -1442,7 +1442,7 @@ describe('list-query replay', () => {
       storeName: 'offline-replay-temp-create-resolution-chain-store'
       storeType: 'listQuery'
       tempIds: ['temp:Linus offline']
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     expect(childResolution.blockedByResolutionIds).toHaveLength(1);
     expect(childResolution.blockedByResolutionIds[0]).toBe(parentResolution.id);
@@ -1469,8 +1469,8 @@ describe('list-query replay', () => {
     }).toMatchInlineSnapshot(`
       blockedResolutionCount: 1
       childResolutionCount: 0
-      createdAt: 1735689621010
-      enqueuedAt: 1735689601010
+      createdAt: 1735689623010
+      enqueuedAt: 1735689603010
       entityRefs:
         - entityKey: '"temp:Linus offline'
           entityKind: 'item'
@@ -1481,7 +1481,7 @@ describe('list-query replay', () => {
       sessionKey: 'offline-replay-temp-create-resolution-chain-session'
       storeName: 'offline-replay-temp-create-resolution-chain-store'
       storeType: 'listQuery'
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     const [tempEntity] = env.apiStore.getOfflineEntities();
     expect(tempEntity?.blockedByResolutionIds).toHaveLength(1);
@@ -1508,7 +1508,7 @@ describe('list-query replay', () => {
     ).toMatchInlineSnapshot(`
       blockedResolutionCount: 1
       childResolutionCount: 1
-      createdAt: 1735689621010
+      createdAt: 1735689623010
       entityKey: '"temp:Linus offline'
       entityKind: 'item'
       id: 'offline-replay-temp-create-resolution-chain-session:offline-replay-temp-create-resolution-chain-store:"temp:Linus offline'
@@ -1519,7 +1519,7 @@ describe('list-query replay', () => {
       storeType: 'listQuery'
       syncState: 'resolution-required'
       tempId: 'temp:Linus offline'
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
     expect(patchUserExecute).not.toHaveBeenCalled();
 
@@ -1580,8 +1580,8 @@ describe('list-query replay', () => {
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689621010
-      enqueuedAt: 1735689601010
+      createdAt: 1735689623010
+      enqueuedAt: 1735689603010
       entityRefs:
         - entityKey: '"users||3'
           entityKind: 'item'
@@ -1592,7 +1592,7 @@ describe('list-query replay', () => {
       sessionKey: 'offline-replay-temp-create-resolution-chain-session'
       storeName: 'offline-replay-temp-create-resolution-chain-store'
       storeType: 'listQuery'
-      updatedAt: 1735689621010
+      updatedAt: 1735689623010
     `);
 
     // Once the child is remapped onto the final payload, it becomes eligible for
@@ -1629,12 +1629,12 @@ describe('list-query replay', () => {
       "
       time   | query-items                    | query-status |
       0      | Ada, Grace                     | success      | [query-items, query-status] ui-initialized
-      1.01s  | Ada, Grace                     | success      | -- queue the temp create and a dependent edit while offline
+      3.01s  | Ada, Grace                     | success      | -- queue the temp create and a dependent edit while offline
       .      | Ada, Grace, Linus blocked edit | success      | [query-items, query-items] ui-changed
-      21.01s | Ada, Grace, Linus blocked edit | success      | -- go online and let the temp create exhaust replay retries
+      23.01s | Ada, Grace, Linus blocked edit | success      | -- go online and let the temp create exhaust replay retries
       .      | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the temp payload can reconcile
       .      | Ada, Grace, Linus offline      | success      | [query-items] ui-changed
-      22.01s | Ada, Grace, Linus offline      | success      | -- retry the remapped child resolution
+      24.01s | Ada, Grace, Linus offline      | success      | -- retry the remapped child resolution
       .      | Ada, Grace, Linus blocked edit | success      | [query-items] ui-changed
       "
     `);
@@ -1793,9 +1793,9 @@ describe('list-query replay', () => {
       "
       time   | query-items                      |
       0      | Ada, Grace                       | ui-initialized
-      1.01s  | Ada, Grace, Linus offline        | ui-changed
+      3.01s  | Ada, Grace, Linus offline        | ui-changed
       .      | Ada, Grace, Linus discarded edit | ui-changed
-      21.01s | Ada, Grace, Linus discarded edit | -- go online and let the parent temp create exhaust replay
+      23.01s | Ada, Grace, Linus discarded edit | -- go online and let the parent temp create exhaust replay
       .      | Ada, Grace                       | ui-changed
       "
     `);
@@ -1891,7 +1891,7 @@ describe('list-query replay', () => {
         blockedResolutionCount: 0
         childResolutionCount: 0
         childResolutionIds: []
-        createdAt: 1735689601010
+        createdAt: 1735689603010
         entityKey: '"temp:Linus offline'
         entityKind: 'item'
         id: 'offline-replay-temp-list-query-session:list-query-1:"temp:Linus offline'
@@ -1902,7 +1902,7 @@ describe('list-query replay', () => {
         storeType: 'listQuery'
         syncState: 'pending'
         tempId: 'temp:Linus offline'
-        updatedAt: 1735689601010
+        updatedAt: 1735689603010
     `);
 
     act(() => {
@@ -1925,7 +1925,7 @@ describe('list-query replay', () => {
       "
       time  | query-items               | query-status |
       0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
-      1.01s | Ada, Grace, Linus offline | success      | [query-items, query-items, query-items] ui-changed
+      3.01s | Ada, Grace, Linus offline | success      | [query-items, query-items, query-items] ui-changed
       "
     `);
 

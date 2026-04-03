@@ -106,9 +106,9 @@ describe('document', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
     expect(directMutation).not.toHaveBeenCalled();
     expect(getSingleQueuedMutationData(sessionKey, storeName))
       .toMatchInlineSnapshot(`
@@ -149,9 +149,9 @@ describe('document', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { data: 2, kind: 'online' }
-    `);
+        ok: '✅'
+        value: { data: 2, kind: 'online' }
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -199,9 +199,9 @@ describe('document', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getSingleQueuedMutationData(sessionKey, storeName))
       .toMatchInlineSnapshot(`
@@ -301,9 +301,9 @@ describe('document', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'online' }
-    `);
+        ok: '✅'
+        value: { kind: 'online' }
+      `);
 
     await advanceTime(1_200);
     await waitForMicrotaskCondition(
@@ -368,9 +368,9 @@ describe('collection', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
     expect(directMutation).not.toHaveBeenCalled();
     expect(getSingleQueuedMutationData(sessionKey, storeName))
       .toMatchInlineSnapshot(`
@@ -657,13 +657,13 @@ describe('collection', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
+        ok: '✅'
 
-      value:
-        data:
-          value: { name: 'Grace' }
-        kind: 'online'
-    `);
+        value:
+          data:
+            value: { name: 'Grace' }
+          kind: 'online'
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -720,9 +720,9 @@ describe('collection', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getSingleQueuedMutationData(sessionKey, storeName))
       .toMatchInlineSnapshot(`
@@ -845,9 +845,9 @@ describe('list-query', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
     expect(directMutation).not.toHaveBeenCalled();
     expect(getSingleQueuedMutationData(sessionKey, storeName))
       .toMatchInlineSnapshot(`
@@ -900,12 +900,12 @@ describe('list-query', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
+        ok: '✅'
 
-      value:
-        data: { name: 'Grace' }
-        kind: 'online'
-    `);
+        value:
+          data: { name: 'Grace' }
+          kind: 'online'
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -954,9 +954,9 @@ describe('list-query', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'online' }
-    `);
+        ok: '✅'
+        value: { kind: 'online' }
+      `);
     expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(onSuccess).toHaveBeenCalledWith(undefined, 'users||1');
   });
@@ -1014,9 +1014,9 @@ describe('list-query', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getSingleQueuedMutationData(sessionKey, storeName))
       .toMatchInlineSnapshot(`
@@ -1136,9 +1136,9 @@ test('fallback queueing does not reapply the optimistic update', async () => {
 
   expect({ ok: result.ok, value: result.ok ? result.value : null })
     .toMatchInlineSnapshot(`
-    ok: '✅'
-    value: { kind: 'queued' }
-  `);
+      ok: '✅'
+      value: { kind: 'queued' }
+    `);
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 2
   `);
@@ -1206,9 +1206,9 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
 
   expect({ ok: result.ok, value: result.ok ? result.value : null })
     .toMatchInlineSnapshot(`
-    ok: '✅'
-    value: { kind: 'queued' }
-  `);
+      ok: '✅'
+      value: { kind: 'queued' }
+    `);
 
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []

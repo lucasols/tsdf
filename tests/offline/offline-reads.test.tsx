@@ -286,7 +286,7 @@ test('when a loaded list query refetches while offline, it keeps the last succes
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | query-items | query-status |
-    1.81s | Ada         | success      | -- timeline-cleared
+    3.81s | Ada         | success      | -- timeline-cleared
     .     | Ada         | success      | scheduled-fetch-triggered
     "
   `);

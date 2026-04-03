@@ -1721,9 +1721,9 @@ describe('hybrid fallback integration', () => {
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
-      ok: '✅'
-      value: { kind: 'queued' }
-    `);
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
 
     await advanceTime(1);
     await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);

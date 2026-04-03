@@ -23,6 +23,7 @@ import {
   getNextStoreId,
   registerMockStoreInstance,
 } from './browserTabsTestUtils';
+import { seedCollectionScenarioPersistentStorage } from './seedScenarioPersistentStorage';
 import {
   createServerTableMock,
   type ServerTableSharedState,
@@ -310,6 +311,14 @@ export function createCollectionStoreTestEnv<
     unregisterMockStoreInstance();
     throw error;
   }
+
+  seedCollectionScenarioPersistentStorage({
+    storeName: id,
+    sessionKey: getSessionKey(),
+    persistentStorage: resolvedPersistentStorage ?? null,
+    initialData: testOptions?.initialData,
+    timestamp: testOptions?.initialLastFetchStartTime,
+  });
 
   if (usesRealTimeUpdates) {
     serverTable.wsEvents.on('data_changed', (event) => {
