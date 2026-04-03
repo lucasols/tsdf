@@ -43,10 +43,6 @@ import type {
   OfflineMutationInput,
 } from './persistentStorage/offline/types';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
-import type {
-  DocumentPersistentStorageConfig,
-  StorageAdapter,
-} from './persistentStorage/types';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
   BatchRequest,

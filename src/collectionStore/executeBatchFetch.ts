@@ -3,6 +3,11 @@ import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
 
+import {
+  offlineConnectivityError,
+  runOfflineAwareFetch,
+  type OfflineAwareFetchController,
+} from '../persistentStorage/offline/fetchRuntime';
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {

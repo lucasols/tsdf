@@ -8,6 +8,10 @@ import {
   type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
 import type {
+  AnyOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
+} from '../../src/persistentStorage/offline/types';
+import type {
   CollectionPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
@@ -15,7 +19,10 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
 import {
   createServerTableMock,
   type ServerTableSharedState,

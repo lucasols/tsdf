@@ -28,7 +28,7 @@ import type {
 } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const testDataSchema = rc_object({ name: rc_string, value: rc_number });
