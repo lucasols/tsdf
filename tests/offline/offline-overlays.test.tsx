@@ -20,6 +20,7 @@ import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateListQueryUserOperations,
   type PatchUserOperations,
+  type UpdateValueExecuteContext,
   type UpdateValueOperations,
   userPatchSchema,
   userRowSchema,
@@ -49,10 +50,6 @@ afterEach(() => {
 });
 
 const deleteItemInputSchema = rc_object({ itemId: rc_string });
-
-type UpdateValueExecuteContext = Parameters<
-  UpdateValueOperations['updateValue']['execute']
->[0];
 
 describe('document overlays', () => {
   test('document invalidation keeps pending optimistic data visible until replay settles', async () => {

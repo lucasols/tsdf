@@ -119,7 +119,7 @@ test('direct document store runtime offline controls public api', async () => {
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
-    updatedAt: 1735689602000
+    updatedAt: 1735689600000
   `);
 
   offlineSession.setOfflineRuntimeConfig({
@@ -139,7 +139,7 @@ test('direct document store runtime offline controls public api', async () => {
     isLeader: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
-    network: { active: '❌', enabled: '❌' }
+    network: { active: '✅', enabled: '❌' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
     updatedAt: 1735689602000

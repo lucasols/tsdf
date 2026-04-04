@@ -510,7 +510,7 @@ test('stale async outage classifications are ignored after a newer failure settl
     network: { active: '❌', enabled: '❌' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'stale-outage-session'
-    updatedAt: 1735689600035
+    updatedAt: 1735689600000
   `);
   expect(staleClassificationEnv.store.state.error?.id ?? null).not.toBe(
     'offline',
@@ -531,7 +531,7 @@ test('stale async outage classifications are ignored after a newer failure settl
     network: { active: '❌', enabled: '❌' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'stale-outage-session'
-    updatedAt: 1735689600035
+    updatedAt: 1735689600000
   `);
   expect(staleClassificationEnv.store.state.error?.id ?? null).not.toBe(
     'offline',

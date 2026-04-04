@@ -43,7 +43,11 @@ import type {
   OfflineSession,
   OfflineSessionConfig,
 } from './types';
-import { globalOfflineStatusSchema } from './types';
+import {
+  getEffectiveOfflineFromModes,
+  globalOfflineStatusSchema,
+  isModeEffectivelyActive,
+} from './types';
 
 type SessionStoreState = {
   status: GlobalOfflineStatus;
@@ -180,7 +184,7 @@ function normalizePersistedOfflineStatus(
   if (compactStatus?.s === sessionKey) {
     const network = normalizeCompactModeState(compactStatus.n);
     const outage = normalizeCompactModeState(compactStatus.o);
-    const effectiveOffline = network.active || outage.active;
+    const effectiveOffline = getEffectiveOfflineFromModes({ network, outage });
 
     return {
       sessionKey,
@@ -206,10 +210,7 @@ function normalizePersistedOfflineStatus(
     return null;
   }
 
-  const effectiveOffline =
-    persistedStatus.effectiveOffline ||
-    persistedStatus.network.active ||
-    persistedStatus.outage.active;
+  const effectiveOffline = getEffectiveOfflineFromModes(persistedStatus);
 
   return {
     sessionKey,
@@ -823,11 +824,28 @@ export class SessionOfflineCoordinator {
       if (wasActive) {
         this.#replaySuppressedByNetworkDisable = true;
       }
-      this.setNetworkActive(false, { classified: false });
+      const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+      this.#updateStatus((current) => ({
+        ...current,
+        network: {
+          enabled: this.#isNetworkEnabled(),
+          active: current.network.active,
+        },
+      }));
+      this.#handleConnectivityChange(wasEffectivelyOffline);
       this.#syncNetworkListeners();
       return;
     }
 
+    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    this.#updateStatus((current) => ({
+      ...current,
+      network: {
+        enabled: this.#isNetworkEnabled(),
+        active: current.network.active,
+      },
+    }));
+    this.#handleConnectivityChange(wasEffectivelyOffline);
     this.#replaySuppressedByNetworkDisable = false;
     this.#syncNetworkListeners();
     this.#primeNetworkState();
@@ -854,13 +872,30 @@ export class SessionOfflineCoordinator {
       if (wasActive) {
         this.#replaySuppressedByOutageDisable = true;
       }
-      this.setOutageActive(false);
+      const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+      this.#updateStatus((current) => ({
+        ...current,
+        outage: {
+          enabled: this.#isOutageEnabled(),
+          active: current.outage.active,
+        },
+      }));
+      this.#handleConnectivityChange(wasEffectivelyOffline);
       return;
     }
 
     if (this.#replaySuppressedByOutageDisable) {
       this.#replaySuppressedByOutageDisable = false;
-      this.setOutageActive(true);
+      const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+      this.#updateStatus((current) => ({
+        ...current,
+        outage: {
+          enabled: this.#isOutageEnabled(),
+          active: current.outage.active,
+        },
+      }));
+      this.#handleConnectivityChange(wasEffectivelyOffline);
+      this.#syncRecoveryProbe();
       return;
     }
 
@@ -892,14 +927,8 @@ export class SessionOfflineCoordinator {
 
     return this.#deriveLocalStatus({
       ...status,
-      network: {
-        enabled: networkEnabled,
-        active: networkEnabled ? status.network.active : false,
-      },
-      outage: {
-        enabled: outageEnabled,
-        active: outageEnabled ? status.outage.active : false,
-      },
+      network: { enabled: networkEnabled, active: status.network.active },
+      outage: { enabled: outageEnabled, active: status.outage.active },
       isLeader: updates.isLeader ?? status.isLeader,
       updatedAt: updates.updatedAt ?? status.updatedAt,
     });
@@ -924,15 +953,12 @@ export class SessionOfflineCoordinator {
   }
 
   async refreshNetworkState(): Promise<boolean> {
-    if (!this.#isNetworkEnabled()) {
-      this.setNetworkActive(false, { classified: false });
-      return false;
-    }
+    if (!this.#isNetworkEnabled()) return false;
 
     const token = ++this.#networkStateToken;
     const detectedOffline = await this.#getCurrentOfflineState();
     if (token !== this.#networkStateToken) {
-      return this.store.state.status.network.active;
+      return isModeEffectivelyActive(this.store.state.status.network);
     }
 
     if (detectedOffline) {
@@ -963,7 +989,7 @@ export class SessionOfflineCoordinator {
   ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
     const nextEnabled = this.#isNetworkEnabled();
-    const nextActive = nextEnabled ? active : false;
+    const nextActive = active;
     this.#classifiedNetworkActive = nextActive
       ? (options.classified ?? this.#classifiedNetworkActive)
       : false;
@@ -987,7 +1013,7 @@ export class SessionOfflineCoordinator {
   ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
     const nextEnabled = this.#isOutageEnabled();
-    const nextActive = nextEnabled ? active : false;
+    const nextActive = active;
 
     this.#updateStatus((current) => ({
       ...current,
@@ -1077,6 +1103,7 @@ export class SessionOfflineCoordinator {
 
   #primeNetworkState(): void {
     if (!this.#isNetworkEnabled()) return;
+    if (this.store.state.status.network.active) return;
 
     const initial = this.#getCurrentOfflineState();
 
@@ -1134,7 +1161,7 @@ export class SessionOfflineCoordinator {
   }
 
   #deriveLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
-    const effectiveOffline = status.network.active || status.outage.active;
+    const effectiveOffline = getEffectiveOfflineFromModes(status);
 
     return this.#stampLocalStatus({
       ...status,
@@ -1235,10 +1262,9 @@ export class SessionOfflineCoordinator {
     }
 
     if (
-      this.store.state.status.network.active &&
+      isModeEffectivelyActive(this.store.state.status.network) &&
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#isNetworkEnabled() &&
       this.#canonicalConfig.networkRecoveryCheck
     ) {
       return {
@@ -1249,9 +1275,8 @@ export class SessionOfflineCoordinator {
     }
 
     if (
-      this.store.state.status.outage.active &&
-      !this.store.state.status.network.active &&
-      this.#isOutageEnabled() &&
+      isModeEffectivelyActive(this.store.state.status.outage) &&
+      !isModeEffectivelyActive(this.store.state.status.network) &&
       this.#canonicalConfig.outageRecoveryCheck
     ) {
       return {

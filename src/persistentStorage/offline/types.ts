@@ -251,13 +251,21 @@ export type OfflineConnectivityState = 'online' | 'offline';
 export type GlobalOfflineStatus = {
   /** Session key for this status bucket. */
   sessionKey: string;
-  /** Network mode and current active state. */
+  /**
+   * Network mode runtime enablement plus the last observed network-offline
+   * state for this session. `active` is preserved even while runtime support is
+   * disabled so it can resume correctly when re-enabled.
+   */
   network: { enabled: boolean; active: boolean };
-  /** Outage mode and active recovery state. */
+  /**
+   * Outage mode runtime enablement plus the last observed outage-active state
+   * for this session. `active` is preserved even while runtime support is
+   * disabled so it can resume correctly when re-enabled.
+   */
   outage: { enabled: boolean; active: boolean };
-  /** Effective mode after combining network and outage data. */
+  /** Effective mode after combining only enabled active modes. */
   effectiveMode: OfflineConnectivityState;
-  /** Whether offline behavior is currently active. */
+  /** Whether any enabled offline mode is currently active. */
   effectiveOffline: boolean;
   /** Whether this tab currently acts as leader for this session. */
   isLeader: boolean;
@@ -348,13 +356,28 @@ export const globalOfflineStatusSchema = rc_object({
   lastRecoveryCheckAt: rc_number.orNull(),
 });
 
+export function isModeEffectivelyActive(mode: {
+  enabled: boolean;
+  active: boolean;
+}) {
+  return mode.enabled && mode.active;
+}
+
+export function getEffectiveOfflineFromModes(status: {
+  network: { enabled: boolean; active: boolean };
+  outage: { enabled: boolean; active: boolean };
+}) {
+  return (
+    isModeEffectivelyActive(status.network) ||
+    isModeEffectivelyActive(status.outage)
+  );
+}
+
 export function isEffectiveOfflineStatusValue(value: unknown): boolean {
   const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
   if (status === null) return false;
 
-  return (
-    status.effectiveOffline || status.network.active || status.outage.active
-  );
+  return getEffectiveOfflineFromModes(status);
 }
 
 /**

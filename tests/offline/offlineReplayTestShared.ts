@@ -25,6 +25,10 @@ export type UpdateValueOperations = {
   >;
 };
 
+export type UpdateValueExecuteContext = Parameters<
+  UpdateValueOperations['updateValue']['execute']
+>[0];
+
 export type UpdateValueConflictOperations = {
   updateValue: DocumentOfflineOperationDefinition<
     { value: number },

@@ -202,7 +202,7 @@ test('network classifications are ignored when network mode is disabled', async 
     network: { active: '❌', enabled: '❌' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'classified-network-disabled-session'
-    updatedAt: 1735689600010
+    updatedAt: 1735689600000
   `);
   expect(env.store.state.error?.id ?? null).not.toBe('offline');
 });

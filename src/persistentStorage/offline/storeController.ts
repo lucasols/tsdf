@@ -16,6 +16,8 @@ import { validateWithSchema } from '../validateWithSchema';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
 import {
+  getEffectiveOfflineFromModes,
+  isModeEffectivelyActive,
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
@@ -286,9 +288,9 @@ export function createOfflineStoreController<
   ): OfflineMutationQueueingCause | null {
     const status = current.session.getStatus();
 
-    if (status.network.active) return 'network';
+    if (isModeEffectivelyActive(status.network)) return 'network';
 
-    if (status.outage.active) return 'outage';
+    if (isModeEffectivelyActive(status.outage)) return 'outage';
 
     return null;
   }
@@ -336,20 +338,22 @@ export function createOfflineStoreController<
     }
 
     const status = current.session.getStatus();
-    if (!status.network.active && !status.outage.active) return;
+    if (!getEffectiveOfflineFromModes(status)) return;
 
     await current.session.refreshNetworkState();
 
+    const statusAfterRefresh = current.session.getStatus();
     if (
       navigator.onLine !== false &&
-      current.session.getStatus().network.active
+      isModeEffectivelyActive(statusAfterRefresh.network)
     ) {
       current.session.setNetworkActive(false, { classified: false });
     }
 
+    const statusAfterNetworkClear = current.session.getStatus();
     if (
-      current.session.getStatus().outage.active &&
-      !current.session.getStatus().network.active
+      isModeEffectivelyActive(statusAfterNetworkClear.outage) &&
+      !isModeEffectivelyActive(statusAfterNetworkClear.network)
     ) {
       current.session.setOutageActive(false);
     }
