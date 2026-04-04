@@ -80,8 +80,7 @@ test('persistent storage without offline config keeps the existing online flow e
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(
     pick(getGlobalOfflineStatus(sessionKey), [
-      'effectiveMode',
-      'effectiveOffline',
+      'isOfflineMode',
       'isLeader',
       'lastFailureAt',
       'lastRecoveryCheckAt',
@@ -90,9 +89,8 @@ test('persistent storage without offline config keeps the existing online flow e
       'sessionKey',
     ]),
   ).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '❌', enabled: '❌' }
@@ -103,8 +101,7 @@ test('persistent storage without offline config keeps the existing online flow e
 
 function getGlobalOfflineStatusSummary(sessionKey: string) {
   return pick(getGlobalOfflineStatus(sessionKey), [
-    'effectiveMode',
-    'effectiveOffline',
+    'isOfflineMode',
     'network',
     'outage',
     'sessionKey',
@@ -592,8 +589,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   // Mount the global banner before any store has initialized offline support.
   const globalHook = renderHook(() => {
     const status = pick(useGlobalOfflineStatus(sessionKey), [
-      'effectiveMode',
-      'effectiveOffline',
+      'isOfflineMode',
       'network',
       'outage',
       'sessionKey',
@@ -663,15 +659,13 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   expect(globalStatusRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
-    ⋅ effectiveMode: normal
-    ⋅ effectiveOffline: ❌
+    ⋅ isOfflineMode: ❌
     ⋅ network: {enabled:❌, active:❌}
     ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: offline-global-hook-session
     └─
     ┌─
-    ⋅ effectiveMode: offline
-    ⋅ effectiveOffline: ✅
+    ⋅ isOfflineMode: ✅
     ⋅ network: {enabled:✅, active:✅}
     ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: offline-global-hook-session
@@ -693,15 +687,13 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   expect(globalStatusRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
-    ⋅ effectiveMode: normal
-    ⋅ effectiveOffline: ❌
+    ⋅ isOfflineMode: ❌
     ⋅ network: {enabled:❌, active:❌}
     ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: offline-global-hook-session
     └─
     ┌─
-    ⋅ effectiveMode: offline
-    ⋅ effectiveOffline: ✅
+    ⋅ isOfflineMode: ✅
     ⋅ network: {enabled:✅, active:✅}
     ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: offline-global-hook-session
@@ -710,8 +702,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     >>> Browser reconnects
 
     ┌─
-    ⋅ effectiveMode: normal
-    ⋅ effectiveOffline: ❌
+    ⋅ isOfflineMode: ❌
     ⋅ network: {enabled:✅, active:❌}
     ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: offline-global-hook-session
@@ -754,8 +745,7 @@ test('app restart boots global offline status from the persisted localStorage sn
     `);
 
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
+    isOfflineMode: '✅'
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'offline-startup-bootstrap'
@@ -763,8 +753,7 @@ test('app restart boots global offline status from the persisted localStorage sn
 
   const hook = renderHook(() =>
     pick(useGlobalOfflineStatus(sessionKey), [
-      'effectiveMode',
-      'effectiveOffline',
+      'isOfflineMode',
       'network',
       'outage',
       'sessionKey',
@@ -818,9 +807,8 @@ test('global offline status is shared across stores in the same session', async 
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '✅' }
@@ -830,8 +818,7 @@ test('global offline status is shared across stores in the same session', async 
   `);
   const hook = renderHook(() =>
     pick(useGlobalOfflineStatus(sessionKey), [
-      'effectiveMode',
-      'effectiveOffline',
+      'isOfflineMode',
       'network',
       'outage',
       'sessionKey',

@@ -38,7 +38,7 @@ import type {
   OfflineSessionConfig,
 } from './types';
 import {
-  getEffectiveOfflineFromModes,
+  getIsOfflineModeFromStatus,
   globalOfflineStatusSchema,
   isModeEffectivelyActive,
 } from './types';
@@ -117,8 +117,7 @@ function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
     sessionKey,
     network: { enabled: false, active: false },
     outage: { enabled: false, active: false },
-    effectiveMode: 'normal',
-    effectiveOffline: false,
+    isOfflineMode: false,
     isLeader: true,
     updatedAt: Date.now(),
     lastFailureAt: null,
@@ -176,14 +175,13 @@ function normalizePersistedOfflineStatus(
   if (compactStatus !== null) {
     const network = normalizeCompactModeState(compactStatus.n);
     const outage = normalizeCompactModeState(compactStatus.o);
-    const effectiveOffline = getEffectiveOfflineFromModes({ network, outage });
+    const isOfflineMode = getIsOfflineModeFromStatus({ network, outage });
 
     return {
       sessionKey,
       network,
       outage,
-      effectiveMode: effectiveOffline ? 'offline' : 'normal',
-      effectiveOffline,
+      isOfflineMode,
       isLeader: true,
       updatedAt:
         typeof compactStatus.u === 'number' ? compactStatus.u : Date.now(),
@@ -202,14 +200,13 @@ function normalizePersistedOfflineStatus(
     return null;
   }
 
-  const effectiveOffline = getEffectiveOfflineFromModes(persistedStatus);
+  const isOfflineMode = getIsOfflineModeFromStatus(persistedStatus);
 
   return {
     sessionKey,
     network: persistedStatus.network,
     outage: persistedStatus.outage,
-    effectiveMode: effectiveOffline ? 'offline' : 'normal',
-    effectiveOffline,
+    isOfflineMode,
     isLeader: true,
     updatedAt: persistedStatus.updatedAt,
     lastFailureAt: persistedStatus.lastFailureAt,
@@ -266,7 +263,7 @@ function clearPersistedOfflineStatusSnapshot(sessionKey: string): void {
 }
 
 function syncPersistedOfflineStatusSnapshot(status: GlobalOfflineStatus): void {
-  if (!status.effectiveOffline) {
+  if (!status.isOfflineMode) {
     clearPersistedOfflineStatusSnapshot(status.sessionKey);
     return;
   }
@@ -722,7 +719,7 @@ export class SessionOfflineCoordinator {
   }
 
   isReplayBlocked(): boolean {
-    if (this.store.state.status.effectiveOffline) return true;
+    if (this.store.state.status.isOfflineMode) return true;
 
     const { network, outage } = this.store.state.status;
 
@@ -820,7 +817,7 @@ export class SessionOfflineCoordinator {
 
     this.#networkEnabledOverride = enabled;
 
-    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     this.#updateStatus((current) => ({
       ...current,
@@ -845,7 +842,7 @@ export class SessionOfflineCoordinator {
 
     this.#outageEnabledOverride = enabled;
 
-    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     this.#updateStatus((current) => ({
       ...current,
@@ -884,12 +881,12 @@ export class SessionOfflineCoordinator {
   ): void {
     this.#syncRecoveryProbe();
 
-    if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
+    if (!wasEffectivelyOffline && this.store.state.status.isOfflineMode) {
       this.#notifyOfflineCycle();
       return;
     }
 
-    if (wasEffectivelyOffline && !this.store.state.status.effectiveOffline) {
+    if (wasEffectivelyOffline && !this.store.state.status.isOfflineMode) {
       this.#notifyGreenCycle();
       return;
     }
@@ -948,7 +945,7 @@ export class SessionOfflineCoordinator {
       recoveryCheckAt?: number;
     } = {},
   ): void {
-    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isNetworkEnabled();
     const nextActive = active;
@@ -973,7 +970,7 @@ export class SessionOfflineCoordinator {
     active: boolean,
     options: { recoveryCheckAt?: number } = {},
   ): void {
-    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isOutageEnabled();
     const nextActive = active;
@@ -1017,14 +1014,18 @@ export class SessionOfflineCoordinator {
   }
 
   #notifyGreenCycle(): void {
-    if (this.store.state.status.effectiveOffline || !this.isLeader()) return;
+    if (this.store.state.status.isOfflineMode || !this.isLeader()) {
+      return;
+    }
     for (const registration of this.#registrations.values()) {
       registration.onGreenCycle?.();
     }
   }
 
   #notifyOfflineCycle(): void {
-    if (!this.store.state.status.effectiveOffline || !this.isLeader()) return;
+    if (!this.store.state.status.isOfflineMode || !this.isLeader()) {
+      return;
+    }
     for (const registration of this.#registrations.values()) {
       registration.onOfflineCycle?.();
     }
@@ -1124,13 +1125,9 @@ export class SessionOfflineCoordinator {
   }
 
   #deriveLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
-    const effectiveOffline = getEffectiveOfflineFromModes(status);
+    const isOfflineMode = getIsOfflineModeFromStatus(status);
 
-    return this.#stampLocalStatus({
-      ...status,
-      effectiveOffline,
-      effectiveMode: effectiveOffline ? 'offline' : 'normal',
-    });
+    return this.#stampLocalStatus({ ...status, isOfflineMode });
   }
 
   #updateStatus(
@@ -1196,7 +1193,7 @@ export class SessionOfflineCoordinator {
       return;
     }
 
-    if (leadershipChanged && !this.store.state.status.effectiveOffline) {
+    if (leadershipChanged && !this.store.state.status.isOfflineMode) {
       this.#notifyGreenCycle();
     }
 

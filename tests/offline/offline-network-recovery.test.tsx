@@ -58,9 +58,8 @@ test('classified network failures activate network mode and shift fetches into o
 
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: 1735689600010
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '✅' }
@@ -110,7 +109,7 @@ test('classified network recovery uses network-specific probes and clears networ
   const statusHook = renderHook(() => {
     const status = useGlobalOfflineStatus(sessionKey);
     env.trackUIChanges(
-      `mode:${status.effectiveMode} network:${status.network.active ? 'on' : 'off'} probes:${probeCount}`,
+      `offlineMode:${status.isOfflineMode ? 'on' : 'off'} network:${status.network.active ? 'on' : 'off'} probes:${probeCount}`,
     );
     return status;
   });
@@ -128,9 +127,8 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: 1735689600010
     lastRecoveryCheckAt: 1735689600110
     network: { active: '✅', enabled: '✅' }
@@ -146,9 +144,8 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: 1735689600010
     lastRecoveryCheckAt: 1735689600310
     network: { active: '❌', enabled: '✅' }
@@ -158,15 +155,15 @@ test('classified network recovery uses network-specific probes and clears networ
   `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                 |
-    0     | "mode:normal network:off probes:0" | ui-initialized
-    10ms  | "mode:normal network:off probes:0" | 🔴 >fetch-started
-    .     | "mode:normal network:off probes:0" | 🔴 <fetch-error (value: "error")
-    .     | "mode:offline network:on probes:0" | ui-changed
-    110ms | "mode:offline network:on probes:0" | -- wait for the first classified-network recovery probe; it should fail and keep network mode active
-    .     | "mode:offline network:on probes:1" | ui-changed
-    310ms | "mode:offline network:on probes:1" | -- wait for the second classified-network recovery probe; it should clear network mode
-    .     | "mode:normal network:off probes:2" | ui-changed
+    time  | ui                                     |
+    0     | "offlineMode:off network:off probes:0" | ui-initialized
+    10ms  | "offlineMode:off network:off probes:0" | 🔴 >fetch-started
+    .     | "offlineMode:off network:off probes:0" | 🔴 <fetch-error (value: "error")
+    .     | "offlineMode:on network:on probes:0"   | ui-changed
+    110ms | "offlineMode:on network:on probes:0"   | -- wait for the first classified-network recovery probe; it should fail and keep network mode active
+    .     | "offlineMode:on network:on probes:1"   | ui-changed
+    310ms | "offlineMode:on network:on probes:1"   | -- wait for the second classified-network recovery probe; it should clear network mode
+    .     | "offlineMode:off network:off probes:2" | ui-changed
     "
   `);
   statusHook.unmount();
@@ -194,9 +191,8 @@ test('network classifications are ignored when network mode is disabled', async 
 
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '❌', enabled: '❌' }
@@ -247,9 +243,8 @@ test('browser offline events stop classified-network probing and hand control to
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: 1735689600010
     lastRecoveryCheckAt: 1735689600060
     network: { active: '✅', enabled: '✅' }
@@ -309,9 +304,8 @@ test('coming back online after browser-driven network takeover clears the interr
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: 1735689600010
     lastRecoveryCheckAt: 1735689600060
     network: { active: '❌', enabled: '✅' }

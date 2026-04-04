@@ -336,9 +336,8 @@ test('direct list-query store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '❌', enabled: '✅' }
@@ -518,9 +517,8 @@ test('direct list-query store offline public api', async () => {
   );
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '✅' }
@@ -638,9 +636,8 @@ test('direct list-query store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '❌', enabled: '✅' }

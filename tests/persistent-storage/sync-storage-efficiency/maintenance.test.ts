@@ -521,7 +521,7 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 📖 #15 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index) | 0.05 kb
       .     | 🗑️ #13 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 📖 #7 ✅ tsdf.user@example.com._o_.s (entry data) | 0.51 kb
+      .     | 📖 #7 ✅ tsdf.user@example.com._o_.s (entry data) | 0.46 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);

@@ -111,9 +111,8 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '✅' }
@@ -134,9 +133,8 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '❌' }
@@ -164,9 +162,8 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '✅' }
@@ -346,9 +343,8 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '❌', enabled: '✅' }
@@ -498,9 +494,8 @@ test('direct document store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'offline'
-    effectiveOffline: '✅'
     isLeader: '✅'
+    isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '✅' }
@@ -600,9 +595,8 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'normal'
-    effectiveOffline: '❌'
     isLeader: '✅'
+    isOfflineMode: '❌'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '❌', enabled: '✅' }

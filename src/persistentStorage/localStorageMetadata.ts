@@ -17,7 +17,7 @@ import {
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
 import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
-import { isEffectiveOfflineStatusValue } from './offline/types';
+import { isOfflineModeStatusValue } from './offline/types';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
@@ -947,7 +947,7 @@ function isSessionOfflineDuringManagedCleanup(
       ? rawStatus.d
       : (rawStatus ?? null);
 
-  return isEffectiveOfflineStatusValue(status);
+  return isOfflineModeStatusValue(status);
 }
 
 export function clearManagedLocalStorageSession(

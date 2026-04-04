@@ -90,7 +90,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     await flushAllTimers();
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (3.11 kb)
+      "tsdf (3.06 kb)
       ├ _m (0.64 kb)
       │ ├ g (0.04 kb)
       │ └ r (0.59 kb)
@@ -106,9 +106,9 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       │     │   └ m (0.05 kb)
       │     └ offline-sync-format-doc (0.12 kb)
       │       └ m (0.07 kb)
-      └ offline-sync-format-session (2.47 kb)
-        ├ _o_ (0.54 kb)
-        │ └ s (0.54 kb)
+      └ offline-sync-format-session (2.41 kb)
+        ├ _o_ (0.48 kb)
+        │ └ s (0.48 kb)
         └ offline-sync-format-doc (1.88 kb)
           ├ oe (0.90 kb)
           │ └ document (0.90 kb)
@@ -158,9 +158,8 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     expect(getParsedLocalStorageValue('tsdf.offline-sync-format-session._o_.s'))
       .toMatchInlineSnapshot(`
         d:
-          effectiveMode: 'offline'
-          effectiveOffline: '✅'
           isLeader: '✅'
+          isOfflineMode: '✅'
           lastFailureAt: null
           lastRecoveryCheckAt: null
           network: { active: '✅', enabled: '✅' }
@@ -271,11 +270,11 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     await flushAllTimers();
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (3.06 kb)
-      ├ offline-opfs-format-session (2.99 kb)
-      │ ├ _o_.s (0.65 kb)
+      "tsdf (3.01 kb)
+      ├ offline-opfs-format-session (2.94 kb)
+      │ ├ _o_.s (0.59 kb)
       │ │ ├ d._i.r.json (0.10 kb)
-      │ │ └ d.e.p.json (0.54 kb)
+      │ │ └ d.e.p.json (0.48 kb)
       │ └ offline-opfs-format-doc (2.29 kb)
       │   ├ d._i.r.json (0.11 kb)
       │   ├ d.e.p.json (0.05 kb)
@@ -305,9 +304,8 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
         'tsdf/offline-opfs-format-session/_o_.s/d.e.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      effectiveMode: 'offline'
-      effectiveOffline: '✅'
       isLeader: '✅'
+      isOfflineMode: '✅'
       lastFailureAt: null
       lastRecoveryCheckAt: null
       network: { active: '✅', enabled: '✅' }

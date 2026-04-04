@@ -252,9 +252,8 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'offline'
-      effectiveOffline: '✅'
       isLeader: '✅'
+      isOfflineMode: '✅'
       lastFailureAt: 1735689600000
       lastRecoveryCheckAt: null
       network: { active: '❌', enabled: '✅' }
@@ -317,9 +316,8 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'normal'
-      effectiveOffline: '❌'
       isLeader: '✅'
+      isOfflineMode: '❌'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: null
       network: { active: '❌', enabled: '✅' }
@@ -429,9 +427,8 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'normal'
-      effectiveOffline: '❌'
       isLeader: '✅'
+      isOfflineMode: '❌'
       lastFailureAt: 1735689600010
       lastRecoveryCheckAt: 1735689600025
       network: { active: '❌', enabled: '❌' }
@@ -1135,9 +1132,8 @@ describe('collection', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'offline'
-      effectiveOffline: '✅'
       isLeader: '✅'
+      isOfflineMode: '✅'
       lastFailureAt: 1735689600000
       lastRecoveryCheckAt: null
       network: { active: '❌', enabled: '✅' }
@@ -1432,9 +1428,8 @@ describe('list-query', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'offline'
-      effectiveOffline: '✅'
       isLeader: '✅'
+      isOfflineMode: '✅'
       lastFailureAt: 1735689600000
       lastRecoveryCheckAt: null
       network: { active: '❌', enabled: '✅' }

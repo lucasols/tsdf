@@ -14,7 +14,7 @@ import {
 
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
-import { isEffectiveOfflineStatusValue } from './offline/types';
+import { isOfflineModeStatusValue } from './offline/types';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getNamespaceId,
@@ -1566,9 +1566,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
               scope,
               getPayloadRecordKey('document'),
             );
-            return isEffectiveOfflineStatusValue(status)
-              ? scope.sessionKey
-              : null;
+            return isOfflineModeStatusValue(status) ? scope.sessionKey : null;
           }),
         )
       ).filter((sessionKey) => sessionKey !== null),

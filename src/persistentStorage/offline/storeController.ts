@@ -201,7 +201,7 @@ export type OfflineStoreController<
     resolution: unknown,
   ) => Promise<void>;
   prepareForFetch: () => Promise<void>;
-  getSessionStatus: () => { effectiveOffline: boolean } | null;
+  getSessionStatus: () => { isOfflineMode: boolean } | null;
   handleFetchSuccess: () => Promise<void>;
   evaluateOfflineFetchError: (
     error: unknown,
@@ -315,7 +315,7 @@ export function createOfflineStoreController<
   ): PreparedOfflineMutation['initialAction'] {
     const status = current.session.getStatus();
 
-    if (!status.effectiveOffline) return 'run';
+    if (!status.isOfflineMode) return 'run';
 
     const cause = getActiveMutationQueueingCause(current);
     if (cause === null) return 'run';
@@ -480,7 +480,7 @@ export function createOfflineStoreController<
       entityNamespace,
     };
 
-    if (!session.getStatus().effectiveOffline && session.isLeader()) {
+    if (!session.getStatus().isOfflineMode && session.isLeader()) {
       void ensureReplayScheduled();
     }
 
@@ -2016,7 +2016,7 @@ export function createOfflineStoreController<
     if (
       replayScheduled ||
       replayRetryTimer !== null ||
-      current.session.getStatus().effectiveOffline ||
+      current.session.getStatus().isOfflineMode ||
       current.session.isReplayBlocked() ||
       !current.session.isLeader() ||
       queueEntries.size === 0
@@ -2044,7 +2044,7 @@ export function createOfflineStoreController<
       const current = ensureActiveSession();
       if (!current) return;
       if (
-        current.session.getStatus().effectiveOffline ||
+        current.session.getStatus().isOfflineMode ||
         current.session.isReplayBlocked() ||
         !current.session.isLeader()
       ) {
@@ -2210,7 +2210,7 @@ export function createOfflineStoreController<
 
         if (
           classification !== 'ignore' ||
-          current.session.getStatus().effectiveOffline
+          current.session.getStatus().isOfflineMode
         ) {
           entryToUse = {
             ...entryToUse,

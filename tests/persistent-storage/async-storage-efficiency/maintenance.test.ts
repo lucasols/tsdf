@@ -846,7 +846,7 @@ describe('async storage efficiency: maintenance', () => {
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/unprotected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       135ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.p.json
-            |    └ (entry data) | 0.50 kb
+            |    └ (entry data) | 0.44 kb
       138ms | 📖 #2 tsdf/sess-trigger/trigger-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
       .     | 📖 #3 tsdf/user%40example.com/_o_.s/d._i.r.json
