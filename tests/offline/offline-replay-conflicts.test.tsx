@@ -6,16 +6,26 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import {
   type CollectionOfflineOperationDefinition,
+  type ListQueryOfflineOperationDefinition,
   useGlobalOfflineEntities,
   useGlobalOfflineResolutions,
 } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
-import { type UpdateValueConflictOperations } from './offlineReplayTestShared';
+import {
+  type PatchUserOperations,
+  type UpdateValueConflictOperations,
+  userPatchSchema,
+  userRowSchema,
+} from './offlineReplayTestShared';
 import {
   classifyMutationOutage,
   collectionCreateInputSchema,
@@ -23,6 +33,7 @@ import {
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
+  listQueryQueryPayloadSchema,
   quickRecoveryProbe,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
@@ -678,6 +689,330 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     offlineResolutionsHook.unmount();
     tempAdaHook.unmount();
   });
+});
+
+type CreateAndPatchListQueryUserConflictOperations = PatchUserOperations & {
+  createUser: ListQueryOfflineOperationDefinition<
+    { id: number; name: string },
+    ListQueryParams,
+    string,
+    { name: string },
+    { reason: string },
+    { id: number; name: string }
+  >;
+};
+
+test('list-query temp-create conflicts promote dependent edits into blocked resolutions that the UI can inspect', async () => {
+  network.setOffline();
+  const usersQuery = { tableId: 'users' } as const;
+  const createUserExecute = vi.fn(({ input }: { input: { name: string } }) => ({
+    id: 3,
+    name: input.name,
+  }));
+  const patchUserExecute = vi.fn(
+    ({ input }: { input: { itemId: string; name: string } }) => {
+      env.apiStore.updateItemState(input.itemId, (item) => ({
+        ...item,
+        name: input.name,
+      }));
+
+      return { name: input.name };
+    },
+  );
+
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    CreateAndPatchListQueryUserConflictOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-replay-temp-create-conflict-chain-store',
+      getSessionKey: () => 'offline-replay-temp-create-conflict-chain-session',
+      testScenario: { loaded: { queries: [usersQuery] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: createOfflineConfigForSessionKey(
+          () => 'offline-replay-temp-create-conflict-chain-session',
+          {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: createUserExecute,
+                conflictHandling: {
+                  schema: docConflictSchema,
+                  detectConflict: ({ input }) =>
+                    input.name === 'Linus offline'
+                      ? { reason: 'server-changed' }
+                      : false,
+                  resolveConflict: () => undefined,
+                },
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: patchUserExecute,
+              },
+            },
+          },
+        ),
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+
+    env.trackItemUI('query-items', query.items.join(', '));
+    env.trackItemUI('query-status', query.status);
+    return query;
+  });
+  await flushAllTimers();
+
+  // Queue the temp create and the dependent edit while offline so the child
+  // mutation has to wait on the temp entity lifecycle.
+  env.addTimelineComments('beforeNextAction', [
+    'queue the temp create and a dependent edit while offline',
+  ]);
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState(
+          'temp:Linus offline',
+          { id: -1, name: 'Linus offline' },
+          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+        );
+      },
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+    });
+  });
+
+  await act(async () => {
+    await env.apiStore.performMutation('temp:Linus offline', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+          ...item,
+          name: 'Linus blocked edit',
+        }));
+      },
+      mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
+      },
+    });
+  });
+
+  // Bring the session online. The temp create should stop at conflict
+  // detection, and the dependent edit should be promoted into a blocked
+  // child resolution that a conflict UI can inspect through hooks.
+  env.addTimelineComments('beforeNextAction', [
+    'go online and let the temp create stop at conflict detection',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(
+    () => env.apiStore.getOfflineResolutions().length === 2,
+  );
+  await flushAllTimers();
+
+  const offlineEntitiesHook = renderHook(() =>
+    env.apiStore.useOfflineEntities(),
+  );
+  const offlineResolutionsHook = renderHook(() =>
+    env.apiStore.useOfflineResolutions(),
+  );
+
+  const parentResolution = offlineResolutionsHook.result.current.find(
+    (resolution) => resolution.operation === 'createUser',
+  );
+  const childResolution = offlineResolutionsHook.result.current.find(
+    (resolution) => resolution.operation === 'patchUserName',
+  );
+
+  expect(parentResolution).toBeDefined();
+  expect(childResolution).toBeDefined();
+  if (!parentResolution || !childResolution) {
+    throw new Error('Expected temp-create parent and child resolutions');
+  }
+
+  expect(createUserExecute).not.toHaveBeenCalled();
+  expect(patchUserExecute).not.toHaveBeenCalled();
+  expect(hook.result.current.items).toMatchInlineSnapshot(`
+    ['Ada', 'Grace', 'Linus blocked edit']
+  `);
+  expect(parentResolution.childResolutionIds).toHaveLength(1);
+  expect(parentResolution.childResolutionIds[0]).toBe(childResolution.id);
+
+  expect({
+    ...pick(parentResolution, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    conflict:
+      parentResolution.kind === 'conflict' ? parentResolution.conflict : null,
+    tempIds: 'tempIds' in parentResolution ? parentResolution.tempIds : null,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 1
+    conflict: { reason: 'server-changed' }
+    createdAt: 1735689603010
+    enqueuedAt: 1735689603010
+    entityRefs:
+      - entityKey: '"temp:Linus offline'
+        entityKind: 'item'
+    input: { name: 'Linus offline' }
+    kind: 'conflict'
+    operation: 'createUser'
+    sessionKey: 'offline-replay-temp-create-conflict-chain-session'
+    storeName: 'offline-replay-temp-create-conflict-chain-store'
+    storeType: 'listQuery'
+    tempIds: ['temp:Linus offline']
+    updatedAt: 1735689603010
+  `);
+
+  expect(childResolution.blockedByResolutionIds).toHaveLength(1);
+  expect(childResolution.blockedByResolutionIds[0]).toBe(parentResolution.id);
+  expect(childResolution.childResolutionIds).toMatchInlineSnapshot(`[]`);
+  expect({
+    ...pick(childResolution, [
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    conflict:
+      childResolution.kind === 'conflict' ? childResolution.conflict : null,
+    lastReplayError:
+      childResolution.kind === 'retry-exhausted'
+        ? childResolution.lastReplayError
+        : null,
+  }).toMatchInlineSnapshot(`
+    blockedResolutionCount: 1
+    childResolutionCount: 0
+    conflict: null
+    createdAt: 1735689603010
+    enqueuedAt: 1735689603010
+    entityRefs:
+      - entityKey: '"temp:Linus offline'
+        entityKind: 'item'
+    input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' }
+    kind: 'retry-exhausted'
+    lastReplayError: { message: 'Blocked by unresolved temp create dependency' }
+    operation: 'patchUserName'
+    sessionKey: 'offline-replay-temp-create-conflict-chain-session'
+    storeName: 'offline-replay-temp-create-conflict-chain-store'
+    storeType: 'listQuery'
+    updatedAt: 1735689603010
+  `);
+
+  const [tempEntity] = offlineEntitiesHook.result.current;
+  expect(tempEntity?.blockedByResolutionIds).toHaveLength(1);
+  expect(tempEntity?.blockedByResolutionIds[0]).toBe(parentResolution.id);
+  expect(tempEntity?.childResolutionIds).toHaveLength(1);
+  expect(tempEntity?.childResolutionIds[0]).toBe(childResolution.id);
+  expect(
+    pick(tempEntity, [
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'createdAt',
+      'entityKey',
+      'entityKind',
+      'id',
+      'pendingMutations',
+      'requiresResolution',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'syncState',
+      'tempId',
+      'updatedAt',
+    ]),
+  ).toMatchInlineSnapshot(`
+    blockedResolutionCount: 1
+    childResolutionCount: 1
+    createdAt: 1735689603010
+    entityKey: '"temp:Linus offline'
+    entityKind: 'item'
+    id: 'offline-replay-temp-create-conflict-chain-session:offline-replay-temp-create-conflict-chain-store:"temp:Linus offline'
+    pendingMutations: 0
+    requiresResolution: '✅'
+    sessionKey: 'offline-replay-temp-create-conflict-chain-session'
+    storeName: 'offline-replay-temp-create-conflict-chain-store'
+    storeType: 'listQuery'
+    syncState: 'resolution-required'
+    tempId: 'temp:Linus offline'
+    updatedAt: 1735689603010
+  `);
+
+  await expect(
+    env.apiStore.resolveOfflineResolution(childResolution.id, {
+      action: 'retry',
+    }),
+  ).rejects.toThrow(
+    'Cannot resolve a blocked offline resolution before its parent temp create is cleared',
+  );
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | query-items                    | query-status |
+    0     | Ada, Grace                     | success      | [query-items, query-status] ui-initialized
+    3.01s | Ada, Grace                     | success      | -- queue the temp create and a dependent edit while offline
+    .     | Ada, Grace, Linus offline      | success      | [query-items] ui-changed
+    .     | Ada, Grace, Linus offline      | success      | offline:createUser queued
+    .     | Ada, Grace, Linus blocked edit | success      | [query-items] ui-changed
+    .     | Ada, Grace, Linus blocked edit | success      | offline:patchUserName queued
+    .     | Ada, Grace, Linus blocked edit | success      | -- go online and let the temp create stop at conflict detection
+    .     | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
+    .     | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
+    "
+  `);
+
+  hook.unmount();
+  offlineEntitiesHook.unmount();
+  offlineResolutionsHook.unmount();
 });
 
 test('conflict handling still works for mutations queued via fallback', async () => {
