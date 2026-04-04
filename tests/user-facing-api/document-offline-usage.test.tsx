@@ -134,7 +134,7 @@ test('direct document store runtime offline controls public api', async () => {
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isLeader: '✅'
-    isOfflineMode: '❌'
+    isOfflineMode: '✅'
     lastFailureAt: null
     lastRecoveryCheckAt: null
     network: { active: '✅', enabled: '❌' }

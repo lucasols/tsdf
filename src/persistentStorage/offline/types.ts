@@ -101,9 +101,9 @@ export type OfflineMutationQueueingConfig = {
  * offline session.
  */
 export type OfflineRuntimeConfig = {
-  /** Effective network mode enablement for the current session. */
+  /** Whether future operations may enter network offline handling. */
   network: { enabled: boolean };
-  /** Effective outage mode enablement for the current session. */
+  /** Whether future operations may enter outage offline handling. */
   outage: { enabled: boolean };
   /** Effective queue admission policy for offline-enabled mutations. */
   mutationQueueing: {
@@ -224,7 +224,9 @@ export type OfflineSessionConfig = {
   /**
    * Classify a remote failure as `outage`, `network`, or `ignore`.
    * `outage` activates outage recovery behavior.
-   * `network` activates network offline handling only when `network.enabled` is true.
+   * `network` activates network offline handling for future operations only
+   * when `network.enabled` is true. Existing offline recovery may keep using
+   * classifications until already-active work finishes recovering.
    */
   classifyFailure?: (
     error: unknown,
@@ -249,18 +251,18 @@ export type GlobalOfflineStatus = {
   /** Session key for this status bucket. */
   sessionKey: string;
   /**
-   * Network mode runtime enablement plus the last observed network-offline
-   * state for this session. `active` is preserved even while runtime support is
-   * disabled so it can resume correctly when re-enabled.
+   * Network mode admission enablement plus the last observed network-offline
+   * state for this session. `active` is preserved even while new admission is
+   * disabled so existing offline work can recover and sync safely.
    */
   network: { enabled: boolean; active: boolean };
   /**
-   * Outage mode runtime enablement plus the last observed outage-active state
-   * for this session. `active` is preserved even while runtime support is
-   * disabled so it can resume correctly when re-enabled.
+   * Outage mode admission enablement plus the last observed outage-active
+   * state for this session. `active` is preserved even while new admission is
+   * disabled so existing offline work can recover and sync safely.
    */
   outage: { enabled: boolean; active: boolean };
-  /** Whether the session is currently operating in offline mode. */
+  /** Whether the session currently has any active offline cause. */
   isOfflineMode: boolean;
   /** Whether this tab currently acts as leader for this session. */
   isLeader: boolean;
@@ -361,10 +363,7 @@ export function getIsOfflineModeFromStatus(status: {
   network: { enabled: boolean; active: boolean };
   outage: { enabled: boolean; active: boolean };
 }) {
-  return (
-    isModeEffectivelyActive(status.network) ||
-    isModeEffectivelyActive(status.outage)
-  );
+  return status.network.active || status.outage.active;
 }
 
 export function isOfflineModeStatusValue(value: unknown): boolean {

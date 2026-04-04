@@ -202,6 +202,7 @@ export type OfflineStoreController<
   ) => Promise<void>;
   prepareForFetch: () => Promise<void>;
   getSessionStatus: () => { isOfflineMode: boolean } | null;
+  shouldTreatFetchAsOffline: () => boolean;
   handleFetchSuccess: () => Promise<void>;
   evaluateOfflineFetchError: (
     error: unknown,
@@ -295,6 +296,12 @@ export function createOfflineStoreController<
     return null;
   }
 
+  function shouldTreatFutureOperationsAsOffline(
+    current: ActiveSessionState,
+  ): boolean {
+    return getActiveMutationQueueingCause(current) !== null;
+  }
+
   function isMutationQueueingAllowed(
     cause: OfflineMutationQueueingCause,
   ): boolean {
@@ -343,12 +350,17 @@ export function createOfflineStoreController<
     await current.session.refreshNetworkState();
 
     const statusAfterRefresh = current.session.getStatus();
-    if (navigator.onLine !== false && statusAfterRefresh.network.active) {
+    if (
+      navigator.onLine !== false &&
+      statusAfterRefresh.network.enabled &&
+      statusAfterRefresh.network.active
+    ) {
       current.session.setNetworkActive(false, { classified: false });
     }
 
     const statusAfterNetworkClear = current.session.getStatus();
     if (
+      statusAfterNetworkClear.outage.enabled &&
       statusAfterNetworkClear.outage.active &&
       !statusAfterNetworkClear.network.active
     ) {
@@ -2464,6 +2476,13 @@ export function createOfflineStoreController<
     return current?.session.getStatus() ?? null;
   }
 
+  function shouldTreatFetchAsOffline(): boolean {
+    const current = ensureActiveSession();
+    if (!current) return false;
+
+    return shouldTreatFutureOperationsAsOffline(current);
+  }
+
   async function handleFetchSuccess(): Promise<void> {
     const current = ensureActiveSession();
     if (!current) return;
@@ -2492,6 +2511,7 @@ export function createOfflineStoreController<
     resolveOfflineResolution,
     prepareForFetch,
     getSessionStatus,
+    shouldTreatFetchAsOffline,
     handleFetchSuccess,
     evaluateOfflineFetchError,
     ensureReplayScheduled,

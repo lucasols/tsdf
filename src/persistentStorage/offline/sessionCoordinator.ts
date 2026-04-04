@@ -37,11 +37,7 @@ import type {
   OfflineSession,
   OfflineSessionConfig,
 } from './types';
-import {
-  getIsOfflineModeFromStatus,
-  globalOfflineStatusSchema,
-  isModeEffectivelyActive,
-} from './types';
+import { getIsOfflineModeFromStatus, globalOfflineStatusSchema } from './types';
 
 type SessionStoreState = {
   status: GlobalOfflineStatus;
@@ -900,7 +896,7 @@ export class SessionOfflineCoordinator {
     const token = ++this.#networkStateToken;
     const detectedOffline = await this.#getCurrentOfflineState();
     if (token !== this.#networkStateToken) {
-      return isModeEffectivelyActive(this.store.state.status.network);
+      return this.store.state.status.network.active;
     }
 
     if (!this.#isNetworkEnabled()) {
@@ -999,13 +995,20 @@ export class SessionOfflineCoordinator {
     }
 
     if (result === 'outage') {
-      if (!this.#isOutageEnabled()) return 'ignore';
+      if (!this.#isOutageEnabled() && !this.store.state.status.outage.active) {
+        return 'ignore';
+      }
       this.setOutageActive(true);
       return 'outage';
     }
 
     if (result === 'network') {
-      if (!this.#isNetworkEnabled()) return 'ignore';
+      if (
+        !this.#isNetworkEnabled() &&
+        !this.store.state.status.network.active
+      ) {
+        return 'ignore';
+      }
       this.setNetworkActive(true, { classified: true, recordFailureAt: true });
       return 'network';
     }
@@ -1222,7 +1225,7 @@ export class SessionOfflineCoordinator {
     }
 
     if (
-      isModeEffectivelyActive(this.store.state.status.network) &&
+      this.store.state.status.network.active &&
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
       this.#canonicalConfig.networkRecoveryCheck
@@ -1235,8 +1238,8 @@ export class SessionOfflineCoordinator {
     }
 
     if (
-      isModeEffectivelyActive(this.store.state.status.outage) &&
-      !isModeEffectivelyActive(this.store.state.status.network) &&
+      this.store.state.status.outage.active &&
+      !this.store.state.status.network.active &&
       this.#canonicalConfig.outageRecoveryCheck
     ) {
       return {

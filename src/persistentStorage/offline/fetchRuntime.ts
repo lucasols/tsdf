@@ -20,6 +20,7 @@ export function isOfflineConnectivityError(value: unknown): boolean {
 export type OfflineAwareFetchController = {
   prepareForFetch?: () => Promise<void>;
   getSessionStatus: () => { isOfflineMode: boolean } | null;
+  shouldTreatFetchAsOffline?: () => boolean;
   handleFetchSuccess?: () => Promise<void>;
   evaluateOfflineFetchError: (
     error: unknown,
@@ -43,7 +44,12 @@ export async function runOfflineAwareFetch<T>({
 }): Promise<OfflineAwareFetchResult<T>> {
   await controller?.prepareForFetch?.();
 
-  if (controller?.getSessionStatus()?.isOfflineMode) {
+  const shouldTreatFetchAsOffline = () =>
+    controller?.shouldTreatFetchAsOffline?.() ??
+    controller?.getSessionStatus()?.isOfflineMode ??
+    false;
+
+  if (shouldTreatFetchAsOffline()) {
     return { ok: false, offline: true };
   }
 
@@ -54,7 +60,7 @@ export async function runOfflineAwareFetch<T>({
   } catch (error) {
     await controller?.evaluateOfflineFetchError(error, operationName);
 
-    if (controller?.getSessionStatus()?.isOfflineMode) {
+    if (shouldTreatFetchAsOffline()) {
       return { ok: false, offline: true };
     }
 
