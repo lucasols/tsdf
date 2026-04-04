@@ -124,7 +124,7 @@ function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
     sessionKey,
     network: { enabled: false, active: false },
     outage: { enabled: false, active: false },
-    effectiveMode: 'online',
+    effectiveMode: 'normal',
     effectiveOffline: false,
     isLeader: true,
     updatedAt: Date.now(),
@@ -190,7 +190,7 @@ function normalizePersistedOfflineStatus(
       sessionKey,
       network,
       outage,
-      effectiveMode: effectiveOffline ? 'offline' : 'online',
+      effectiveMode: effectiveOffline ? 'offline' : 'normal',
       effectiveOffline,
       isLeader: true,
       updatedAt:
@@ -216,7 +216,7 @@ function normalizePersistedOfflineStatus(
     sessionKey,
     network: persistedStatus.network,
     outage: persistedStatus.outage,
-    effectiveMode: effectiveOffline ? 'offline' : 'online',
+    effectiveMode: effectiveOffline ? 'offline' : 'normal',
     effectiveOffline,
     isLeader: true,
     updatedAt: persistedStatus.updatedAt,
@@ -1166,7 +1166,7 @@ export class SessionOfflineCoordinator {
     return this.#stampLocalStatus({
       ...status,
       effectiveOffline,
-      effectiveMode: effectiveOffline ? 'offline' : 'online',
+      effectiveMode: effectiveOffline ? 'offline' : 'normal',
     });
   }
 

@@ -63,7 +63,7 @@ test('async outage classification promotes the session into outage mode after a 
   env.apiStore.scheduleFetch('highPriority');
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -185,7 +185,7 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: 1735689600010
@@ -198,14 +198,14 @@ test('recovery probes back off and stop after a successful recovery check', asyn
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui                                |
-    0     | "mode:online outage:off probes:0" | ui-initialized
-    10ms  | "mode:online outage:off probes:0" | 🔴 >fetch-started
-    .     | "mode:online outage:off probes:0" | 🔴 <fetch-error (value: "error")
+    0     | "mode:normal outage:off probes:0" | ui-initialized
+    10ms  | "mode:normal outage:off probes:0" | 🔴 >fetch-started
+    .     | "mode:normal outage:off probes:0" | 🔴 <fetch-error (value: "error")
     .     | "mode:offline outage:on probes:0" | ui-changed
     110ms | "mode:offline outage:on probes:0" | -- wait for the first probe; it should fail and keep outage mode active
     .     | "mode:offline outage:on probes:1" | ui-changed
     310ms | "mode:offline outage:on probes:1" | -- wait for the second probe; it should restore online mode
-    .     | "mode:online outage:off probes:2" | ui-changed
+    .     | "mode:normal outage:off probes:2" | ui-changed
     "
   `);
   statusHook.unmount();
@@ -291,9 +291,9 @@ test('default outage recovery probes use the slower backend-friendly cadence', a
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time   | ui                                |
-      0      | "mode:online outage:off probes:0" | ui-initialized
-      10ms   | "mode:online outage:off probes:0" | 🔴 >fetch-started
-      .      | "mode:online outage:off probes:0" | 🔴 <fetch-error (value: "error")
+      0      | "mode:normal outage:off probes:0" | ui-initialized
+      10ms   | "mode:normal outage:off probes:0" | 🔴 >fetch-started
+      .      | "mode:normal outage:off probes:0" | 🔴 <fetch-error (value: "error")
       .      | "mode:offline outage:on probes:0" | ui-changed
       30.01s | "mode:offline outage:on probes:0" | -- the default outage recovery delay should avoid probing again before 30 seconds
       .      | "mode:offline outage:on probes:0" | -- the first default outage recovery probe should run at 30 seconds
@@ -402,7 +402,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: 1735689600010
@@ -415,14 +415,14 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui                                |
-    0     | "mode:online outage:off probes:0" | ui-initialized
-    10ms  | "mode:online outage:off probes:0" | 🔴 >fetch-started
-    .     | "mode:online outage:off probes:0" | 🔴 <fetch-error (value: "error")
+    0     | "mode:normal outage:off probes:0" | ui-initialized
+    10ms  | "mode:normal outage:off probes:0" | 🔴 >fetch-started
+    .     | "mode:normal outage:off probes:0" | 🔴 <fetch-error (value: "error")
     .     | "mode:offline outage:on probes:0" | ui-changed
     60ms  | "mode:offline outage:on probes:0" | -- the first recovery probe rejects, so outage mode should stay active and schedule another retry
     .     | "mode:offline outage:on probes:1" | ui-changed
     110ms | "mode:offline outage:on probes:1" | -- the second recovery probe succeeds and should restore online mode
-    .     | "mode:online outage:off probes:2" | ui-changed
+    .     | "mode:normal outage:off probes:2" | ui-changed
     "
   `);
   statusHook.unmount();
@@ -502,7 +502,7 @@ test('stale async outage classifications are ignored after a newer failure settl
   expect(recoveryCheck).not.toHaveBeenCalled();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -523,7 +523,7 @@ test('stale async outage classifications are ignored after a newer failure settl
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null

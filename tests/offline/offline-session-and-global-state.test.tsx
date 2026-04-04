@@ -90,7 +90,7 @@ test('persistent storage without offline config keeps the existing online flow e
       'sessionKey',
     ]),
   ).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -664,7 +664,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   expect(globalStatusRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
-    ⋅ effectiveMode: online
+    ⋅ effectiveMode: normal
     ⋅ effectiveOffline: ❌
     ⋅ network: {enabled:❌, active:❌}
     ⋅ outage: {enabled:❌, active:❌}
@@ -694,7 +694,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   expect(globalStatusRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
-    ⋅ effectiveMode: online
+    ⋅ effectiveMode: normal
     ⋅ effectiveOffline: ❌
     ⋅ network: {enabled:❌, active:❌}
     ⋅ outage: {enabled:❌, active:❌}
@@ -711,7 +711,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     >>> Browser reconnects
 
     ┌─
-    ⋅ effectiveMode: online
+    ⋅ effectiveMode: normal
     ⋅ effectiveOffline: ❌
     ⋅ network: {enabled:✅, active:❌}
     ⋅ outage: {enabled:❌, active:❌}

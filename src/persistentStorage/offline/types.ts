@@ -244,8 +244,8 @@ export type OfflineSessionConfig = {
   mutationQueueing?: OfflineMutationQueueingConfig;
 };
 
-/** Effective network/offline state computed by offline coordination. */
-export type OfflineConnectivityState = 'online' | 'offline';
+/** Effective runtime mode computed by offline coordination. */
+export type OfflineConnectivityState = 'normal' | 'offline';
 
 /** Per-session offline status snapshot shared across tabs. */
 export type GlobalOfflineStatus = {
@@ -263,7 +263,7 @@ export type GlobalOfflineStatus = {
    * disabled so it can resume correctly when re-enabled.
    */
   outage: { enabled: boolean; active: boolean };
-  /** Effective mode after combining only enabled active modes. */
+  /** Effective runtime mode after combining only enabled active modes. */
   effectiveMode: OfflineConnectivityState;
   /** Whether any enabled offline mode is currently active. */
   effectiveOffline: boolean;
@@ -348,7 +348,7 @@ export const globalOfflineStatusSchema = rc_object({
   sessionKey: rc_string,
   network: offlineStatusModeStateSchema,
   outage: offlineStatusModeStateSchema,
-  effectiveMode: rc_literals('online', 'offline'),
+  effectiveMode: rc_literals('normal', 'offline'),
   effectiveOffline: rc_boolean,
   isLeader: rc_boolean,
   updatedAt: rc_number,

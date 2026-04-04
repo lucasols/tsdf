@@ -134,7 +134,7 @@ test('direct document store runtime offline controls public api', async () => {
     outage: { enabled: '❌' }
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -346,7 +346,7 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -600,7 +600,7 @@ test('direct document store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null

@@ -317,7 +317,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'online'
+      effectiveMode: 'normal'
       effectiveOffline: '❌'
       isLeader: '✅'
       lastFailureAt: 1735689600010
@@ -429,7 +429,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-      effectiveMode: 'online'
+      effectiveMode: 'normal'
       effectiveOffline: '❌'
       isLeader: '✅'
       lastFailureAt: 1735689600010

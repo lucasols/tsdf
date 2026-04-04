@@ -146,7 +146,7 @@ test('classified network recovery uses network-specific probes and clears networ
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
   expect(statusHook.result.current).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: 1735689600010
@@ -159,14 +159,14 @@ test('classified network recovery uses network-specific probes and clears networ
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui                                 |
-    0     | "mode:online network:off probes:0" | ui-initialized
-    10ms  | "mode:online network:off probes:0" | 🔴 >fetch-started
-    .     | "mode:online network:off probes:0" | 🔴 <fetch-error (value: "error")
+    0     | "mode:normal network:off probes:0" | ui-initialized
+    10ms  | "mode:normal network:off probes:0" | 🔴 >fetch-started
+    .     | "mode:normal network:off probes:0" | 🔴 <fetch-error (value: "error")
     .     | "mode:offline network:on probes:0" | ui-changed
     110ms | "mode:offline network:on probes:0" | -- wait for the first classified-network recovery probe; it should fail and keep network mode active
     .     | "mode:offline network:on probes:1" | ui-changed
     310ms | "mode:offline network:on probes:1" | -- wait for the second classified-network recovery probe; it should clear network mode
-    .     | "mode:online network:off probes:2" | ui-changed
+    .     | "mode:normal network:off probes:2" | ui-changed
     "
   `);
   statusHook.unmount();
@@ -194,7 +194,7 @@ test('network classifications are ignored when network mode is disabled', async 
 
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -309,7 +309,7 @@ test('coming back online after browser-driven network takeover clears the interr
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: 1735689600010

@@ -336,7 +336,7 @@ test('direct list-query store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
@@ -638,7 +638,7 @@ test('direct list-query store offline public api', async () => {
   `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
-    effectiveMode: 'online'
+    effectiveMode: 'normal'
     effectiveOffline: '❌'
     isLeader: '✅'
     lastFailureAt: null
