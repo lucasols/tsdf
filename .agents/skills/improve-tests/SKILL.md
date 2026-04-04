@@ -143,6 +143,7 @@ Comments are not optional polish — they are a core readability requirement. A 
 - **Comments must explain _why_, not just label _what_.** A comment like `// refetch` adds nothing — the code already says that. A comment like `// refetch while previous request is still in-flight — should deduplicate` explains the scenario and the expected behavior in one line.
 - **Use comments to separate phases.** Label the setup, action, and assertion phases so a reader can scan the test structure without parsing every line. This is especially important in longer tests with multiple sequential steps.
 - **Flag tests where the reader must cross-reference production code to understand what is being tested.** If the test comment says `// trigger the edge case` without explaining which edge case or why it matters, the comment is not doing its job.
+- **Every user interaction point must have a comment.** Any line that simulates a user or system action — fetches, mutations, navigation, reconnection, tab switches, timer advances, invalidations — must be preceded by a comment explaining what is happening and why. These are the critical moments that drive the test scenario; without comments, the reader must decode function calls to reconstruct the story.
 - **Don't add noise comments.** Comments that restate the code (`// create the store` above `createStore()`) or that describe obvious operations add clutter. Every comment should earn its place by explaining something the code alone does not make clear.
 
 ### Timeline and snapshot annotations
