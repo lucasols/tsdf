@@ -1216,6 +1216,25 @@ test('disabling active network mode pauses replay until network is re-enabled an
   statusRenders.addMark('Disable runtime network mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
 
+  // While network mode is disabled, new offline-enabled mutations should use
+  // the direct path instead of entering the durable queue.
+  const directMutationWhileDisabled = vi.fn(() => Promise.resolve(3));
+  const disabledNetworkMutationResult = await env.apiStore.performMutation({
+    mutation: directMutationWhileDisabled,
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+
+  expect({
+    ok: disabledNetworkMutationResult.ok,
+    value: disabledNetworkMutationResult.ok
+      ? disabledNetworkMutationResult.value
+      : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { data: 3, kind: 'online' }
+  `);
+  expect(directMutationWhileDisabled).toHaveBeenCalledTimes(1);
+
   await advanceTime(250);
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
