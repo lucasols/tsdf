@@ -157,6 +157,7 @@ Comments are not optional polish — they are a core readability requirement. A 
 - Prefer focused tests with clear setup and intent.
 - Default stance: unreadable tests are review findings, not polish opportunities.
 - A strong test should let a human reviewer answer three questions in seconds: what is the setup, what changed, and what should happen next.
+- **Flag test names that use technical/implementation language instead of describing behavior.** Test names should read like a user-facing requirement, not an implementation note. Prefer `"queued mutations are sent after reconnecting"` over `"calls flushQueue when isOnline transitions to true"`. Prefer `"global offline hooks can mount before any store is created"` over `"useGlobalOfflineStatus works without localStorage-backed store"`. The name should describe _what happens from the user's perspective and what outcome to expect_, not which internal function is called or which state flag changes.
 - Flag test names that are wrong, vague, or misleading relative to the actual assertions.
 - **Flag top-level `describe` blocks that merely repeat the file name.** A file-level `describe` wrapper that adds no information beyond what the file name already communicates is pure noise — remove it and let the inner `describe`/`test` blocks stand on their own. If the top-level `describe` label carries meaning that the file name does not, rename the file to be self-explanatory instead of keeping the redundant wrapper.
 - Flag brittle fixtures, duplicated setup, and opaque data builders.
