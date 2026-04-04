@@ -298,7 +298,7 @@ test('logging back into the same session replays durable offline mutations queue
 type CreateAndPatchListQueryUserOperations = CreateListQueryUserOperations &
   PatchUserOperations;
 
-test('global and store offline entities expose temp-create dependency metadata once replay reaches manual resolution', async () => {
+test('a global offline view sees the same blocked temp item as the store after replay stalls on a temp create', async () => {
   network.setOffline();
 
   const sessionKey = 'offline-session-temp-create-dependencies';
@@ -364,7 +364,21 @@ test('global and store offline entities expose temp-create dependency metadata o
     },
   );
 
-  // Queue a temp create and a dependent edit while fully offline.
+  const queryHook = renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+
+    env.trackItemUI('query-items', query.items.join(', '));
+    return query;
+  });
+  await flushAllTimers();
+
+  // The user creates a record offline and immediately edits it before the app
+  // has ever managed to sync that temp item to the server.
+  env.addTimelineComments('beforeNextAction', [
+    'queue a temp create and then edit the same temp item while still offline',
+  ]);
   await act(async () => {
     await env.apiStore.performMutation(null, {
       optimisticUpdate: () => {
@@ -395,8 +409,11 @@ test('global and store offline entities expose temp-create dependency metadata o
     });
   });
 
-  // Let the temp create exhaust replay so the parent and child dependency
-  // metadata becomes visible through both store-scoped and global entity APIs.
+  // When connectivity returns, replay keeps failing the temp create until the
+  // app gives up and asks the user to resolve that blocked chain manually.
+  env.addTimelineComments('beforeNextAction', [
+    'go back online and let replay exhaust every retry for the temp create',
+  ]);
   act(() => {
     network.goOnline();
   });
@@ -411,15 +428,28 @@ test('global and store offline entities expose temp-create dependency metadata o
   }
   await flushAllTimers();
 
-  const [storeEntity] = env.apiStore.getOfflineEntities();
-  const [globalEntity] = getGlobalOfflineEntities(sessionKey);
+  // A list screen and a global offline tray should now agree about the same
+  // unresolved temp item and expose the dependency chain needed to resolve it.
   const parentResolution = env.apiStore
     .getOfflineResolutions()
     .find((resolution) => resolution.operation === 'createUser');
   const childResolution = env.apiStore
     .getOfflineResolutions()
     .find((resolution) => resolution.operation === 'patchUserName');
+  const storeHook = renderHook(() => env.apiStore.useOfflineEntities());
+  const globalHook = renderHook(() => useGlobalOfflineEntities(sessionKey));
+  const [storeEntity] = storeHook.result.current;
+  const [globalEntity] = globalHook.result.current;
 
+  expect(pick(queryHook.result.current, ['items', 'pendingSync', 'status']))
+    .toMatchInlineSnapshot(`
+      items: ['Ada', 'Grace', 'Linus blocked edit']
+      pendingSync: '❌'
+      status: 'success'
+    `);
+
+  // The store-scoped offline view shows the temp item as a manual-resolution
+  // problem: it is blocked by the failed create and has the edit as a child.
   expect(storeEntity?.blockedByResolutionIds).toHaveLength(1);
   expect(storeEntity?.blockedByResolutionIds[0]).toBe(parentResolution?.id);
   expect(storeEntity?.childResolutionIds).toHaveLength(1);
@@ -444,7 +474,7 @@ test('global and store offline entities expose temp-create dependency metadata o
   ).toMatchInlineSnapshot(`
     blockedResolutionCount: 1
     childResolutionCount: 1
-    createdAt: 1735689620000
+    createdAt: 1735689623010
     entityKey: '"temp:Linus offline'
     entityKind: 'item'
     id: 'offline-session-temp-create-dependencies:offline-session-temp-create-dependencies-store:"temp:Linus offline'
@@ -455,45 +485,40 @@ test('global and store offline entities expose temp-create dependency metadata o
     storeType: 'listQuery'
     syncState: 'resolution-required'
     tempId: 'temp:Linus offline'
-    updatedAt: 1735689620000
+    updatedAt: 1735689623010
   `);
-  expect(globalEntity?.blockedByResolutionIds).toHaveLength(1);
-  expect(globalEntity?.blockedByResolutionIds[0]).toBe(parentResolution?.id);
-  expect(globalEntity?.childResolutionIds).toHaveLength(1);
-  expect(globalEntity?.childResolutionIds[0]).toBe(childResolution?.id);
-  expect(
-    pick(globalEntity, [
-      'blockedResolutionCount',
-      'childResolutionCount',
-      'createdAt',
-      'entityKey',
-      'entityKind',
-      'id',
-      'pendingMutations',
-      'requiresResolution',
-      'sessionKey',
-      'storeName',
-      'storeType',
-      'syncState',
-      'tempId',
-      'updatedAt',
-    ]),
-  ).toMatchInlineSnapshot(`
-    blockedResolutionCount: 1
-    childResolutionCount: 1
-    createdAt: 1735689620000
-    entityKey: '"temp:Linus offline'
-    entityKind: 'item'
-    id: 'offline-session-temp-create-dependencies:offline-session-temp-create-dependencies-store:"temp:Linus offline'
-    pendingMutations: 0
-    requiresResolution: '✅'
-    sessionKey: 'offline-session-temp-create-dependencies'
-    storeName: 'offline-session-temp-create-dependencies-store'
-    storeType: 'listQuery'
-    syncState: 'resolution-required'
-    tempId: 'temp:Linus offline'
-    updatedAt: 1735689620000
+
+  // The global session-level view should surface the exact same unresolved
+  // entity so an app-wide offline tray matches the local store UI.
+  expect(globalHook.result.current).toEqual(storeHook.result.current);
+  expect(globalEntity).toEqual(storeEntity);
+  expect(getGlobalOfflineEntities(sessionKey)).toEqual(
+    globalHook.result.current,
+  );
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | query-items                    |
+    0      | Ada, Grace                     | ui-initialized
+    3.01s  | Ada, Grace                     | -- queue a temp create and then edit the same temp item while still offline
+    .      | Ada, Grace, Linus offline      | ui-changed
+    .      | Ada, Grace, Linus offline      | offline:createUser queued
+    .      | Ada, Grace, Linus blocked edit | ui-changed
+    .      | Ada, Grace, Linus blocked edit | offline:patchUserName queued
+    .      | Ada, Grace, Linus blocked edit | -- go back online and let replay exhaust every retry for the temp create
+    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    8.01s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    18.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    23.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
+    .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
+    "
   `);
+
+  queryHook.unmount();
+  storeHook.unmount();
+  globalHook.unmount();
 });
 
 test('offline mutations fail fast when no session key is available', async () => {
