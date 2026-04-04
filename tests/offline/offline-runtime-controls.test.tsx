@@ -393,21 +393,24 @@ test('disabling active network mode pauses replay until network is re-enabled an
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
 
   // While network mode is disabled, new offline-enabled mutations should use
-  // the direct path instead of entering the durable queue.
-  const directMutationWhileDisabled = vi.fn(() => Promise.resolve(3));
+  // the direct path instead of entering the durable queue. In a realistic
+  // browser-offline scenario that direct request still fails normally.
+  const directMutationWhileDisabled = vi.fn(() =>
+    Promise.reject(new Error('disabled-network-direct-error')),
+  );
   const disabledNetworkMutationResult = await env.apiStore.performMutation({
     mutation: directMutationWhileDisabled,
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
   expect({
+    error: disabledNetworkMutationResult.ok
+      ? null
+      : disabledNetworkMutationResult.error,
     ok: disabledNetworkMutationResult.ok,
-    value: disabledNetworkMutationResult.ok
-      ? disabledNetworkMutationResult.value
-      : null,
   }).toMatchInlineSnapshot(`
-    ok: '✅'
-    value: { data: 3, kind: 'online' }
+    error: { code: 500, id: 'fetch-error', message: 'disabled-network-direct-error' }
+    ok: '❌'
   `);
   expect(directMutationWhileDisabled).toHaveBeenCalledTimes(1);
 
