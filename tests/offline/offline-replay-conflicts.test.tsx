@@ -287,19 +287,19 @@ test('offline conflicts are detected before execute, surface through selectors, 
   );
   expect(storeResolutionHook.result.current.map(summarizeConflictResolution))
     .toMatchInlineSnapshot(`
-    - conflict: { reason: 'server-changed' }
-      createdAt: 1735689600000
-      enqueuedAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 2 }
-      kind: 'conflict'
-      operation: 'updateValue'
-      sessionKey: 'offline-conflict-session'
-      storeName: 'offline-conflict-doc'
-      storeType: 'document'
-      updatedAt: 1735689600000
-  `);
+      - conflict: { reason: 'server-changed' }
+        createdAt: 1735689600000
+        enqueuedAt: 1735689600000
+        entityRefs:
+          - { entityKey: 'document', entityKind: 'document' }
+        input: { value: 2 }
+        kind: 'conflict'
+        operation: 'updateValue'
+        sessionKey: 'offline-conflict-session'
+        storeName: 'offline-conflict-doc'
+        storeType: 'document'
+        updatedAt: 1735689600000
+    `);
   expect(globalResolutionHook.result.current).toEqual(
     storeResolutionHook.result.current,
   );
