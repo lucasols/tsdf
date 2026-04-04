@@ -1,3 +1,10 @@
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from '../../src/internal/testTimelineTypes';
+import { getOrCreateSessionOfflineCoordinator } from '../../src/persistentStorage/offline/sessionCoordinator';
+import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
+import type { StorageAdapter } from '../../src/persistentStorage/types';
 import type { ScheduleFetchResults } from '../../src/requestScheduler';
 import type { StoreError } from '../../src/utils/storeShared';
 
@@ -94,6 +101,117 @@ export type Action = {
 };
 
 export type ActionReference = Pick<Action, 'id' | 'action'>;
+
+function formatTimelineSessionKey(value: string | false): string {
+  return value === false ? 'false' : value;
+}
+
+type ResolutionTimelineItem = { id: string; operation: string };
+
+export function createOfflineTimelineTestLogger(args: {
+  addAction: (action: string) => void;
+  getSessionKey: () => string | false;
+}) {
+  let unsubscribeResolutionObserver: (() => void) | null = null;
+  let knownResolutionIds = new Set<string>();
+
+  function syncResolutionState(
+    getOfflineResolutions: () => ResolutionTimelineItem[],
+    { shouldLogNewItems }: { shouldLogNewItems: boolean },
+  ) {
+    const nextResolutions = [...getOfflineResolutions()].sort((left, right) => {
+      return (
+        left.operation.localeCompare(right.operation) ||
+        left.id.localeCompare(right.id)
+      );
+    });
+    const nextResolutionIds = new Set(nextResolutions.map(({ id }) => id));
+
+    if (shouldLogNewItems) {
+      for (const resolution of nextResolutions) {
+        if (knownResolutionIds.has(resolution.id)) continue;
+
+        args.addAction(`offline:${resolution.operation} resolution-required`);
+      }
+    }
+
+    knownResolutionIds = nextResolutionIds;
+  }
+
+  function observeResolutionTimeline(argsToObserve: {
+    sessionKey: string | false;
+    getOfflineResolutions: () => ResolutionTimelineItem[];
+    adapter: StorageAdapter;
+    config: OfflineSessionConfig;
+    seedOnly?: boolean;
+  }) {
+    unsubscribeResolutionObserver?.();
+    unsubscribeResolutionObserver = null;
+    knownResolutionIds = new Set();
+
+    if (argsToObserve.sessionKey === false) return;
+
+    const coordinator = getOrCreateSessionOfflineCoordinator(
+      argsToObserve.sessionKey,
+      { adapter: argsToObserve.adapter, config: argsToObserve.config },
+    );
+    unsubscribeResolutionObserver = coordinator.store.subscribe(() => {
+      syncResolutionState(argsToObserve.getOfflineResolutions, {
+        shouldLogNewItems: true,
+      });
+    });
+
+    syncResolutionState(argsToObserve.getOfflineResolutions, {
+      shouldLogNewItems: !argsToObserve.seedOnly,
+    });
+  }
+
+  return {
+    onSessionKeyChanged(event: TestSessionKeyChangedEvent) {
+      args.addAction(
+        `session-key-changed (from: ${formatTimelineSessionKey(
+          event.previousSessionKey,
+        )}, to: ${formatTimelineSessionKey(event.sessionKey)})`,
+      );
+    },
+    onOfflineTimelineEvent(event: TestOfflineTimelineEvent) {
+      if (event.phase === 'replay-failed') return;
+      args.addAction(`offline:${event.operation} ${event.phase}`);
+    },
+    attachResolutionObserver(argsToObserve: {
+      getOfflineResolutions: () => ResolutionTimelineItem[];
+      adapter: StorageAdapter;
+      config: OfflineSessionConfig;
+    }) {
+      observeResolutionTimeline({
+        sessionKey: args.getSessionKey(),
+        getOfflineResolutions: argsToObserve.getOfflineResolutions,
+        adapter: argsToObserve.adapter,
+        config: argsToObserve.config,
+        seedOnly: true,
+      });
+    },
+    handleSessionKeyChangedForResolutionObserver(argsToObserve: {
+      event: TestSessionKeyChangedEvent;
+      getOfflineResolutions: () => ResolutionTimelineItem[];
+      adapter: StorageAdapter;
+      config: OfflineSessionConfig;
+    }) {
+      observeResolutionTimeline({
+        sessionKey: argsToObserve.event.sessionKey,
+        getOfflineResolutions: argsToObserve.getOfflineResolutions,
+        adapter: argsToObserve.adapter,
+        config: argsToObserve.config,
+        seedOnly: true,
+      });
+    },
+    dispose() {
+      unsubscribeResolutionObserver?.();
+      unsubscribeResolutionObserver = null;
+      knownResolutionIds = new Set();
+    },
+  };
+}
 
 /**
  * Creates an action tracker for managing test timeline actions

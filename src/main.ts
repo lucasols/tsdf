@@ -104,6 +104,7 @@ export type {
   OfflineSession,
   OfflineSessionConfig,
   OfflineReplayRetryConfig,
+  OfflineSupersedeConfig,
   ListQueryOfflineEntityRef,
   ListQueryOfflineOperationDefinition,
   OfflineResolutionRecord,

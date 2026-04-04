@@ -18,6 +18,14 @@ import { Store, useSubscribeToStore } from 't-state';
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
+import {
+  wrapGetSessionKeyForTest,
+  wrapOfflineOperationsForTimeline,
+} from './internal/offlineTestInstrumentation';
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from './internal/testTimelineTypes';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import {
@@ -30,6 +38,7 @@ import {
   offlineConnectivityError,
 } from './persistentStorage/offline/fetchRuntime';
 import {
+  type OfflineAwareMutationController,
   type OfflineMutationResult,
   runHybridOfflineMutation,
 } from './persistentStorage/offline/mutationRuntime';
@@ -147,6 +156,8 @@ type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
   { kind: 'document-snapshot' }
 >;
 
+const EMPTY_DOCUMENT_OFFLINE_OPERATIONS = {};
+
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
   AnyOfflineOperationDefinition
@@ -234,6 +245,8 @@ export type DocumentStoreOptions<
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     onReceiveRemoteMsg?: (message: DocumentBrowserTabsMessage<State>) => void;
+    onSessionKeyChanged?: (event: TestSessionKeyChangedEvent) => void;
+    onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
   };
 };
 
@@ -270,6 +283,9 @@ export function createDocumentStore<
   '~test': testOptions,
 }: DocumentStoreOptions<State, TOfflineOperations, StorageState>) {
   let invalidationWasTriggered = false;
+  type ResolvedOfflineOperations = TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
@@ -290,8 +306,17 @@ export function createDocumentStore<
   let initialStatus: DocumentStatus = 'idle';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const getSessionKeyForRuntime =
+    import.meta.env.TEST && testOptions
+      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
+      : getSessionKey;
+
   const resolvedPersistentStorageConfig = persistentStorageConfig
-    ? { ...persistentStorageConfig, getSessionKey, storeName: id }
+    ? {
+        ...persistentStorageConfig,
+        getSessionKey: getSessionKeyForRuntime,
+        storeName: id,
+      }
     : null;
 
   if (import.meta.env.TEST && testOptions) {
@@ -317,25 +342,43 @@ export function createDocumentStore<
     ? setupDocumentPersistence(resolvedPersistentStorageConfig)
     : null;
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
+  // WORKAROUND: Session-only offline config omits operations, so document stores normalize that case to an empty registry before passing it through the generic offline controller surface.
+  const resolvedOfflineOperations = __LEGIT_CAST__<
+    ResolvedOfflineOperations,
+    unknown
+  >(resolvedOfflineConfig?.operations ?? EMPTY_DOCUMENT_OFFLINE_OPERATIONS);
 
   assertDocumentOfflineOperations(
     // WORKAROUND: Persistent config stores offline operations behind the generic persistence surface, and the assertion helper expects the already-narrowed ValidStoreState variant.
     __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
-      resolvedOfflineConfig?.operations ?? null,
+      resolvedOfflineOperations,
     ),
   );
 
+  const offlineOperationsForRuntime =
+    import.meta.env.TEST &&
+    testOptions?.onOfflineTimelineEvent &&
+    resolvedOfflineConfig
+      ? wrapOfflineOperationsForTimeline(
+          resolvedOfflineOperations,
+          testOptions.onOfflineTimelineEvent,
+        )
+      : resolvedOfflineOperations;
+
   const offlineController =
     resolvedPersistentStorageConfig && resolvedOfflineConfig
-      ? createOfflineStoreController({
+      ? createOfflineStoreController<ResolvedOfflineOperations>({
           storeName: id,
           storeType: 'document',
-          getSessionKey,
+          getSessionKey: getSessionKeyForRuntime,
           onPersistentStorageError:
             resolvedPersistentStorageConfig.onPersistentStorageError,
           adapter: resolvedPersistentStorageConfig.adapter,
           offlineSession: resolvedOfflineConfig.session,
-          operations: resolvedOfflineConfig.operations,
+          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
+          operations: __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
+            offlineOperationsForRuntime,
+          ),
           storeAdapter: {
             getEntityRefs: () => [
               { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
@@ -344,7 +387,7 @@ export function createDocumentStore<
               { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
             ],
             getProtectedCacheKeys: () => {
-              const sessionKey = getSessionKey();
+              const sessionKey = getSessionKeyForRuntime();
               if (sessionKey === false) return [];
               return [
                 createProtectedStorageKey({
@@ -565,7 +608,7 @@ export function createDocumentStore<
       {
         storeType: 'document',
         storeKey: id,
-        getSessionKey,
+        getSessionKey: getSessionKeyForRuntime,
         onMessage: handleRemoteMessage,
         onSessionChange() {
           lastDocumentSyncVersion = undefined;
@@ -926,7 +969,13 @@ export function createDocumentStore<
       mutation: offline
         ? () =>
             runHybridOfflineMutation({
-              controller: offlineController,
+              // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
+              controller: __LEGIT_CAST__<
+                OfflineAwareMutationController<
+                  Exclude<TOfflineOperations, null>
+                > | null,
+                unknown
+              >(offlineController),
               offline,
               directMutation,
             })
@@ -953,6 +1002,18 @@ export function createDocumentStore<
     });
 
     storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
+
+    if (
+      import.meta.env.TEST &&
+      offline &&
+      result.ok &&
+      result.value.kind === 'queued'
+    ) {
+      testOptions?.onOfflineTimelineEvent?.({
+        operation: offline.operation,
+        phase: 'queued',
+      });
+    }
 
     if (!offline && result.ok && result.value.kind === 'online') {
       return Result.ok(result.value.data);
@@ -982,7 +1043,7 @@ export function createDocumentStore<
     returnRefetchingStatus?: boolean;
   } = {}) {
     const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
+      sessionKey: getSessionKeyForRuntime(),
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
@@ -1256,7 +1317,7 @@ export function createDocumentStore<
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {
       return useOfflineStoreEntities({
-        sessionKey: getSessionKey(),
+        sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });

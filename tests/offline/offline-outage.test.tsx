@@ -54,7 +54,6 @@ test('async outage classification promotes the session into outage mode after a 
       offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure,
         outage: { enabled: true, recoveryCheck },
-        operations: {},
       }),
     },
   });
@@ -128,7 +127,6 @@ test('recovery probes back off and stop after a successful recovery check', asyn
             jitterRatio: 0,
           },
         },
-        operations: {},
       }),
     },
   });

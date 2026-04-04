@@ -5,6 +5,7 @@ import { klona } from 'klona/json';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 
+import type { TestOfflineTimelineEvent } from '../internal/testTimelineTypes';
 import {
   isOfflineConnectivityError,
   offlineConnectivityError,
@@ -121,6 +122,7 @@ export type CreateMutationApiOptions<
     itemKey: string,
     consistency?: SnapshotConsistency,
   ) => void;
+  onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
 };
 
 export function createMutationApi<
@@ -155,6 +157,7 @@ export function createMutationApi<
   runWithBroadcastConsistency,
   publishQuerySnapshot,
   publishItemSnapshot,
+  onOfflineTimelineEvent,
 }: CreateMutationApiOptions<
   ItemState,
   QueryPayload,
@@ -838,6 +841,15 @@ export function createMutationApi<
       items: affectedItems,
       success: result.ok,
     });
+
+    if (import.meta.env.TEST) {
+      if (offline && result.ok && result.value.kind === 'queued') {
+        onOfflineTimelineEvent?.({
+          operation: offline.operation,
+          phase: 'queued',
+        });
+      }
+    }
 
     if (!offline && result.ok && result.value.kind === 'online') {
       return Result.ok(result.value.data);

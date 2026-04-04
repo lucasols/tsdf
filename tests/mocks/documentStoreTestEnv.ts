@@ -25,6 +25,7 @@ import {
 } from './serverMock';
 import {
   createActionTracker,
+  createOfflineTimelineTestLogger,
   createEmojiCyclers,
   createUITracker,
   getDefaultLowPriorityThrottleMs,
@@ -138,6 +139,10 @@ export function createDocumentStoreTestEnv<
   } = createActionTracker();
 
   const { getMutationEmoji } = createEmojiCyclers();
+  const offlineTimelineLogger = createOfflineTimelineTestLogger({
+    addAction,
+    getSessionKey,
+  });
 
   const { uiChanges, trackUIChanges } = createUITracker<
     number | string | undefined
@@ -219,6 +224,26 @@ export function createDocumentStoreTestEnv<
             });
           }
         },
+        onSessionKeyChanged: (event) => {
+          offlineTimelineLogger.onSessionKeyChanged(event);
+          if (resolvedPersistentStorage?.offline) {
+            offlineTimelineLogger.handleSessionKeyChangedForResolutionObserver({
+              event,
+              getOfflineResolutions: () =>
+                documentStore
+                  .getOfflineResolutions()
+                  .map(({ id: resolutionId, operation }) => ({
+                    id: resolutionId,
+                    operation,
+                  })),
+              adapter: resolvedPersistentStorage.adapter,
+              config: resolvedPersistentStorage.offline.session.getConfig(),
+            });
+          }
+        },
+        onOfflineTimelineEvent: (event) => {
+          offlineTimelineLogger.onOfflineTimelineEvent(event);
+        },
       },
       onSchedulerEvent: (event, data) => {
         logSchedulerEvent(event, addAction, data);
@@ -241,6 +266,20 @@ export function createDocumentStoreTestEnv<
     serverMock.wsEvents.on('data_changed', () => {
       addAction('received-ws-data-change-event');
       documentStore.invalidateData('realtimeUpdate');
+    });
+  }
+
+  if (resolvedPersistentStorage?.offline) {
+    offlineTimelineLogger.attachResolutionObserver({
+      getOfflineResolutions: () =>
+        documentStore
+          .getOfflineResolutions()
+          .map(({ id: resolutionId, operation }) => ({
+            id: resolutionId,
+            operation,
+          })),
+      adapter: resolvedPersistentStorage.adapter,
+      config: resolvedPersistentStorage.offline.session.getConfig(),
     });
   }
 

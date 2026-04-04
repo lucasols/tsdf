@@ -99,7 +99,7 @@ test('direct document store runtime offline controls public api', async () => {
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: offlineSession, operations: {} },
+      offline: { session: offlineSession },
     },
   });
 

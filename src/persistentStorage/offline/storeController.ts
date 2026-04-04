@@ -954,10 +954,27 @@ export function createOfflineStoreController<
     );
   }
 
+  function matchesSupersededOperation(args: {
+    candidateOperationName: string;
+    operationName: string;
+    supersedes: NonNullable<AnyOfflineOperationDefinition['supersedes']>;
+  }): boolean {
+    const { candidateOperationName, operationName, supersedes } = args;
+    const operationFilter = supersedes.operations;
+
+    if (operationFilter === undefined) return true;
+    if (operationFilter === 'self') {
+      return candidateOperationName === operationName;
+    }
+
+    return operationFilter.includes(candidateOperationName);
+  }
+
   function findSupersededEntries(args: {
     operationName: string;
     entityRefs: OfflineEntityRef[];
     queueOrder: number;
+    supersedes: NonNullable<AnyOfflineOperationDefinition['supersedes']>;
     entries?: Iterable<OfflineQueueEntry>;
   }): OfflineQueueEntry[] {
     if (args.entityRefs.length !== 1) {
@@ -980,6 +997,11 @@ export function createOfflineStoreController<
           entry.attempts === 0 &&
           entry.entityRefs.length === 1 &&
           getQueueOrder(entry) < args.queueOrder &&
+          matchesSupersededOperation({
+            candidateOperationName: entry.operation,
+            operationName: args.operationName,
+            supersedes: args.supersedes,
+          }) &&
           isSameEntityRef(entry.entityRefs[0], targetRef)
         );
       })
@@ -1817,6 +1839,7 @@ export function createOfflineStoreController<
           operationName,
           entityRefs,
           queueOrder,
+          supersedes: operation.supersedes,
           entries: workingQueue.values(),
         })
       : [];

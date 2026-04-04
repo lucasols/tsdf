@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
@@ -444,6 +444,198 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
   );
 });
 
+test('same-entity supersede can prune only the latest-wins operation while keeping unrelated queued work', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-selective-supersede-session';
+  const storeName = 'offline-selective-supersede-store';
+  const replayedOperations: Array<
+    | { operation: 'setUserRole'; input: { itemId: string; role: string } }
+    | { operation: 'setUserName'; input: { itemId: string; name: string } }
+  > = [];
+  const setUserNameExecute = vi.fn(
+    ({ input }: { input: { itemId: string; name: string } }) => {
+      replayedOperations.push({ operation: 'setUserName', input });
+      env.apiStore.updateItemState(input.itemId, (item) => ({
+        ...item,
+        name: input.name,
+      }));
+      return { name: input.name };
+    },
+  );
+  const setUserRoleExecute = vi.fn(
+    ({ input }: { input: { itemId: string; role: string } }) => {
+      replayedOperations.push({ operation: 'setUserRole', input });
+      env.apiStore.updateItemState(input.itemId, (item) => ({
+        ...item,
+        role: input.role,
+      }));
+      return { role: input.role };
+    },
+  );
+  const setUserNameInputSchema = rc_object({
+    itemId: rc_string,
+    name: rc_string,
+  });
+  const setUserRoleInputSchema = rc_object({
+    itemId: rc_string,
+    role: rc_string,
+  });
+  const collectionWithRoleSchema = rc_object({
+    value: rc_object({ name: rc_string, role: rc_string }),
+  });
+
+  type SelectiveSupersedeCollectionOperations = {
+    setUserName: CollectionOfflineOperationDefinition<
+      { name: string; role: string },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+    setUserRole: CollectionOfflineOperationDefinition<
+      { name: string; role: string },
+      string,
+      { itemId: string; role: string },
+      unknown
+    >;
+  };
+
+  const env = createCollectionStoreTestEnv<
+    { name: string; role: string },
+    SelectiveSupersedeCollectionOperations
+  >(
+    { 'users||1': { name: 'Ada', role: 'reader' } },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionWithRoleSchema,
+        payloadSchema: rc_string,
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
+          network: network.config,
+          operations: {
+            setUserName: {
+              inputSchema: setUserNameInputSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              supersedes: { scope: 'same-entity', operations: 'self' },
+              execute: setUserNameExecute,
+            },
+            setUserRole: {
+              inputSchema: setUserRoleInputSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: setUserRoleExecute,
+            },
+          },
+        }),
+      },
+    },
+  );
+
+  // Keep an unrelated queued change for the same entity so the test can prove
+  // selective supersede does not wipe the whole queue entry chain.
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (item) => ({
+        ...item,
+        role: 'admin',
+      }));
+    },
+    mutation: () => Promise.resolve({ role: 'admin' }),
+    offline: {
+      operation: 'setUserRole',
+      input: { itemId: 'users||1', role: 'admin' },
+    },
+  });
+
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (item) => ({
+        ...item,
+        name: 'Ada first',
+      }));
+    },
+    mutation: () => Promise.resolve({ name: 'Ada first' }),
+    offline: {
+      operation: 'setUserName',
+      input: { itemId: 'users||1', name: 'Ada first' },
+    },
+  });
+
+  // Queue a later name change; this should replace only the earlier name
+  // update, not the unrelated role change.
+  await advanceTime(50);
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (item) => ({
+        ...item,
+        name: 'Ada latest',
+      }));
+    },
+    mutation: () => Promise.resolve({ name: 'Ada latest' }),
+    offline: {
+      operation: 'setUserName',
+      input: { itemId: 'users||1', name: 'Ada latest' },
+    },
+  });
+
+  expect(
+    getOfflineQueueEntries(sessionKey, storeName)
+      .map((entry) => {
+        const data = getOfflineQueueEntryData(entry);
+
+        return {
+          input: data.input,
+          operation: data.operation,
+          queueOrder: data.queueOrder,
+        };
+      })
+      .sort((left, right) => Number(left.queueOrder) - Number(right.queueOrder))
+      .map(({ queueOrder: _queueOrder, ...entry }) => entry),
+  ).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', role: 'admin' }
+      operation: 'setUserRole'
+    - input: { itemId: 'users||1', name: 'Ada latest' }
+      operation: 'setUserName'
+  `);
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: '"users||1'
+      entityKind: 'item'
+      id: 'offline-selective-supersede-session:offline-selective-supersede-store:"users||1'
+      pendingMutations: 2
+      requiresResolution: '❌'
+      sessionKey: 'offline-selective-supersede-session'
+      storeName: 'offline-selective-supersede-store'
+      storeType: 'collection'
+      syncState: 'pending'
+      updatedAt: 1735689600050
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(replayedOperations).toMatchInlineSnapshot(`
+    - input: { itemId: 'users||1', role: 'admin' }
+      operation: 'setUserRole'
+    - input: { itemId: 'users||1', name: 'Ada latest' }
+      operation: 'setUserName'
+  `);
+  expect(setUserRoleExecute).toHaveBeenCalledTimes(1);
+  expect(setUserNameExecute).toHaveBeenCalledTimes(1);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+});
+
 test('needs-confirmation entries are skipped when shouldSkipSync returns true', async () => {
   network.setOffline();
   let skipCheckEnqueuedAt: number | null = null;
@@ -624,10 +816,14 @@ test('needs-confirmation entries retry execute when shouldSkipSync returns false
     "
     time | ui                               |
     0    | "value:1 sync:none pending:0"    | ui-initialized
+    .    | "value:1 sync:none pending:0"    | offline:updateValue queued
     .    | "value:2 sync:pending pending:1" | ui-changed
     .    | "value:2 sync:pending pending:1" | -- bring the session online and wait for the first replay attempt to settle into syncing
+    .    | "value:2 sync:pending pending:1" | offline:updateValue replay-started
     .    | "value:2 sync:syncing pending:1" | ui-changed
     5s   | "value:2 sync:syncing pending:1" | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
+    .    | "value:2 sync:syncing pending:1" | offline:updateValue replay-started
+    .    | "value:2 sync:syncing pending:1" | offline:updateValue replay-finished
     .    | "value:2 sync:none pending:0"    | ui-changed
     "
   `);
@@ -1592,6 +1788,9 @@ describe('basic replay lifecycle', () => {
       0     | "value:1 pending:no"  | ui-initialized
       .     | "value:2 pending:no"  | ui-changed
       .     | "value:2 pending:yes" | ui-changed
+      .     | "value:2 pending:yes" | offline:updateValue queued
+      .     | "value:2 pending:yes" | offline:updateValue replay-started
+      .     | "value:2 pending:yes" | offline:updateValue replay-finished
       .     | "value:2 pending:no"  | ui-changed
       10ms  | "value:2 pending:no"  | 🔴 >fetch-started
       810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)

@@ -5,6 +5,10 @@ import {
 } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from '../../src/internal/testTimelineTypes';
 import {
   createListQueryStore,
   type ListQueryBrowserTabsMessage,
@@ -43,6 +47,7 @@ import {
 } from './serverTableMock';
 import {
   createActionTracker,
+  createOfflineTimelineTestLogger,
   createEmojiCyclers,
   createPerItemUITracker,
   getDefaultLowPriorityThrottleMs,
@@ -236,6 +241,10 @@ export function createListQueryStoreTestEnv<
     clearTimeline: clearActionTimeline,
   } = createActionTracker();
   const { getMutationEmoji } = createEmojiCyclers();
+  const offlineTimelineLogger = createOfflineTimelineTestLogger({
+    addAction,
+    getSessionKey,
+  });
 
   const serverTable = createServerTableMock<TRow>(
     flattenTables(serverInitialData),
@@ -383,6 +392,26 @@ export function createListQueryStoreTestEnv<
             },
           });
         }
+      },
+      onSessionKeyChanged: (event: TestSessionKeyChangedEvent) => {
+        offlineTimelineLogger.onSessionKeyChanged(event);
+        if (resolvedPersistentStorage?.offline) {
+          offlineTimelineLogger.handleSessionKeyChangedForResolutionObserver({
+            event,
+            getOfflineResolutions: () =>
+              listQueryStore
+                .getOfflineResolutions()
+                .map(({ id: resolutionId, operation }) => ({
+                  id: resolutionId,
+                  operation,
+                })),
+            adapter: resolvedPersistentStorage.adapter,
+            config: resolvedPersistentStorage.offline.session.getConfig(),
+          });
+        }
+      },
+      onOfflineTimelineEvent: (event: TestOfflineTimelineEvent) => {
+        offlineTimelineLogger.onOfflineTimelineEvent(event);
       },
     },
     onSchedulerEvent: (
@@ -533,6 +562,20 @@ export function createListQueryStoreTestEnv<
 
     serverTable.wsEvents.on('list_changed', () => {
       addAction('received-ws-list-change-event');
+    });
+  }
+
+  if (resolvedPersistentStorage?.offline) {
+    offlineTimelineLogger.attachResolutionObserver({
+      getOfflineResolutions: () =>
+        listQueryStore
+          .getOfflineResolutions()
+          .map(({ id: resolutionId, operation }) => ({
+            id: resolutionId,
+            operation,
+          })),
+      adapter: resolvedPersistentStorage.adapter,
+      config: resolvedPersistentStorage.offline.session.getConfig(),
     });
   }
 

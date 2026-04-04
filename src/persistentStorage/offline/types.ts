@@ -644,6 +644,14 @@ export type OfflineSupersedeConfig = {
   /** Drop earlier unattempted pending entries for the same single entity. */
   scope: 'same-entity';
   /**
+   * Limits which earlier operations may be pruned for that entity.
+   *
+   * Omit this to prune every earlier pending operation for the entity,
+   * use `'self'` to prune only earlier entries of the current operation,
+   * or provide explicit operation names to target a specific related set.
+   */
+  operations?: 'self' | readonly string[];
+  /**
    * When the pruned entries include a temp-entity lifecycle, drop the current
    * operation itself instead of persisting a replacement entry.
    */

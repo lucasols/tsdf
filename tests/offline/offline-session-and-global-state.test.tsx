@@ -272,15 +272,20 @@ test('logging back into the same session replays durable offline mutations queue
     0     | "value:1 pending:no"  | ui-initialized
     .     | "value:2 pending:no"  | ui-changed
     .     | "value:2 pending:yes" | ui-changed
+    .     | "value:2 pending:yes" | offline:updateValue queued
+    .     | "value:2 pending:yes" | session-key-changed (from: offline-session-resume, to: false)
     .     | "value:2 pending:no"  | ui-changed
     10ms  | "value:2 pending:no"  | -- the browser goes back online while the app is logged out
     .     | "value:2 pending:no"  | 🔴 >fetch-started
     810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
     .     | "value:1 pending:no"  | ui-changed
     1.81s | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
+    .     | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
     .     | "value:1 pending:no"  | scheduled-fetch-triggered
     1.82s | "value:1 pending:yes" | ui-changed
     .     | "value:1 pending:yes" | 🟠 >fetch-started
+    .     | "value:1 pending:yes" | offline:updateValue replay-started
+    .     | "value:1 pending:yes" | offline:updateValue replay-finished
     .     | "value:2 pending:yes" | ui-changed
     .     | "value:2 pending:no"  | ui-changed
     2.62s | "value:2 pending:no"  | 🟠 <fetch-finished (value: 1)
@@ -1016,10 +1021,10 @@ test('runtime offline overrides are memory-only and reset to the store config af
 
   expect(restartedOfflineSession.getOfflineRuntimeConfig())
     .toMatchInlineSnapshot(`
-    mutationQueueing: { network: 'allow', outage: 'allow' }
-    network: { enabled: '✅' }
-    outage: { enabled: '❌' }
-  `);
+      mutationQueueing: { network: 'allow', outage: 'allow' }
+      network: { enabled: '✅' }
+      outage: { enabled: '❌' }
+    `);
   expect(
     pick(getGlobalOfflineStatus(sessionKey), [
       'effectiveMode',

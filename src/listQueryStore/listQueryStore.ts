@@ -15,6 +15,14 @@ import {
   CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
   createIdleThrottledScheduler,
 } from '../cacheLimits/scheduleIdleThrottled';
+import {
+  wrapGetSessionKeyForTest,
+  wrapOfflineOperationsForTimeline,
+} from '../internal/offlineTestInstrumentation';
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from '../internal/testTimelineTypes';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import {
@@ -141,6 +149,8 @@ export type ListQueryStateCleanup<
   queryKeys: string[];
   queryPayloads: QueryPayload[];
 };
+
+const EMPTY_LIST_QUERY_OFFLINE_OPERATIONS = {};
 
 const noPartialResourcesFieldsOptionError =
   'fields option is required when partialResources is enabled';
@@ -273,6 +283,8 @@ type ListQueryStoreOptionsBase<
         ItemPayload
       >,
     ) => void;
+    onSessionKeyChanged?: (event: TestSessionKeyChangedEvent) => void;
+    onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
   };
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
@@ -571,9 +583,18 @@ export function createListQueryStore<
     ): readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[];
   };
 
+  const getSessionKeyForRuntime =
+    import.meta.env.TEST && testOptions
+      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
+      : getSessionKey;
+
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
   const resolvedPersistentStorageConfig = persistentStorageConfig
-    ? { ...persistentStorageConfig, getSessionKey, storeName: id }
+    ? {
+        ...persistentStorageConfig,
+        getSessionKey: getSessionKeyForRuntime,
+        storeName: id,
+      }
     : null;
 
   // Persistent storage setup
@@ -584,6 +605,20 @@ export function createListQueryStore<
       })
     : null;
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
+  // WORKAROUND: Session-only offline config omits operations, so list-query stores normalize that case to an empty registry before passing it through the generic offline controller surface.
+  const resolvedOfflineOperations = __LEGIT_CAST__<
+    ResolvedOfflineOperations,
+    Record<string, unknown>
+  >(resolvedOfflineConfig?.operations ?? EMPTY_LIST_QUERY_OFFLINE_OPERATIONS);
+  const offlineOperationsForRuntime =
+    import.meta.env.TEST &&
+    testOptions?.onOfflineTimelineEvent &&
+    resolvedOfflineConfig
+      ? wrapOfflineOperationsForTimeline(
+          resolvedOfflineOperations,
+          testOptions.onOfflineTimelineEvent,
+        )
+      : resolvedOfflineOperations;
 
   const store = new Store<State>({
     debugName,
@@ -647,9 +682,12 @@ export function createListQueryStore<
     );
   }
 
-  let offlineController: OfflineStoreController<
-    Exclude<TOfflineOperations, null>
-  > | null = null;
+  type ResolvedOfflineOperations = TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
+
+  let offlineController: OfflineStoreController<ResolvedOfflineOperations> | null =
+    null;
   const offlineFetchController = {
     prepareForFetch: () =>
       offlineController?.prepareForFetch() ?? Promise.resolve(),
@@ -667,7 +705,11 @@ export function createListQueryStore<
       args: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
     ) =>
       offlineController
-        ? offlineController.prepareForMutation(args)
+        ? // WORKAROUND: The shared controller also supports session-only offline configs with no operation map, so list-query mutation calls re-narrow it only when typed offline mutation input is present.
+          __LEGIT_CAST__<
+            OfflineStoreController<Exclude<TOfflineOperations, null>>,
+            unknown
+          >(offlineController).prepareForMutation(args)
         : Promise.reject(new Error('Offline mutation controller unavailable')),
     queueMutation: <
       TName extends keyof Exclude<TOfflineOperations, null> & string,
@@ -675,7 +717,11 @@ export function createListQueryStore<
       args: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
     ) =>
       offlineController
-        ? offlineController.queueMutation(args)
+        ? // WORKAROUND: The shared controller also supports session-only offline configs with no operation map, so list-query mutation calls re-narrow it only when typed offline mutation input is present.
+          __LEGIT_CAST__<
+            OfflineStoreController<Exclude<TOfflineOperations, null>>,
+            unknown
+          >(offlineController).queueMutation(args)
         : Promise.resolve(),
   };
 
@@ -1145,162 +1191,166 @@ export function createListQueryStore<
     runWithBroadcastConsistency,
     publishQuerySnapshot,
     publishItemSnapshot,
+    onOfflineTimelineEvent:
+      import.meta.env.TEST && testOptions
+        ? testOptions.onOfflineTimelineEvent
+        : undefined,
   });
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
-    offlineController = createOfflineStoreController<
-      Exclude<TOfflineOperations, null>
-    >({
-      storeName: id,
-      storeType: 'listQuery',
-      getSessionKey,
-      onPersistentStorageError:
-        resolvedPersistentStorageConfig.onPersistentStorageError,
-      adapter: resolvedPersistentStorageConfig.adapter,
-      offlineSession: resolvedOfflineConfig.session,
-      // WORKAROUND: The list-query persistent config keeps operations behind a
-      // widened generic boundary, so the controller input has to re-narrow
-      // them back to the caller's concrete offline operation map here.
-      operations: __LEGIT_CAST__<
-        Exclude<TOfflineOperations, null>,
-        Record<string, unknown>
-      >(resolvedOfflineConfig.operations),
-      storeAdapter: {
-        normalizeEntityRefs: (entityRefs) =>
-          entityRefs.map((ref) => {
-            // Temp entities are queued internally as normalized refs.
-            const normalizedRef = offlineItemEntityRefSchema
-              .parse(ref)
-              .unwrapOrNull();
-            if (normalizedRef !== null) return normalizedRef;
+    offlineController = createOfflineStoreController<ResolvedOfflineOperations>(
+      {
+        storeName: id,
+        storeType: 'listQuery',
+        getSessionKey: getSessionKeyForRuntime,
+        onPersistentStorageError:
+          resolvedPersistentStorageConfig.onPersistentStorageError,
+        adapter: resolvedPersistentStorageConfig.adapter,
+        offlineSession: resolvedOfflineConfig.session,
+        // WORKAROUND: The list-query persistent config keeps operations behind a
+        // widened generic boundary, so the controller input has to re-narrow
+        // them back to the caller's concrete offline operation map here.
+        operations: __LEGIT_CAST__<
+          ResolvedOfflineOperations,
+          Record<string, unknown>
+        >(offlineOperationsForRuntime),
+        storeAdapter: {
+          normalizeEntityRefs: (entityRefs) =>
+            entityRefs.map((ref) => {
+              // Temp entities are queued internally as normalized refs.
+              const normalizedRef = offlineItemEntityRefSchema
+                .parse(ref)
+                .unwrapOrNull();
+              if (normalizedRef !== null) return normalizedRef;
 
-            return {
-              entityKey: getItemKey(
-                // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
-                __LEGIT_CAST__<ItemPayload, unknown>(ref),
-              ),
-              entityKind: 'item' as const,
-            };
-          }),
-        getProtectedCacheKeys: (entityRefs) => {
-          const sessionKey = getSessionKey();
-          if (sessionKey === false) return [];
-          return entityRefs.map((ref) =>
-            createProtectedStorageKey({
-              backend:
-                resolvedPersistentStorageConfig.adapter !== 'local-sync'
-                  ? 'opfs'
-                  : 'localStorage',
-              sessionKey,
-              storeName: id,
-              kind: 'listQuery.item',
-              key: ref.entityKey,
+              return {
+                entityKey: getItemKey(
+                  // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
+                  __LEGIT_CAST__<ItemPayload, unknown>(ref),
+                ),
+                entityKind: 'item' as const,
+              };
             }),
-          );
-        },
-        applyPendingEntity: ({ tempId, pendingEntity }) => {
-          if (!pendingEntity || typeof pendingEntity !== 'object') return;
-          addItemToState(
-            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-            // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
-            __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
-          );
-        },
-        rollbackPendingEntity: ({ tempId }) => {
-          deleteItemState(
-            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when removing queued temp entities.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-          );
-        },
-        reconcileTempEntity: ({ tempId, reconciliation }) => {
-          const tempPayload =
-            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
-          const tempItemKey = getItemKey(tempPayload);
-          const currentItem = getItemState(tempPayload);
-          const finalData =
-            reconciliation.finalData !== undefined
-              ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the list-query store.
-                __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
-              : (currentItem ?? undefined);
-          if (finalData === undefined) return;
-
-          const finalPayload =
-            // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(
-              reconciliation.finalPayload,
+          getProtectedCacheKeys: (entityRefs) => {
+            const sessionKey = getSessionKeyForRuntime();
+            if (sessionKey === false) return [];
+            return entityRefs.map((ref) =>
+              createProtectedStorageKey({
+                backend:
+                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                    ? 'opfs'
+                    : 'localStorage',
+                sessionKey,
+                storeName: id,
+                kind: 'listQuery.item',
+                key: ref.entityKey,
+              }),
             );
-          const finalItemKey = getItemKey(finalPayload);
-          const queryMemberships = Object.entries(store.state.queries)
-            .map(([queryKey, query]) => ({
-              queryKey,
-              index: query.items.indexOf(tempItemKey),
-            }))
-            .filter(({ index }) => index !== -1);
+          },
+          applyPendingEntity: ({ tempId, pendingEntity }) => {
+            if (!pendingEntity || typeof pendingEntity !== 'object') return;
+            addItemToState(
+              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+              // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
+              __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+            );
+          },
+          rollbackPendingEntity: ({ tempId }) => {
+            deleteItemState(
+              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when removing queued temp entities.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+            );
+          },
+          reconcileTempEntity: ({ tempId, reconciliation }) => {
+            const tempPayload =
+              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
+            const tempItemKey = getItemKey(tempPayload);
+            const currentItem = getItemState(tempPayload);
+            const finalData =
+              reconciliation.finalData !== undefined
+                ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the list-query store.
+                  __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
+                : (currentItem ?? undefined);
+            if (finalData === undefined) return;
 
-          deleteItemState(tempPayload);
-          addItemToState(finalPayload, finalData);
+            const finalPayload =
+              // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(
+                reconciliation.finalPayload,
+              );
+            const finalItemKey = getItemKey(finalPayload);
+            const queryMemberships = Object.entries(store.state.queries)
+              .map(([queryKey, query]) => ({
+                queryKey,
+                index: query.items.indexOf(tempItemKey),
+              }))
+              .filter(({ index }) => index !== -1);
 
-          if (queryMemberships.length === 0) return;
+            deleteItemState(tempPayload);
+            addItemToState(finalPayload, finalData);
 
-          store.produceState(
-            (draft) => {
-              for (const { queryKey, index } of queryMemberships) {
-                const query = notNullish(draft.queries[queryKey]);
-                const existingIndex = query.items.indexOf(finalItemKey);
-                if (existingIndex !== -1) {
-                  query.items.splice(existingIndex, 1);
+            if (queryMemberships.length === 0) return;
+
+            store.produceState(
+              (draft) => {
+                for (const { queryKey, index } of queryMemberships) {
+                  const query = notNullish(draft.queries[queryKey]);
+                  const existingIndex = query.items.indexOf(finalItemKey);
+                  if (existingIndex !== -1) {
+                    query.items.splice(existingIndex, 1);
+                  }
+
+                  query.items.splice(
+                    Math.min(index, query.items.length),
+                    0,
+                    finalItemKey,
+                  );
                 }
+              },
+              { action: 'offline-reconcile-temp-item' },
+            );
 
-                query.items.splice(
-                  Math.min(index, query.items.length),
-                  0,
-                  finalItemKey,
-                );
-              }
-            },
-            { action: 'offline-reconcile-temp-item' },
-          );
-
-          touchQueries(queryMemberships.map(({ queryKey }) => queryKey));
-          for (const { queryKey } of queryMemberships) {
-            publishQuerySnapshot(queryKey);
-          }
-        },
-        captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
-          if (offlineOverlaySessionKey !== sessionKey)
-            clearOfflineOverlays(sessionKey);
-          captureOfflineOverlays(
-            entityRefs.flatMap((ref) => {
-              return ref.entityKind === 'item' ? [ref.entityKey] : [];
-            }),
-          );
-        },
-        syncEntityOverlays: ({ entities, sessionKey }) => {
-          if (offlineOverlaySessionKey !== sessionKey)
-            clearOfflineOverlays(sessionKey);
-
-          const activeItemKeys = new Set(
-            entities
-              .filter((entity) => {
-                return (
-                  entity.entityKind === 'item' && !entity.requiresResolution
-                );
-              })
-              .map((entity) => entity.entityKey),
-          );
-
-          offlineOverlayStore.produceState((draft) => {
-            for (const itemKey of Object.keys(draft)) {
-              if (!activeItemKeys.has(itemKey)) {
-                delete draft[itemKey];
-              }
+            touchQueries(queryMemberships.map(({ queryKey }) => queryKey));
+            for (const { queryKey } of queryMemberships) {
+              publishQuerySnapshot(queryKey);
             }
-          });
+          },
+          captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
+            if (offlineOverlaySessionKey !== sessionKey)
+              clearOfflineOverlays(sessionKey);
+            captureOfflineOverlays(
+              entityRefs.flatMap((ref) => {
+                return ref.entityKind === 'item' ? [ref.entityKey] : [];
+              }),
+            );
+          },
+          syncEntityOverlays: ({ entities, sessionKey }) => {
+            if (offlineOverlaySessionKey !== sessionKey)
+              clearOfflineOverlays(sessionKey);
+
+            const activeItemKeys = new Set(
+              entities
+                .filter((entity) => {
+                  return (
+                    entity.entityKind === 'item' && !entity.requiresResolution
+                  );
+                })
+                .map((entity) => entity.entityKey),
+            );
+
+            offlineOverlayStore.produceState((draft) => {
+              for (const itemKey of Object.keys(draft)) {
+                if (!activeItemKeys.has(itemKey)) {
+                  delete draft[itemKey];
+                }
+              }
+            });
+          },
         },
       },
-    });
+    );
   }
 
   function applyLoadedFieldsFromSnapshot(
@@ -1710,7 +1760,7 @@ export function createListQueryStore<
     >({
       storeType: 'listQuery',
       storeKey: id,
-      getSessionKey,
+      getSessionKey: getSessionKeyForRuntime,
       onMessage: handleRemoteBrowserTabsMessage,
       onSessionChange() {
         lastQuerySyncVersions.clear();
@@ -1745,7 +1795,7 @@ export function createListQueryStore<
       QueryMetadata
     >[] {
       const offlineEntities = useOfflineStoreEntities({
-        sessionKey: getSessionKey(),
+        sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
@@ -1834,7 +1884,7 @@ export function createListQueryStore<
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
     const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
+      sessionKey: getSessionKeyForRuntime(),
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
@@ -2241,7 +2291,7 @@ export function createListQueryStore<
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {
       return useOfflineStoreEntities({
-        sessionKey: getSessionKey(),
+        sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });

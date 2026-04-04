@@ -509,11 +509,15 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | temp:Ada             |
-    0     | pending:Ada          | ui-initialized
+    0     | -                    | offline:createUser queued
+    .     | pending:Ada          | ui-initialized
     1.01s | pending:Ada          | -- replay the queued temp create and persist the conflict
+    .     | pending:Ada          | offline:createUser resolution-required
     .     | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
     .     | pending:Ada resolved | ui-changed
+    .     | pending:Ada resolved | offline:createUser replay-started
     .     | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
+    .     | pending:Ada resolved | offline:createUser replay-finished
     .     | ···                  | ui-changed
     "
   `);

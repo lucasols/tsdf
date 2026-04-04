@@ -19,12 +19,21 @@ import {
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
+import {
+  wrapGetSessionKeyForTest,
+  wrapOfflineOperationsForTimeline,
+} from '../internal/offlineTestInstrumentation';
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from '../internal/testTimelineTypes';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import {
   isOfflineConnectivityError,
   offlineConnectivityError,
 } from '../persistentStorage/offline/fetchRuntime';
 import {
+  type OfflineAwareMutationController,
   type OfflineMutationResult,
   runHybridOfflineMutation,
 } from '../persistentStorage/offline/mutationRuntime';
@@ -222,6 +231,8 @@ type CollectionOfflineOperationsConfig<
   ItemPayload extends ValidPayload,
 > = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
 
+const EMPTY_COLLECTION_OFFLINE_OPERATIONS = {};
+
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -306,6 +317,8 @@ export type CollectionStoreOptions<
     onReceiveRemoteMsg?: (
       message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
     ) => void;
+    onSessionKeyChanged?: (event: TestSessionKeyChangedEvent) => void;
+    onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
   };
 };
 
@@ -369,6 +382,9 @@ export function createCollectionStore<
     data: ItemState | null;
     payload?: ItemPayload;
   };
+  type ResolvedOfflineOperations = TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
 
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
@@ -387,8 +403,17 @@ export function createCollectionStore<
   let initialStatus: CollectionItemStatus = 'success';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const getSessionKeyForRuntime =
+    import.meta.env.TEST && testOptions
+      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
+      : getSessionKey;
+
   const resolvedPersistentStorageConfig = persistentStorageConfig
-    ? { ...persistentStorageConfig, getSessionKey, storeName: id }
+    ? {
+        ...persistentStorageConfig,
+        getSessionKey: getSessionKeyForRuntime,
+        storeName: id,
+      }
     : null;
 
   if (import.meta.env.TEST && testOptions) {
@@ -467,18 +492,36 @@ export function createCollectionStore<
     });
   }
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
+  // WORKAROUND: Session-only offline config omits operations, so collection stores normalize that case to an empty registry before passing it through the generic offline controller surface.
+  const resolvedOfflineOperations = __LEGIT_CAST__<
+    ResolvedOfflineOperations,
+    unknown
+  >(resolvedOfflineConfig?.operations ?? EMPTY_COLLECTION_OFFLINE_OPERATIONS);
+
+  const offlineOperationsForRuntime =
+    import.meta.env.TEST &&
+    testOptions?.onOfflineTimelineEvent &&
+    resolvedOfflineConfig
+      ? wrapOfflineOperationsForTimeline(
+          resolvedOfflineOperations,
+          testOptions.onOfflineTimelineEvent,
+        )
+      : resolvedOfflineOperations;
 
   const offlineController =
     resolvedPersistentStorageConfig && resolvedOfflineConfig
-      ? createOfflineStoreController({
+      ? createOfflineStoreController<ResolvedOfflineOperations>({
           storeName: id,
           storeType: 'collection',
-          getSessionKey,
+          getSessionKey: getSessionKeyForRuntime,
           onPersistentStorageError:
             resolvedPersistentStorageConfig.onPersistentStorageError,
           adapter: resolvedPersistentStorageConfig.adapter,
           offlineSession: resolvedOfflineConfig.session,
-          operations: resolvedOfflineConfig.operations,
+          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
+          operations: __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
+            offlineOperationsForRuntime,
+          ),
           storeAdapter: {
             normalizeEntityRefs: (entityRefs) =>
               entityRefs.map((ref) => {
@@ -497,7 +540,7 @@ export function createCollectionStore<
                 };
               }),
             getProtectedCacheKeys: (entityRefs) => {
-              const sessionKey = getSessionKey();
+              const sessionKey = getSessionKeyForRuntime();
               if (sessionKey === false) return [];
               return entityRefs.map((ref) =>
                 createProtectedStorageKey({
@@ -1035,7 +1078,7 @@ export function createCollectionStore<
     >({
       storeType: 'collection',
       storeKey: id,
-      getSessionKey,
+      getSessionKey: getSessionKeyForRuntime,
       onMessage: handleRemoteMessage,
       onSessionChange() {
         lastCollectionSyncVersions.clear();
@@ -1372,7 +1415,7 @@ export function createCollectionStore<
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ) {
     const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
+      sessionKey: getSessionKeyForRuntime(),
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
@@ -1648,7 +1691,13 @@ export function createCollectionStore<
       mutation: offline
         ? () =>
             runHybridOfflineMutation({
-              controller: offlineController,
+              // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
+              controller: __LEGIT_CAST__<
+                OfflineAwareMutationController<
+                  Exclude<TOfflineOperations, null>
+                > | null,
+                unknown
+              >(offlineController),
               offline,
               directMutation,
             })
@@ -1687,6 +1736,18 @@ export function createCollectionStore<
       items: affectedItems,
       success: result.ok,
     });
+
+    if (
+      import.meta.env.TEST &&
+      offline &&
+      result.ok &&
+      result.value.kind === 'queued'
+    ) {
+      testOptions?.onOfflineTimelineEvent?.({
+        operation: offline.operation,
+        phase: 'queued',
+      });
+    }
 
     if (!offline && result.ok && result.value.kind === 'online') {
       return Result.ok(result.value.data);
@@ -1920,7 +1981,7 @@ export function createCollectionStore<
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {
       return useOfflineStoreEntities({
-        sessionKey: getSessionKey(),
+        sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });

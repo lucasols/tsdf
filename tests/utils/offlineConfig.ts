@@ -6,16 +6,15 @@ import {
 
 type OfflineConfigSessionKey = string | false | (() => string | false);
 
-type StoreOfflineConfig<TOperations extends Record<string, unknown>> = {
-  session: OfflineSession;
-  operations: TOperations;
-};
+type StoreOfflineConfig<
+  TOperations extends Record<string, unknown> = Record<never, never>,
+> = { session: OfflineSession; operations?: TOperations };
 
 export function createOfflineConfigForSessionKey<
-  TOperations extends Record<string, unknown>,
+  TOperations extends Record<string, unknown> = Record<never, never>,
 >(
   sessionKey: OfflineConfigSessionKey,
-  config: OfflineSessionConfig & { operations: TOperations },
+  config: OfflineSessionConfig & { operations?: TOperations },
 ): StoreOfflineConfig<TOperations> {
   const { operations, ...sessionConfig } = config;
 
@@ -25,6 +24,6 @@ export function createOfflineConfigForSessionKey<
         typeof sessionKey === 'function' ? sessionKey : () => sessionKey,
       config: sessionConfig,
     }),
-    operations,
+    ...(operations === undefined ? {} : { operations }),
   };
 }

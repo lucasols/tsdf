@@ -292,12 +292,15 @@ type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
   InternalDocumentOfflineOperations<State> | null;
 
 type StoreOfflineConfig<
-  TOperations extends Record<string, AnyOfflineOperationDefinition>,
+  TOperations extends Record<string, AnyOfflineOperationDefinition> = Record<
+    never,
+    never
+  >,
 > = {
   /** Shared session-level offline policy and runtime controls. */
   session: OfflineSession;
-  /** Store-local offline operation definitions. */
-  operations: TOperations;
+  /** Store-local offline operation definitions. Optional when only session-level offline controls are used. */
+  operations?: TOperations;
 };
 
 /** Persistent storage config for DocumentStore. */
@@ -308,7 +311,7 @@ export type DocumentPersistentStorageConfig<
 > = StorePersistentStorageBaseConfig<State, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? never
+    ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
 };
 
@@ -329,7 +332,7 @@ export type ResolvedDocumentPersistentStorageConfig<
 > = ResolvedStorePersistentStorageBaseConfig<State, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? never
+    ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
 };
 
@@ -363,7 +366,7 @@ export type CollectionPersistentStorageConfig<
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? never
+    ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
@@ -390,7 +393,7 @@ export type ResolvedCollectionPersistentStorageConfig<
 > = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? never
+    ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
@@ -444,7 +447,7 @@ export type ListQueryPersistentStorageConfig<
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? never
+    ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
   /** Schema used to validate cached item payloads on load. */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
@@ -481,7 +484,7 @@ export type ResolvedListQueryPersistentStorageConfig<
 > = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? never
+    ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
   /** Schema used to validate cached item payloads on load. */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
