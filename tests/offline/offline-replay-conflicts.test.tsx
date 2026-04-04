@@ -30,7 +30,6 @@ import {
   classifyMutationOutage,
   collectionCreateInputSchema,
   collectionSchema,
-  docConflictSchema,
   docMutationInputSchema,
   docSchema,
   listQueryQueryPayloadSchema,
@@ -170,7 +169,7 @@ function getSingleConflictResolution<T extends { id: string; kind: string }>(
   return conflict;
 }
 
-test('offline conflicts are detected before execute, surface through selectors, and can be resolved', async () => {
+test('offline conflicts are detected before execute, surface through selectors, and can be committed externally', async () => {
   network.setOffline();
   const execute = vi.fn(
     ({
@@ -185,7 +184,6 @@ test('offline conflicts are detected before execute, surface through selectors, 
       return input;
     },
   );
-  let resolveEnqueuedAt: number | null = null;
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
     1,
     {
@@ -205,27 +203,10 @@ test('offline conflicts are detected before execute, surface through selectors, 
               inputSchema: docMutationInputSchema,
               execute,
               conflictHandling: {
-                schema: docConflictSchema,
                 detectConflict: ({ input, enqueuedAt }) => {
                   expect(input.value).toBe(2);
                   expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
                   return { reason: 'server-changed' };
-                },
-                resolveConflict: ({
-                  input,
-                  conflict,
-                  resolution,
-                  enqueuedAt,
-                }) => {
-                  expect(input.value).toBe(2);
-                  expect(conflict).toMatchInlineSnapshot(
-                    `reason: 'server-changed'`,
-                  );
-                  expect(resolution).toMatchInlineSnapshot(
-                    `resolution: 'accept-local'`,
-                  );
-                  resolveEnqueuedAt = enqueuedAt;
-                  return undefined;
                 },
               },
             },
@@ -324,17 +305,17 @@ test('offline conflicts are detected before execute, surface through selectors, 
     storeResolutionHook.result.current,
   );
 
-  // Resolve the stored conflict and confirm the session clears its offline
-  // bookkeeping once the resolution is accepted.
+  // Simulate an external conflict-resolution API call that accepts the
+  // optimistic value, then commit that accepted outcome back into the store so
+  // it can clear bookkeeping without replaying the mutation internally.
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(conflict.id, {
-      resolution: 'accept-local',
+      action: 'commit',
     });
     await Promise.resolve();
     await flushAllTimers();
   });
 
-  expect(resolveEnqueuedAt).toBe(TEST_INITIAL_TIME);
   expect(storeResolutionHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(globalResolutionHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(storeOfflineHook.result.current).toMatchInlineSnapshot(`[]`);
@@ -354,32 +335,6 @@ test('offline conflicts are detected before execute, surface through selectors, 
 test('resolving a persisted conflict can requeue a replacement mutation and replay it immediately', async () => {
   network.setOffline();
   const executedInputs: number[] = [];
-  const resolveConflict = vi.fn(
-    ({
-      conflict,
-      resolution,
-      enqueuedAt,
-    }: {
-      conflict: { reason: string };
-      resolution: unknown;
-      enqueuedAt: number;
-    }) => {
-      expect(conflict).toMatchInlineSnapshot(`reason: 'server-changed'`);
-      expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-
-      expect(resolution).toMatchInlineSnapshot(`value: 7`);
-
-      if (typeof resolution !== 'object' || resolution === null) {
-        throw new Error('Expected a numeric conflict resolution payload');
-      }
-      const nextValue = Reflect.get(resolution, 'value');
-      if (typeof nextValue !== 'number') {
-        throw new Error('Expected a numeric conflict resolution payload');
-      }
-
-      return { requeue: { input: { value: nextValue } } };
-    },
-  );
 
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
     1,
@@ -406,10 +361,8 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
                 return input;
               },
               conflictHandling: {
-                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.value === 2 ? { reason: 'server-changed' } : false,
-                resolveConflict,
               },
             },
           },
@@ -469,11 +422,13 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
     'resolve the conflict with a replacement value and replay it immediately',
   ]);
   await act(async () => {
-    await env.apiStore.resolveOfflineResolution(conflict.id, { value: 7 });
+    await env.apiStore.resolveOfflineResolution(conflict.id, {
+      action: 'requeue',
+      input: { value: 7 },
+    });
     await flushAllTimers();
   });
 
-  expect(resolveConflict).toHaveBeenCalledTimes(1);
   expect(executedInputs).toMatchInlineSnapshot(`[7]`);
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 7
@@ -535,18 +490,8 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
                   executeResolvers.push(resolve);
                 }),
               conflictHandling: {
-                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.name === 'Ada' ? { reason: 'server-changed' } : false,
-                resolveConflict: ({ conflict, resolution }) => {
-                  expect(conflict).toMatchInlineSnapshot(
-                    `reason: 'server-changed'`,
-                  );
-                  expect(resolution).toMatchInlineSnapshot(
-                    `name: 'Ada resolved'`,
-                  );
-                  return { requeue: { input: { name: 'Ada resolved' } } };
-                },
               },
               tempEntity: {
                 buildPendingEntity: (input) => ({
@@ -628,7 +573,8 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(conflict.id, {
-      name: 'Ada resolved',
+      action: 'requeue',
+      input: { name: 'Ada resolved' },
     });
     await Promise.resolve();
   });
@@ -685,6 +631,102 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     offlineResolutionsHook.unmount();
     tempAdaHook.unmount();
   });
+});
+
+test('committing a temp-entity conflict with an external result reconciles the original temp row', async () => {
+  network.setOffline();
+  const execute = vi.fn(() =>
+    Promise.resolve({ id: 'users||should-not-run', name: 'Should not run' }),
+  );
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    CreateUserConflictOperations
+  >(
+    { 'users||1': { name: 'User 1' } },
+    {
+      getSessionKey: () => 'offline-conflict-temp-commit-session',
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-conflict-temp-commit-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              execute,
+              conflictHandling: {
+                detectConflict: ({ input }) =>
+                  input.name === 'Ada' ? { reason: 'server-changed' } : false,
+              },
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: `pending:${input.name}` },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                  finalData: { value: { name: result.name } },
+                }),
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  await env.apiStore.performMutation('__create__', {
+    mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
+    offline: { operation: 'createUser', input: { name: 'Ada' } },
+  });
+
+  const tempAdaHook = renderHook(() => env.apiStore.useItem('temp:Ada'));
+  await flushAllTimers();
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  const conflict = getSingleConflictResolution(
+    env.apiStore.getOfflineResolutions(),
+  );
+
+  env.addTimelineComments('afterLastAction', [
+    'commit the conflict using an externally accepted server result',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(conflict.id, {
+      action: 'commit',
+      result: { id: 'users||ada-committed', name: 'Ada committed' },
+    });
+    await flushAllTimers();
+  });
+
+  expect(execute).not.toHaveBeenCalled();
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
+  expect(tempAdaHook.result.current.data).toBeNull();
+  expect(env.store.state[getCompositeKey('users||ada-committed')]?.data)
+    .toMatchInlineSnapshot(`
+    value: { name: 'Ada committed' }
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | offline:createUser queued
+    1.01s | offline:createUser resolution-required
+    .     | -- commit the conflict using an externally accepted server result
+    "
+  `);
+
+  tempAdaHook.unmount();
 });
 
 type CreateAndPatchListQueryUserConflictOperations = PatchUserOperations & {
@@ -756,12 +798,10 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
               },
               execute: createUserExecute,
               conflictHandling: {
-                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.name === 'Linus offline'
                     ? { reason: 'server-changed' }
                     : false,
-                resolveConflict: () => undefined,
               },
             },
             patchUserName: {
@@ -1043,7 +1083,6 @@ test('conflict handling still works for mutations queued via fallback', async ()
               conflictHandling: {
                 detectConflict: ({ input }) =>
                   input.value === 2 ? { reason: 'server-changed' } : false,
-                resolveConflict: () => undefined,
               },
             },
           },
@@ -1085,11 +1124,11 @@ test('conflict handling still works for mutations queued via fallback', async ()
         createdAt: 1735689600001
         entityKey: 'document'
         entityKind: 'document'
-        id: 'hybrid-conflict-session:document-2:document'
+        id: 'hybrid-conflict-session:document-3:document'
         pendingMutations: 0
         requiresResolution: '✅'
         sessionKey: 'hybrid-conflict-session'
-        storeName: 'document-2'
+        storeName: 'document-3'
         storeType: 'document'
         syncState: 'resolution-required'
         updatedAt: 1735689600001
@@ -1122,7 +1161,7 @@ test('conflict handling still works for mutations queued via fallback', async ()
       kind: 'conflict'
       operation: 'updateValue'
       sessionKey: 'hybrid-conflict-session'
-      storeName: 'document-2'
+      storeName: 'document-3'
       storeType: 'document'
       updatedAt: 1735689600001
   `);

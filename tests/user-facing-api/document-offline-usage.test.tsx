@@ -17,7 +17,6 @@ import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const docSchema = rc_object({ value: rc_number, label: rc_string });
-const docConflictSchema = rc_object({ reason: rc_string });
 const setValueInputSchema = rc_object({ value: rc_number });
 const conflictResolutionSchema = z.object({ value: z.number() });
 const patchDocAccumulationZodSchema = z
@@ -284,7 +283,6 @@ test('direct document store offline public api', async () => {
               return { ...documentState };
             },
             conflictHandling: {
-              schema: docConflictSchema,
               detectConflict: ({
                 input,
                 enqueuedAt,
@@ -297,23 +295,6 @@ test('direct document store offline public api', async () => {
                 if (input.value !== 6) return false;
 
                 return { reason: 'stale-server-value' };
-              },
-              resolveConflict: ({
-                conflict,
-                resolution,
-                input,
-                enqueuedAt,
-                updatedAt,
-              }) => {
-                void input;
-                expect(conflict.reason).toBe('stale-server-value');
-                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
-                const parsedResolution =
-                  conflictResolutionSchema.parse(resolution);
-
-                return {
-                  requeue: { input: { value: parsedResolution.value } },
-                };
               },
             },
             execute: ({ input }) => {
@@ -448,7 +429,7 @@ test('direct document store offline public api', async () => {
 
   expect(documentStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   await documentStore.resolveOfflineResolution('missing', {
-    resolution: 'noop',
+    action: 'discard',
   });
   expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
@@ -580,7 +561,10 @@ test('direct document store offline public api', async () => {
   );
 
   await act(async () => {
-    await documentStore.resolveOfflineResolution(conflict.id, { value: 7 });
+    await documentStore.resolveOfflineResolution(conflict.id, {
+      action: 'requeue',
+      input: conflictResolutionSchema.parse({ value: 7 }),
+    });
     await flushAllTimers();
   });
 

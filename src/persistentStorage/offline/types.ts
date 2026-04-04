@@ -568,6 +568,34 @@ export type OfflineRetryExhaustedResolutionAction =
   | { action: 'discard' };
 
 /**
+ * Built-in resolution actions for persisted conflict records.
+ *
+ * `commit` is intended for flows where the final API call has already been made
+ * externally and the store only needs to clear bookkeeping plus reconcile any
+ * temp-entity lifecycle using the accepted server result.
+ *
+ * @typeParam TInput - Input type expected when requeueing a replacement mutation.
+ * @typeParam TResult - Result shape returned by the external conflict resolution call.
+ */
+export type OfflineConflictResolutionAction<
+  TInput = unknown,
+  TResult = unknown,
+> =
+  | { action: 'discard' }
+  | { action: 'requeue'; input: TInput }
+  | { action: 'commit'; result?: TResult };
+
+/**
+ * Built-in resolution actions accepted by `resolveOfflineResolution(...)`.
+ *
+ * @typeParam TInput - Input type expected when requeueing a replacement mutation.
+ * @typeParam TResult - Result shape returned by an externally completed conflict resolution call.
+ */
+export type OfflineResolutionAction<TInput = unknown, TResult = unknown> =
+  | OfflineRetryExhaustedResolutionAction
+  | OfflineConflictResolutionAction<TInput, TResult>;
+
+/**
  * Extracts operation input type from a schema map.
  *
  * @typeParam TOperations - Operation registry to inspect.
@@ -615,17 +643,6 @@ export type OfflineMutationInput<
   >,
   TName extends keyof TOperations & string = keyof TOperations & string,
 > = OfflineMutationDescriptor<TOperations, TName>;
-
-/**
- * Result returned from conflict handlers to requeue a replacement operation input.
- *
- * @typeParam TInput - Input type expected by the operation when requeued.
- */
-export type OfflineResolveConflictResult<TInput> =
-  | undefined
-  | null
-  | false
-  | { requeue?: { input: TInput } };
 
 /**
  * Context passed into offline mutation accumulation hooks.
@@ -710,15 +727,13 @@ type OperationReplayCheckContext<TInput, TServerSnapshot> =
  * Conflict hook configuration for a queued offline operation.
  *
  * @typeParam TInput - Input type of the queued operation being checked and potentially requeued.
- * @typeParam TConflict - Conflict payload produced by detection and consumed during resolution.
+ * @typeParam TConflict - Conflict payload produced by detection and persisted for later external resolution.
  */
 export type OfflineConflictHandlingConfig<
   TInput,
   TConflict,
   TServerSnapshot = unknown,
 > = {
-  /** Optional schema to validate and sanitize stored conflict payloads. */
-  schema?: PersistentStorageSchema<TConflict>;
   /**
    * Inspect remote state before replaying the mutation and return conflict payload
    * when the queued mutation can no longer be applied safely.
@@ -726,17 +741,6 @@ export type OfflineConflictHandlingConfig<
   detectConflict: (
     ctx: OperationReplayCheckContext<TInput, TServerSnapshot>,
   ) => Promise<TConflict | false | null> | TConflict | false | null;
-  /**
-   * Resolve persisted conflict data and optionally requeue an adjusted operation.
-   */
-  resolveConflict: (
-    ctx: OperationBaseContext<TInput> & {
-      conflict: TConflict;
-      resolution: unknown;
-    },
-  ) =>
-    | Promise<OfflineResolveConflictResult<TInput>>
-    | OfflineResolveConflictResult<TInput>;
 };
 
 type ConflictHandlingField<TInput, TConflict, TServerSnapshot> =
@@ -1119,7 +1123,7 @@ export type AnyOfflineOperationDefinition = {
  *
  * @typeParam TInput - Input payload accepted by the operation.
  * @typeParam TConflict - Conflict payload produced by optional conflict handling.
- * @typeParam TTempResult - Result returned by `execute`, used only when `tempEntity` reconciliation needs it.
+ * @typeParam TTempResult - Result returned by `execute`, also reused when externally committed conflict resolution needs temp-entity reconciliation.
  *
  * @example
  * ```ts
@@ -1140,7 +1144,7 @@ export type DefineOfflineOperation<
   input?: TInput;
   /** Conflict payload type produced by the optional conflict handler. */
   conflict?: TConflict;
-  /** Result returned by `execute`, used only for `tempEntity` reconciliation. */
+  /** Result returned by `execute`, also reused by externally committed conflict resolution for temp-entity reconciliation. */
   result?: TTempResult;
   /** Snapshot type returned by `getServerSnapshot` and exposed to replay checks. */
   serverSnapshot?: TServerSnapshot;
@@ -1241,7 +1245,6 @@ export type DocumentOfflineOperationDefinition<
  *     inputSchema: z.object({ reason: z.string() }),
  *     conflictHandling: {
  *       detectConflict: () => false,
- *       resolveConflict: () => undefined,
  *     },
  *     execute: () => undefined,
  *   },

@@ -2049,10 +2049,7 @@ describe('hybrid fallback integration', () => {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
-              conflictHandling: {
-                detectConflict: () => false,
-                resolveConflict: () => undefined,
-              },
+              conflictHandling: { detectConflict: () => false },
             },
           },
         },

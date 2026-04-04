@@ -21,7 +21,6 @@ const todoPayloadSchema = rc_string;
 const todoInputSchema = rc_object({ id: rc_string, title: rc_string });
 const renameManyTodosInputSchema = rc_array(todoInputSchema);
 const createTodoInputSchema = rc_object({ title: rc_string });
-const todoConflictSchema = rc_object({ reason: rc_string });
 const conflictResolutionSchema = z.object({ title: z.string() });
 const FETCH_DELAY_MS = 30;
 
@@ -207,33 +206,10 @@ test('direct collection store offline public api', async () => {
             inputSchema: todoInputSchema,
             getEntityRefs: ({ input }) => [input.id],
             conflictHandling: {
-              schema: todoConflictSchema,
               detectConflict: ({ input, enqueuedAt, updatedAt }) => {
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
                 if (input.title !== 'Todo 1 conflict') return false;
                 return { reason: 'server-changed' };
-              },
-              resolveConflict: ({
-                input,
-                conflict,
-                resolution,
-                enqueuedAt,
-                updatedAt,
-              }) => {
-                expect(input.id).toBe('1');
-
-                expect(conflict).toMatchInlineSnapshot(
-                  `reason: 'server-changed'`,
-                );
-                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
-                const parsedResolution =
-                  conflictResolutionSchema.parse(resolution);
-
-                return {
-                  requeue: {
-                    input: { id: input.id, title: parsedResolution.title },
-                  },
-                };
               },
             },
             execute: ({ input }) => {
@@ -399,7 +375,7 @@ test('direct collection store offline public api', async () => {
 
   expect(collectionStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   await collectionStore.resolveOfflineResolution('missing', {
-    resolution: 'noop',
+    action: 'discard',
   });
   expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
@@ -555,7 +531,12 @@ test('direct collection store offline public api', async () => {
 
   await act(async () => {
     await collectionStore.resolveOfflineResolution(conflict.id, {
-      title: 'Todo 1 resolved',
+      action: 'requeue',
+      input: {
+        id: '1',
+        title: conflictResolutionSchema.parse({ title: 'Todo 1 resolved' })
+          .title,
+      },
     });
     await flushAllTimers();
   });

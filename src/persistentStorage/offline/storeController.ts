@@ -26,7 +26,6 @@ import {
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
   type OfflineResolutionRecord,
-  type OfflineResolveConflictResult,
   type OfflineSession,
   type OfflineStoreType,
   type PersistedOfflineResolutionRecord,
@@ -1218,14 +1217,14 @@ export function createOfflineStoreController<
 
   async function rebindQueuedEntriesAfterTempReconciliation(args: {
     current: ActiveSessionState;
-    entryIdToSkip: string;
+    entryIdToSkip?: string;
     tempId: ValidPayload;
     finalPayload: ValidPayload;
   }): Promise<void> {
     const changedQueueEntries: OfflineQueueEntry[] = [];
 
     for (const entry of queueEntries.values()) {
-      if (entry.id === args.entryIdToSkip) continue;
+      if (args.entryIdToSkip && entry.id === args.entryIdToSkip) continue;
 
       const rewrite = rewriteEntryInput(entry, args.tempId, args.finalPayload);
       if (!rewrite) continue;
@@ -1259,6 +1258,82 @@ export function createOfflineStoreController<
     }
 
     refreshDerivedState(args.current);
+  }
+
+  async function reconcileTempEntitiesFromResult(args: {
+    current: ActiveSessionState;
+    operationName: string;
+    input: unknown;
+    tempIds: ValidPayload[];
+    result: unknown;
+    entryIdToSkip?: string;
+  }): Promise<void> {
+    const operation = operations[args.operationName];
+    if (!operation) return;
+
+    const tempEntity = operation.tempEntity;
+    const tempEntities = operation.tempEntities;
+    if (!tempEntity && !tempEntities) return;
+    if (!storeAdapter.reconcileTempEntity) return;
+
+    if (tempEntity) {
+      const tempId = args.tempIds[0];
+      if (tempId === undefined) return;
+
+      const reconciliation = tempEntity.reconcileServerEntity(
+        args.result,
+        tempId,
+      );
+      storeAdapter.reconcileTempEntity({
+        operationName: args.operationName,
+        input: args.input,
+        tempId,
+        result: args.result,
+        reconciliation,
+      });
+      await rebindQueuedEntriesAfterTempReconciliation({
+        current: args.current,
+        entryIdToSkip: args.entryIdToSkip,
+        tempId,
+        finalPayload: reconciliation.finalPayload,
+      });
+      return;
+    }
+
+    if (!tempEntities) return;
+
+    const reconciliations = orderByTempIds<{
+      tempId: ValidPayload;
+      finalPayload: ValidPayload;
+      finalData?: unknown;
+    }>({
+      operationName: args.operationName,
+      label: 'Temp reconciliations',
+      tempIds: args.tempIds,
+      items: tempEntities
+        .reconcileServerEntities(args.result, args.tempIds)
+        .map((reconciliation) => ({
+          tempId: castTempLifecyclePayload(reconciliation.tempId),
+          finalPayload: castTempLifecyclePayload(reconciliation.finalPayload),
+          finalData: reconciliation.finalData,
+        })),
+    });
+
+    for (const reconciliation of reconciliations) {
+      storeAdapter.reconcileTempEntity({
+        operationName: args.operationName,
+        input: args.input,
+        tempId: reconciliation.tempId,
+        result: args.result,
+        reconciliation,
+      });
+      await rebindQueuedEntriesAfterTempReconciliation({
+        current: args.current,
+        entryIdToSkip: args.entryIdToSkip,
+        tempId: reconciliation.tempId,
+        finalPayload: reconciliation.finalPayload,
+      });
+    }
   }
 
   async function persistEntry(
@@ -1570,19 +1645,7 @@ export function createOfflineStoreController<
     current: ActiveSessionState;
     entry: OfflineQueueEntry;
     conflict: unknown;
-    conflictHandling: NonNullable<
-      AnyOfflineOperationDefinition['conflictHandling']
-    >;
   }): Promise<void> {
-    if (
-      args.conflictHandling.schema &&
-      validateWithSchema(args.conflictHandling.schema, args.conflict) === null
-    ) {
-      throw new Error(
-        `Invalid offline conflict payload for operation "${args.entry.operation}"`,
-      );
-    }
-
     await persistManualResolutionChain({
       current: args.current,
       parentEntry: args.entry,
@@ -2075,8 +2138,6 @@ export function createOfflineStoreController<
       const shouldCheckSkipBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
       const conflictHandling = operation.conflictHandling;
-      const tempEntity = operation.tempEntity;
-      const tempEntities = operation.tempEntities;
       const replayCheckBaseCtx = {
         input: nextEntry.input,
         enqueuedAt: nextEntry.createdAt,
@@ -2134,7 +2195,6 @@ export function createOfflineStoreController<
             current,
             entry: entryToUse,
             conflict,
-            conflictHandling,
           });
           continue;
         }
@@ -2145,69 +2205,15 @@ export function createOfflineStoreController<
           updatedAt: entryToUse.updatedAt,
         });
 
-        if (
-          entryToUse.tempIds?.[0] !== undefined &&
-          tempEntity &&
-          storeAdapter.reconcileTempEntity
-        ) {
-          const reconciliation = tempEntity.reconcileServerEntity(
-            result,
-            entryToUse.tempIds[0],
-          );
-          storeAdapter.reconcileTempEntity({
+        if (entryToUse.tempIds) {
+          await reconcileTempEntitiesFromResult({
+            current,
             operationName: entryToUse.operation,
             input: entryToUse.input,
-            tempId: entryToUse.tempIds[0],
-            result,
-            reconciliation,
-          });
-          await rebindQueuedEntriesAfterTempReconciliation({
-            current,
-            entryIdToSkip: entryToUse.id,
-            tempId: entryToUse.tempIds[0],
-            finalPayload: reconciliation.finalPayload,
-          });
-        }
-
-        if (
-          entryToUse.tempIds &&
-          tempEntities &&
-          storeAdapter.reconcileTempEntity
-        ) {
-          const reconciliations = orderByTempIds<{
-            tempId: ValidPayload;
-            finalPayload: ValidPayload;
-            finalData?: unknown;
-          }>({
-            operationName: entryToUse.operation,
-            label: 'Temp reconciliations',
             tempIds: entryToUse.tempIds,
-            items: tempEntities
-              .reconcileServerEntities(result, entryToUse.tempIds)
-              .map((reconciliation) => ({
-                tempId: castTempLifecyclePayload(reconciliation.tempId),
-                finalPayload: castTempLifecyclePayload(
-                  reconciliation.finalPayload,
-                ),
-                finalData: reconciliation.finalData,
-              })),
+            result,
+            entryIdToSkip: entryToUse.id,
           });
-
-          for (const reconciliation of reconciliations) {
-            storeAdapter.reconcileTempEntity({
-              operationName: entryToUse.operation,
-              input: entryToUse.input,
-              tempId: reconciliation.tempId,
-              result,
-              reconciliation,
-            });
-            await rebindQueuedEntriesAfterTempReconciliation({
-              current,
-              entryIdToSkip: entryToUse.id,
-              tempId: reconciliation.tempId,
-              finalPayload: reconciliation.finalPayload,
-            });
-          }
         }
 
         await removeEntry(entryToUse.id, current);
@@ -2410,21 +2416,10 @@ export function createOfflineStoreController<
       return;
     }
 
-    if (!operation.conflictHandling) {
-      await removeResolution(resolutionId, current);
-      return;
-    }
+    const resolutionAction = isObject(resolution) ? resolution : null;
+    const action = resolutionAction?.action;
 
-    const result = await operation.conflictHandling.resolveConflict({
-      input: resolutionRecord.input,
-      conflict: resolutionRecord.conflict,
-      enqueuedAt: resolutionRecord.enqueuedAt,
-      updatedAt: resolutionRecord.updatedAt,
-      resolution,
-    });
-
-    const typedResult: OfflineResolveConflictResult<unknown> = result;
-    if (!typedResult) {
+    if (action === 'discard') {
       await discardTempCreateResolutionChain({
         current,
         resolution: resolutionRecord,
@@ -2432,9 +2427,7 @@ export function createOfflineStoreController<
       return;
     }
 
-    const requeue = typedResult.requeue;
-
-    if (requeue) {
+    if (action === 'requeue') {
       await removeResolution(resolutionId, current, true);
       await queuePreparedMutations(
         prepareMutationWithSession(current, {
@@ -2442,7 +2435,7 @@ export function createOfflineStoreController<
           operation: __LEGIT_CAST__<keyof TOperations & string, string>(
             resolutionRecord.operation,
           ),
-          input: requeue.input,
+          input: resolutionAction?.input,
           tempIds: resolutionRecord.tempIds,
           entityRefs: resolutionRecord.entityRefs,
         }),
@@ -2450,10 +2443,31 @@ export function createOfflineStoreController<
       return;
     }
 
-    await discardTempCreateResolutionChain({
-      current,
-      resolution: resolutionRecord,
-    });
+    if (action === 'commit') {
+      const committedResult = resolutionAction?.result;
+      if (
+        (operation.tempEntity || operation.tempEntities) &&
+        committedResult === undefined
+      ) {
+        throw new Error(
+          `Offline resolution "${resolutionRecord.operation}" requires a result when committing a temp-entity conflict`,
+        );
+      }
+
+      if (committedResult !== undefined && resolutionRecord.tempIds) {
+        await reconcileTempEntitiesFromResult({
+          current,
+          operationName: resolutionRecord.operation,
+          input: resolutionRecord.input,
+          tempIds: resolutionRecord.tempIds,
+          result: committedResult,
+        });
+      }
+      await removeResolution(resolutionId, current);
+      return;
+    }
+
+    throw new Error('Invalid offline resolution action');
   }
 
   async function evaluateOfflineFetchError(

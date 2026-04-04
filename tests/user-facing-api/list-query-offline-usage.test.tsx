@@ -26,7 +26,6 @@ const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
 const renameManyUsersInputSchema = rc_array(userInputSchema);
 const createUserInputSchema = rc_object({ name: rc_string });
-const userConflictSchema = rc_object({ reason: rc_string });
 const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
 const userPayloadSchema = z.union([
   z.string(),
@@ -249,33 +248,10 @@ test('direct list-query store offline public api', async () => {
             inputSchema: userInputSchema,
             getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
             conflictHandling: {
-              schema: userConflictSchema,
               detectConflict: ({ input, enqueuedAt, updatedAt }) => {
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
                 if (input.name !== 'Ada conflict') return false;
                 return { reason: 'server-changed' };
-              },
-              resolveConflict: ({
-                input,
-                conflict,
-                resolution,
-                enqueuedAt,
-                updatedAt,
-              }) => {
-                expect(input.id).toBe(1);
-
-                expect(conflict).toMatchInlineSnapshot(
-                  `reason: 'server-changed'`,
-                );
-                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
-                const parsedResolution =
-                  conflictResolutionSchema.parse(resolution);
-
-                return {
-                  requeue: {
-                    input: { id: input.id, name: parsedResolution.name },
-                  },
-                };
               },
             },
             execute: ({ input }) => {
@@ -440,7 +416,7 @@ test('direct list-query store offline public api', async () => {
 
   expect(listQueryStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   await listQueryStore.resolveOfflineResolution('missing', {
-    resolution: 'noop',
+    action: 'discard',
   });
   expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
@@ -608,7 +584,11 @@ test('direct list-query store offline public api', async () => {
 
   await act(async () => {
     await listQueryStore.resolveOfflineResolution(conflict.id, {
-      name: 'Ada resolved',
+      action: 'requeue',
+      input: {
+        id: 1,
+        name: conflictResolutionSchema.parse({ name: 'Ada resolved' }).name,
+      },
     });
     await flushAllTimers();
   });
