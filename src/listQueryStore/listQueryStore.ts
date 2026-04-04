@@ -24,7 +24,10 @@ import type {
   TestSessionKeyChangedEvent,
 } from '../internal/testTimelineTypes';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
-import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
+import {
+  useOfflineStoreEntities,
+  useOfflineStoreResolutions,
+} from '../persistentStorage/offline/sessionCoordinator';
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
@@ -2291,6 +2294,13 @@ export function createListQueryStore<
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {
       return useOfflineStoreEntities({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+    },
+    useOfflineResolutions: () => {
+      return useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,

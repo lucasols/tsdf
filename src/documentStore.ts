@@ -42,7 +42,10 @@ import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
 } from './persistentStorage/offline/mutationRuntime';
-import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
+import {
+  useOfflineStoreEntities,
+  useOfflineStoreResolutions,
+} from './persistentStorage/offline/sessionCoordinator';
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
@@ -1321,6 +1324,13 @@ export function createDocumentStore<
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {
       return useOfflineStoreEntities({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+    },
+    useOfflineResolutions: () => {
+      return useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,

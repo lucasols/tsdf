@@ -125,8 +125,10 @@ export type { OfflineMutationResult } from './persistentStorage/offline/mutation
 export {
   createOfflineSession,
   getGlobalOfflineEntities,
+  getGlobalOfflineResolutions,
   getGlobalOfflineStatus,
   useGlobalOfflineEntities,
+  useGlobalOfflineResolutions,
   useGlobalOfflineStatus,
 } from './persistentStorage/offline/sessionCoordinator';
 

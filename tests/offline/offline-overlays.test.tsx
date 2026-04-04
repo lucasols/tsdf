@@ -34,6 +34,8 @@ import {
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
+const staleInvalidationFetchDurationMs = 810;
+const replaySettleDurationMs = 2_000;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -50,6 +52,42 @@ afterEach(() => {
 });
 
 const deleteItemInputSchema = rc_object({ itemId: rc_string });
+
+function reconnectAndInvalidate(invalidate: () => void) {
+  act(() => {
+    network.goOnline();
+    invalidate();
+  });
+}
+
+async function waitForStaleInvalidationToFinish() {
+  await advanceTime(staleInvalidationFetchDurationMs);
+}
+
+async function waitForReplayToSettle() {
+  await advanceTime(replaySettleDurationMs);
+  await flushAllTimers();
+}
+
+function summarizeOfflineEntitySyncState(
+  entities: Array<{
+    entityKey?: string;
+    pendingMutations?: number;
+    requiresResolution: boolean;
+    syncState: string;
+  }>,
+) {
+  return entities.map(
+    ({ entityKey, pendingMutations, requiresResolution, syncState }) => ({
+      ...(entityKey === undefined ? {} : { entityKey }),
+      ...(pendingMutations === undefined || pendingMutations === 0
+        ? {}
+        : { pendingMutations }),
+      requiresResolution,
+      syncState,
+    }),
+  );
+}
 
 describe('document overlays', () => {
   test('document invalidation keeps pending optimistic data visible until replay settles', async () => {
@@ -88,6 +126,7 @@ describe('document overlays', () => {
     const hook = renderHook(() => env.apiStore.useDocument());
     await Promise.resolve();
 
+    // Queue an optimistic document edit while the browser is offline.
     await act(async () => {
       await env.apiStore.performMutation({
         optimisticUpdate: () => {
@@ -108,11 +147,11 @@ describe('document overlays', () => {
       status: 'success'
     `);
 
-    act(() => {
-      network.goOnline();
+    // Let a stale refetch land before the queued replay finishes.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority');
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
@@ -122,8 +161,8 @@ describe('document overlays', () => {
       status: 'success'
     `);
 
-    await advanceTime(2_000);
-    await flushAllTimers();
+    // Once replay settles, the optimistic overlay should no longer be needed.
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
@@ -167,6 +206,7 @@ describe('document overlays', () => {
     const hook = renderHook(() => env.apiStore.useDocument());
     await Promise.resolve();
 
+    // Queue an optimistic document edit that will later fail during replay.
     await act(async () => {
       await env.apiStore.performMutation({
         optimisticUpdate: () => {
@@ -179,8 +219,8 @@ describe('document overlays', () => {
       });
     });
 
-    act(() => {
-      network.goOnline();
+    // Reconnect and let replay transition the queued mutation into manual resolution.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority');
     });
     await flushAllTimers();
@@ -192,16 +232,12 @@ describe('document overlays', () => {
       pendingSync: '❌'
       status: 'success'
     `);
-    expect(
-      env.apiStore
-        .getOfflineEntities()
-        .map(({ requiresResolution, syncState }) => ({
-          requiresResolution,
-          syncState,
-        })),
-    ).toMatchInlineSnapshot(`
-      - { requiresResolution: '✅', syncState: 'resolution-required' }
-    `);
+    expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
+      .toMatchInlineSnapshot(`
+        - entityKey: 'document'
+          requiresResolution: '✅'
+          syncState: 'resolution-required'
+      `);
 
     hook.unmount();
   });
@@ -272,6 +308,7 @@ describe('collection overlays', () => {
     );
     await Promise.resolve();
 
+    // Queue an optimistic rename while the item is offline-visible.
     await act(async () => {
       await env.apiStore.performMutation('users||1', {
         optimisticUpdate: () => {
@@ -294,11 +331,11 @@ describe('collection overlays', () => {
       status: 'success'
     `);
 
-    act(() => {
-      network.goOnline();
+    // A refetch finishing first should not replace the optimistic item overlay.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', 'users||1');
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada pending'
@@ -310,8 +347,8 @@ describe('collection overlays', () => {
       status: 'success'
     `);
 
-    await advanceTime(2_000);
-    await flushAllTimers();
+    // Once replay finishes, the overlay can collapse into the real item state.
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada replayed'
@@ -372,6 +409,7 @@ describe('collection overlays', () => {
     );
     await Promise.resolve();
 
+    // Queue a delete so the item disappears immediately from the UI.
     await act(async () => {
       await env.apiStore.performMutation('users||1', {
         optimisticUpdate: () => {
@@ -392,11 +430,11 @@ describe('collection overlays', () => {
       status: 'deleted'
     `);
 
-    act(() => {
-      network.goOnline();
+    // A stale item refetch should not resurrect the deleted entry before replay settles.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', 'users||1');
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: null
@@ -408,8 +446,8 @@ describe('collection overlays', () => {
       status: 'deleted'
     `);
 
-    await advanceTime(2_000);
-    await flushAllTimers();
+    // Replay completion should only clear the sync metadata, not change the deleted UI.
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: null
@@ -467,6 +505,7 @@ describe('collection overlays', () => {
     );
     await Promise.resolve();
 
+    // Queue an optimistic rename that replay will reject into manual resolution.
     await act(async () => {
       await env.apiStore.performMutation('users||1', {
         optimisticUpdate: () => {
@@ -479,8 +518,8 @@ describe('collection overlays', () => {
       });
     });
 
-    act(() => {
-      network.goOnline();
+    // Reconnect and let replay replace the derived overlay with the persisted server value.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', 'users||1');
     });
     await flushAllTimers();
@@ -494,16 +533,12 @@ describe('collection overlays', () => {
       pendingSync: '❌'
       status: 'success'
     `);
-    expect(
-      env.apiStore
-        .getOfflineEntities()
-        .map(({ requiresResolution, syncState }) => ({
-          requiresResolution,
-          syncState,
-        })),
-    ).toMatchInlineSnapshot(`
-      - { requiresResolution: '✅', syncState: 'resolution-required' }
-    `);
+    expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
+      .toMatchInlineSnapshot(`
+        - entityKey: '"users||1'
+          requiresResolution: '✅'
+          syncState: 'resolution-required'
+      `);
 
     hook.unmount();
   });
@@ -601,11 +636,10 @@ describe('list-query overlays', () => {
     `);
 
     // A refetch that finishes before replay should not blank or revert the row.
-    act(() => {
-      network.goOnline();
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', usersQuery);
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
@@ -620,8 +654,7 @@ describe('list-query overlays', () => {
     `);
 
     // Once replay succeeds, the derived overlay should disappear.
-    await advanceTime(2_000);
-    await flushAllTimers();
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
@@ -697,6 +730,7 @@ describe('list-query overlays', () => {
     await flushAllTimers();
     network.setOffline();
 
+    // Queue an optimistic edit after the standalone item cache is already populated.
     await act(async () => {
       await env.apiStore.performMutation('users||1', {
         optimisticUpdate: () => {
@@ -723,11 +757,11 @@ describe('list-query overlays', () => {
       status: 'success'
     `);
 
-    act(() => {
-      network.goOnline();
+    // A direct item refetch should preserve the optimistic overlay until replay finishes.
+    reconnectAndInvalidate(() => {
       env.scheduleItemFetch('highPriority', 'users||1');
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada pending'
@@ -739,8 +773,8 @@ describe('list-query overlays', () => {
       status: 'success'
     `);
 
-    await advanceTime(2_000);
-    await flushAllTimers();
+    // Once replay settles, the standalone item view should show the replayed value.
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada replayed'
@@ -852,11 +886,10 @@ describe('list-query overlays', () => {
     `);
 
     // A stale refetch should keep the temp row visible in the same slot.
-    act(() => {
-      network.goOnline();
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', usersQuery);
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
@@ -872,8 +905,7 @@ describe('list-query overlays', () => {
 
     // After replay succeeds, the derived overlay disappears and the list falls
     // back to the last server-derived membership until another list refresh runs.
-    await advanceTime(2_000);
-    await flushAllTimers();
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
@@ -975,8 +1007,8 @@ describe('list-query overlays', () => {
       });
     });
 
-    act(() => {
-      network.goOnline();
+    // Reconnect and let replay convert the temp row into a manual-resolution entry.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', usersQuery);
     });
     await flushAllTimers();
@@ -993,19 +1025,12 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
-    expect(
-      env.apiStore
-        .getOfflineEntities()
-        .map(({ entityKey, requiresResolution, syncState }) => ({
-          entityKey,
-          requiresResolution,
-          syncState,
-        })),
-    ).toMatchInlineSnapshot(`
-      - entityKey: '"temp:Linus blocked'
-        requiresResolution: '✅'
-        syncState: 'resolution-required'
-    `);
+    expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
+      .toMatchInlineSnapshot(`
+        - entityKey: '"temp:Linus blocked'
+          requiresResolution: '✅'
+          syncState: 'resolution-required'
+      `);
 
     hook.unmount();
   });
@@ -1059,6 +1084,7 @@ describe('list-query overlays', () => {
     );
     await flushAllTimers();
 
+    // Queue a delete that removes the row from the rendered list immediately.
     await act(async () => {
       await env.apiStore.performMutation('users||1', {
         optimisticUpdate: () => {
@@ -1080,12 +1106,19 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
+    expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
+      .toMatchInlineSnapshot(`
+        - entityKey: '"users||1'
+          pendingMutations: 1
+          requiresResolution: '❌'
+          syncState: 'pending'
+      `);
 
-    act(() => {
-      network.goOnline();
+    // A stale refetch should keep the list empty while the delete is still pending.
+    reconnectAndInvalidate(() => {
       env.scheduleFetch('highPriority', usersQuery);
     });
-    await advanceTime(810);
+    await waitForStaleInvalidationToFinish();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
@@ -1098,9 +1131,16 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
+    expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
+      .toMatchInlineSnapshot(`
+        - entityKey: '"users||1'
+          pendingMutations: 1
+          requiresResolution: '❌'
+          syncState: 'syncing'
+      `);
 
-    await advanceTime(2_000);
-    await flushAllTimers();
+    // Replay completion should clear the pending delete metadata without changing the empty list.
+    await waitForReplayToSettle();
 
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
@@ -1113,6 +1153,9 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
+    expect(
+      summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()),
+    ).toMatchInlineSnapshot(`[]`);
 
     hook.unmount();
   });

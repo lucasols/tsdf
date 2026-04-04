@@ -24,16 +24,17 @@ import {
   setSessionProtectedKeysSnapshot,
 } from './sessionProtectionRegistry';
 import type {
-  OfflineFailureClassification,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  OfflineFailureClassification,
   OfflineFailureContext,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
+  OfflineOutageModeConfig,
   OfflineRecoveryProbeConfig,
+  OfflineResolutionRecord,
   OfflineRuntimeConfig,
   OfflineRuntimeConfigUpdate,
-  OfflineOutageModeConfig,
   OfflineSession,
   OfflineSessionConfig,
 } from './types';
@@ -42,14 +43,14 @@ import { getIsOfflineModeFromStatus, globalOfflineStatusSchema } from './types';
 type SessionStoreState = {
   status: GlobalOfflineStatus;
   entities: GlobalOfflineEntity[];
-  resolutions: unknown[];
+  resolutions: OfflineResolutionRecord[];
 };
 
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
   entities: GlobalOfflineEntity[];
-  resolutions: unknown[];
+  resolutions: OfflineResolutionRecord[];
 };
 
 type OfflineSessionMessage =
@@ -58,7 +59,7 @@ type OfflineSessionMessage =
 
 type SessionStoreContribution = {
   entities: GlobalOfflineEntity[];
-  resolutions: unknown[];
+  resolutions: OfflineResolutionRecord[];
   protectedKeys: string[];
 };
 
@@ -706,7 +707,7 @@ export class SessionOfflineCoordinator {
     return this.store.state.entities;
   }
 
-  getResolutions(): unknown[] {
+  getResolutions(): OfflineResolutionRecord[] {
     return this.store.state.resolutions;
   }
 
@@ -1390,6 +1391,16 @@ export function getGlobalOfflineEntities(
   return registry.get(sessionKey)?.getEntities() ?? [];
 }
 
+/**
+ * Returns the latest list of offline conflict/retry resolutions for a session.
+ * Useful to render conflict-resolution trays or retry-required queues.
+ */
+export function getGlobalOfflineResolutions(
+  sessionKey: string,
+): OfflineResolutionRecord[] {
+  return registry.get(sessionKey)?.getResolutions() ?? [];
+}
+
 export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   if (!import.meta.env.TEST) {
     throw new Error(
@@ -1475,6 +1486,15 @@ export function createOfflineSession(args: {
         getGlobalOfflineEntities(sessionKey)
       );
     },
+    getOfflineResolutions: () => {
+      const sessionKey = getSessionKey();
+      if (sessionKey === false) return [];
+
+      return (
+        getActiveCoordinator(false)?.getResolutions() ??
+        getGlobalOfflineResolutions(sessionKey)
+      );
+    },
     useOfflineStatus: () => {
       const coordinator = useSessionCoordinator();
       const statusSelector = useCallback(
@@ -1492,6 +1512,17 @@ export function createOfflineSession(args: {
       );
 
       return coordinator.store.useSelectorRC(entitiesSelector);
+    },
+    useOfflineResolutions: () => {
+      const coordinator = useSessionCoordinator();
+      const resolutionsSelector = useCallback(
+        (state: SessionStoreState) => state.resolutions,
+        [],
+      );
+
+      return coordinator.store.useSelectorRC(resolutionsSelector, {
+        equalityFn: deepEqual,
+      });
     },
   };
 }
@@ -1556,6 +1587,23 @@ export function useGlobalOfflineEntities(
 }
 
 /**
+ * React hook returning global offline conflict/retry resolutions for a session.
+ */
+export function useGlobalOfflineResolutions(
+  sessionKey: string,
+): readonly OfflineResolutionRecord[] {
+  const coordinator = useSessionOfflineCoordinator(sessionKey, true);
+  const resolutionsSelector = useCallback(
+    (state: SessionStoreState) => state.resolutions,
+    [],
+  );
+
+  return coordinator.store.useSelectorRC(resolutionsSelector, {
+    equalityFn: deepEqual,
+  });
+}
+
+/**
  * React hook returning offline entities for a specific store in a session.
  */
 export function useOfflineStoreEntities(args: {
@@ -1579,6 +1627,34 @@ export function useOfflineStoreEntities(args: {
   );
 
   return coordinator.store.useSelectorRC(entitiesSelector, {
+    equalityFn: deepEqual,
+  });
+}
+
+/**
+ * React hook returning offline conflict/retry resolutions for a specific store in a session.
+ */
+export function useOfflineStoreResolutions(args: {
+  sessionKey: string | false;
+  inactiveScope: string;
+  storeName?: string;
+}): readonly OfflineResolutionRecord[] {
+  const coordinator = useSessionOfflineCoordinator(
+    resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
+    false,
+  );
+  const resolutionsSelector = useCallback(
+    (state: SessionStoreState) => {
+      if (!args.storeName) return [];
+
+      return state.resolutions.filter(
+        (resolution) => resolution.storeName === args.storeName,
+      );
+    },
+    [args.storeName],
+  );
+
+  return coordinator.store.useSelectorRC(resolutionsSelector, {
     equalityFn: deepEqual,
   });
 }

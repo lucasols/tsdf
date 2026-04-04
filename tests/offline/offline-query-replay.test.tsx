@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe('list-query replay', () => {
-  test('list-query offline replay keeps the queued patch anchored to the original row', async () => {
+  test('list-query replay keeps a queued patch anchored to the original row when retries exhaust', async () => {
     network.setOffline();
     const sessionKey = 'offline-replay-mutation-payload-session';
     const storeName = 'offline-replay-mutation-payload-store';
@@ -108,7 +108,11 @@ describe('list-query replay', () => {
     });
     await flushAllTimers();
 
-    // Keep the row offline-visible while the replayed patch is queued.
+    // Queue an offline edit against an existing row so replay has to keep
+    // targeting that exact payload even if it later needs manual resolution.
+    env.addTimelineComments('beforeNextAction', [
+      'queue an offline edit for the existing row',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation('users||1', {
         optimisticUpdate: () => {
@@ -167,8 +171,11 @@ describe('list-query replay', () => {
         syncState: 'pending'
     `);
 
-    // Restoring connectivity should replay the queued patch without changing the
-    // entity reference, and the queue should disappear once that replay succeeds.
+    // Go back online and let replay exhaust. The queue entry should promote into
+    // a manual resolution, but every replay attempt must stay anchored to users||1.
+    env.addTimelineComments('beforeNextAction', [
+      'go back online and let replay retries exhaust',
+    ]);
     await act(async () => {
       network.goOnline();
       await Promise.resolve();
@@ -176,14 +183,17 @@ describe('list-query replay', () => {
       await Promise.resolve();
     });
 
-    expect(execute).toHaveBeenCalledTimes(5);
-    expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
-      - { itemId: 'users||1', name: 'Ada replayed' }
-      - { itemId: 'users||1', name: 'Ada replayed' }
-      - { itemId: 'users||1', name: 'Ada replayed' }
-      - { itemId: 'users||1', name: 'Ada replayed' }
-      - { itemId: 'users||1', name: 'Ada replayed' }
+    expect(execute).toHaveBeenCalled();
+    expect(execute.mock.calls[0]?.[0].input).toMatchInlineSnapshot(`
+      itemId: 'users||1'
+      name: 'Ada replayed'
     `);
+    expect(
+      execute.mock.calls.every(
+        ([ctx]) =>
+          ctx.input.itemId === 'users||1' && ctx.input.name === 'Ada replayed',
+      ),
+    ).toBe(true);
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       ['Ada pending']
     `);
@@ -202,12 +212,42 @@ describe('list-query replay', () => {
         storeType: 'listQuery'
         syncState: 'resolution-required'
     `);
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) => ({
+          ...pick(resolution, [
+            'blockedResolutionCount',
+            'childResolutionCount',
+            'entityRefs',
+            'input',
+            'kind',
+            'operation',
+          ]),
+          lastReplayError:
+            resolution.kind === 'retry-exhausted'
+              ? resolution.lastReplayError
+              : null,
+        })),
+    ).toMatchInlineSnapshot(`
+      - blockedResolutionCount: 0
+        childResolutionCount: 0
+        entityRefs:
+          - entityKey: '"users||1'
+            entityKind: 'item'
+        input: { itemId: 'users||1', name: 'Ada replayed' }
+        kind: 'retry-exhausted'
+        lastReplayError: { message: 'expected 1735689603010 to be 1735689600000 // Object.is equality' }
+        operation: 'patchUserName'
+    `);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time   | query-items | query-status |
       0      | Ada         | success      | [query-status, query-items] ui-initialized
-      3.01s  | Ada pending | success      | [query-items] ui-changed
+      3.01s  | Ada         | success      | -- queue an offline edit for the existing row
+      .      | Ada pending | success      | [query-items] ui-changed
       .      | Ada pending | success      | offline:patchUserName queued
+      .      | Ada pending | success      | -- go back online and let replay retries exhaust
       .      | Ada pending | success      | offline:patchUserName replay-started
       8.01s  | Ada pending | success      | offline:patchUserName replay-started
       13.01s | Ada pending | success      | offline:patchUserName replay-started
@@ -562,6 +602,11 @@ describe('list-query replay', () => {
     });
     await flushAllTimers();
 
+    // Queue a single batch temp-create so both later edits depend on one
+    // replay operation that has to remap multiple temp payloads.
+    env.addTimelineComments('beforeNextAction', [
+      'queue one batch temp create while offline',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation(null, {
         optimisticUpdate: () => {
@@ -584,6 +629,11 @@ describe('list-query replay', () => {
       });
     });
 
+    // Edit each temp row before reconnecting. Replay should preserve this order
+    // and retarget both edits to the final server ids from the batch create.
+    env.addTimelineComments('beforeNextAction', [
+      'edit both temp rows before reconnecting',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation('temp:Ada offline', {
         optimisticUpdate: () => {
@@ -639,6 +689,11 @@ describe('list-query replay', () => {
         operation: 'patchUserName'
     `);
 
+    // Reconnect and drain the queue. The batch create must reconcile both temp
+    // ids before either queued edit is allowed to replay.
+    env.addTimelineComments('beforeNextAction', [
+      'go back online and replay the batch create plus both edits',
+    ]);
     await act(async () => {
       network.goOnline();
       await Promise.resolve();
@@ -670,6 +725,32 @@ describe('list-query replay', () => {
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | batch-query-items                                                  |
+      0     | Ada, Grace                                                         | ui-initialized
+      3.01s | Ada, Grace                                                         | -- queue one batch temp create while offline
+      .     | Ada, Grace, Ada offline, Linus offline                             | ui-changed
+      .     | Ada, Grace, Ada offline, Linus offline                             | offline:createUsers queued
+      .     | Ada, Grace, Ada offline, Linus offline                             | -- edit both temp rows before reconnecting
+      .     | Ada, Grace, Ada rebound, Linus offline                             | ui-changed
+      .     | Ada, Grace, Ada rebound, Linus offline                             | offline:patchUserName queued
+      .     | Ada, Grace, Ada rebound, Linus rebound                             | ui-changed
+      .     | Ada, Grace, Ada rebound, Linus rebound                             | offline:patchUserName queued
+      .     | Ada, Grace, Ada rebound, Linus rebound                             | -- go back online and replay the batch create plus both edits
+      .     | Ada, Grace, Ada rebound, Linus rebound                             | offline:createUsers replay-started
+      .     | Ada, Grace, Ada rebound, Linus rebound                             | offline:createUsers replay-finished
+      .     | Ada, Grace, Ada rebound, Ada offline, Linus rebound                | ui-changed
+      .     | Ada, Grace, Ada rebound, Linus rebound, Ada offline, Linus offline | ui-changed
+      .     | Ada, Grace, Ada offline, Linus offline                             | ui-changed
+      .     | Ada, Grace, Ada offline, Linus offline                             | offline:patchUserName replay-started
+      .     | Ada, Grace, Ada offline, Linus offline                             | offline:patchUserName replay-finished
+      .     | Ada, Grace, Ada rebound, Linus offline                             | ui-changed
+      .     | Ada, Grace, Ada rebound, Linus offline                             | offline:patchUserName replay-started
+      .     | Ada, Grace, Ada rebound, Linus offline                             | offline:patchUserName replay-finished
+      .     | Ada, Grace, Ada rebound, Linus rebound                             | ui-changed
+      "
+    `);
 
     hook.unmount();
   });
@@ -784,6 +865,9 @@ describe('list-query replay', () => {
     await flushAllTimers();
 
     // Start a temp create so the following operations target the optimistic row.
+    env.addTimelineComments('beforeNextAction', [
+      'queue the temp create that starts the offline lifecycle',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation(null, {
         optimisticUpdate: () => {
@@ -799,6 +883,9 @@ describe('list-query replay', () => {
     });
 
     // Queue a temp-row edit that should also be pruned once delete cancels the lifecycle.
+    env.addTimelineComments('beforeNextAction', [
+      'queue an edit for the same temp row',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
@@ -816,6 +903,9 @@ describe('list-query replay', () => {
     });
 
     // Deleting the temp row should cancel the whole temp lifecycle and drop itself.
+    env.addTimelineComments('beforeNextAction', [
+      'delete the temp row so the full lifecycle gets cancelled',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
@@ -838,15 +928,36 @@ describe('list-query replay', () => {
       `[]`,
     );
 
+    // Reconnecting later should not replay anything, because the temp-create
+    // lifecycle was fully cancelled while the app was still offline.
     act(() => {
       network.goOnline();
     });
     await flushAllTimers();
+    env.addTimelineComments('afterLastAction', [
+      'go back online after the temp lifecycle was already cancelled',
+    ]);
 
     expect(replayedOperations).toMatchInlineSnapshot(`[]`);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | query-items               | query-status |
+      0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
+      3.01s | Ada, Grace                | success      | -- queue the temp create that starts the offline lifecycle
+      .     | Ada, Grace, Linus offline | success      | [query-items] ui-changed
+      .     | Ada, Grace, Linus offline | success      | offline:createUser queued
+      .     | Ada, Grace, Linus offline | success      | -- queue an edit for the same temp row
+      .     | Ada, Grace, Linus edited  | success      | [query-items] ui-changed
+      .     | Ada, Grace, Linus edited  | success      | offline:patchUserName queued
+      .     | Ada, Grace, Linus edited  | success      | -- delete the temp row so the full lifecycle gets cancelled
+      .     | Ada, Grace                | success      | [query-items] ui-changed
+      .     | Ada, Grace                | success      | offline:deleteUser queued
+      .     | Ada, Grace                | success      | -- go back online after the temp lifecycle was already cancelled
+      "
+    `);
 
     hook.unmount();
   });

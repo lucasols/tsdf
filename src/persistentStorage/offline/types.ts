@@ -313,66 +313,6 @@ export type GlobalOfflineEntity = {
   tempId?: ValidPayload;
 };
 
-/** Session-scoped offline controller shared across stores in the same session. */
-export type OfflineSession = {
-  /** Returns the active session key used to scope shared offline state. */
-  getSessionKey: () => string | false;
-  /** Shared static session configuration used by attached stores. */
-  getConfig: () => OfflineSessionConfig;
-  /** Latest effective runtime config for this session. */
-  getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
-  /** Updates runtime controls for this session. */
-  setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => void;
-  /** Resets runtime controls back to the static session config. */
-  resetOfflineRuntimeConfig: () => void;
-  /** Returns the latest global offline status for the session. */
-  getOfflineStatus: () => GlobalOfflineStatus;
-  /** Returns the latest aggregated offline entities for the session. */
-  getOfflineEntities: () => readonly GlobalOfflineEntity[];
-  /** React hook subscribing to the session's global offline status. */
-  useOfflineStatus: () => GlobalOfflineStatus;
-  /** React hook subscribing to the session's aggregated offline entities. */
-  useOfflineEntities: () => readonly GlobalOfflineEntity[];
-};
-
-const offlineStatusModeStateSchema = rc_object({
-  enabled: rc_boolean,
-  active: rc_boolean,
-});
-
-/** Runtime schema for persisted global offline status records. */
-export const globalOfflineStatusSchema = rc_object({
-  sessionKey: rc_string,
-  network: offlineStatusModeStateSchema,
-  outage: offlineStatusModeStateSchema,
-  isOfflineMode: rc_boolean,
-  isLeader: rc_boolean,
-  updatedAt: rc_number,
-  lastFailureAt: rc_number.orNull(),
-  lastRecoveryCheckAt: rc_number.orNull(),
-});
-
-export function isModeEffectivelyActive(mode: {
-  enabled: boolean;
-  active: boolean;
-}) {
-  return mode.enabled && mode.active;
-}
-
-export function getIsOfflineModeFromStatus(status: {
-  network: { enabled: boolean; active: boolean };
-  outage: { enabled: boolean; active: boolean };
-}) {
-  return status.network.active || status.outage.active;
-}
-
-export function isOfflineModeStatusValue(value: unknown): boolean {
-  const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
-  if (status === null) return false;
-
-  return status.isOfflineMode;
-}
-
 /**
  * Persisted offline conflict payload.
  *
@@ -490,6 +430,80 @@ export type OfflineRetryExhaustedResolutionRecord<TInput = unknown> =
     OfflineResolutionDependencyMetadata;
 
 /**
+ * Persisted offline resolution payload.
+ *
+ * @typeParam TConflict - Conflict payload stored for later resolution.
+ * @typeParam TInput - Original mutation input associated with the resolution.
+ */
+export type OfflineResolutionRecord<TConflict = unknown, TInput = unknown> =
+  | OfflineConflictResolutionRecord<TConflict, TInput>
+  | OfflineRetryExhaustedResolutionRecord<TInput>;
+
+/** Session-scoped offline controller shared across stores in the same session. */
+export type OfflineSession = {
+  /** Returns the active session key used to scope shared offline state. */
+  getSessionKey: () => string | false;
+  /** Shared static session configuration used by attached stores. */
+  getConfig: () => OfflineSessionConfig;
+  /** Latest effective runtime config for this session. */
+  getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
+  /** Updates runtime controls for this session. */
+  setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => void;
+  /** Resets runtime controls back to the static session config. */
+  resetOfflineRuntimeConfig: () => void;
+  /** Returns the latest global offline status for the session. */
+  getOfflineStatus: () => GlobalOfflineStatus;
+  /** Returns the latest aggregated offline entities for the session. */
+  getOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** Returns the latest aggregated conflict/retry resolutions for the session. */
+  getOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** React hook subscribing to the session's global offline status. */
+  useOfflineStatus: () => GlobalOfflineStatus;
+  /** React hook subscribing to the session's aggregated offline entities. */
+  useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** React hook subscribing to the session's aggregated conflict/retry resolutions. */
+  useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+};
+
+const offlineStatusModeStateSchema = rc_object({
+  enabled: rc_boolean,
+  active: rc_boolean,
+});
+
+/** Runtime schema for persisted global offline status records. */
+export const globalOfflineStatusSchema = rc_object({
+  sessionKey: rc_string,
+  network: offlineStatusModeStateSchema,
+  outage: offlineStatusModeStateSchema,
+  isOfflineMode: rc_boolean,
+  isLeader: rc_boolean,
+  updatedAt: rc_number,
+  lastFailureAt: rc_number.orNull(),
+  lastRecoveryCheckAt: rc_number.orNull(),
+});
+
+export function isModeEffectivelyActive(mode: {
+  enabled: boolean;
+  active: boolean;
+}) {
+  return mode.enabled && mode.active;
+}
+
+export function getIsOfflineModeFromStatus(status: {
+  network: { enabled: boolean; active: boolean };
+  outage: { enabled: boolean; active: boolean };
+}) {
+  return status.network.active || status.outage.active;
+}
+
+export function isOfflineModeStatusValue(value: unknown): boolean {
+  const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
+  if (status === null) return false;
+
+  return status.isOfflineMode;
+}
+
+/**
  * Persisted offline resolution payload without any derived dependency metadata.
  *
  * This shape is what gets serialized to storage and hydrated back into memory.
@@ -503,16 +517,6 @@ export type PersistedOfflineResolutionRecord<
 > =
   | OfflineConflictResolutionRecordBase<TConflict, TInput>
   | OfflineRetryExhaustedResolutionRecordBase<TInput>;
-
-/**
- * Persisted offline resolution payload.
- *
- * @typeParam TConflict - Conflict payload stored for later resolution.
- * @typeParam TInput - Original mutation input associated with the resolution.
- */
-export type OfflineResolutionRecord<TConflict = unknown, TInput = unknown> =
-  | OfflineConflictResolutionRecord<TConflict, TInput>
-  | OfflineRetryExhaustedResolutionRecord<TInput>;
 
 /**
  * Persisted offline mutation queue entry.

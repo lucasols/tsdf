@@ -591,19 +591,32 @@ describe('document', () => {
     const envA = createEnv(storeNameA);
     const envB = createEnv(storeNameB);
 
+    // Start one mutation whose failure classification stays pending so a newer
+    // failure can settle the session state first.
     const pendingMutation = envA.apiStore.performMutation({
       mutation: () => Promise.reject(new Error('first failure')),
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
     await Promise.resolve();
+
+    // The later failure resolves immediately as a normal error, so any stale
+    // result from the first classification must be ignored afterwards.
     const settledMutation = await envB.apiStore.performMutation({
       mutation: () => Promise.reject(new Error('second failure')),
       offline: { operation: 'updateValue', input: { value: 3 } },
     });
 
-    expect(settledMutation.ok).toBe(false);
+    expect({
+      error: settledMutation.ok ? null : settledMutation.error,
+      ok: settledMutation.ok,
+    }).toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'second failure' }
+      ok: '❌'
+    `);
 
+    // Resolving the older classification as an outage must not retroactively
+    // queue the earlier mutation or flip the session into offline mode.
     resolveFirstClassification?.('outage');
     const result = await pendingMutation;
 
@@ -618,6 +631,16 @@ describe('document', () => {
         getOfflineQueueEntries(sessionKey, storeNameB),
       ),
     ).toMatchInlineSnapshot(`[]`);
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isLeader: '✅'
+      isOfflineMode: '❌'
+      lastFailureAt: null
+      lastRecoveryCheckAt: null
+      network: { active: '❌', enabled: '❌' }
+      outage: { active: '❌', enabled: '❌' }
+      sessionKey: 'hybrid-doc-stale-mutation-classification-session'
+      updatedAt: 1735689600000
+    `);
   });
 
   test('preserve the normal error when the direct failure is not connectivity-related', async () => {
@@ -1526,17 +1549,28 @@ test('fallback queueing does not reapply the optimistic update', async () => {
       ),
     },
   });
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(
+      `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
+    );
+    return doc;
+  });
+
+  await Promise.resolve();
 
   // The optimistic write should happen once and stay visible after the
   // direct request degrades into a queued mutation.
-  const result = await env.apiStore.performMutation({
-    optimisticUpdate: () => {
-      env.apiStore.updateState((draft) => {
-        draft.value += 1;
-      });
-    },
-    mutation: () => Promise.reject(new Error('offline-fallback')),
-    offline: { operation: 'updateValue', input: { value: 2 } },
+  const result = await act(async () => {
+    return env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value += 1;
+        });
+      },
+      mutation: () => Promise.reject(new Error('offline-fallback')),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
   });
 
   expect({ ok: result.ok, value: result.ok ? result.value : null })
@@ -1544,9 +1578,25 @@ test('fallback queueing does not reapply the optimistic update', async () => {
       ok: '✅'
       value: { kind: 'queued' }
     `);
-  expect(env.store.state.data).toMatchInlineSnapshot(`
-    value: 2
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '✅'
+    status: 'success'
   `);
+  expect(env.store.state.data).toMatchInlineSnapshot(`value: 2`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time | ui                    |
+    0    | "value:1 pending:no"  | ui-initialized
+    .    | "value:2 pending:no"  | ui-changed
+    .    | "value:2 pending:yes" | ui-changed
+    .    | "value:2 pending:yes" | offline:updateValue queued
+    "
+  `);
+
+  hook.unmount();
 });
 
 test('fallback queueing still creates and reconciles temp entities', async () => {

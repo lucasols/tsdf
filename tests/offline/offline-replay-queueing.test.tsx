@@ -855,16 +855,29 @@ test('healthy replay failures are retried 5 times and then move into the resolut
     },
   });
 
+  trackDocumentReplayState(env);
+
   await env.apiStore.performMutation({
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
+  trackDocumentReplayState(env);
 
+  // Bring the browser back online so the first replay failure can start the
+  // healthy retry budget for this queued mutation.
+  env.addTimelineComments('beforeNextAction', [
+    'bring the browser back online so the first replay failure starts the healthy retry budget',
+  ]);
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  trackDocumentReplayState(env);
 
+  // Keep the session online long enough to spend the remaining retry budget.
+  env.addTimelineComments('beforeNextAction', [
+    'keep the session online long enough to spend the remaining healthy retry budget',
+  ]);
   for (const attempt of [2, 3, 4, 5]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
@@ -872,6 +885,7 @@ test('healthy replay failures are retried 5 times and then move into the resolut
     );
   }
   await flushAllTimers();
+  trackDocumentReplayState(env);
 
   expect(execute).toHaveBeenCalledTimes(5);
 
@@ -935,6 +949,24 @@ test('healthy replay failures are retried 5 times and then move into the resolut
       storeName: 'document-4'
       storeType: 'document'
       updatedAt: 1735689620000
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time | ui                                           |
+    0    | "value:1 sync:none pending:0"                | ui-initialized
+    .    | "value:1 sync:none pending:0"                | offline:updateValue queued
+    .    | "value:1 sync:pending pending:1"             | ui-changed
+    .    | "value:1 sync:pending pending:1"             | -- bring the browser back online so the first replay failure starts the healthy retry budget
+    .    | "value:1 sync:pending pending:1"             | offline:updateValue replay-started
+    .    | "value:1 sync:syncing pending:1"             | ui-changed
+    5s   | "value:1 sync:syncing pending:1"             | -- keep the session online long enough to spend the remaining healthy retry budget
+    .    | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    10s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    15s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    20s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .    | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
+    .    | "value:1 sync:resolution-required pending:0" | ui-changed
+    "
   `);
 });
 
@@ -1232,31 +1264,59 @@ test('going offline again resets the healthy replay failure budget', async () =>
     },
   });
 
+  trackDocumentReplayState(env);
+
   await env.apiStore.performMutation({
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
+  trackDocumentReplayState(env);
 
+  // Start replaying while online, but stop before the queued mutation has
+  // exhausted its healthy retry budget.
+  env.addTimelineComments('beforeNextAction', [
+    'start replaying online, but stop before the queued mutation exhausts its healthy retry budget',
+  ]);
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  trackDocumentReplayState(env);
+
+  env.addTimelineComments('beforeNextAction', [
+    'keep retrying until the mutation has spent only part of its healthy retry budget',
+  ]);
   for (const attempt of [2, 3]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => execute.mock.calls.length === attempt,
     );
   }
+  trackDocumentReplayState(env);
 
+  // Going offline while the queued mutation is paused in needs-confirmation
+  // should let the next online transition restart the healthy retry budget.
+  env.addTimelineComments('beforeNextAction', [
+    'go offline again while the queued mutation is paused in needs-confirmation',
+  ]);
   act(() => {
     network.goOffline();
   });
   await Promise.resolve();
+  trackDocumentReplayState(env);
 
+  env.addTimelineComments('beforeNextAction', [
+    'come back online and verify the paused mutation gets a fresh healthy retry budget',
+  ]);
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 4);
+  trackDocumentReplayState(env);
+
+  env.addTimelineComments('beforeNextAction', [
+    'spend the fresh retry budget; only after these new failures should the mutation require resolution',
+  ]);
   for (const attempt of [5, 6, 7, 8]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
@@ -1264,6 +1324,7 @@ test('going offline again resets the healthy replay failure budget', async () =>
     );
   }
   await flushAllTimers();
+  trackDocumentReplayState(env);
 
   expect(
     env.apiStore
@@ -1307,6 +1368,32 @@ test('going offline again resets the healthy replay failure budget', async () =>
       storeName: 'document-7'
       storeType: 'document'
       updatedAt: 1735689630000
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time | ui                                           |
+    0    | "value:1 sync:none pending:0"                | ui-initialized
+    .    | "value:1 sync:none pending:0"                | offline:updateValue queued
+    .    | "value:1 sync:pending pending:1"             | ui-changed
+    .    | "value:1 sync:pending pending:1"             | -- start replaying online, but stop before the queued mutation exhausts its healthy retry budget
+    .    | "value:1 sync:pending pending:1"             | offline:updateValue replay-started
+    .    | "value:1 sync:syncing pending:1"             | ui-changed
+    5s   | "value:1 sync:syncing pending:1"             | -- keep retrying until the mutation has spent only part of its healthy retry budget
+    .    | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    10s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .    | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    .    | "value:1 sync:needs-confirmation pending:1"  | -- go offline again while the queued mutation is paused in needs-confirmation
+    .    | "value:1 sync:needs-confirmation pending:1"  | -- come back online and verify the paused mutation gets a fresh healthy retry budget
+    .    | "value:1 sync:needs-confirmation pending:1"  | offline:updateValue replay-started
+    .    | "value:1 sync:syncing pending:1"             | ui-changed
+    15s  | "value:1 sync:syncing pending:1"             | -- spend the fresh retry budget; only after these new failures should the mutation require resolution
+    .    | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    20s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    25s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    30s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .    | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
+    .    | "value:1 sync:resolution-required pending:0" | ui-changed
+    "
   `);
 });
 

@@ -4,7 +4,11 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import {
+  type CollectionOfflineOperationDefinition,
+  useGlobalOfflineEntities,
+  useGlobalOfflineResolutions,
+} from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -38,6 +42,122 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
 });
+
+type OfflineEntitySummaryInput = {
+  blockedByResolutionIds: string[];
+  blockedResolutionCount: number;
+  childResolutionCount: number;
+  childResolutionIds: string[];
+  createdAt: number;
+  entityKey: string;
+  entityKind: string;
+  id: string;
+  pendingMutations: number;
+  requiresResolution: boolean;
+  sessionKey: string;
+  storeName: string;
+  storeType: string;
+  syncState: string;
+  tempId?: unknown;
+  updatedAt: number;
+};
+
+function summarizeOfflineEntities(
+  entities: readonly OfflineEntitySummaryInput[],
+) {
+  return entities.map((entity) => ({
+    ...pick(entity, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'entityKey',
+      'entityKind',
+      'id',
+      'pendingMutations',
+      'requiresResolution',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'syncState',
+      'updatedAt',
+    ]),
+    ...(entity.tempId === undefined ? {} : { tempId: entity.tempId }),
+  }));
+}
+
+type ConflictResolutionSummaryInput = {
+  blockedByResolutionIds?: string[];
+  blockedResolutionCount?: number;
+  childResolutionCount?: number;
+  childResolutionIds?: string[];
+  conflict?: unknown;
+  createdAt: number;
+  enqueuedAt: number;
+  entityRefs: Array<{ entityKey: string; entityKind: string }>;
+  id: string;
+  input: unknown;
+  kind: string;
+  operation: string;
+  sessionKey: string;
+  storeName: string;
+  storeType: string;
+  updatedAt: number;
+};
+
+function summarizeConflictResolution(
+  resolution: ConflictResolutionSummaryInput,
+) {
+  if (resolution.kind !== 'conflict') {
+    throw new Error('Expected a persisted offline conflict');
+  }
+
+  return {
+    conflict: resolution.conflict,
+    createdAt: resolution.createdAt,
+    enqueuedAt: resolution.enqueuedAt,
+    entityRefs: resolution.entityRefs,
+    input: resolution.input,
+    kind: resolution.kind,
+    operation: resolution.operation,
+    sessionKey: resolution.sessionKey,
+    storeName: resolution.storeName,
+    storeType: resolution.storeType,
+    updatedAt: resolution.updatedAt,
+  };
+}
+
+function summarizeDetailedConflictResolution(
+  resolution: ConflictResolutionSummaryInput,
+) {
+  return {
+    ...pick(resolution, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+    ]),
+    ...summarizeConflictResolution(resolution),
+  };
+}
+
+function getSingleConflictResolution<T extends { id: string; kind: string }>(
+  resolutions: readonly T[],
+) {
+  expect(resolutions).toHaveLength(1);
+  const [conflict] = resolutions;
+
+  if (!conflict) {
+    throw new Error('Expected a persisted offline conflict');
+  }
+
+  if (conflict.kind !== 'conflict') {
+    throw new Error('Expected a persisted offline conflict');
+  }
+
+  return conflict;
+}
 
 test('offline conflicts are detected before execute, surface through selectors, and can be resolved', async () => {
   network.setOffline();
@@ -105,7 +225,6 @@ test('offline conflicts are detected before execute, surface through selectors, 
       },
     },
   );
-
   // Queue the offline mutation while the browser is disconnected.
   await env.apiStore.performMutation({
     optimisticUpdate: () => {
@@ -119,11 +238,24 @@ test('offline conflicts are detected before execute, surface through selectors, 
 
   // Reconnect so the queued mutation can be replayed and rejected before it
   // reaches the execute callback.
+  env.addTimelineComments('beforeNextAction', [
+    'reconnect and stop the queued mutation at conflict detection before execute runs',
+  ]);
   await act(async () => {
     network.goOnline();
     await Promise.resolve();
     await flushAllTimers();
   });
+  const storeOfflineHook = renderHook(() => env.apiStore.useOfflineEntities());
+  const storeResolutionHook = renderHook(() =>
+    env.apiStore.useOfflineResolutions(),
+  );
+  const globalOfflineHook = renderHook(() =>
+    useGlobalOfflineEntities('offline-conflict-session'),
+  );
+  const globalResolutionHook = renderHook(() =>
+    useGlobalOfflineResolutions('offline-conflict-session'),
+  );
 
   expect(execute).not.toHaveBeenCalled();
   expect(env.store.state).toMatchInlineSnapshot(`
@@ -132,44 +264,29 @@ test('offline conflicts are detected before execute, surface through selectors, 
     refetchOnMount: '❌'
     status: 'success'
   `);
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-conflict-session:offline-conflict-doc:document'
-      pendingMutations: 0
-      requiresResolution: '✅'
-      sessionKey: 'offline-conflict-session'
-      storeName: 'offline-conflict-doc'
-      storeType: 'document'
-      syncState: 'resolution-required'
-      updatedAt: 1735689600000
-  `);
-  expect(
-    env.apiStore.getOfflineResolutions().map((resolution) => {
-      if (resolution.kind !== 'conflict') {
-        throw new Error('Expected a persisted offline conflict');
-      }
-
-      return {
-        kind: resolution.kind,
-        conflict: resolution.conflict,
-        createdAt: resolution.createdAt,
-        enqueuedAt: resolution.enqueuedAt,
-        entityRefs: resolution.entityRefs,
-        input: resolution.input,
-        operation: resolution.operation,
-        sessionKey: resolution.sessionKey,
-        storeName: resolution.storeName,
-        storeType: resolution.storeType,
-        updatedAt: resolution.updatedAt,
-      };
-    }),
-  ).toMatchInlineSnapshot(`
+  expect(summarizeOfflineEntities(storeOfflineHook.result.current))
+    .toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600000
+        entityKey: 'document'
+        entityKind: 'document'
+        id: 'offline-conflict-session:offline-conflict-doc:document'
+        pendingMutations: 0
+        requiresResolution: '✅'
+        sessionKey: 'offline-conflict-session'
+        storeName: 'offline-conflict-doc'
+        storeType: 'document'
+        syncState: 'resolution-required'
+        updatedAt: 1735689600000
+    `);
+  expect(globalOfflineHook.result.current).toEqual(
+    storeOfflineHook.result.current,
+  );
+  expect(storeResolutionHook.result.current.map(summarizeConflictResolution))
+    .toMatchInlineSnapshot(`
     - conflict: { reason: 'server-changed' }
       createdAt: 1735689600000
       enqueuedAt: 1735689600000
@@ -183,12 +300,20 @@ test('offline conflicts are detected before execute, surface through selectors, 
       storeType: 'document'
       updatedAt: 1735689600000
   `);
-
-  const [conflict] = env.apiStore.getOfflineResolutions();
-  expect(conflict).toBeDefined();
-  if (!conflict) {
-    throw new Error('Expected a persisted offline conflict');
-  }
+  expect(globalResolutionHook.result.current).toEqual(
+    storeResolutionHook.result.current,
+  );
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time |
+    0    | offline:updateValue queued
+    .    | -- reconnect and stop the queued mutation at conflict detection before execute runs
+    .    | offline:updateValue resolution-required
+    "
+  `);
+  const conflict = getSingleConflictResolution(
+    storeResolutionHook.result.current,
+  );
 
   // Resolve the stored conflict and confirm the session clears its offline
   // bookkeeping once the resolution is accepted.
@@ -201,14 +326,20 @@ test('offline conflicts are detected before execute, surface through selectors, 
   });
 
   expect(resolveEnqueuedAt).toBe(TEST_INITIAL_TIME);
-  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(storeResolutionHook.result.current).toMatchInlineSnapshot(`[]`);
+  expect(globalResolutionHook.result.current).toMatchInlineSnapshot(`[]`);
+  expect(storeOfflineHook.result.current).toMatchInlineSnapshot(`[]`);
+  expect(globalOfflineHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(env.store.state).toMatchInlineSnapshot(`
     data: { value: 2 }
     error: null
     refetchOnMount: '❌'
     status: 'success'
   `);
+  storeOfflineHook.unmount();
+  storeResolutionHook.unmount();
+  globalOfflineHook.unmount();
+  globalResolutionHook.unmount();
 });
 
 test('resolving a persisted conflict can requeue a replacement mutation and replay it immediately', async () => {
@@ -277,7 +408,6 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
       },
     },
   );
-
   // Queue the replay candidate while offline so we can verify the conflict
   // flow starts from a durable persisted mutation.
   await env.apiStore.performMutation({
@@ -296,34 +426,39 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
     network.goOnline();
   });
   await flushAllTimers();
+  const storeOfflineHook = renderHook(() => env.apiStore.useOfflineEntities());
+  const storeResolutionHook = renderHook(() =>
+    env.apiStore.useOfflineResolutions(),
+  );
 
-  const [conflict] = env.apiStore.getOfflineResolutions();
-  expect(conflict).toBeDefined();
+  const conflict = getSingleConflictResolution(
+    storeResolutionHook.result.current,
+  );
   expect(executedInputs).toMatchInlineSnapshot(`[]`);
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-conflict-requeue-session:offline-conflict-requeue-doc:document'
-      pendingMutations: 0
-      requiresResolution: '✅'
-      sessionKey: 'offline-conflict-requeue-session'
-      storeName: 'offline-conflict-requeue-doc'
-      storeType: 'document'
-      syncState: 'resolution-required'
-      updatedAt: 1735689600000
-  `);
-
-  if (!conflict) {
-    throw new Error('Expected a persisted offline conflict');
-  }
+  expect(summarizeOfflineEntities(storeOfflineHook.result.current))
+    .toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600000
+        entityKey: 'document'
+        entityKind: 'document'
+        id: 'offline-conflict-requeue-session:offline-conflict-requeue-doc:document'
+        pendingMutations: 0
+        requiresResolution: '✅'
+        sessionKey: 'offline-conflict-requeue-session'
+        storeName: 'offline-conflict-requeue-doc'
+        storeType: 'document'
+        syncState: 'resolution-required'
+        updatedAt: 1735689600000
+    `);
 
   // Resolve the conflict by requeueing a replacement mutation and let it run
   // immediately while the original optimistic state stays visible.
+  env.addTimelineComments('beforeNextAction', [
+    'resolve the conflict with a replacement value and replay it immediately',
+  ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(conflict.id, { value: 7 });
     await flushAllTimers();
@@ -334,8 +469,20 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 7
   `);
-  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(storeResolutionHook.result.current).toMatchInlineSnapshot(`[]`);
+  expect(storeOfflineHook.result.current).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time |
+    0    | offline:updateValue queued
+    .    | offline:updateValue resolution-required
+    1s   | -- resolve the conflict with a replacement value and replay it immediately
+    .    | offline:updateValue replay-started
+    .    | offline:updateValue replay-finished
+    "
+  `);
+  storeOfflineHook.unmount();
+  storeResolutionHook.unmount();
 });
 
 type CreateUserConflictOperations = {
@@ -409,7 +556,6 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
       },
     },
   );
-
   await env.apiStore.performMutation('__create__', {
     mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
     offline: { operation: 'createUser', input: { name: 'Ada' } },
@@ -423,25 +569,29 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     return item;
   });
   await flushAllTimers();
+  const offlineEntitiesHook = renderHook(() =>
+    env.apiStore.useOfflineEntities(),
+  );
 
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: '"temp:Ada'
-      entityKind: 'item'
-      id: 'offline-conflict-temp-requeue-session:collection-1:"temp:Ada'
-      pendingMutations: 1
-      requiresResolution: '❌'
-      sessionKey: 'offline-conflict-temp-requeue-session'
-      storeName: 'collection-1'
-      storeType: 'collection'
-      syncState: 'pending'
-      tempId: 'temp:Ada'
-      updatedAt: 1735689600000
-  `);
+  expect(summarizeOfflineEntities(offlineEntitiesHook.result.current))
+    .toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600000
+        entityKey: '"temp:Ada'
+        entityKind: 'item'
+        id: 'offline-conflict-temp-requeue-session:collection-1:"temp:Ada'
+        pendingMutations: 1
+        requiresResolution: '❌'
+        sessionKey: 'offline-conflict-temp-requeue-session'
+        storeName: 'collection-1'
+        storeType: 'collection'
+        syncState: 'pending'
+        tempId: 'temp:Ada'
+        updatedAt: 1735689600000
+    `);
 
   expect(
     env.store.state[getCompositeKey('temp:Ada')]?.data,
@@ -456,12 +606,13 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     network.goOnline();
   });
   await flushAllTimers();
+  const offlineResolutionsHook = renderHook(() =>
+    env.apiStore.useOfflineResolutions(),
+  );
 
-  const [conflict] = env.apiStore.getOfflineResolutions();
-  expect(conflict).toBeDefined();
-  if (!conflict) {
-    throw new Error('Expected a persisted offline conflict');
-  }
+  const conflict = getSingleConflictResolution(
+    offlineResolutionsHook.result.current,
+  );
 
   // Resolve the conflict with adjusted input, but keep the original
   // optimistic temp row alive while the replacement replay is in flight.
@@ -478,7 +629,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
 
   // The replacement replay should still point at the original temp entity,
   // not create a second temp row derived from the adjusted input.
-  expect(env.apiStore.getOfflineEntities().map((entity) => entity.tempId))
+  expect(offlineEntitiesHook.result.current.map((entity) => entity.tempId))
     .toMatchInlineSnapshot(`
       ['temp:Ada']
     `);
@@ -499,8 +650,8 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   executeResolvers[0]?.({ id: 'users||ada-resolved', name: 'Ada resolved' });
   await flushAllTimers();
 
-  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(offlineResolutionsHook.result.current).toMatchInlineSnapshot(`[]`);
+  expect(offlineEntitiesHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
 
   expect(
@@ -523,6 +674,8 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   `);
 
   act(() => {
+    offlineEntitiesHook.unmount();
+    offlineResolutionsHook.unmount();
     tempAdaHook.unmount();
   });
 });
@@ -564,7 +717,6 @@ test('conflict handling still works for mutations queued via fallback', async ()
       },
     },
   );
-
   // A mutation that first fails online should still enter the normal replay
   // conflict flow once it has been queued by the hybrid fallback.
   const result = await env.apiStore.performMutation({
@@ -584,31 +736,44 @@ test('conflict handling still works for mutations queued via fallback', async ()
   await waitForMicrotaskCondition(
     () => env.apiStore.getOfflineResolutions().length === 1,
   );
+  const storeOfflineHook = renderHook(() => env.apiStore.useOfflineEntities());
+  const storeResolutionHook = renderHook(() =>
+    env.apiStore.useOfflineResolutions(),
+  );
 
   expect(execute).not.toHaveBeenCalled();
+  expect(summarizeOfflineEntities(storeOfflineHook.result.current))
+    .toMatchInlineSnapshot(`
+      - blockedByResolutionIds: []
+        blockedResolutionCount: 0
+        childResolutionCount: 0
+        childResolutionIds: []
+        createdAt: 1735689600001
+        entityKey: 'document'
+        entityKind: 'document'
+        id: 'hybrid-conflict-session:document-2:document'
+        pendingMutations: 0
+        requiresResolution: '✅'
+        sessionKey: 'hybrid-conflict-session'
+        storeName: 'document-2'
+        storeType: 'document'
+        syncState: 'resolution-required'
+        updatedAt: 1735689600001
+    `);
+  env.addTimelineComments('afterLastAction', [
+    'the fallback-queued mutation reaches conflict detection on the first recovery tick',
+  ]);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time |
+    0    | offline:updateValue queued
+    1ms  | offline:updateValue resolution-required
+    .    | -- the fallback-queued mutation reaches conflict detection on the first recovery tick
+    "
+  `);
 
   expect(
-    env.apiStore
-      .getOfflineResolutions()
-      .map((resolution) => ({
-        ...pick(resolution, [
-          'blockedByResolutionIds',
-          'blockedResolutionCount',
-          'childResolutionCount',
-          'childResolutionIds',
-          'createdAt',
-          'enqueuedAt',
-          'entityRefs',
-          'input',
-          'kind',
-          'operation',
-          'sessionKey',
-          'storeName',
-          'storeType',
-          'updatedAt',
-        ]),
-        conflict: resolution.kind === 'conflict' ? resolution.conflict : null,
-      })),
+    storeResolutionHook.result.current.map(summarizeDetailedConflictResolution),
   ).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
@@ -627,4 +792,6 @@ test('conflict handling still works for mutations queued via fallback', async ()
       storeType: 'document'
       updatedAt: 1735689600001
   `);
+  storeOfflineHook.unmount();
+  storeResolutionHook.unmount();
 });
