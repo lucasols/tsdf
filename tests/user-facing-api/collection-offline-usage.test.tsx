@@ -374,7 +374,7 @@ test('direct collection store offline public api', async () => {
   await Promise.resolve();
 
   expect(collectionStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  await collectionStore.resolveOfflineResolution('missing', {
+  await collectionStore.resolveOfflineResolution('missing', 'conflictTodo', {
     action: 'discard',
   });
   expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
@@ -530,14 +530,18 @@ test('direct collection store offline public api', async () => {
     `);
 
   await act(async () => {
-    await collectionStore.resolveOfflineResolution(conflict.id, {
-      action: 'requeue',
-      input: {
-        id: '1',
-        title: conflictResolutionSchema.parse({ title: 'Todo 1 resolved' })
-          .title,
+    await collectionStore.resolveOfflineResolution(
+      conflict.id,
+      'conflictTodo',
+      {
+        action: 'requeue',
+        input: {
+          id: '1',
+          title: conflictResolutionSchema.parse({ title: 'Todo 1 resolved' })
+            .title,
+        },
       },
-    });
+    );
     await flushAllTimers();
   });
 

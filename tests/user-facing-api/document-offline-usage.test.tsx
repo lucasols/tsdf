@@ -428,7 +428,7 @@ test('direct document store offline public api', async () => {
   await Promise.resolve();
 
   expect(documentStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  await documentStore.resolveOfflineResolution('missing', {
+  await documentStore.resolveOfflineResolution('missing', 'conflictValue', {
     action: 'discard',
   });
   expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
@@ -561,7 +561,7 @@ test('direct document store offline public api', async () => {
   );
 
   await act(async () => {
-    await documentStore.resolveOfflineResolution(conflict.id, {
+    await documentStore.resolveOfflineResolution(conflict.id, 'conflictValue', {
       action: 'requeue',
       input: conflictResolutionSchema.parse({ value: 7 }),
     });

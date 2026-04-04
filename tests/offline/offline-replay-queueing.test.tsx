@@ -1072,7 +1072,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     storeType: 'document'
     updatedAt: 1735689620000
   `);
-  await env.apiStore.resolveOfflineResolution(resolution.id, {
+  await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
     action: 'retry',
   });
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
@@ -1157,9 +1157,11 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     storeType: 'document'
     updatedAt: 1735689640000
   `);
-  await env.apiStore.resolveOfflineResolution(discardResolution.id, {
-    action: 'discard',
-  });
+  await env.apiStore.resolveOfflineResolution(
+    discardResolution.id,
+    'updateValue',
+    { action: 'discard' },
+  );
 
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);

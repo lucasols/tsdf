@@ -25,7 +25,8 @@ import {
   type OfflineMutationInput,
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
-  type OfflineResolutionRecord,
+  type OfflineResolutionActionForOperation,
+  type OfflineResolutionRecordForStore,
   type OfflineSession,
   type OfflineStoreType,
   type PersistedOfflineResolutionRecord,
@@ -194,10 +195,11 @@ export type OfflineStoreController<
     args: OfflineMutationInput<TOperations, TName>,
   ) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
-  getOfflineResolutions: () => OfflineResolutionRecord[];
-  resolveOfflineResolution: (
+  getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
+  resolveOfflineResolution: <TName extends keyof TOperations & string>(
     resolutionId: string,
-    resolution: unknown,
+    operationName: TName,
+    resolution: OfflineResolutionActionForOperation<TOperations, TName>,
   ) => Promise<void>;
   prepareForFetch: () => Promise<void>;
   getSessionStatus: () => { isOfflineMode: boolean } | null;
@@ -705,36 +707,44 @@ export function createOfflineStoreController<
 
   function buildDerivedResolutionRecords(
     dependencySnapshot?: ResolutionDependencySnapshot,
-  ): OfflineResolutionRecord[] {
+  ): OfflineResolutionRecordForStore<TOperations>[] {
     const snapshot = dependencySnapshot ?? createResolutionDependencySnapshot();
 
-    return [...resolutions.values()]
-      .map((resolution) => {
-        const blockedByResolutionIds =
-          snapshot.blockedByResolutionIdsByResolutionId.get(resolution.id) ??
-          [];
-        const childResolutionIds =
-          snapshot.childResolutionIdsByResolutionId.get(resolution.id) ?? [];
+    // WORKAROUND: Resolution records are hydrated with `operation: string`, so
+    // the derived in-memory list needs one cast back to the operation-aware
+    // union exposed by the typed controller and store APIs.
+    return __LEGIT_CAST__<
+      OfflineResolutionRecordForStore<TOperations>[],
+      unknown
+    >(
+      [...resolutions.values()]
+        .map((resolution) => {
+          const blockedByResolutionIds =
+            snapshot.blockedByResolutionIdsByResolutionId.get(resolution.id) ??
+            [];
+          const childResolutionIds =
+            snapshot.childResolutionIdsByResolutionId.get(resolution.id) ?? [];
 
-        return {
-          ...resolution,
-          blockedByResolutionIds,
-          childResolutionIds,
-          blockedResolutionCount:
-            snapshot.blockedResolutionIdsByResolutionId.get(resolution.id)
-              ?.size ?? 0,
-          childResolutionCount: childResolutionIds.length,
-        };
-      })
-      .sort((left, right) => {
-        if (left.createdAt !== right.createdAt) {
-          return left.createdAt - right.createdAt;
-        }
-        if (left.enqueuedAt !== right.enqueuedAt) {
-          return left.enqueuedAt - right.enqueuedAt;
-        }
-        return left.id.localeCompare(right.id);
-      });
+          return {
+            ...resolution,
+            blockedByResolutionIds,
+            childResolutionIds,
+            blockedResolutionCount:
+              snapshot.blockedResolutionIdsByResolutionId.get(resolution.id)
+                ?.size ?? 0,
+            childResolutionCount: childResolutionIds.length,
+          };
+        })
+        .sort((left, right) => {
+          if (left.createdAt !== right.createdAt) {
+            return left.createdAt - right.createdAt;
+          }
+          if (left.enqueuedAt !== right.enqueuedAt) {
+            return left.enqueuedAt - right.enqueuedAt;
+          }
+          return left.id.localeCompare(right.id);
+        }),
+    );
   }
 
   function refreshDerivedState(current?: ActiveSessionState): void {
@@ -2352,13 +2362,16 @@ export function createOfflineStoreController<
       .filter((entity) => entity.storeName === storeName);
   }
 
-  function getOfflineResolutions(): OfflineResolutionRecord[] {
+  function getOfflineResolutions(): OfflineResolutionRecordForStore<TOperations>[] {
     return buildDerivedResolutionRecords();
   }
 
-  async function resolveOfflineResolution(
+  async function resolveOfflineResolution<
+    TName extends keyof TOperations & string,
+  >(
     resolutionId: string,
-    resolution: unknown,
+    operationName: TName,
+    resolution: OfflineResolutionActionForOperation<TOperations, TName>,
   ): Promise<void> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
@@ -2367,7 +2380,13 @@ export function createOfflineStoreController<
     const resolutionRecord = resolutions.get(resolutionId);
     if (!resolutionRecord) return;
 
-    const operation = operations[resolutionRecord.operation];
+    if (resolutionRecord.operation !== operationName) {
+      throw new Error(
+        `Offline resolution operation mismatch: expected "${resolutionRecord.operation}" but received "${operationName}"`,
+      );
+    }
+
+    const operation = operations[operationName];
     if (!operation) {
       await removeResolution(resolutionId, current);
       return;
@@ -2431,10 +2450,7 @@ export function createOfflineStoreController<
       await removeResolution(resolutionId, current, true);
       await queuePreparedMutations(
         prepareMutationWithSession(current, {
-          // WORKAROUND: Resolution records persist operation names as plain strings, and requeueing needs to rebind the validated name to the operation-map key type.
-          operation: __LEGIT_CAST__<keyof TOperations & string, string>(
-            resolutionRecord.operation,
-          ),
+          operation: operationName,
           input: resolutionAction?.input,
           tempIds: resolutionRecord.tempIds,
           entityRefs: resolutionRecord.entityRefs,

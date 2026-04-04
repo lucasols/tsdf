@@ -51,6 +51,7 @@ import {
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
   type OfflineMutationInput,
+  type OfflineResolutionActionForOperation,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -2018,8 +2019,21 @@ export function createCollectionStore<
     },
     getOfflineResolutions: () =>
       offlineController?.getOfflineResolutions() ?? [],
-    resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
-      offlineController?.resolveOfflineResolution(resolutionId, resolution),
+    resolveOfflineResolution: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolutionId: string,
+      operationName: TName,
+      resolution: OfflineResolutionActionForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ) =>
+      offlineController?.resolveOfflineResolution(
+        resolutionId,
+        operationName,
+        resolution,
+      ),
     startMutation,
     invalidateItem,
     updateItemState,

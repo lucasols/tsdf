@@ -415,7 +415,7 @@ test('direct list-query store offline public api', async () => {
   await Promise.resolve();
 
   expect(listQueryStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
-  await listQueryStore.resolveOfflineResolution('missing', {
+  await listQueryStore.resolveOfflineResolution('missing', 'conflictUser', {
     action: 'discard',
   });
   expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
@@ -583,7 +583,7 @@ test('direct list-query store offline public api', async () => {
   `);
 
   await act(async () => {
-    await listQueryStore.resolveOfflineResolution(conflict.id, {
+    await listQueryStore.resolveOfflineResolution(conflict.id, 'conflictUser', {
       action: 'requeue',
       input: {
         id: 1,

@@ -645,6 +645,35 @@ export type OfflineMutationInput<
 > = OfflineMutationDescriptor<TOperations, TName>;
 
 /**
+ * Extracts operation result type from a registered operation map.
+ *
+ * @typeParam TOperations - Operation registry to inspect.
+ * @typeParam TName - Operation name whose result type should be extracted.
+ */
+export type OperationResult<
+  TOperations,
+  TName extends keyof TOperations,
+> = TOperations[TName] extends {
+  execute: (...args: __LEGIT_ANY__[]) => infer TResult;
+}
+  ? Awaited<TResult>
+  : never;
+
+/**
+ * Resolution action accepted for a specific registered offline operation.
+ *
+ * @typeParam TOperations - Operation registry to inspect.
+ * @typeParam TName - Operation name whose resolution payload should be extracted.
+ */
+export type OfflineResolutionActionForOperation<
+  TOperations,
+  TName extends keyof TOperations,
+> = OfflineResolutionAction<
+  OperationInput<TOperations, TName>,
+  OperationResult<TOperations, TName>
+>;
+
+/**
  * Context passed into offline mutation accumulation hooks.
  *
  * @typeParam TInput - Input type shared by the existing and incoming queued mutations.
@@ -1484,6 +1513,37 @@ export type OperationConflict<
 }
   ? TConflict
   : never;
+
+/**
+ * Operation-aware offline resolution record for a specific registered operation.
+ *
+ * @typeParam TOperations - Operation registry to inspect.
+ * @typeParam TName - Operation name whose stored resolution shape should be extracted.
+ */
+export type OfflineResolutionRecordForOperation<
+  TOperations,
+  TName extends keyof TOperations & string,
+> =
+  | (OfflineConflictResolutionRecord<
+      OperationConflict<TOperations, TName>,
+      OperationInput<TOperations, TName>
+    > & { operation: TName })
+  | (OfflineRetryExhaustedResolutionRecord<
+      OperationInput<TOperations, TName>
+    > & { operation: TName });
+
+/**
+ * Union of operation-aware offline resolution records for an operation registry.
+ *
+ * @typeParam TOperations - Operation registry to inspect.
+ * @typeParam TName - Optional subset of operation names to include.
+ */
+export type OfflineResolutionRecordForStore<
+  TOperations,
+  TName extends keyof TOperations & string = keyof TOperations & string,
+> = {
+  [K in TName]: OfflineResolutionRecordForOperation<TOperations, K>;
+}[TName];
 
 /**
  * Base shape for each offline operation entry in `persistentStorage.offline.operations`.

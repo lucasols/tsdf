@@ -1374,9 +1374,11 @@ describe('list-query replay', () => {
     // Discarding the parent should clear every nested descendant and roll back
     // both optimistic temp items from the query and item state.
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(parentResolution.id, {
-        action: 'discard',
-      });
+      await env.apiStore.resolveOfflineResolution(
+        parentResolution.id,
+        'createUser',
+        { action: 'discard' },
+      );
       await Promise.resolve();
     });
     await flushAllTimers();
@@ -1672,9 +1674,11 @@ describe('list-query replay', () => {
     // The blocked child must not become independently resolvable before the
     // parent temp create has either succeeded or been discarded.
     await expect(
-      env.apiStore.resolveOfflineResolution(childResolution.id, {
-        action: 'retry',
-      }),
+      env.apiStore.resolveOfflineResolution(
+        childResolution.id,
+        'patchUserName',
+        { action: 'retry' },
+      ),
     ).rejects.toThrow(
       'Cannot resolve a blocked offline resolution before its parent temp create is cleared',
     );
@@ -1685,9 +1689,11 @@ describe('list-query replay', () => {
       'retry the parent resolution so the temp payload can reconcile',
     ]);
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(parentResolution.id, {
-        action: 'retry',
-      });
+      await env.apiStore.resolveOfflineResolution(
+        parentResolution.id,
+        'createUser',
+        { action: 'retry' },
+      );
       await Promise.resolve();
     });
     await waitForMicrotaskCondition(
@@ -1747,9 +1753,11 @@ describe('list-query replay', () => {
       'retry the remapped child resolution',
     ]);
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(remappedChildResolution!.id, {
-        action: 'retry',
-      });
+      await env.apiStore.resolveOfflineResolution(
+        remappedChildResolution!.id,
+        'patchUserName',
+        { action: 'retry' },
+      );
       await Promise.resolve();
     });
     await waitForMicrotaskCondition(
@@ -1939,9 +1947,11 @@ describe('list-query replay', () => {
     // Discarding the parent should remove the blocked child resolution and the
     // optimistic temp row in one cascade.
     await act(async () => {
-      await env.apiStore.resolveOfflineResolution(parentResolution.id, {
-        action: 'discard',
-      });
+      await env.apiStore.resolveOfflineResolution(
+        parentResolution.id,
+        'createUser',
+        { action: 'discard' },
+      );
       await Promise.resolve();
     });
     await flushAllTimers();

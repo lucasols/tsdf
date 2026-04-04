@@ -309,7 +309,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
   // optimistic value, then commit that accepted outcome back into the store so
   // it can clear bookkeeping without replaying the mutation internally.
   await act(async () => {
-    await env.apiStore.resolveOfflineResolution(conflict.id, {
+    await env.apiStore.resolveOfflineResolution(conflict.id, 'updateValue', {
       action: 'commit',
     });
     await Promise.resolve();
@@ -422,7 +422,7 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
     'resolve the conflict with a replacement value and replay it immediately',
   ]);
   await act(async () => {
-    await env.apiStore.resolveOfflineResolution(conflict.id, {
+    await env.apiStore.resolveOfflineResolution(conflict.id, 'updateValue', {
       action: 'requeue',
       input: { value: 7 },
     });
@@ -572,7 +572,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     'resolve the conflict with a new name while keeping the same temp row',
   ]);
   await act(async () => {
-    await env.apiStore.resolveOfflineResolution(conflict.id, {
+    await env.apiStore.resolveOfflineResolution(conflict.id, 'createUser', {
       action: 'requeue',
       input: { name: 'Ada resolved' },
     });
@@ -701,7 +701,7 @@ test('committing a temp-entity conflict with an external result reconciles the o
     'commit the conflict using an externally accepted server result',
   ]);
   await act(async () => {
-    await env.apiStore.resolveOfflineResolution(conflict.id, {
+    await env.apiStore.resolveOfflineResolution(conflict.id, 'createUser', {
       action: 'commit',
       result: { id: 'users||ada-committed', name: 'Ada committed' },
     });
@@ -715,8 +715,8 @@ test('committing a temp-entity conflict with an external result reconciles the o
   expect(tempAdaHook.result.current.data).toBeNull();
   expect(env.store.state[getCompositeKey('users||ada-committed')]?.data)
     .toMatchInlineSnapshot(`
-    value: { name: 'Ada committed' }
-  `);
+      value: { name: 'Ada committed' }
+    `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -1025,7 +1025,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
   `);
 
   await expect(
-    env.apiStore.resolveOfflineResolution(childResolution.id, {
+    env.apiStore.resolveOfflineResolution(childResolution.id, 'patchUserName', {
       action: 'retry',
     }),
   ).rejects.toThrow(
