@@ -40,10 +40,8 @@ import {
   offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
 import {
-  defaultOfflineRuntimeConfig,
   type AnyOfflineOperationDefinition,
   type OfflineMutationInput,
-  type OfflineRuntimeConfigUpdate,
 } from './persistentStorage/offline/types';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
@@ -318,88 +316,91 @@ export function createDocumentStore<
   const persistence = resolvedPersistentStorageConfig
     ? setupDocumentPersistence(resolvedPersistentStorageConfig)
     : null;
+  const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
 
   assertDocumentOfflineOperations(
     // WORKAROUND: Persistent config stores offline operations behind the generic persistence surface, and the assertion helper expects the already-narrowed ValidStoreState variant.
     __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
-      persistentStorageConfig?.offlineMode?.operations ?? null,
+      resolvedOfflineConfig?.operations ?? null,
     ),
   );
 
-  const offlineController = resolvedPersistentStorageConfig?.offlineMode
-    ? createOfflineStoreController({
-        storeName: id,
-        storeType: 'document',
-        getSessionKey,
-        onPersistentStorageError:
-          resolvedPersistentStorageConfig.onPersistentStorageError,
-        adapter: resolvedPersistentStorageConfig.adapter,
-        offlineMode: resolvedPersistentStorageConfig.offlineMode,
-        storeAdapter: {
-          getEntityRefs: () => [
-            { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
-          ],
-          normalizeEntityRefs: () => [
-            { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
-          ],
-          getProtectedCacheKeys: () => {
-            const sessionKey = getSessionKey();
-            if (sessionKey === false) return [];
-            return [
-              createProtectedStorageKey({
-                backend:
-                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
-                    ? 'opfs'
-                    : 'localStorage',
-                sessionKey,
-                storeName: id,
-                kind: 'document',
-                key: 'document',
-              }),
-            ];
-          },
-          applyPendingEntity: ({ pendingEntity }) => {
-            if (!pendingEntity || typeof pendingEntity !== 'object') return;
-            updateState((draft) => Object.assign(draft, pendingEntity));
-          },
-          reconcileTempEntity: ({ reconciliation }) => {
-            if (
-              !reconciliation.finalData ||
-              typeof reconciliation.finalData !== 'object'
-            ) {
-              return;
-            }
+  const offlineController =
+    resolvedPersistentStorageConfig && resolvedOfflineConfig
+      ? createOfflineStoreController({
+          storeName: id,
+          storeType: 'document',
+          getSessionKey,
+          onPersistentStorageError:
+            resolvedPersistentStorageConfig.onPersistentStorageError,
+          adapter: resolvedPersistentStorageConfig.adapter,
+          offlineSession: resolvedOfflineConfig.session,
+          operations: resolvedOfflineConfig.operations,
+          storeAdapter: {
+            getEntityRefs: () => [
+              { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
+            ],
+            normalizeEntityRefs: () => [
+              { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
+            ],
+            getProtectedCacheKeys: () => {
+              const sessionKey = getSessionKey();
+              if (sessionKey === false) return [];
+              return [
+                createProtectedStorageKey({
+                  backend:
+                    resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                      ? 'opfs'
+                      : 'localStorage',
+                  sessionKey,
+                  storeName: id,
+                  kind: 'document',
+                  key: 'document',
+                }),
+              ];
+            },
+            applyPendingEntity: ({ pendingEntity }) => {
+              if (!pendingEntity || typeof pendingEntity !== 'object') return;
+              updateState((draft) => Object.assign(draft, pendingEntity));
+            },
+            reconcileTempEntity: ({ reconciliation }) => {
+              if (
+                !reconciliation.finalData ||
+                typeof reconciliation.finalData !== 'object'
+              ) {
+                return;
+              }
 
-            updateState((draft) =>
-              Object.assign(draft, reconciliation.finalData),
-            );
-          },
-          captureQueuedMutationOverlays: ({ sessionKey }) => {
-            if (offlineOverlaySessionKey !== sessionKey) {
-              clearOfflineOverlay(sessionKey);
-            }
+              updateState((draft) =>
+                Object.assign(draft, reconciliation.finalData),
+              );
+            },
+            captureQueuedMutationOverlays: ({ sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey) {
+                clearOfflineOverlay(sessionKey);
+              }
 
-            offlineOverlayStore.setState({ data: klona(store.state.data) });
-          },
-          syncEntityOverlays: ({ entities, sessionKey }) => {
-            if (offlineOverlaySessionKey !== sessionKey) {
-              clearOfflineOverlay(sessionKey);
-            }
+              offlineOverlayStore.setState({ data: klona(store.state.data) });
+            },
+            syncEntityOverlays: ({ entities, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey) {
+                clearOfflineOverlay(sessionKey);
+              }
 
-            if (
-              !entities.some((entity) => {
-                return (
-                  entity.entityKey === DOC_TARGET_KEY &&
-                  entity.requiresResolution === false
-                );
-              })
-            ) {
-              offlineOverlayStore.setState(null);
-            }
+              if (
+                !entities.some((entity) => {
+                  return (
+                    entity.entityKey === DOC_TARGET_KEY &&
+                    entity.requiresResolution === false
+                  );
+                })
+              ) {
+                offlineOverlayStore.setState(null);
+              }
+            },
           },
-        },
-      })
-    : null;
+        })
+      : null;
 
   const store = new Store<DocumentStoreState<State>>({
     debugName,
@@ -1264,15 +1265,6 @@ export function createDocumentStore<
       offlineController?.getOfflineResolutions() ?? [],
     resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
       offlineController?.resolveOfflineResolution(resolutionId, resolution),
-    getOfflineRuntimeConfig: () =>
-      offlineController?.getOfflineRuntimeConfig() ??
-      defaultOfflineRuntimeConfig,
-    setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => {
-      offlineController?.setOfflineRuntimeConfig(update);
-    },
-    resetOfflineRuntimeConfig: () => {
-      offlineController?.resetOfflineRuntimeConfig();
-    },
     useDocument,
     useListItemIsLoading,
     useListItemIsDeleted,

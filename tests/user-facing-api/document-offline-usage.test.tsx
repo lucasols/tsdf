@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
+  createOfflineSession,
   createDocumentStore,
   type DefineDocumentOfflineOperations,
   type DefineOfflineOperation,
@@ -79,8 +80,12 @@ test('direct document store runtime offline controls public api', async () => {
   const network = createOfflineNetworkMock(false);
   const sessionKey = 'direct-document-runtime-controls';
   network.install();
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
-  const documentStore = createDocumentStore<
+  const documentStore_ = createDocumentStore<
     DocState,
     RuntimeOnlyDocumentOfflineOperations
   >({
@@ -94,13 +99,13 @@ test('direct document store runtime offline controls public api', async () => {
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: { network: network.config, operations: {} },
+      offline: { session: offlineSession, operations: {} },
     },
   });
 
   await flushAllTimers();
 
-  expect(documentStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'allow', outage: 'allow' }
     network: { enabled: '✅' }
     outage: { enabled: '❌' }
@@ -114,16 +119,16 @@ test('direct document store runtime offline controls public api', async () => {
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
-    updatedAt: 1735689600000
+    updatedAt: 1735689602000
   `);
 
-  documentStore.setOfflineRuntimeConfig({
+  offlineSession.setOfflineRuntimeConfig({
     network: { enabled: false },
     mutationQueueing: { network: 'disallow' },
   });
   await Promise.resolve();
 
-  expect(documentStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'disallow', outage: 'allow' }
     network: { enabled: '❌' }
     outage: { enabled: '❌' }
@@ -141,19 +146,19 @@ test('direct document store runtime offline controls public api', async () => {
   `);
 
   expect(() => {
-    documentStore.setOfflineRuntimeConfig({ outage: { enabled: true } });
+    offlineSession.setOfflineRuntimeConfig({ outage: { enabled: true } });
   }).toThrowErrorMatchingInlineSnapshot(
     `
     Error#:
-      message: 'Offline runtime control "outage.enabled" is unavailable for session "direct-document-runtime-controls" because offlineMode.outage was not configured'
+      message: 'Offline runtime control "outage.enabled" is unavailable for session "direct-document-runtime-controls" because offlineSession.outage was not configured'
       name: 'Error'
     `,
   );
 
-  documentStore.resetOfflineRuntimeConfig();
+  offlineSession.resetOfflineRuntimeConfig();
   await Promise.resolve();
 
-  expect(documentStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'allow', outage: 'allow' }
     network: { enabled: '✅' }
     outage: { enabled: '❌' }
@@ -196,6 +201,13 @@ test('direct document store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-session';
   network.install();
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: {
+      network: network.config,
+      mutationQueueing: { network: 'allow', outage: 'allow' },
+    },
+  });
 
   let documentState: DocState = { value: 1, label: 'server' };
   const skipSyncReplayOrder: string[] = [];
@@ -218,9 +230,8 @@ test('direct document store offline public api', async () => {
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
-        network: network.config,
-        mutationQueueing: { network: 'allow', outage: 'allow' },
+      offline: {
+        session: offlineSession,
         operations: {
           setValue: {
             inputSchema: setValueInputSchema,

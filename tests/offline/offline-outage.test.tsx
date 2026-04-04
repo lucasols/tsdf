@@ -6,6 +6,7 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import { docSchema } from './offlineTestShared';
 
 beforeEach(() => {
@@ -50,11 +51,11 @@ test('async outage classification promotes the session into outage mode after a 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure,
         outage: { enabled: true, recoveryCheck },
         operations: {},
-      },
+      }),
     },
   });
 
@@ -115,7 +116,7 @@ test('recovery probes back off and stop after a successful recovery check', asyn
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure: () => 'outage' as const,
         outage: {
           enabled: true,
@@ -128,7 +129,7 @@ test('recovery probes back off and stop after a successful recovery check', asyn
           },
         },
         operations: {},
-      },
+      }),
     },
   });
   const statusHook = renderHook(() => {
@@ -229,11 +230,11 @@ test('default outage recovery probes use the slower backend-friendly cadence', a
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure: () => 'outage' as const,
         outage: { enabled: true, recoveryCheck },
         operations: {},
-      },
+      }),
     },
   });
 
@@ -331,7 +332,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure: () => 'outage' as const,
         outage: {
           enabled: true,
@@ -344,7 +345,7 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
           },
         },
         operations: {},
-      },
+      }),
     },
   });
   const statusHook = renderHook(() => {
@@ -476,11 +477,11 @@ test('stale async outage classifications are ignored after a newer failure settl
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offlineMode: {
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
           classifyFailure,
           outage: { enabled: true, recoveryCheck },
           operations: {},
-        },
+        }),
       },
     });
 

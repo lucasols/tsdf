@@ -351,7 +351,9 @@ export function setupListQueryPersistence<
   let maintenanceCallbackKey: string | null = null;
 
   function isOfflineNetworkActive(): boolean {
-    return isOfflineNetworkModeActiveSync(config.offlineMode?.network);
+    return isOfflineNetworkModeActiveSync(
+      config.offline?.session.getConfig().network,
+    );
   }
 
   function clearSaveTimer(): void {

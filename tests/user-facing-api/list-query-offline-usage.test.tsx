@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
+  createOfflineSession,
   createListQueryStore,
   type DefineListQueryOfflineOperations,
   type DefineOfflineOperation,
@@ -142,6 +143,10 @@ test('direct list-query store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-offline-session';
   network.install();
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
   let nextUserId = 3;
   const userState = new Map<number, User>([
@@ -196,8 +201,8 @@ test('direct list-query store offline public api', async () => {
       schema: userSchema,
       itemPayloadSchema: userPayloadSchema,
       queryPayloadSchema: usersQueryPayloadSchema,
-      offlineMode: {
-        network: network.config,
+      offline: {
+        session: offlineSession,
         operations: {
           renameUser: {
             inputSchema: userInputSchema,

@@ -34,13 +34,14 @@ import type {
   GlobalOfflineEntity,
   GlobalOfflineStatus,
   OfflineFailureContext,
-  OfflineModeConfig,
+  OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineRecoveryProbeConfig,
   OfflineRuntimeConfig,
   OfflineRuntimeConfigUpdate,
-  OfflineOperationSchemaShape,
   OfflineOutageModeConfig,
+  OfflineSession,
+  OfflineSessionConfig,
 } from './types';
 import { globalOfflineStatusSchema } from './types';
 
@@ -77,7 +78,7 @@ type SessionCoordinatorOptions = {
   sessionKey: string;
   adapter?: StorageAdapter;
   onPersistentStorageError?: (error: unknown) => void;
-  config?: OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>;
+  config?: OfflineSessionConfig;
   bootstrapStatusFromLocalStorage?: boolean;
 };
 
@@ -363,18 +364,18 @@ type SessionCanonicalConfig = {
   networkRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
   hasOutageConfig: boolean;
   outageEnabledByDefault: boolean;
-  classifyFailure?: OfflineModeConfig<
-    Record<string, OfflineOperationSchemaShape>
-  >['classifyFailure'];
+  mutationQueueingByDefault: {
+    network: OfflineMutationQueueingPolicy;
+    outage: OfflineMutationQueueingPolicy;
+  };
+  classifyFailure?: OfflineSessionConfig['classifyFailure'];
   outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
   outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
 
 function toCanonicalConfig(
   adapter: StorageAdapter | null,
-  config:
-    | OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>
-    | undefined,
+  config: OfflineSessionConfig | undefined,
 ): SessionCanonicalConfig {
   return {
     adapter,
@@ -390,6 +391,10 @@ function toCanonicalConfig(
     ),
     hasOutageConfig: config?.outage !== undefined,
     outageEnabledByDefault: config?.outage?.enabled ?? false,
+    mutationQueueingByDefault: {
+      network: config?.mutationQueueing?.network ?? 'allow',
+      outage: config?.mutationQueueing?.outage ?? 'allow',
+    },
     classifyFailure: config?.classifyFailure,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
@@ -435,6 +440,10 @@ function sameCanonicalConfig(
     sameProbeConfig(left.networkRecoveryProbe, right.networkRecoveryProbe) &&
     left.hasOutageConfig === right.hasOutageConfig &&
     left.outageEnabledByDefault === right.outageEnabledByDefault &&
+    left.mutationQueueingByDefault.network ===
+      right.mutationQueueingByDefault.network &&
+    left.mutationQueueingByDefault.outage ===
+      right.mutationQueueingByDefault.outage &&
     left.classifyFailure === right.classifyFailure &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
@@ -486,6 +495,9 @@ export class SessionOfflineCoordinator {
   #classifiedNetworkActive = false;
   #networkEnabledOverride: boolean | undefined;
   #outageEnabledOverride: boolean | undefined;
+  #mutationQueueingOverrides:
+    | OfflineRuntimeConfigUpdate['mutationQueueing']
+    | undefined;
   #replaySuppressedByNetworkDisable = false;
   #replaySuppressedByOutageDisable = false;
   #hydrated = false;
@@ -589,7 +601,7 @@ export class SessionOfflineCoordinator {
   configure(options: {
     adapter?: StorageAdapter;
     onPersistentStorageError?: (error: unknown) => void;
-    config?: OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>;
+    config?: OfflineSessionConfig;
   }): void {
     const nextAdapter = options.adapter ?? this.#canonicalAdapter;
     const nextConfig = toCanonicalConfig(nextAdapter, options.config);
@@ -620,7 +632,7 @@ export class SessionOfflineCoordinator {
       !sameCanonicalConfig(this.#canonicalConfig, nextConfig)
     ) {
       throw new Error(
-        `[tsdf] Incompatible offlineMode configuration for session "${this.sessionKey}"`,
+        `[tsdf] Incompatible offline session configuration for session "${this.sessionKey}"`,
       );
     }
 
@@ -695,10 +707,14 @@ export class SessionOfflineCoordinator {
     return this.store.state.status;
   }
 
-  getRuntimeConfig(): Pick<OfflineRuntimeConfig, 'network' | 'outage'> {
+  getRuntimeConfig(): OfflineRuntimeConfig {
     return {
       network: { enabled: this.#isNetworkEnabled() },
       outage: { enabled: this.#isOutageEnabled() },
+      mutationQueueing: {
+        network: this.#resolveMutationQueueingPolicy('network'),
+        outage: this.#resolveMutationQueueingPolicy('outage'),
+      },
     };
   }
 
@@ -729,6 +745,19 @@ export class SessionOfflineCoordinator {
     if (update.outage?.enabled !== undefined) {
       this.#setOutageRuntimeEnabled(update.outage.enabled);
     }
+
+    if (update.mutationQueueing !== undefined) {
+      const nextOverrides = {
+        ...(this.#mutationQueueingOverrides ?? {}),
+        ...update.mutationQueueing,
+      };
+
+      this.#mutationQueueingOverrides =
+        nextOverrides.network === undefined &&
+        nextOverrides.outage === undefined
+          ? undefined
+          : nextOverrides;
+    }
   }
 
   resetRuntimeConfig(): void {
@@ -738,6 +767,7 @@ export class SessionOfflineCoordinator {
     if (this.#outageEnabledOverride !== undefined) {
       this.#setOutageRuntimeEnabled(undefined);
     }
+    this.#mutationQueueingOverrides = undefined;
   }
 
   #browserReportsOnline(): boolean {
@@ -768,7 +798,16 @@ export class SessionOfflineCoordinator {
     if (isConfigured) return;
 
     throw new Error(
-      `Offline runtime control "${mode}.enabled" is unavailable for session "${this.sessionKey}" because offlineMode.${mode} was not configured`,
+      `Offline runtime control "${mode}.enabled" is unavailable for session "${this.sessionKey}" because offlineSession.${mode} was not configured`,
+    );
+  }
+
+  #resolveMutationQueueingPolicy(
+    cause: 'network' | 'outage',
+  ): OfflineMutationQueueingPolicy {
+    return (
+      this.#mutationQueueingOverrides?.[cause] ??
+      this.#canonicalConfig.mutationQueueingByDefault[cause]
     );
   }
 
@@ -1377,6 +1416,98 @@ export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   defaultStatusBySession.clear();
 }
 
+export function createOfflineSession(args: {
+  getSessionKey: () => string | false;
+  config: OfflineSessionConfig;
+}): OfflineSession {
+  const { getSessionKey, config } = args;
+  const inactiveScope = `offline-session:${Math.random().toString(36).slice(2)}`;
+  const baseRuntimeConfig: OfflineRuntimeConfig = {
+    network: { enabled: config.network?.enabled ?? false },
+    outage: { enabled: config.outage?.enabled ?? false },
+    mutationQueueing: {
+      network: config.mutationQueueing?.network ?? 'allow',
+      outage: config.mutationQueueing?.outage ?? 'allow',
+    },
+  };
+
+  function getActiveCoordinator(
+    bootstrapStatusFromLocalStorage = true,
+  ): SessionOfflineCoordinator | null {
+    const sessionKey = getSessionKey();
+    if (sessionKey === false) return null;
+
+    return getOrCreateSessionOfflineCoordinator(sessionKey, {
+      config,
+      bootstrapStatusFromLocalStorage,
+    });
+  }
+
+  function useSessionCoordinator(): SessionOfflineCoordinator {
+    const activeSessionKey = getSessionKey();
+    return useConfiguredSessionOfflineCoordinator(
+      activeSessionKey === false
+        ? resolveOfflineSessionScope(false, inactiveScope)
+        : activeSessionKey,
+      activeSessionKey === false ? undefined : config,
+      activeSessionKey !== false,
+    );
+  }
+
+  return {
+    getSessionKey,
+    getConfig: () => config,
+    getOfflineRuntimeConfig: () =>
+      getActiveCoordinator()?.getRuntimeConfig() ?? baseRuntimeConfig,
+    setOfflineRuntimeConfig: (update) => {
+      getActiveCoordinator()?.setRuntimeConfig(update);
+    },
+    resetOfflineRuntimeConfig: () => {
+      getActiveCoordinator()?.resetRuntimeConfig();
+    },
+    getOfflineStatus: () => {
+      const sessionKey = getSessionKey();
+      if (sessionKey === false) {
+        return resolveDefaultStatus(
+          resolveOfflineSessionScope(false, inactiveScope),
+        );
+      }
+
+      return (
+        getActiveCoordinator()?.getStatus() ??
+        getGlobalOfflineStatus(sessionKey)
+      );
+    },
+    getOfflineEntities: () => {
+      const sessionKey = getSessionKey();
+      if (sessionKey === false) return [];
+
+      return (
+        getActiveCoordinator(false)?.getEntities() ??
+        getGlobalOfflineEntities(sessionKey)
+      );
+    },
+    useOfflineStatus: () => {
+      const coordinator = useSessionCoordinator();
+      const statusSelector = useCallback(
+        (state: SessionStoreState) => state.status,
+        [],
+      );
+
+      return coordinator.store.useSelectorRC(statusSelector);
+    },
+    useOfflineEntities: () => {
+      const coordinator = useSessionCoordinator();
+      const entitiesSelector = useCallback(
+        (state: SessionStoreState) => state.entities,
+        [],
+      );
+
+      return coordinator.store.useSelectorRC(entitiesSelector);
+    },
+  };
+}
+
 function useSessionOfflineCoordinator(
   sessionKey: string,
   bootstrapStatusFromLocalStorage = false,
@@ -1388,6 +1519,21 @@ function useSessionOfflineCoordinator(
         bootstrapStatusFromLocalStorage,
       }),
     [bootstrapStatusFromLocalStorage, sessionKey],
+  );
+}
+
+function useConfiguredSessionOfflineCoordinator(
+  sessionKey: string,
+  config: OfflineSessionConfig | undefined,
+  bootstrapStatusFromLocalStorage = false,
+): SessionOfflineCoordinator {
+  return useMemo(
+    () =>
+      getOrCreateSessionOfflineCoordinator(sessionKey, {
+        config,
+        bootstrapStatusFromLocalStorage,
+      }),
+    [bootstrapStatusFromLocalStorage, config, sessionKey],
   );
 }
 

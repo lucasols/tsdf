@@ -4,6 +4,7 @@ import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import {
+  createOfflineSession,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   useGlobalOfflineEntities,
@@ -17,6 +18,7 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateListQueryUserOperations,
   getOfflineQueueEntries,
@@ -52,7 +54,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-test('persistent storage without offlineMode keeps the existing online flow even when the browser reports offline', async () => {
+test('persistent storage without offline config keeps the existing online flow even when the browser reports offline', async () => {
   network.setOffline();
 
   const sessionKey = 'offline-opt-in-required';
@@ -62,7 +64,7 @@ test('persistent storage without offlineMode keeps the existing online flow even
     persistentStorage: { adapter: 'local-sync', schema: docSchema },
   });
 
-  // Without offlineMode config, the store should operate normally even when the browser is offline.
+  // Without offline config, the store should operate normally even when the browser is offline.
   env.scheduleFetch('highPriority');
   await flushAllTimers();
 
@@ -113,7 +115,7 @@ test('stores unregister their previous offline session when the session key beco
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => currentSessionKey, {
         network: network.config,
         operations: {
           updateValue: {
@@ -121,7 +123,7 @@ test('stores unregister their previous offline session when the session key beco
             execute: ({ input }: UpdateValueExecuteContext) => input,
           },
         },
-      },
+      }),
     },
   });
 
@@ -180,7 +182,7 @@ test('logging back into the same session replays durable offline mutations queue
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => currentSessionKey, {
         network: network.config,
         operations: {
           updateValue: {
@@ -194,7 +196,7 @@ test('logging back into the same session replays durable offline mutations queue
             },
           },
         },
-      },
+      }),
     },
   });
 
@@ -331,7 +333,7 @@ test('global and store offline entities expose temp-create dependency metadata o
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offlineMode: {
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
           network: network.config,
           operations: {
             createUser: {
@@ -352,7 +354,7 @@ test('global and store offline entities expose temp-create dependency metadata o
               execute: ({ input }) => ({ name: input.name }),
             },
           },
-        },
+        }),
       },
     },
   );
@@ -489,7 +491,7 @@ test('global and store offline entities expose temp-create dependency metadata o
   `);
 });
 
-// Each store manages its own offline lifecycle -- a store without offlineMode
+// Each store manages its own offline lifecycle -- a store without offline config
 // should never surface pending-sync or offline-entity state from sibling stores.
 test('plain stores do not inherit offline state from other stores in the same session', async () => {
   network.setOffline();
@@ -503,7 +505,7 @@ test('plain stores do not inherit offline state from other stores in the same se
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offlineMode: {
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
           network: network.config,
           operations: {
             updateValue: {
@@ -516,7 +518,7 @@ test('plain stores do not inherit offline state from other stores in the same se
               },
             },
           },
-        },
+        }),
       },
     },
   );
@@ -569,7 +571,7 @@ test('offline mutations fail fast when no session key is available', async () =>
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         network: network.config,
         operations: {
           updateValue: {
@@ -582,7 +584,7 @@ test('offline mutations fail fast when no session key is available', async () =>
             },
           },
         },
-      },
+      }),
     },
   });
 
@@ -638,7 +640,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offlineMode: {
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
           network: network.config,
           operations: {
             updateValue: {
@@ -651,7 +653,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
               },
             },
           },
-        },
+        }),
       },
     });
 
@@ -770,7 +772,10 @@ test('global offline status is shared across stores in the same session', async 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: { network: { enabled: true }, operations: {} },
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
+        network: { enabled: true },
+        operations: {},
+      }),
     },
   });
 
@@ -782,7 +787,10 @@ test('global offline status is shared across stores in the same session', async 
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offlineMode: { network: { enabled: true }, operations: {} },
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
+          network: { enabled: true },
+          operations: {},
+        }),
       },
     },
   );
@@ -806,27 +814,65 @@ test('global offline status is shared across stores in the same session', async 
   hook.unmount();
 });
 
+test('stores sharing a session key reject incompatible offline session configs', () => {
+  const sessionKey = 'incompatible-offline-session';
+  const matchingSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: { enabled: true } },
+  });
+  const incompatibleSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: {
+      network: { enabled: true },
+      outage: { enabled: true, recoveryCheck: () => false },
+    },
+  });
+
+  createDocumentStoreTestEnv(1, {
+    id: 'incompatible-offline-session-a',
+    getSessionKey: () => sessionKey,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { session: matchingSession, operations: {} },
+    },
+  });
+
+  expect(() =>
+    incompatibleSession.getOfflineRuntimeConfig(),
+  ).toThrowErrorMatchingInlineSnapshot(
+    `
+    Error#:
+      message: '[tsdf] Incompatible offline session configuration for session "incompatible-offline-session"'
+      name: 'Error'
+    `,
+  );
+});
+
 test('runtime mode enabled toggles are shared across stores in the same session', async () => {
   network.setOffline();
   const sessionKey = 'shared-runtime-offline-controls';
   const usersQuery = { tableId: 'users' } as const;
   const sharedOutageRecoveryCheck = () => false;
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: {
+      network: network.config,
+      outage: { enabled: true, recoveryCheck: sharedOutageRecoveryCheck },
+    },
+  });
 
-  const documentEnv = createDocumentStoreTestEnv(1, {
+  const documentEnv_ = createDocumentStoreTestEnv(1, {
     id: 'shared-runtime-doc',
     getSessionKey: () => sessionKey,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
-        network: network.config,
-        outage: { enabled: true, recoveryCheck: sharedOutageRecoveryCheck },
-        operations: {},
-      },
+      offline: { session: offlineSession, operations: {} },
     },
   });
 
-  const collectionEnv = createCollectionStoreTestEnv(
+  const collectionEnv_ = createCollectionStoreTestEnv(
     { 'users||1': { name: 'User 1' } },
     {
       id: 'shared-runtime-collection',
@@ -835,16 +881,12 @@ test('runtime mode enabled toggles are shared across stores in the same session'
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offlineMode: {
-          network: network.config,
-          outage: { enabled: true, recoveryCheck: sharedOutageRecoveryCheck },
-          operations: {},
-        },
+        offline: { session: offlineSession, operations: {} },
       },
     },
   );
 
-  const listQueryEnv = createListQueryStoreTestEnv(
+  const listQueryEnv_ = createListQueryStoreTestEnv(
     { users: [{ id: 1, name: 'Ada' }] },
     {
       id: 'shared-runtime-list-query',
@@ -855,41 +897,30 @@ test('runtime mode enabled toggles are shared across stores in the same session'
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offlineMode: {
-          network: network.config,
-          outage: { enabled: true, recoveryCheck: sharedOutageRecoveryCheck },
-          operations: {},
-        },
+        offline: { session: offlineSession, operations: {} },
       },
     },
   );
 
   await Promise.resolve();
 
-  expect(documentEnv.apiStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'allow', outage: 'allow' }
     network: { enabled: '✅' }
     outage: { enabled: '✅' }
   `);
 
-  documentEnv.apiStore.setOfflineRuntimeConfig({
+  offlineSession.setOfflineRuntimeConfig({
     network: { enabled: false },
     outage: { enabled: false },
   });
   await Promise.resolve();
 
-  expect(collectionEnv.apiStore.getOfflineRuntimeConfig())
-    .toMatchInlineSnapshot(`
-      mutationQueueing: { network: 'allow', outage: 'allow' }
-      network: { enabled: '❌' }
-      outage: { enabled: '❌' }
-    `);
-  expect(listQueryEnv.apiStore.getOfflineRuntimeConfig())
-    .toMatchInlineSnapshot(`
-      mutationQueueing: { network: 'allow', outage: 'allow' }
-      network: { enabled: '❌' }
-      outage: { enabled: '❌' }
-    `);
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '❌' }
+    outage: { enabled: '❌' }
+  `);
   expect(
     pick(getGlobalOfflineStatus(sessionKey), [
       'effectiveMode',
@@ -906,13 +937,13 @@ test('runtime mode enabled toggles are shared across stores in the same session'
     sessionKey: 'shared-runtime-offline-controls'
   `);
 
-  collectionEnv.apiStore.setOfflineRuntimeConfig({
+  offlineSession.setOfflineRuntimeConfig({
     network: { enabled: true },
     outage: { enabled: true },
   });
   await Promise.resolve();
 
-  expect(documentEnv.apiStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'allow', outage: 'allow' }
     network: { enabled: '✅' }
     outage: { enabled: '✅' }
@@ -937,50 +968,58 @@ test('runtime mode enabled toggles are shared across stores in the same session'
 test('runtime offline overrides are memory-only and reset to the store config after restart', async () => {
   network.setOffline();
   const sessionKey = 'memory-only-runtime-offline-controls';
+  const firstOfflineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
-  const firstEnv = createDocumentStoreTestEnv(1, {
+  const firstEnv_ = createDocumentStoreTestEnv(1, {
     id: 'memory-only-runtime-doc',
     getSessionKey: () => sessionKey,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: { network: network.config, operations: {} },
+      offline: { session: firstOfflineSession, operations: {} },
     },
   });
 
   await Promise.resolve();
-  firstEnv.apiStore.setOfflineRuntimeConfig({
+  firstOfflineSession.setOfflineRuntimeConfig({
     network: { enabled: false },
     mutationQueueing: { network: 'disallow' },
   });
   await Promise.resolve();
 
-  expect(firstEnv.apiStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(firstOfflineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'disallow', outage: 'allow' }
     network: { enabled: '❌' }
     outage: { enabled: '❌' }
   `);
 
   __resetSessionOfflineCoordinatorRegistryForTests();
+  const restartedOfflineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
-  const restartedEnv = createDocumentStoreTestEnv(1, {
+  const restartedEnv_ = createDocumentStoreTestEnv(1, {
     id: 'memory-only-runtime-doc',
     getSessionKey: () => sessionKey,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: { network: network.config, operations: {} },
+      offline: { session: restartedOfflineSession, operations: {} },
     },
   });
 
   await Promise.resolve();
 
-  expect(restartedEnv.apiStore.getOfflineRuntimeConfig())
+  expect(restartedOfflineSession.getOfflineRuntimeConfig())
     .toMatchInlineSnapshot(`
-      mutationQueueing: { network: 'allow', outage: 'allow' }
-      network: { enabled: '✅' }
-      outage: { enabled: '❌' }
-    `);
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '✅' }
+    outage: { enabled: '❌' }
+  `);
   expect(
     pick(getGlobalOfflineStatus(sessionKey), [
       'effectiveMode',
@@ -998,11 +1037,53 @@ test('runtime offline overrides are memory-only and reset to the store config af
   `);
 });
 
+test('offline sessions follow dynamic session key changes and keep runtime overrides scoped per session key', () => {
+  let currentSessionKey: string | false = 'dynamic-offline-session-a';
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => currentSessionKey,
+    config: { network: { enabled: true } },
+  });
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '✅' }
+    outage: { enabled: '❌' }
+  `);
+
+  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '❌' }
+    outage: { enabled: '❌' }
+  `);
+
+  currentSessionKey = 'dynamic-offline-session-b';
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '✅' }
+    outage: { enabled: '❌' }
+  `);
+
+  currentSessionKey = 'dynamic-offline-session-a';
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '❌' }
+    outage: { enabled: '❌' }
+  `);
+});
+
 test('disabling active network mode pauses replay until network is re-enabled and connectivity recovers', async () => {
   network.setOffline();
   const sessionKey = 'runtime-network-replay-pause';
   const storeName = 'runtime-network-replay-pause-doc';
   const replayedInputs: { value: number }[] = [];
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
@@ -1011,8 +1092,8 @@ test('disabling active network mode pauses replay until network is re-enabled an
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
-        network: network.config,
+      offline: {
+        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1047,7 +1128,7 @@ test('disabling active network mode pauses replay until network is re-enabled an
 
   expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
 
-  env.apiStore.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
   await Promise.resolve();
 
   expect(
@@ -1070,7 +1151,7 @@ test('disabling active network mode pauses replay until network is re-enabled an
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
 
-  env.apiStore.setOfflineRuntimeConfig({ network: { enabled: true } });
+  offlineSession.setOfflineRuntimeConfig({ network: { enabled: true } });
   await Promise.resolve();
 
   expect(
@@ -1112,6 +1193,22 @@ test('disabling active outage mode pauses replay until outage is re-enabled and 
     recoveryAttempts += 1;
     return recoveryAttempts >= 2;
   });
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: {
+      classifyFailure: () => 'outage' as const,
+      outage: {
+        enabled: true,
+        recoveryCheck,
+        recoveryProbe: {
+          initialIntervalMs: 100,
+          maxIntervalMs: 100,
+          backoffMultiplier: 1,
+          jitterRatio: 0,
+        },
+      },
+    },
+  });
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
@@ -1120,18 +1217,8 @@ test('disabling active outage mode pauses replay until outage is re-enabled and 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
-        classifyFailure: () => 'outage' as const,
-        outage: {
-          enabled: true,
-          recoveryCheck,
-          recoveryProbe: {
-            initialIntervalMs: 100,
-            maxIntervalMs: 100,
-            backoffMultiplier: 1,
-            jitterRatio: 0,
-          },
-        },
+      offline: {
+        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1176,7 +1263,7 @@ test('disabling active outage mode pauses replay until outage is re-enabled and 
     sessionKey: 'runtime-outage-replay-pause'
   `);
 
-  env.apiStore.setOfflineRuntimeConfig({ outage: { enabled: false } });
+  offlineSession.setOfflineRuntimeConfig({ outage: { enabled: false } });
   await Promise.resolve();
   await advanceTime(250);
 
@@ -1199,7 +1286,7 @@ test('disabling active outage mode pauses replay until outage is re-enabled and 
     sessionKey: 'runtime-outage-replay-pause'
   `);
 
-  env.apiStore.setOfflineRuntimeConfig({ outage: { enabled: true } });
+  offlineSession.setOfflineRuntimeConfig({ outage: { enabled: true } });
   await Promise.resolve();
 
   expect(
@@ -1234,9 +1321,13 @@ test('disabling active outage mode pauses replay until outage is re-enabled and 
   );
 });
 
-test('runtime mutation queueing overrides are store-local and affect only future mutations', async () => {
+test('runtime mutation queueing overrides are shared across stores in the same session and affect only future mutations', async () => {
   network.setOffline();
   const sessionKey = 'runtime-mutation-queueing-overrides';
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
   function createEnv(storeName: string) {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
@@ -1246,8 +1337,8 @@ test('runtime mutation queueing overrides are store-local and affect only future
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offlineMode: {
-          network: network.config,
+        offline: {
+          session: offlineSession,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1282,7 +1373,7 @@ test('runtime mutation queueing overrides are store-local and affect only future
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-a'),
   ).toHaveLength(1);
 
-  envA.apiStore.setOfflineRuntimeConfig({
+  offlineSession.setOfflineRuntimeConfig({
     mutationQueueing: { network: 'disallow' },
   });
 
@@ -1311,12 +1402,12 @@ test('runtime mutation queueing overrides are store-local and affect only future
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
-  expect(otherStoreResult.ok).toBe(true);
+  expect(otherStoreResult.ok).toBe(false);
   expect(
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-b'),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
 
-  envA.apiStore.resetOfflineRuntimeConfig();
+  offlineSession.resetOfflineRuntimeConfig();
 
   const resetResult = await envA.apiStore.performMutation({
     optimisticUpdate: () => {
@@ -1332,7 +1423,7 @@ test('runtime mutation queueing overrides are store-local and affect only future
   expect(
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-a'),
   ).toHaveLength(2);
-  expect(envA.apiStore.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
     mutationQueueing: { network: 'allow', outage: 'allow' }
     network: { enabled: '✅' }
     outage: { enabled: '❌' }
@@ -1354,7 +1445,7 @@ test('global and per-store offline entity selectors aggregate queued work across
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offlineMode: {
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
           network: network.config,
           operations: {
             updateValue: {
@@ -1367,7 +1458,7 @@ test('global and per-store offline entity selectors aggregate queued work across
               },
             },
           },
-        },
+        }),
       },
     });
     return env;

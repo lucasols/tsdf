@@ -37,6 +37,7 @@ import {
 } from '../offline/offlineTestShared';
 import { flushAllTimers, range } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -424,16 +425,19 @@ describe('collection hook memoization', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offlineMode: {
-            network: network.config,
-            operations: {
-              patchName: {
-                inputSchema: userPatchSchema,
-                getEntityRefs: ({ input }) => [input.itemId],
-                execute: () => ({ name: 'ignored' }),
+          offline: createOfflineConfigForSessionKey(
+            () => 'collection-pending-sync-memoization',
+            {
+              network: network.config,
+              operations: {
+                patchName: {
+                  inputSchema: userPatchSchema,
+                  getEntityRefs: ({ input }) => [input.itemId],
+                  execute: () => ({ name: 'ignored' }),
+                },
               },
             },
-          },
+          ),
         },
       },
     );
@@ -1014,16 +1018,19 @@ describe('list-query hook memoization', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offlineMode: {
-            network: network.config,
-            operations: {
-              patchUserName: {
-                inputSchema: userPatchSchema,
-                getEntityRefs: ({ input }) => [input.itemId],
-                execute: () => ({ name: 'ignored' }),
+          offline: createOfflineConfigForSessionKey(
+            () => 'list-query-item-pending-sync-memoization',
+            {
+              network: network.config,
+              operations: {
+                patchUserName: {
+                  inputSchema: userPatchSchema,
+                  getEntityRefs: ({ input }) => [input.itemId],
+                  execute: () => ({ name: 'ignored' }),
+                },
               },
             },
-          },
+          ),
         },
       },
     );
@@ -1094,16 +1101,19 @@ describe('list-query hook memoization', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offlineMode: {
-            network: network.config,
-            operations: {
-              patchUserName: {
-                inputSchema: userPatchSchema,
-                getEntityRefs: ({ input }) => [input.itemId],
-                execute: () => ({ name: 'ignored' }),
+          offline: createOfflineConfigForSessionKey(
+            () => 'list-query-query-pending-sync-memoization',
+            {
+              network: network.config,
+              operations: {
+                patchUserName: {
+                  inputSchema: userPatchSchema,
+                  getEntityRefs: ({ input }) => [input.itemId],
+                  execute: () => ({ name: 'ignored' }),
+                },
               },
             },
-          },
+          ),
         },
       },
     );

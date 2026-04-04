@@ -103,7 +103,9 @@ export function setupDocumentPersistence<
   let syncHydrationMissKnown = false;
 
   function isOfflineNetworkActive(): boolean {
-    return isOfflineNetworkModeActiveSync(config.offlineMode?.network);
+    return isOfflineNetworkModeActiveSync(
+      config.offline?.session.getConfig().network,
+    );
   }
 
   function hydrateFromLocalStorage(): void {

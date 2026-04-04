@@ -7,6 +7,7 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import { docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -34,7 +35,7 @@ test('classified network failures activate network mode and shift fetches into o
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure,
         network: {
           ...network.config,
@@ -47,7 +48,7 @@ test('classified network failures activate network mode and shift fetches into o
           },
         },
         operations: {},
-      },
+      }),
     },
   });
 
@@ -90,7 +91,7 @@ test('classified network recovery uses network-specific probes and clears networ
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure: () => 'network' as const,
         network: {
           ...network.config,
@@ -103,7 +104,7 @@ test('classified network recovery uses network-specific probes and clears networ
           },
         },
         operations: {},
-      },
+      }),
     },
   });
   const statusHook = renderHook(() => {
@@ -180,7 +181,10 @@ test('network classifications are ignored when network mode is disabled', async 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: { classifyFailure, operations: {} },
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
+        classifyFailure,
+        operations: {},
+      }),
     },
   });
 
@@ -212,7 +216,7 @@ test('browser offline events stop classified-network probing and hand control to
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure: () => 'network' as const,
         network: {
           ...network.config,
@@ -225,7 +229,7 @@ test('browser offline events stop classified-network probing and hand control to
           },
         },
         operations: {},
-      },
+      }),
     },
   });
 
@@ -268,7 +272,7 @@ test('coming back online after browser-driven network takeover clears the interr
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offlineMode: {
+      offline: createOfflineConfigForSessionKey(() => sessionKey, {
         classifyFailure: () => 'network' as const,
         network: {
           ...network.config,
@@ -281,7 +285,7 @@ test('coming back online after browser-driven network takeover clears the interr
           },
         },
         operations: {},
-      },
+      }),
     },
   });
 

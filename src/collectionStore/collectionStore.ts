@@ -39,8 +39,6 @@ import {
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
   type OfflineMutationInput,
-  type OfflineRuntimeConfigUpdate,
-  defaultOfflineRuntimeConfig,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -468,121 +466,124 @@ export function createCollectionStore<
       }
     });
   }
+  const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
 
-  const offlineController = resolvedPersistentStorageConfig?.offlineMode
-    ? createOfflineStoreController({
-        storeName: id,
-        storeType: 'collection',
-        getSessionKey,
-        onPersistentStorageError:
-          resolvedPersistentStorageConfig.onPersistentStorageError,
-        adapter: resolvedPersistentStorageConfig.adapter,
-        offlineMode: resolvedPersistentStorageConfig.offlineMode,
-        storeAdapter: {
-          normalizeEntityRefs: (entityRefs) =>
-            entityRefs.map((ref) => {
-              // Temp entities are queued internally as normalized refs.
-              const normalizedRef = offlineItemEntityRefSchema
-                .parse(ref)
-                .unwrapOrNull();
-              if (normalizedRef !== null) return normalizedRef;
+  const offlineController =
+    resolvedPersistentStorageConfig && resolvedOfflineConfig
+      ? createOfflineStoreController({
+          storeName: id,
+          storeType: 'collection',
+          getSessionKey,
+          onPersistentStorageError:
+            resolvedPersistentStorageConfig.onPersistentStorageError,
+          adapter: resolvedPersistentStorageConfig.adapter,
+          offlineSession: resolvedOfflineConfig.session,
+          operations: resolvedOfflineConfig.operations,
+          storeAdapter: {
+            normalizeEntityRefs: (entityRefs) =>
+              entityRefs.map((ref) => {
+                // Temp entities are queued internally as normalized refs.
+                const normalizedRef = offlineItemEntityRefSchema
+                  .parse(ref)
+                  .unwrapOrNull();
+                if (normalizedRef !== null) return normalizedRef;
 
-              return {
-                entityKey: getItemKey(
-                  // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
-                  __LEGIT_CAST__<ItemPayload, unknown>(ref),
+                return {
+                  entityKey: getItemKey(
+                    // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
+                    __LEGIT_CAST__<ItemPayload, unknown>(ref),
+                  ),
+                  entityKind: 'item' as const,
+                };
+              }),
+            getProtectedCacheKeys: (entityRefs) => {
+              const sessionKey = getSessionKey();
+              if (sessionKey === false) return [];
+              return entityRefs.map((ref) =>
+                createProtectedStorageKey({
+                  backend:
+                    resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                      ? 'opfs'
+                      : 'localStorage',
+                  sessionKey,
+                  storeName: id,
+                  kind: 'collection.item',
+                  key: ref.entityKey,
+                }),
+              );
+            },
+            applyPendingEntity: ({ tempId, pendingEntity }) => {
+              if (!pendingEntity || typeof pendingEntity !== 'object') return;
+              addItemToState(
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when applying queued entities.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+                // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
+                __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+              );
+            },
+            rollbackPendingEntity: ({ tempId }) => {
+              deleteItemState(
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when removing queued temp entities.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+              );
+            },
+            reconcileTempEntity: ({ tempId, reconciliation }) => {
+              const currentItem = getItemState(
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+              );
+              const finalData =
+                reconciliation.finalData !== undefined
+                  ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
+                    __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
+                  : (currentItem?.data ?? undefined);
+              if (finalData === undefined) return;
+              deleteItemState(
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload before deleting the temp entry.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+              );
+              addItemToState(
+                // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(
+                  reconciliation.finalPayload,
                 ),
-                entityKind: 'item' as const,
-              };
-            }),
-          getProtectedCacheKeys: (entityRefs) => {
-            const sessionKey = getSessionKey();
-            if (sessionKey === false) return [];
-            return entityRefs.map((ref) =>
-              createProtectedStorageKey({
-                backend:
-                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
-                    ? 'opfs'
-                    : 'localStorage',
-                sessionKey,
-                storeName: id,
-                kind: 'collection.item',
-                key: ref.entityKey,
-              }),
-            );
-          },
-          applyPendingEntity: ({ tempId, pendingEntity }) => {
-            if (!pendingEntity || typeof pendingEntity !== 'object') return;
-            addItemToState(
-              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when applying queued entities.
-              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-              // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
-              __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
-            );
-          },
-          rollbackPendingEntity: ({ tempId }) => {
-            deleteItemState(
-              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when removing queued temp entities.
-              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-            );
-          },
-          reconcileTempEntity: ({ tempId, reconciliation }) => {
-            const currentItem = getItemState(
-              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
-              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-            );
-            const finalData =
-              reconciliation.finalData !== undefined
-                ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
-                  __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
-                : (currentItem?.data ?? undefined);
-            if (finalData === undefined) return;
-            deleteItemState(
-              // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload before deleting the temp entry.
-              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-            );
-            addItemToState(
-              // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
-              __LEGIT_CAST__<ItemPayload, ValidPayload>(
-                reconciliation.finalPayload,
-              ),
-              finalData,
-            );
-          },
-          captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
-            if (offlineOverlaySessionKey !== sessionKey)
-              clearOfflineOverlays(sessionKey);
-            captureOfflineOverlays(
-              entityRefs.flatMap((ref) => {
-                return ref.entityKind === 'item' ? [ref.entityKey] : [];
-              }),
-            );
-          },
-          syncEntityOverlays: ({ entities, sessionKey }) => {
-            if (offlineOverlaySessionKey !== sessionKey)
-              clearOfflineOverlays(sessionKey);
+                finalData,
+              );
+            },
+            captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey)
+                clearOfflineOverlays(sessionKey);
+              captureOfflineOverlays(
+                entityRefs.flatMap((ref) => {
+                  return ref.entityKind === 'item' ? [ref.entityKey] : [];
+                }),
+              );
+            },
+            syncEntityOverlays: ({ entities, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey)
+                clearOfflineOverlays(sessionKey);
 
-            const activeItemKeys = new Set(
-              entities
-                .filter((entity) => {
-                  return (
-                    entity.entityKind === 'item' && !entity.requiresResolution
-                  );
-                })
-                .map((entity) => entity.entityKey),
-            );
+              const activeItemKeys = new Set(
+                entities
+                  .filter((entity) => {
+                    return (
+                      entity.entityKind === 'item' && !entity.requiresResolution
+                    );
+                  })
+                  .map((entity) => entity.entityKey),
+              );
 
-            offlineOverlayStore.produceState((draft) => {
-              for (const itemKey of Object.keys(draft)) {
-                if (!activeItemKeys.has(itemKey)) {
-                  delete draft[itemKey];
+              offlineOverlayStore.produceState((draft) => {
+                for (const itemKey of Object.keys(draft)) {
+                  if (!activeItemKeys.has(itemKey)) {
+                    delete draft[itemKey];
+                  }
                 }
-              }
-            });
+              });
+            },
           },
-        },
-      })
-    : null;
+        })
+      : null;
 
   function touchItems(itemKeys: string[]): void {
     itemCacheRuntime.touch(itemKeys, (itemKey) => {
@@ -1928,15 +1929,6 @@ export function createCollectionStore<
       offlineController?.getOfflineResolutions() ?? [],
     resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
       offlineController?.resolveOfflineResolution(resolutionId, resolution),
-    getOfflineRuntimeConfig: () =>
-      offlineController?.getOfflineRuntimeConfig() ??
-      defaultOfflineRuntimeConfig,
-    setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => {
-      offlineController?.setOfflineRuntimeConfig(update);
-    },
-    resetOfflineRuntimeConfig: () => {
-      offlineController?.resetOfflineRuntimeConfig();
-    },
     startMutation,
     invalidateItem,
     updateItemState,

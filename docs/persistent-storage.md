@@ -20,6 +20,7 @@ Exported from `tsdf`:
 | `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                   |
 | `StorageBackend`                                                                                             | `'localStorage' \| 'opfs'`                                  |
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                        |
+| `createOfflineSession({ getSessionKey, config })`                                                            | Creates a shared offline session for multiple stores        |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                            |
 | `clearSessionStorage(sessionKey, backend)`                                                                   | Clears all TSDF entries for one session/backend             |
 | `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across all backends |
@@ -52,7 +53,9 @@ Store-specific options:
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store's existing `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
-If `persistentStorage.offlineMode` is configured, `offlineMode.mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
+If `persistentStorage.offline` is configured, create one shared offline session with `createOfflineSession(...)` and pass that session to every store that should share connectivity policy and runtime controls. Store-local offline behavior stays in `persistentStorage.offline.operations`.
+
+Session-level `mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
 
 ## Backend behavior
 
@@ -73,13 +76,23 @@ If `persistentStorage.offlineMode` is configured, `offlineMode.mutationQueueing`
 
 ```ts
 import { rc_object, rc_string } from 'runcheck';
-import { createDocumentStore } from 'tsdf';
+import { createDocumentStore, createOfflineSession } from 'tsdf';
 
 type Settings = { id: string; theme: 'light' | 'dark' };
 
+const getSessionKey = () => (userId ? `tenant:${userId}` : false);
+
+const offlineSession = createOfflineSession({
+  getSessionKey,
+  config: {
+    network: { enabled: true },
+    mutationQueueing: { network: 'allow', outage: 'allow' },
+  },
+});
+
 const settingsStore = createDocumentStore<Settings>({
   id: 'document-settings',
-  getSessionKey: () => (userId ? `tenant:${userId}` : false),
+  getSessionKey,
   fetchFn: (signal) => api.getSettings(signal),
   errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
@@ -95,6 +108,7 @@ const settingsStore = createDocumentStore<Settings>({
     onPersistentStorageError: (error) => {
       console.error('Settings persistence failed', error);
     },
+    offline: { session: offlineSession, operations: {} },
   },
 });
 ```

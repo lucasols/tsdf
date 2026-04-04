@@ -25,8 +25,6 @@ import {
 import {
   offlineItemEntityRefSchema,
   type OfflineMutationInput,
-  type OfflineRuntimeConfigUpdate,
-  defaultOfflineRuntimeConfig,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -585,6 +583,7 @@ export function createListQueryStore<
         getQueryKey,
       })
     : null;
+  const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
 
   const store = new Store<State>({
     debugName,
@@ -1142,15 +1141,13 @@ export function createListQueryStore<
       events.emit('invalidateItem', event);
     },
     blockWindowClose,
-    offlineController: resolvedPersistentStorageConfig?.offlineMode
-      ? offlineMutationController
-      : null,
+    offlineController: resolvedOfflineConfig ? offlineMutationController : null,
     runWithBroadcastConsistency,
     publishQuerySnapshot,
     publishItemSnapshot,
   });
 
-  if (resolvedPersistentStorageConfig?.offlineMode) {
+  if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
     offlineController = createOfflineStoreController<
       Exclude<TOfflineOperations, null>
     >({
@@ -1160,7 +1157,14 @@ export function createListQueryStore<
       onPersistentStorageError:
         resolvedPersistentStorageConfig.onPersistentStorageError,
       adapter: resolvedPersistentStorageConfig.adapter,
-      offlineMode: resolvedPersistentStorageConfig.offlineMode,
+      offlineSession: resolvedOfflineConfig.session,
+      // WORKAROUND: The list-query persistent config keeps operations behind a
+      // widened generic boundary, so the controller input has to re-narrow
+      // them back to the caller's concrete offline operation map here.
+      operations: __LEGIT_CAST__<
+        Exclude<TOfflineOperations, null>,
+        Record<string, unknown>
+      >(resolvedOfflineConfig.operations),
       storeAdapter: {
         normalizeEntityRefs: (entityRefs) =>
           entityRefs.map((ref) => {
@@ -2246,15 +2250,6 @@ export function createListQueryStore<
       offlineController?.getOfflineResolutions() ?? [],
     resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
       offlineController?.resolveOfflineResolution(resolutionId, resolution),
-    getOfflineRuntimeConfig: () =>
-      offlineController?.getOfflineRuntimeConfig() ??
-      defaultOfflineRuntimeConfig,
-    setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => {
-      offlineController?.setOfflineRuntimeConfig(update);
-    },
-    resetOfflineRuntimeConfig: () => {
-      offlineController?.resetOfflineRuntimeConfig();
-    },
     preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,

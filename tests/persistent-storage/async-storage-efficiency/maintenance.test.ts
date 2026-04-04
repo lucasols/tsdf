@@ -12,6 +12,7 @@ import {
   resolveAfterAllTimers,
 } from '../../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../../utils/networkMock';
+import { createOfflineConfigForSessionKey } from '../../utils/offlineConfig';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
   getOpfsDirTree,
@@ -727,7 +728,7 @@ describe('async storage efficiency: maintenance', () => {
         persistentStorage: {
           adapter: opfsPersistentStorage,
           schema: wrappedDocumentSchema,
-          offlineMode: {
+          offline: createOfflineConfigForSessionKey(() => dottedSessionKey, {
             network: offlineNetwork.config,
             operations: {
               markProtected: {
@@ -735,7 +736,7 @@ describe('async storage efficiency: maintenance', () => {
                 execute: ({ input }) => input,
               },
             },
-          },
+          }),
         },
       },
     );

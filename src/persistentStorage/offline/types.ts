@@ -95,17 +95,17 @@ export type OfflineMutationQueueingConfig = {
 };
 
 /**
- * Effective runtime offline controls exposed through store instances.
+ * Effective runtime offline controls exposed through an offline session.
  *
- * `network` and `outage` are session-scoped and may affect every store sharing
- * the same session key. `mutationQueueing` remains store-local.
+ * All fields are session-scoped and affect every store attached to the same
+ * offline session.
  */
 export type OfflineRuntimeConfig = {
   /** Effective network mode enablement for the current session. */
   network: { enabled: boolean };
   /** Effective outage mode enablement for the current session. */
   outage: { enabled: boolean };
-  /** Effective store-local queue admission policy for offline-enabled mutations. */
+  /** Effective queue admission policy for offline-enabled mutations. */
   mutationQueueing: {
     network: OfflineMutationQueueingPolicy;
     outage: OfflineMutationQueueingPolicy;
@@ -120,7 +120,7 @@ export const defaultOfflineRuntimeConfig: OfflineRuntimeConfig = {
 };
 
 /**
- * Partial runtime offline control update accepted by store instances.
+ * Partial runtime offline control update accepted by an offline session.
  *
  * Provided fields shallow-merge into the current runtime config.
  */
@@ -129,7 +129,7 @@ export type OfflineRuntimeConfigUpdate = {
   network?: { enabled?: boolean };
   /** Optional session-scoped update for outage mode enablement. */
   outage?: { enabled?: boolean };
-  /** Optional store-local update for offline mutation queue admission policy. */
+  /** Optional session-scoped update for offline mutation queue admission policy. */
   mutationQueueing?: {
     network?: OfflineMutationQueueingPolicy;
     outage?: OfflineMutationQueueingPolicy;
@@ -146,20 +146,6 @@ export type OfflineFailureContext = {
   operationName?: string;
   /** Session key used by browser tab and persistence scoping. */
   sessionKey: string;
-};
-
-/** Fixed replay retry policy for healthy online replay failures. Omitted fields use built-in defaults. */
-export type OfflineReplayRetryConfig = {
-  /**
-   * Max counted failures before manual resolution is required.
-   * @default 5
-   */
-  maxFailures?: number;
-  /**
-   * Fixed delay between replay retries, in milliseconds.
-   * @default 5000
-   */
-  intervalMs?: number;
 };
 
 /** Re-check strategy for recovery probing. Omitted fields use built-in defaults (which differ between network and outage modes). */
@@ -219,10 +205,44 @@ export type OfflineOutageModeConfig = {
   recoveryProbe?: OfflineRecoveryProbeConfig;
 };
 
-const offlineStatusModeStateSchema = rc_object({
-  enabled: rc_boolean,
-  active: rc_boolean,
-});
+/** Fixed replay retry policy for healthy online replay failures. Omitted fields use built-in defaults. */
+export type OfflineReplayRetryConfig = {
+  /**
+   * Max counted failures before manual resolution is required.
+   * @default 5
+   */
+  maxFailures?: number;
+  /**
+   * Fixed delay between replay retries, in milliseconds.
+   * @default 5000
+   */
+  intervalMs?: number;
+};
+
+/** Shared offline/session policy reused by every store in the same session. */
+export type OfflineSessionConfig = {
+  /**
+   * Classify a remote failure as `outage`, `network`, or `ignore`.
+   * `outage` activates outage recovery behavior.
+   * `network` activates network offline handling only when `network.enabled` is true.
+   */
+  classifyFailure?: (
+    error: unknown,
+    ctx: OfflineFailureContext,
+  ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
+  /** Network detection strategy and browser integration. */
+  network?: OfflineNetworkModeConfig;
+  /** Outage detection and recovery strategy for remote failures. */
+  outage?: OfflineOutageModeConfig;
+  /** Fixed retry policy for healthy online replay failures. */
+  replayRetry?: OfflineReplayRetryConfig;
+  /**
+   * Root policy controlling whether offline-enabled mutations may enter the
+   * durable offline queue for each active offline cause.
+   * @default undefined
+   */
+  mutationQueueing?: OfflineMutationQueueingConfig;
+};
 
 /** Effective network/offline state computed by offline coordination. */
 export type OfflineConnectivityState = 'online' | 'offline';
@@ -248,28 +268,6 @@ export type GlobalOfflineStatus = {
   /** Timestamp of last recovery probe execution, if any. */
   lastRecoveryCheckAt: number | null;
 };
-
-/** Runtime schema for persisted global offline status records. */
-export const globalOfflineStatusSchema = rc_object({
-  sessionKey: rc_string,
-  network: offlineStatusModeStateSchema,
-  outage: offlineStatusModeStateSchema,
-  effectiveMode: rc_literals('online', 'offline'),
-  effectiveOffline: rc_boolean,
-  isLeader: rc_boolean,
-  updatedAt: rc_number,
-  lastFailureAt: rc_number.orNull(),
-  lastRecoveryCheckAt: rc_number.orNull(),
-});
-
-export function isEffectiveOfflineStatusValue(value: unknown): boolean {
-  const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
-  if (status === null) return false;
-
-  return (
-    status.effectiveOffline || status.network.active || status.outage.active
-  );
-}
 
 /** Queue state of an offline mutation entry. */
 export type OfflineSyncState = 'pending' | 'syncing' | 'needs-confirmation';
@@ -309,6 +307,55 @@ export type GlobalOfflineEntity = {
   /** Optional temporary ID for optimistic create flows. */
   tempId?: ValidPayload;
 };
+
+/** Session-scoped offline controller shared across stores in the same session. */
+export type OfflineSession = {
+  /** Returns the active session key used to scope shared offline state. */
+  getSessionKey: () => string | false;
+  /** Shared static session configuration used by attached stores. */
+  getConfig: () => OfflineSessionConfig;
+  /** Latest effective runtime config for this session. */
+  getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
+  /** Updates runtime controls for this session. */
+  setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => void;
+  /** Resets runtime controls back to the static session config. */
+  resetOfflineRuntimeConfig: () => void;
+  /** Returns the latest global offline status for the session. */
+  getOfflineStatus: () => GlobalOfflineStatus;
+  /** Returns the latest aggregated offline entities for the session. */
+  getOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** React hook subscribing to the session's global offline status. */
+  useOfflineStatus: () => GlobalOfflineStatus;
+  /** React hook subscribing to the session's aggregated offline entities. */
+  useOfflineEntities: () => readonly GlobalOfflineEntity[];
+};
+
+const offlineStatusModeStateSchema = rc_object({
+  enabled: rc_boolean,
+  active: rc_boolean,
+});
+
+/** Runtime schema for persisted global offline status records. */
+export const globalOfflineStatusSchema = rc_object({
+  sessionKey: rc_string,
+  network: offlineStatusModeStateSchema,
+  outage: offlineStatusModeStateSchema,
+  effectiveMode: rc_literals('online', 'offline'),
+  effectiveOffline: rc_boolean,
+  isLeader: rc_boolean,
+  updatedAt: rc_number,
+  lastFailureAt: rc_number.orNull(),
+  lastRecoveryCheckAt: rc_number.orNull(),
+});
+
+export function isEffectiveOfflineStatusValue(value: unknown): boolean {
+  const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
+  if (status === null) return false;
+
+  return (
+    status.effectiveOffline || status.network.active || status.outage.active
+  );
+}
 
 /**
  * Persisted offline conflict payload.
@@ -499,14 +546,6 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
 export type OfflineRetryExhaustedResolutionAction =
   | { action: 'retry' }
   | { action: 'discard' };
-
-/**
- * Base shape for each offline operation entry in `offlineMode.operations`.
- * The `inputSchema` is used for both validation and queue serialization.
- */
-export type OfflineOperationSchemaShape = {
-  inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
-};
 
 /**
  * Extracts operation input type from a schema map.
@@ -944,7 +983,7 @@ type TempEntityField<
         >;
 
 /**
- * Shape used by `offlineMode.operations` for each operation name.
+ * Shape used by `persistentStorage.offline.operations` for each operation name.
  *
  * @typeParam TInput - The persisted input payload for the queued offline operation.
  * @typeParam TConflict - The conflict payload produced by pre-execution conflict detection.
@@ -1097,7 +1136,7 @@ type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
  * Document-store specific offline operation definition.
  *
  * Prefer this alias when manually typing a single operation inside
- * `persistentStorage.offlineMode.operations` for a document store.
+ * `persistentStorage.offline.operations` for a document store.
  *
  * `TOptions` is usually provided with {@link DefineOfflineOperation}, which lets
  * callers specify the queued `input`, replay `result`, and optional `conflict`
@@ -1245,7 +1284,7 @@ export type CollectionOfflineOperationDefinition<
 /**
  * Builds a collection offline operations map from a compact operation spec.
  *
- * Use this helper to define the full `offlineMode.operations` contract for a
+ * Use this helper to define the full `persistentStorage.offline.operations` contract for a
  * collection store while keeping each operation's type declaration short.
  *
  * Each operation key is described with {@link DefineOfflineOperation}, and this
@@ -1348,7 +1387,7 @@ export type ListQueryOfflineOperationDefinition<
 /**
  * Builds a list-query offline operations map from a compact operation spec.
  *
- * Use this helper to define the full `offlineMode.operations` contract for a
+ * Use this helper to define the full `persistentStorage.offline.operations` contract for a
  * list-query store while keeping each operation's type declaration short.
  *
  * Each operation key is described with {@link DefineOfflineOperation}, and this
@@ -1416,43 +1455,9 @@ export type OperationConflict<
   : never;
 
 /**
- * Root offline configuration passed in store persistentStorage options.
- *
- * @typeParam TOperations - Operation registry exposed by the store.
+ * Base shape for each offline operation entry in `persistentStorage.offline.operations`.
+ * The `inputSchema` is used for both validation and queue serialization.
  */
-export type OfflineModeConfig<
-  TOperations extends Record<string, OfflineOperationSchemaShape>,
-> = {
-  /**
-   * Classify a remote failure as `outage`, `network`, or `ignore`.
-   * `outage` activates outage recovery behavior.
-   * `network` activates network offline handling only when `network.enabled` is true.
-   */
-  classifyFailure?: (
-    error: unknown,
-    ctx: OfflineFailureContext,
-  ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
-  /**
-   * Network detection strategy and browser integration.
-   */
-  network?: OfflineNetworkModeConfig;
-  /**
-   * Outage detection and recovery strategy for remote failures.
-   */
-  outage?: OfflineOutageModeConfig;
-  /**
-   * Fixed retry policy for healthy online replay failures.
-   */
-  replayRetry?: OfflineReplayRetryConfig;
-  /**
-   * Root policy controlling whether offline-enabled mutations may enter the
-   * durable offline queue for each active offline cause.
-   *
-   * This applies to all entries in `offlineMode.operations` and only affects
-   * mutations using the `offline` option. Read behavior is unchanged.
-   * @default undefined
-   */
-  mutationQueueing?: OfflineMutationQueueingConfig;
-  /** Mutation operation definitions keyed by operation name. */
-  operations: TOperations;
+export type OfflineOperationSchemaShape = {
+  inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
 };

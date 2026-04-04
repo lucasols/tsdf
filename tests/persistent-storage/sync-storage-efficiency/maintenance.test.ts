@@ -12,6 +12,7 @@ import { resetExpirationScanTracking } from '../../../src/persistentStorage/pers
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { advanceTime } from '../../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../../utils/networkMock';
+import { createOfflineConfigForSessionKey } from '../../utils/offlineConfig';
 import {
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
@@ -414,7 +415,7 @@ describe('sync storage efficiency: maintenance', () => {
         persistentStorage: {
           adapter: 'local-sync',
           schema: wrappedDocumentSchema,
-          offlineMode: {
+          offline: createOfflineConfigForSessionKey(() => dottedSessionKey, {
             network: offlineNetwork.config,
             operations: {
               markProtected: {
@@ -422,7 +423,7 @@ describe('sync storage efficiency: maintenance', () => {
                 execute: ({ input }) => input,
               },
             },
-          },
+          }),
         },
       },
     );

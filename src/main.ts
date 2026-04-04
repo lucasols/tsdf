@@ -101,6 +101,8 @@ export type {
   OfflineMutationQueueingConfig,
   OfflineMutationQueueingCause,
   OfflineMutationQueueingPolicy,
+  OfflineSession,
+  OfflineSessionConfig,
   OfflineReplayRetryConfig,
   ListQueryOfflineEntityRef,
   ListQueryOfflineOperationDefinition,
@@ -120,6 +122,7 @@ export { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
 
 export {
+  createOfflineSession,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   useGlobalOfflineEntities,

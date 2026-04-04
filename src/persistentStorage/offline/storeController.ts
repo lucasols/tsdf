@@ -19,9 +19,6 @@ import {
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
-  type OfflineModeConfig,
-  type OfflineRuntimeConfig,
-  type OfflineRuntimeConfigUpdate,
   type OfflineMutationQueueingCause,
   type OfflineMutationQueueingPolicy,
   type OfflineMutationInput,
@@ -29,6 +26,7 @@ import {
   type OfflineQueueEntry,
   type OfflineResolutionRecord,
   type OfflineResolveConflictResult,
+  type OfflineSession,
   type OfflineStoreType,
   type PersistedOfflineResolutionRecord,
 } from './types';
@@ -87,8 +85,9 @@ type CreateOfflineStoreControllerOptions<
   getSessionKey: () => string | false;
   onPersistentStorageError?: (error: unknown) => void;
   adapter: StorageAdapter;
-  offlineMode: OfflineModeConfig<TOperations>;
   storeAdapter: OfflineStoreAdapter;
+  offlineSession: OfflineSession;
+  operations: TOperations;
 };
 
 type ActiveSessionState = {
@@ -207,9 +206,6 @@ export type OfflineStoreController<
     operationName?: string,
   ) => Promise<void>;
   ensureReplayScheduled: () => Promise<void>;
-  getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
-  setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => void;
-  resetOfflineRuntimeConfig: () => void;
 };
 
 type OfflineStoreControllerBootstrap = Pick<
@@ -233,9 +229,11 @@ export function createOfflineStoreController<
   getSessionKey,
   onPersistentStorageError,
   adapter,
-  offlineMode,
   storeAdapter,
+  offlineSession,
+  operations,
 }: CreateOfflineStoreControllerOptions<TOperations>): OfflineStoreController<TOperations> {
+  const sessionConfig = offlineSession.getConfig();
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
   let activeSession: ActiveSessionState | null = null;
   let replayScheduled = false;
@@ -244,22 +242,12 @@ export function createOfflineStoreController<
   let hydratedPromise: Promise<void> | null = null;
   let nextQueueOrder = 0;
   const replayRetryMaxFailures =
-    offlineMode.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
+    sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
   const replayRetryIntervalMs =
-    offlineMode.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
+    sessionConfig.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
-  const baseOfflineRuntimeConfig: OfflineRuntimeConfig = {
-    network: { enabled: offlineMode.network?.enabled ?? false },
-    outage: { enabled: offlineMode.outage?.enabled ?? false },
-    mutationQueueing: {
-      network: offlineMode.mutationQueueing?.network ?? 'allow',
-      outage: offlineMode.mutationQueueing?.outage ?? 'allow',
-    },
-  };
-  let runtimeMutationQueueingOverrides: OfflineRuntimeConfigUpdate['mutationQueueing'] =
-    undefined;
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
@@ -314,10 +302,9 @@ export function createOfflineStoreController<
   function resolveMutationQueueingPolicy(
     cause: OfflineMutationQueueingCause,
   ): OfflineMutationQueueingPolicy {
+    const current = ensureActiveSession();
     return (
-      runtimeMutationQueueingOverrides?.[cause] ??
-      offlineMode.mutationQueueing?.[cause] ??
-      'allow'
+      current?.session.getRuntimeConfig().mutationQueueing[cause] ?? 'allow'
     );
   }
 
@@ -423,32 +410,36 @@ export function createOfflineStoreController<
 
   function ensureActiveSession(): ActiveSessionState | null {
     const sessionKey = getSessionKey();
-    if (sessionKey === false) {
+    const targetSessionKey = offlineSession.getSessionKey();
+
+    if (sessionKey !== targetSessionKey) {
+      throw new Error(
+        `[tsdf] Store "${storeName}" is attached to offline session "${targetSessionKey}" but getSessionKey() returned "${sessionKey}"`,
+      );
+    }
+
+    if (targetSessionKey === false) {
       if (activeSession) {
         teardownActiveSession();
       }
       return null;
     }
 
-    if (activeSession?.sessionKey === sessionKey) return activeSession;
+    if (activeSession?.sessionKey === targetSessionKey) return activeSession;
 
     teardownActiveSession();
 
-    const session = getOrCreateSessionOfflineCoordinator(sessionKey, {
+    const session = getOrCreateSessionOfflineCoordinator(targetSessionKey, {
       adapter,
       onPersistentStorageError,
-      // WORKAROUND: Session coordinators keep offline operation schemas under a generic erased shape, and session creation restores the caller's concrete operations map.
-      config: __LEGIT_CAST__<
-        OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>,
-        OfflineModeConfig<TOperations>
-      >(offlineMode),
+      config: sessionConfig,
     });
 
     const queueNamespace =
       createPersistentStorageNamespaceHandle<OfflineQueueEntry>({
         storeName,
         adapter,
-        getSessionKey: () => sessionKey,
+        getSessionKey: () => targetSessionKey,
         onPersistentStorageError,
         entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
       });
@@ -456,7 +447,7 @@ export function createOfflineStoreController<
       createPersistentStorageNamespaceHandle<PersistedOfflineResolutionRecord>({
         storeName,
         adapter,
-        getSessionKey: () => sessionKey,
+        getSessionKey: () => targetSessionKey,
         onPersistentStorageError,
         entryPrefix: OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
       });
@@ -464,7 +455,7 @@ export function createOfflineStoreController<
       createPersistentStorageNamespaceHandle<GlobalOfflineEntity>({
         storeName,
         adapter,
-        getSessionKey: () => sessionKey,
+        getSessionKey: () => targetSessionKey,
         onPersistentStorageError,
         entryPrefix: OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
       });
@@ -480,7 +471,7 @@ export function createOfflineStoreController<
     });
 
     activeSession = {
-      sessionKey,
+      sessionKey: targetSessionKey,
       session,
       unregister,
       queueNamespace,
@@ -556,7 +547,7 @@ export function createOfflineStoreController<
   }
 
   function isTempCreateOperation(operationName: string): boolean {
-    const operation = offlineMode.operations[operationName];
+    const operation = operations[operationName];
     return (
       operation?.tempEntity !== undefined ||
       operation?.tempEntities !== undefined
@@ -1135,7 +1126,7 @@ export function createOfflineStoreController<
     input: unknown,
     fallbackEntityRefs: OfflineEntityRef[],
   ): OfflineEntityRef[] {
-    const operation = offlineMode.operations[operationName];
+    const operation = operations[operationName];
     if (!operation) return fallbackEntityRefs;
 
     const rawEntityRefs =
@@ -1171,7 +1162,7 @@ export function createOfflineStoreController<
     );
     if (rewrittenInput === entry.input) return null;
 
-    const operation = offlineMode.operations[entry.operation];
+    const operation = operations[entry.operation];
     if (!operation) return null;
 
     const validatedInput = validateWithSchema(
@@ -1573,7 +1564,7 @@ export function createOfflineStoreController<
     args: InternalQueuedMutationArgs<TName>,
   ): PreparedQueuedMutation {
     const operationName = String(args.operation);
-    const operation = offlineMode.operations[operationName];
+    const operation = operations[operationName];
     if (!operation) {
       throw new Error(
         `Unknown offline operation "${operationName}" for store "${storeName}"`,
@@ -2039,7 +2030,7 @@ export function createOfflineStoreController<
       const nextEntry = getSortedEntries()[0];
       if (!nextEntry) return;
 
-      const operation = offlineMode.operations[nextEntry.operation];
+      const operation = operations[nextEntry.operation];
       if (!operation) {
         await removeEntry(nextEntry.id, current);
         continue;
@@ -2147,7 +2138,11 @@ export function createOfflineStoreController<
           tempEntities &&
           storeAdapter.reconcileTempEntity
         ) {
-          const reconciliations = orderByTempIds({
+          const reconciliations = orderByTempIds<{
+            tempId: ValidPayload;
+            finalPayload: ValidPayload;
+            finalData?: unknown;
+          }>({
             operationName: entryToUse.operation,
             label: 'Temp reconciliations',
             tempIds: entryToUse.tempIds,
@@ -2330,7 +2325,7 @@ export function createOfflineStoreController<
     const resolutionRecord = resolutions.get(resolutionId);
     if (!resolutionRecord) return;
 
-    const operation = offlineMode.operations[resolutionRecord.operation];
+    const operation = operations[resolutionRecord.operation];
     if (!operation) {
       await removeResolution(resolutionId, current);
       return;
@@ -2445,50 +2440,6 @@ export function createOfflineStoreController<
     return current?.session.getStatus() ?? null;
   }
 
-  function getOfflineRuntimeConfig(): OfflineRuntimeConfig {
-    const current = ensureActiveSession();
-    const sessionRuntimeConfig = current?.session.getRuntimeConfig();
-
-    return {
-      network:
-        sessionRuntimeConfig?.network ?? baseOfflineRuntimeConfig.network,
-      outage: sessionRuntimeConfig?.outage ?? baseOfflineRuntimeConfig.outage,
-      mutationQueueing: {
-        network: resolveMutationQueueingPolicy('network'),
-        outage: resolveMutationQueueingPolicy('outage'),
-      },
-    };
-  }
-
-  function setOfflineRuntimeConfig(update: OfflineRuntimeConfigUpdate): void {
-    const current = ensureActiveSession();
-    if (
-      current &&
-      (update.network !== undefined || update.outage !== undefined)
-    ) {
-      current.session.setRuntimeConfig(update);
-    }
-
-    if (update.mutationQueueing !== undefined) {
-      const nextOverrides = {
-        ...(runtimeMutationQueueingOverrides ?? {}),
-        ...update.mutationQueueing,
-      };
-
-      runtimeMutationQueueingOverrides =
-        nextOverrides.network === undefined &&
-        nextOverrides.outage === undefined
-          ? undefined
-          : nextOverrides;
-    }
-  }
-
-  function resetOfflineRuntimeConfig(): void {
-    runtimeMutationQueueingOverrides = undefined;
-    const current = ensureActiveSession();
-    current?.session.resetRuntimeConfig();
-  }
-
   function canQueueMutation(): boolean {
     return getSessionKey() !== false;
   }
@@ -2512,8 +2463,5 @@ export function createOfflineStoreController<
     getSessionStatus,
     evaluateOfflineFetchError,
     ensureReplayScheduled,
-    getOfflineRuntimeConfig,
-    setOfflineRuntimeConfig,
-    resetOfflineRuntimeConfig,
   };
 }

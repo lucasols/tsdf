@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
+  createOfflineSession,
   createCollectionStore,
   type DefineCollectionOfflineOperations,
   type DefineOfflineOperation,
@@ -124,6 +125,10 @@ test('direct collection store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-session';
   network.install();
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
 
   let nextTodoId = 3;
   const todoState = new Map<string, TodoItem>([
@@ -155,8 +160,8 @@ test('direct collection store offline public api', async () => {
       adapter: 'local-sync',
       schema: todoSchema,
       payloadSchema: todoPayloadSchema,
-      offlineMode: {
-        network: network.config,
+      offline: {
+        session: offlineSession,
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
