@@ -107,8 +107,14 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
   - `advanceTime(ms)`: wraps `vi.advanceTimersByTimeAsync(ms)` in `act()` — use instead of calling `vi.advanceTimersByTimeAsync()` directly
   - `range(start, end)`: creates an array of numbers from start to end (inclusive)
   - `pick(obj, keys)`: picks specific keys from an object
-- Add comments to explain the purpose of different phases of the test, especially when using `expect` statements, to make it easier for future readers to understand the intent of the test
 - After updating snapshots automatically via `vitest --update-snapshots` or `vitest -u`, check the diff to ensure that the updates are expected and not regressions.
+
+### Test readability
+
+- **Test names**: describe the user-visible behavior and expected outcome, not implementation details. Prefer `"queued mutations are sent after reconnecting"` over `"calls flushQueue when isOnline transitions to true"`.
+- **Comments**: don't skimp on comments — add as many as needed to make each test interpretable at a glance. Every assertion that is not immediately obvious should have a comment explaining _what it verifies and why it matters_. Use comments to label distinct phases of the test (setup, action, assertion) so a reader doesn't have to mentally reconstruct the flow.
+- **Timeline snapshots**: use `addTimelineComments(...)` to annotate the timeline with human-readable explanations instead of relying on readers to infer meaning from raw actions alone.
+- **Logger stores**: use `addMark('label')` to visually separate different phases of the test in the output.
 
 ### Test isolation from production code
 
