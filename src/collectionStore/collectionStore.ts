@@ -1237,7 +1237,23 @@ export function createCollectionStore<
       return { data: null, error: new AbortedStoreError() };
     }
 
-    const item = store.state[itemId];
+    let item = getItemFromStateOrPersistence(itemId, {
+      materializeSyncState: true,
+    });
+
+    if (item?.error?.id === 'offline') {
+      const hydratedItem = persistence?.readHydratedItem(itemId);
+
+      if (hydratedItem?.data) {
+        item = hydratedItem;
+        store.produceState(
+          (draft) => {
+            draft[itemId] = hydratedItem;
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
 
     if (item?.error) {
       return { data: null, error: new StoreFetchError(item.error, 'fetch') };

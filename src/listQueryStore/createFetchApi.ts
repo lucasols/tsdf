@@ -992,7 +992,30 @@ export function createFetchApi<
       return { items: [], error: new AbortedStoreError(), hasMore: false };
     }
 
-    const query = store.state.queries[queryKey];
+    let query = getQueryStateByKey(queryKey);
+
+    if (query?.error?.id === 'offline') {
+      const hydratedQuery = persistence?.readHydratedQuery(queryKey);
+
+      if (hydratedQuery) {
+        query = hydratedQuery;
+        store.produceState(
+          (draft) => {
+            draft.queries[queryKey] = hydratedQuery;
+
+            for (const itemKey of hydratedQuery.items) {
+              const hydratedItem = persistence?.readHydratedItem(itemKey);
+              if (!hydratedItem) continue;
+
+              draft.items[itemKey] = hydratedItem.item;
+              draft.itemQueries[itemKey] = hydratedItem.itemQuery;
+              draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+            }
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
 
     if (query?.error) {
       return {
@@ -1088,8 +1111,26 @@ export function createFetchApi<
       return { data: null, error: new AbortedStoreError() };
     }
 
-    const item = store.state.items[itemKey];
-    const itemQuery = store.state.itemQueries[itemKey];
+    let itemState = readItemState(itemKey);
+
+    if (itemState?.itemQuery?.error?.id === 'offline') {
+      const hydratedItem = persistence?.readHydratedItem(itemKey);
+
+      if (hydratedItem) {
+        itemState = hydratedItem;
+        store.produceState(
+          (draft) => {
+            draft.items[itemKey] = hydratedItem.item;
+            draft.itemQueries[itemKey] = hydratedItem.itemQuery;
+            draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
+
+    const item = itemState?.item;
+    const itemQuery = itemState?.itemQuery;
 
     if (itemQuery?.error) {
       return {

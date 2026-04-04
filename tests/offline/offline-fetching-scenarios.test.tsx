@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -253,6 +254,68 @@ describe('offline fetching scenarios', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('collection awaitFetch returns cached persisted data when storage is warm but state memory is cold', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-collection-storage-only';
+    const storeName = 'offline-fetching-collection-storage-only';
+    createMockLocalStorageStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        collection: [
+          {
+            payload: 'users||1',
+            data: { value: { name: 'Ada from storage' } },
+          },
+        ],
+      },
+    });
+
+    const env = createCollectionStoreTestEnv(
+      { 'users||1': { name: 'Ada from server' } },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offline: createOfflineConfigForSessionKey(() => sessionKey, {
+            network: network.config,
+            operations: {},
+          }),
+        },
+      },
+    );
+
+    await Promise.resolve();
+
+    expect(Object.keys(env.store.state)).toMatchInlineSnapshot(`[]`);
+
+    const resultPromise = env.apiStore.awaitFetch('users||1');
+    await flushAllTimers();
+    const result = await resultPromise;
+
+    expect(result).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Ada from storage' }
+
+      error: null
+    `);
+    expect(pick(env.apiStore.getItemState('users||1'), ['data', 'status']))
+      .toMatchInlineSnapshot(`
+        data:
+          value: { name: 'Ada from storage' }
+
+        status: 'success'
+      `);
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+  });
+
   test('list-query fetch APIs keep cached query and item data available while offline', async () => {
     const sessionKey = 'offline-fetching-list-query-cached';
     const usersQuery = { tableId: 'users' } as const;
@@ -324,6 +387,85 @@ describe('offline fetching scenarios', () => {
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toEqual(itemRequestHistoryBeforeOfflineFetch);
+  });
+
+  test('list-query await APIs return cached persisted data when storage is warm but state memory is cold', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-list-query-storage-only';
+    const storeName = 'offline-fetching-list-query-storage-only';
+    const usersQuery = { tableId: 'users' } as const;
+    createMockLocalStorageStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        listQuery: {
+          items: [
+            {
+              tableId: 'users',
+              id: 1,
+              data: { id: 1, name: 'Ada from storage' },
+            },
+          ],
+          queries: [
+            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
+          ],
+        },
+      },
+    });
+
+    const env = createListQueryStoreTestEnv(
+      { users: [{ id: 1, name: 'Ada from server' }] },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: createOfflineConfigForSessionKey(() => sessionKey, {
+            network: network.config,
+            operations: {},
+          }),
+        },
+      },
+    );
+
+    await Promise.resolve();
+
+    expect({
+      items: Object.keys(env.store.state.items),
+      queries: Object.keys(env.store.state.queries),
+    }).toMatchInlineSnapshot(`
+      items: []
+      queries: []
+    `);
+
+    const queryResultPromise = env.apiStore.awaitListQueryFetch(usersQuery);
+    const itemResultPromise = env.apiStore.awaitItemFetch('users||1');
+    await flushAllTimers();
+    const [queryResult, itemResult] = await Promise.all([
+      queryResultPromise,
+      itemResultPromise,
+    ]);
+
+    expect({ itemResult, queryResult }).toMatchInlineSnapshot(`
+      itemResult:
+        data: { id: 1, name: 'Ada from storage' }
+        error: null
+
+      queryResult:
+        error: null
+        hasMore: '❌'
+        items:
+          - data: { id: 1, name: 'Ada from storage' }
+            itemPayload: 'users||1'
+    `);
+    expect(
+      env.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('list-query awaitListQueryFetch returns the offline error for a cold query while offline', async () => {
