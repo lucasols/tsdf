@@ -978,6 +978,14 @@ export function createFetchApi<
     const size = options.size ?? defaultQuerySize;
     const fields = normalizeFieldsOption(options.fields);
 
+    if (
+      !syncHydrationEnabled &&
+      preloadQueries_ &&
+      store.state.queries[queryKey] === undefined
+    ) {
+      await preloadQueries_([queryKey]);
+    }
+
     const result = await getOrCreateQueryScheduler(queryKey).awaitFetch(
       queryKey,
       { type: 'load', payload: params, offset: 0, limit: size, fields },
@@ -1093,6 +1101,14 @@ export function createFetchApi<
 
     const itemKey = getItemKey(itemPayload);
     const fields = normalizeFieldsOption(options.fields);
+
+    if (
+      !syncHydrationEnabled &&
+      preloadItems_ &&
+      readMaterializedItemState(itemKey) === undefined
+    ) {
+      await preloadItems_([itemKey]);
+    }
 
     const result = await getOrCreateItemScheduler(
       itemKey,

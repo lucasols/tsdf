@@ -786,6 +786,10 @@ export function createDocumentStore<
   ): Promise<
     { data: State; error: null } | { data: null; error: StoreFetchError }
   > {
+    if (persistence?.hasAsyncPreload && store.state.data === null) {
+      await persistence.preloadPersistentStorage();
+    }
+
     const result = await scheduler.awaitFetch(DOC_REQUEST_ID, null, options);
 
     if (result === 'timeout') {

@@ -2,14 +2,21 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import {
+  flushAllTimers,
+  pick,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { userRowSchema } from './offlineReplayTestShared';
 import {
   collectionSchema,
@@ -24,12 +31,16 @@ beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
   localStorage.clear();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
   localStorage.clear();
 });
 
@@ -203,6 +214,51 @@ describe('offline fetching scenarios', () => {
     expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
 
+  test('document async persistence returns cached storage data while memory starts cold and offline', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-document-async-storage-only';
+    const storeName = 'offline-fetching-document-async-storage-only';
+    createOpfsPersistentStorageTestStore({
+      initialState: { storeName, sessionKey, document: { data: { value: 8 } } },
+    });
+
+    const env = createDocumentStoreTestEnv(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'idle',
+      persistentStorage: {
+        adapter: opfsPersistentStorage,
+        schema: docSchema,
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
+          network: network.config,
+          operations: {},
+        }),
+      },
+    });
+
+    expect(pick(env.store.state, ['data', 'error', 'status']))
+      .toMatchInlineSnapshot(`
+        data: null
+        error: null
+        status: 'idle'
+      `);
+
+    const result = await resolveAfterAllTimers(env.apiStore.awaitFetch());
+
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 8 }
+      error: null
+    `);
+    expect(pick(env.store.state, ['data', 'error', 'status']))
+      .toMatchInlineSnapshot(`
+        data: { value: 8 }
+        error: null
+        status: 'success'
+      `);
+    expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
+  });
+
   test('collection fetch APIs keep the cached item visible while offline', async () => {
     const sessionKey = 'offline-fetching-collection-cached';
     const env = createCollectionStoreTestEnv(
@@ -362,6 +418,66 @@ describe('offline fetching scenarios', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('collection async persistence returns cached storage data while memory starts cold and offline', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-collection-async-storage-only';
+    const storeName = 'offline-fetching-collection-async-storage-only';
+    createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        collection: [
+          {
+            payload: 'users||1',
+            data: { value: { name: 'Ada from async storage' } },
+          },
+        ],
+      },
+    });
+
+    const env = createCollectionStoreTestEnv(
+      { 'users||1': { name: 'Ada from server' } },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: opfsPersistentStorage,
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offline: createOfflineConfigForSessionKey(() => sessionKey, {
+            network: network.config,
+            operations: {},
+          }),
+        },
+      },
+    );
+
+    expect(Object.keys(env.store.state)).toMatchInlineSnapshot(`[]`);
+
+    const result = await resolveAfterAllTimers(
+      env.apiStore.awaitFetch('users||1'),
+    );
+
+    expect(result).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Ada from async storage' }
+
+      error: null
+    `);
+    expect(pick(env.apiStore.getItemState('users||1'), ['data', 'status']))
+      .toMatchInlineSnapshot(`
+        data:
+          value: { name: 'Ada from async storage' }
+
+        status: 'success'
+      `);
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+  });
+
   test('list-query fetch APIs keep cached query and item data available while offline', async () => {
     const sessionKey = 'offline-fetching-list-query-cached';
     const usersQuery = { tableId: 'users' } as const;
@@ -507,6 +623,80 @@ describe('offline fetching scenarios', () => {
         hasMore: '❌'
         items:
           - data: { id: 1, name: 'Ada from storage' }
+            itemPayload: 'users||1'
+    `);
+    expect(
+      env.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('list-query async persistence returns cached storage data while memory starts cold and offline', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-list-query-async-storage-only';
+    const storeName = 'offline-fetching-list-query-async-storage-only';
+    const usersQuery = { tableId: 'users' } as const;
+    createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        listQuery: {
+          items: [
+            {
+              tableId: 'users',
+              id: 1,
+              data: { id: 1, name: 'Ada from async storage' },
+            },
+          ],
+          queries: [
+            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
+          ],
+        },
+      },
+    });
+
+    const env = createListQueryStoreTestEnv(
+      { users: [{ id: 1, name: 'Ada from server' }] },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: opfsPersistentStorage,
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: createOfflineConfigForSessionKey(() => sessionKey, {
+            network: network.config,
+            operations: {},
+          }),
+        },
+      },
+    );
+
+    expect({
+      items: Object.keys(env.store.state.items),
+      queries: Object.keys(env.store.state.queries),
+    }).toMatchInlineSnapshot(`
+      items: []
+      queries: []
+    `);
+
+    const [queryResult, itemResult] = await Promise.all([
+      resolveAfterAllTimers(env.apiStore.awaitListQueryFetch(usersQuery)),
+      resolveAfterAllTimers(env.apiStore.awaitItemFetch('users||1')),
+    ]);
+
+    expect({ itemResult, queryResult }).toMatchInlineSnapshot(`
+      itemResult:
+        data: { id: 1, name: 'Ada from async storage' }
+        error: null
+
+      queryResult:
+        error: null
+        hasMore: '❌'
+        items:
+          - data: { id: 1, name: 'Ada from async storage' }
             itemPayload: 'users||1'
     `);
     expect(

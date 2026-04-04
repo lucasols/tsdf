@@ -1227,6 +1227,10 @@ export function createCollectionStore<
     const itemId = getItemKey(params);
     const scheduler = getScheduler(itemId, params);
 
+    if (persistence?.hasAsyncPreload && !Object.hasOwn(store.state, itemId)) {
+      await persistence.preloadItems([itemId]);
+    }
+
     const result = await scheduler.awaitFetch(itemId, params, options);
 
     if (result === 'timeout') {
