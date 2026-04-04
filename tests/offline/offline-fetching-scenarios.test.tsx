@@ -157,6 +157,52 @@ describe('offline fetching scenarios', () => {
     );
   });
 
+  test('document sync persistence hydrates cached storage into memory before offline fetch APIs run', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-document-storage-hydrated-at-boot';
+    const storeName = 'offline-fetching-document-storage-hydrated-at-boot';
+    createMockLocalStorageStore({
+      storeName,
+      sessionKey,
+      initialState: { document: { data: { value: 7 } } },
+    });
+
+    const env = createDocumentStoreTestEnv(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'idle',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: createOfflineConfigForSessionKey(() => sessionKey, {
+          network: network.config,
+          operations: {},
+        }),
+      },
+    });
+
+    // For the sync local-storage adapter, document persistence is read during
+    // createInitialState, so the cached snapshot is already materialized before
+    // any offline fetch API runs.
+    expect(pick(env.store.state, ['data', 'error', 'status']))
+      .toMatchInlineSnapshot(`
+        data: { value: 7 }
+        error: null
+        status: 'success'
+      `);
+
+    const resultPromise = env.apiStore.awaitFetch();
+    await flushAllTimers();
+    const result = await resultPromise;
+
+    expect(result).toMatchInlineSnapshot(`
+      data: { value: 7 }
+      error: null
+    `);
+    expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
+  });
+
   test('collection fetch APIs keep the cached item visible while offline', async () => {
     const sessionKey = 'offline-fetching-collection-cached';
     const env = createCollectionStoreTestEnv(
