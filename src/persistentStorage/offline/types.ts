@@ -72,6 +72,28 @@ export type OfflineConnectivityError = {
   message: 'Offline';
 };
 
+/** Connectivity cause currently governing offline mutation queueing. */
+export type OfflineMutationQueueingCause = 'network' | 'outage';
+
+/** Root policy value for whether offline-enabled mutations may queue. */
+export type OfflineMutationQueueingPolicy = 'allow' | 'disallow';
+
+/** Root mutation queueing policy shared by all configured offline operations. */
+export type OfflineMutationQueueingConfig = {
+  /**
+   * Controls whether offline-enabled mutations may queue while network mode is
+   * active, including browser-detected offline and classified network failures.
+   * @default 'allow'
+   */
+  network?: OfflineMutationQueueingPolicy;
+  /**
+   * Controls whether offline-enabled mutations may queue while outage mode is
+   * active.
+   * @default 'allow'
+   */
+  outage?: OfflineMutationQueueingPolicy;
+};
+
 /** Context passed into offline failure classification hooks. */
 export type OfflineFailureContext = {
   /** Phase in which the failure was detected. */
@@ -1380,6 +1402,15 @@ export type OfflineModeConfig<
    * Fixed retry policy for healthy online replay failures.
    */
   replayRetry?: OfflineReplayRetryConfig;
+  /**
+   * Root policy controlling whether offline-enabled mutations may enter the
+   * durable offline queue for each active offline cause.
+   *
+   * This applies to all entries in `offlineMode.operations` and only affects
+   * mutations using the `offline` option. Read behavior is unchanged.
+   * @default undefined
+   */
+  mutationQueueing?: OfflineMutationQueueingConfig;
   /** Mutation operation definitions keyed by operation name. */
   operations: TOperations;
 };

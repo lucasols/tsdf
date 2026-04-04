@@ -21,6 +21,10 @@ import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useLi
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import {
+  isOfflineConnectivityError,
+  offlineConnectivityError,
+} from '../persistentStorage/offline/fetchRuntime';
+import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
 } from '../persistentStorage/offline/mutationRuntime';
@@ -1659,7 +1663,9 @@ export function createCollectionStore<
         }
       },
       onError: (exception) => {
-        const error = errorNormalizer(unknownToError(exception));
+        const error = isOfflineConnectivityError(exception)
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(exception));
 
         if (!silentErrors && onMutationError) {
           onMutationError(exception, { silentErrors });

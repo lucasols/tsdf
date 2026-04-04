@@ -20,6 +20,7 @@ import {
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
   type OfflineModeConfig,
+  type OfflineMutationQueueingCause,
   type OfflineMutationInput,
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
@@ -275,6 +276,71 @@ export function createOfflineStoreController<
     removedEntriesApplied: OfflineQueueEntry[];
     touchedNextEntry: boolean;
   };
+
+  function getActiveMutationQueueingCause(
+    current: ActiveSessionState,
+  ): OfflineMutationQueueingCause | null {
+    const status = current.session.getStatus();
+
+    if (status.network.active) return 'network';
+
+    if (status.outage.active) return 'outage';
+
+    return null;
+  }
+
+  function isMutationQueueingAllowed(
+    cause: OfflineMutationQueueingCause,
+  ): boolean {
+    return offlineMode.mutationQueueing?.[cause] !== 'disallow';
+  }
+
+  function getInitialOfflineMutationAction(
+    current: ActiveSessionState,
+  ): PreparedOfflineMutation['initialAction'] {
+    const status = current.session.getStatus();
+
+    if (!status.effectiveOffline) return 'run';
+
+    const cause = getActiveMutationQueueingCause(current);
+    if (cause === null) return 'run';
+
+    if (isMutationQueueingAllowed(cause)) return 'queue';
+
+    if (cause === 'network' && navigator.onLine === false) {
+      return 'reject-offline';
+    }
+
+    return 'run';
+  }
+
+  async function clearOfflineStatusOnSuccess(
+    currentSessionKey: string,
+  ): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current || current.sessionKey !== currentSessionKey) {
+      throw offlineSessionUnavailableError;
+    }
+
+    const status = current.session.getStatus();
+    if (!status.network.active && !status.outage.active) return;
+
+    await current.session.refreshNetworkState();
+
+    if (
+      navigator.onLine !== false &&
+      current.session.getStatus().network.active
+    ) {
+      current.session.setNetworkActive(false, { classified: false });
+    }
+
+    if (
+      current.session.getStatus().outage.active &&
+      !current.session.getStatus().network.active
+    ) {
+      current.session.setOutageActive(false);
+    }
+  }
 
   async function loadNamespaceRecords<T extends { id: string }>(
     namespace: NamespacePersistenceHandle<T>,
@@ -2176,8 +2242,10 @@ export function createOfflineStoreController<
     await current.session.refreshNetworkState();
 
     return {
-      effectiveOffline: current.session.getStatus().effectiveOffline,
+      initialAction: getInitialOfflineMutationAction(current),
       queueMutation: () => queuePreparedMutations(prepared),
+      handleDirectSuccess: () =>
+        clearOfflineStatusOnSuccess(prepared.currentSessionKey),
       classifyError: async (error) => {
         const preparedCurrent = ensureActiveSession();
         if (
@@ -2188,24 +2256,25 @@ export function createOfflineStoreController<
         }
 
         await preparedCurrent.session.refreshNetworkState();
-        if (preparedCurrent.session.getStatus().effectiveOffline) {
-          return true;
+        const activeCauseAfterRefresh =
+          getActiveMutationQueueingCause(preparedCurrent);
+        if (activeCauseAfterRefresh) {
+          return isMutationQueueingAllowed(activeCauseAfterRefresh);
         }
 
-        const classification = await preparedCurrent.session.classifyFailure(
-          error,
-          {
-            phase: 'mutation',
-            storeType,
-            operationName: prepared.operationName,
-            sessionKey: preparedCurrent.sessionKey,
-          },
-        );
+        await preparedCurrent.session.classifyFailure(error, {
+          phase: 'mutation',
+          storeType,
+          operationName: prepared.operationName,
+          sessionKey: preparedCurrent.sessionKey,
+        });
 
-        return (
-          classification !== 'ignore' ||
-          preparedCurrent.session.getStatus().effectiveOffline
-        );
+        const activeCauseAfterClassification =
+          getActiveMutationQueueingCause(preparedCurrent);
+
+        return activeCauseAfterClassification
+          ? isMutationQueueingAllowed(activeCauseAfterClassification)
+          : false;
       },
     };
   }

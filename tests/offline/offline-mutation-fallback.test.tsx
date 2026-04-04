@@ -73,6 +73,47 @@ afterEach(() => {
 });
 
 describe('document', () => {
+  test('disallowed browser-offline network mode returns the normalized offline error without attempting the mutation', async () => {
+    network.setOffline();
+    const sessionKey = 'hybrid-doc-network-disallowed-offline-session';
+    const storeName = 'hybrid-doc-network-disallowed-offline-store';
+    const directMutation = vi.fn(() => Promise.resolve(2));
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          mutationQueueing: { network: 'disallow' },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ error: result.ok ? null : result.error, ok: result.ok })
+      .toMatchInlineSnapshot(`
+      error: { code: 0, id: 'offline', message: 'Offline' }
+      ok: '❌'
+    `);
+    expect(directMutation).not.toHaveBeenCalled();
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
   test('queue immediately when the session is already offline', async () => {
     network.setOffline();
     const sessionKey = 'hybrid-doc-offline-session';
@@ -220,6 +261,365 @@ describe('document', () => {
       sessionKey: 'hybrid-doc-fallback-session'
       updatedAt: 1735689600000
     `);
+  });
+
+  test('disallowed classified network mode still retries the direct mutation while the browser is online', async () => {
+    const sessionKey = 'hybrid-doc-network-disallowed-online-session';
+    const storeName = 'hybrid-doc-network-disallowed-online-store';
+    const directMutation = vi.fn(() => Promise.resolve(2));
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          classifyFailure: () => 'network' as const,
+          network: {
+            ...network.config,
+            recoveryCheck: () => false,
+            recoveryProbe: {
+              initialIntervalMs: 100,
+              maxIntervalMs: 100,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
+          mutationQueueing: { network: 'disallow' },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    env.serverMock.setNextFetchError('boom');
+    env.apiStore.scheduleFetch('highPriority');
+    await advanceTime(25);
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+        ok: '✅'
+        value: { data: 2, kind: 'online' }
+      `);
+    expect(directMutation).toHaveBeenCalledTimes(1);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      effectiveMode: 'online'
+      effectiveOffline: '❌'
+      isLeader: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: null
+      network: { active: '❌', enabled: '✅' }
+      outage: { active: '❌', enabled: '❌' }
+      sessionKey: 'hybrid-doc-network-disallowed-online-session'
+      updatedAt: 1735689600025
+    `);
+  });
+
+  test('disallowed classified network fallback preserves the original direct error instead of queueing', async () => {
+    const sessionKey = 'hybrid-doc-network-disallowed-fallback-session';
+    const storeName = 'hybrid-doc-network-disallowed-fallback-store';
+    const directMutation = vi.fn(() =>
+      Promise.reject(new Error('network-disallowed-error')),
+    );
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          classifyFailure: () => 'network' as const,
+          network: {
+            ...network.config,
+            recoveryCheck: () => false,
+            recoveryProbe: {
+              initialIntervalMs: 100,
+              maxIntervalMs: 100,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
+          mutationQueueing: { network: 'disallow' },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ error: result.ok ? null : result.error, ok: result.ok })
+      .toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'network-disallowed-error' }
+      ok: '❌'
+    `);
+    expect(directMutation).toHaveBeenCalledTimes(1);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('disallowed outage mode still retries the direct mutation before deciding not to queue', async () => {
+    const sessionKey = 'hybrid-doc-outage-disallowed-online-session';
+    const storeName = 'hybrid-doc-outage-disallowed-online-store';
+    const directMutation = vi.fn(() => Promise.resolve(2));
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          classifyFailure: () => 'outage' as const,
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          mutationQueueing: { outage: 'disallow' },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    env.serverMock.setNextFetchError('boom');
+    env.apiStore.scheduleFetch('highPriority');
+    await advanceTime(25);
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+        ok: '✅'
+        value: { data: 2, kind: 'online' }
+      `);
+    expect(directMutation).toHaveBeenCalledTimes(1);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      effectiveMode: 'online'
+      effectiveOffline: '❌'
+      isLeader: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: 1735689600025
+      network: { active: '❌', enabled: '❌' }
+      outage: { active: '❌', enabled: '✅' }
+      sessionKey: 'hybrid-doc-outage-disallowed-online-session'
+      updatedAt: 1735689600025
+    `);
+  });
+
+  test('disallowed outage fallback preserves the original direct error instead of queueing', async () => {
+    const sessionKey = 'hybrid-doc-outage-disallowed-fallback-session';
+    const storeName = 'hybrid-doc-outage-disallowed-fallback-store';
+    const directMutation = vi.fn(() =>
+      Promise.reject(new Error('outage-disallowed-error')),
+    );
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          classifyFailure: () => 'outage' as const,
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          mutationQueueing: { outage: 'disallow' },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ error: result.ok ? null : result.error, ok: result.ok })
+      .toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'outage-disallowed-error' }
+      ok: '❌'
+    `);
+    expect(directMutation).toHaveBeenCalledTimes(1);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('mixed queueing policy can still queue outage-classified failures while network queueing stays disabled', async () => {
+    const sessionKey = 'hybrid-doc-mixed-queue-policy-session';
+    const storeName = 'hybrid-doc-mixed-queue-policy-store';
+    const directMutation = vi.fn(() =>
+      Promise.reject(new Error('offline-fallback')),
+    );
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          mutationQueueing: { network: 'disallow', outage: 'allow' },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
+    expect(getSingleQueuedMutationData(sessionKey, storeName))
+      .toMatchInlineSnapshot(`
+        input: { value: 2 }
+        operation: 'updateValue'
+      `);
+  });
+
+  test('stale async mutation classifications do not queue after a newer failure settles first', async () => {
+    const sessionKey = 'hybrid-doc-stale-mutation-classification-session';
+    const storeNameA = 'hybrid-doc-stale-mutation-classification-store-a';
+    const storeNameB = 'hybrid-doc-stale-mutation-classification-store-b';
+    let resolveFirstClassification:
+      | ((result: 'outage' | 'network' | 'ignore') => void)
+      | undefined;
+    const recoveryCheck = vi.fn(() => false);
+    const classifyFailure = vi
+      .fn<
+        (
+          error: unknown,
+          ctx: {
+            phase: 'fetch' | 'mutation' | 'sync';
+            storeType: 'document' | 'collection' | 'listQuery';
+            operationName?: string;
+            sessionKey: string;
+          },
+        ) => Promise<'outage' | 'network' | 'ignore'>
+      >()
+      .mockImplementationOnce(
+        () =>
+          new Promise<'outage' | 'network' | 'ignore'>((resolve) => {
+            resolveFirstClassification = resolve;
+          }),
+      )
+      .mockResolvedValueOnce('ignore');
+    const createEnv = (id: string) =>
+      createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id,
+        getSessionKey: () => sessionKey,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: docSchema,
+          offlineMode: {
+            classifyFailure,
+            outage: {
+              enabled: true,
+              recoveryCheck,
+              recoveryProbe: quickRecoveryProbe,
+            },
+            mutationQueueing: { outage: 'allow' },
+            operations: {
+              updateValue: {
+                inputSchema: docMutationInputSchema,
+                execute: ({ input }) => input,
+              },
+            },
+          },
+        },
+      });
+
+    const envA = createEnv(storeNameA);
+    const envB = createEnv(storeNameB);
+
+    const pendingMutation = envA.apiStore.performMutation({
+      mutation: () => Promise.reject(new Error('first failure')),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    await Promise.resolve();
+    const settledMutation = await envB.apiStore.performMutation({
+      mutation: () => Promise.reject(new Error('second failure')),
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    });
+
+    expect(settledMutation.ok).toBe(false);
+
+    resolveFirstClassification?.('outage');
+    const result = await pendingMutation;
+
+    expect({ error: result.ok ? null : result.error, ok: result.ok })
+      .toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'first failure' }
+      ok: '❌'
+    `);
+    expect(classifyFailure).toHaveBeenCalledTimes(2);
+    expect(
+      getOfflineQueueEntries(sessionKey, storeNameA).concat(
+        getOfflineQueueEntries(sessionKey, storeNameB),
+      ),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('preserve the normal error when the direct failure is not connectivity-related', async () => {

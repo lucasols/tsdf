@@ -26,6 +26,7 @@ import {
 } from './persistentStorage/offline/entityMetadata';
 import {
   runOfflineAwareFetch,
+  isOfflineConnectivityError,
   offlineConnectivityError,
 } from './persistentStorage/offline/fetchRuntime';
 import {
@@ -942,7 +943,9 @@ export function createDocumentStore<
 
         invalidateData();
 
-        return errorNormalizer(unknownToError(exception));
+        return isOfflineConnectivityError(exception)
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(exception));
       },
     });
 

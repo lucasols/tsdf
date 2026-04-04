@@ -119,6 +119,7 @@ test('direct document store offline public api', async () => {
       schema: docSchema,
       offlineMode: {
         network: network.config,
+        mutationQueueing: { network: 'allow', outage: 'allow' },
         operations: {
           setValue: {
             inputSchema: setValueInputSchema,

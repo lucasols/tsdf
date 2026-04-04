@@ -52,6 +52,8 @@ Store-specific options:
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store's existing `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
+If `persistentStorage.offlineMode` is configured, `offlineMode.mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
+
 ## Backend behavior
 
 ### `localStorage`

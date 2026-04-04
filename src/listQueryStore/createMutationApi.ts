@@ -6,6 +6,10 @@ import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 
 import {
+  isOfflineConnectivityError,
+  offlineConnectivityError,
+} from '../persistentStorage/offline/fetchRuntime';
+import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
@@ -806,7 +810,9 @@ export function createMutationApi<
         }
       },
       onError: (exception) => {
-        const error = errorNormalizer(unknownToError(exception));
+        const error = isOfflineConnectivityError(exception)
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(exception));
 
         if (!silentErrors && onMutationError) {
           onMutationError(exception, { silentErrors });

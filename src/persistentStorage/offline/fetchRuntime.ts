@@ -4,6 +4,19 @@ export const offlineConnectivityError = {
   message: 'Offline',
 } as const;
 
+export function isOfflineConnectivityError(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'code' in value &&
+    'id' in value &&
+    'message' in value &&
+    value.code === offlineConnectivityError.code &&
+    value.id === offlineConnectivityError.id &&
+    value.message === offlineConnectivityError.message
+  );
+}
+
 export type OfflineAwareFetchController = {
   prepareForFetch?: () => Promise<void>;
   getSessionStatus: () => { effectiveOffline: boolean } | null;
