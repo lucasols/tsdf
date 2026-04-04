@@ -114,14 +114,13 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
           │ └ document (0.90 kb)
           └ oq (0.89 kb)
             └ offline-sync-format-doc:1735689600000:4fzzzxjy (0.89 kb)
-      tsdf-os:offline-sync-format-session (0.22 kb)"
+      tsdf-os:offline-sync-format-session (0.15 kb)"
     `);
 
     expect(getParsedLocalStorageValue('tsdf-os:offline-sync-format-session'))
       .toMatchInlineSnapshot(`
         d:
           n: { a: 1, e: 1 }
-          s: 'offline-sync-format-session'
           u: 1735689600000
       `);
     expect(
@@ -291,7 +290,6 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       .toMatchInlineSnapshot(`
         d:
           n: { a: 1, e: 1 }
-          s: 'offline-opfs-format-session'
           u: 1735689600003
       `);
     expect(

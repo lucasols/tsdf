@@ -658,7 +658,6 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     .toMatchInlineSnapshot(`
       d:
         n: { a: 1, e: 1 }
-        s: 'offline-global-hook-session'
         u: 1735689600000
     `);
   expect(globalStatusRenders.changesSnapshot).toMatchInlineSnapshot(`
@@ -744,16 +743,13 @@ test('app restart boots global offline status from the persisted localStorage sn
   // Simulate the bootstrap record left behind by a previous offline session.
   localStorage.setItem(
     bootstrapKey,
-    JSON.stringify({
-      d: { s: sessionKey, n: { e: 1, a: 1 }, u: TEST_INITIAL_TIME },
-    }),
+    JSON.stringify({ d: { n: { e: 1, a: 1 }, u: TEST_INITIAL_TIME } }),
   );
 
   expect(parsePersistedObject(localStorage.getItem(bootstrapKey)!))
     .toMatchInlineSnapshot(`
       d:
         n: { a: 1, e: 1 }
-        s: 'offline-startup-bootstrap'
         u: 1735689600000
     `);
 

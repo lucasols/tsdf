@@ -1,12 +1,6 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { useCallback, useMemo } from 'react';
-import {
-  rc_literals,
-  rc_number,
-  rc_object,
-  rc_parse,
-  rc_string,
-} from 'runcheck';
+import { rc_literals, rc_number, rc_object, rc_parse } from 'runcheck';
 import { Store } from 't-state';
 
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
@@ -111,7 +105,6 @@ const compactOfflineStatusModeStateSchema = rc_object({
   a: rc_literals(COMPACT_FLAG).optionalKey(),
 });
 const compactOfflineStatusSnapshotSchema = rc_object({
-  s: rc_string,
   n: compactOfflineStatusModeStateSchema.optionalKey(),
   o: compactOfflineStatusModeStateSchema.optionalKey(),
   u: rc_number.optionalKey(),
@@ -152,7 +145,6 @@ function normalizeCompactModeState(value: { e?: 1; a?: 1 } | undefined): {
 
 function serializeOfflineStatusSnapshot(status: GlobalOfflineStatus) {
   return {
-    s: status.sessionKey,
     n:
       status.network.enabled || status.network.active
         ? {
@@ -181,7 +173,7 @@ function normalizePersistedOfflineStatus(
     rawStatus,
     compactOfflineStatusSnapshotSchema,
   ).unwrapOrNull();
-  if (compactStatus?.s === sessionKey) {
+  if (compactStatus !== null) {
     const network = normalizeCompactModeState(compactStatus.n);
     const outage = normalizeCompactModeState(compactStatus.o);
     const effectiveOffline = getEffectiveOfflineFromModes({ network, outage });
@@ -499,8 +491,6 @@ export class SessionOfflineCoordinator {
   #mutationQueueingOverrides:
     | OfflineRuntimeConfigUpdate['mutationQueueing']
     | undefined;
-  #replaySuppressedByNetworkDisable = false;
-  #replaySuppressedByOutageDisable = false;
   #hydrated = false;
   #hydrationToken = 0;
   #protectedKeys: string[] = [];
@@ -731,11 +721,22 @@ export class SessionOfflineCoordinator {
     return this.#browserTabs.priority.getPriorityRank() <= 1;
   }
 
-  isReplaySuppressed(): boolean {
-    return (
-      this.#replaySuppressedByNetworkDisable ||
-      this.#replaySuppressedByOutageDisable
-    );
+  isReplayBlocked(): boolean {
+    if (this.store.state.status.effectiveOffline) return true;
+
+    const { network, outage } = this.store.state.status;
+
+    if (!outage.enabled && outage.active) {
+      return true;
+    }
+
+    if (!network.enabled && network.active) {
+      if (this.#classifiedNetworkActive) return true;
+
+      return !this.#browserReportsOnline();
+    }
+
+    return false;
   }
 
   setRuntimeConfig(update: OfflineRuntimeConfigUpdate): void {
@@ -817,27 +818,10 @@ export class SessionOfflineCoordinator {
       this.#assertModeIsConfigured('network');
     }
 
-    const wasActive = this.store.state.status.network.active;
     this.#networkEnabledOverride = enabled;
 
-    if (!this.#isNetworkEnabled()) {
-      if (wasActive) {
-        this.#replaySuppressedByNetworkDisable = true;
-      }
-      const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
-      this.#updateStatus((current) => ({
-        ...current,
-        network: {
-          enabled: this.#isNetworkEnabled(),
-          active: current.network.active,
-        },
-      }));
-      this.#handleConnectivityChange(wasEffectivelyOffline);
-      this.#syncNetworkListeners();
-      return;
-    }
-
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasReplayBlocked = this.isReplayBlocked();
     this.#updateStatus((current) => ({
       ...current,
       network: {
@@ -845,16 +829,10 @@ export class SessionOfflineCoordinator {
         active: current.network.active,
       },
     }));
-    this.#handleConnectivityChange(wasEffectivelyOffline);
-    this.#replaySuppressedByNetworkDisable = false;
+    this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
     this.#syncNetworkListeners();
-    this.#primeNetworkState();
     void this.refreshNetworkState().then((isOffline) => {
-      if (
-        !isOffline &&
-        !this.isReplaySuppressed() &&
-        !this.store.state.status.effectiveOffline
-      ) {
+      if (!isOffline && !this.isReplayBlocked()) {
         this.#notifyGreenCycle();
       }
     });
@@ -865,41 +843,10 @@ export class SessionOfflineCoordinator {
       this.#assertModeIsConfigured('outage');
     }
 
-    const wasActive = this.store.state.status.outage.active;
     this.#outageEnabledOverride = enabled;
 
-    if (!this.#isOutageEnabled()) {
-      if (wasActive) {
-        this.#replaySuppressedByOutageDisable = true;
-      }
-      const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
-      this.#updateStatus((current) => ({
-        ...current,
-        outage: {
-          enabled: this.#isOutageEnabled(),
-          active: current.outage.active,
-        },
-      }));
-      this.#handleConnectivityChange(wasEffectivelyOffline);
-      return;
-    }
-
-    if (this.#replaySuppressedByOutageDisable) {
-      this.#replaySuppressedByOutageDisable = false;
-      const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
-      this.#updateStatus((current) => ({
-        ...current,
-        outage: {
-          enabled: this.#isOutageEnabled(),
-          active: current.outage.active,
-        },
-      }));
-      this.#handleConnectivityChange(wasEffectivelyOffline);
-      this.#syncRecoveryProbe();
-      return;
-    }
-
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasReplayBlocked = this.isReplayBlocked();
     this.#updateStatus((current) => ({
       ...current,
       outage: {
@@ -907,15 +854,7 @@ export class SessionOfflineCoordinator {
         active: current.outage.active,
       },
     }));
-    this.#handleConnectivityChange(wasEffectivelyOffline);
-    this.#replaySuppressedByOutageDisable = false;
-    this.#syncRecoveryProbe();
-    if (
-      !this.store.state.status.effectiveOffline &&
-      !this.isReplaySuppressed()
-    ) {
-      this.#notifyGreenCycle();
-    }
+    this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
   #restampHydratedStatus(
@@ -939,7 +878,10 @@ export class SessionOfflineCoordinator {
       status.network.active && this.#browserReportsOnline();
   }
 
-  #handleConnectivityChange(wasEffectivelyOffline: boolean): void {
+  #handleConnectivityChange(
+    wasEffectivelyOffline: boolean,
+    wasReplayBlocked: boolean,
+  ): void {
     this.#syncRecoveryProbe();
 
     if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
@@ -949,16 +891,35 @@ export class SessionOfflineCoordinator {
 
     if (wasEffectivelyOffline && !this.store.state.status.effectiveOffline) {
       this.#notifyGreenCycle();
+      return;
+    }
+
+    if (!wasEffectivelyOffline && wasReplayBlocked && !this.isReplayBlocked()) {
+      this.#notifyGreenCycle();
     }
   }
 
   async refreshNetworkState(): Promise<boolean> {
-    if (!this.#isNetworkEnabled()) return false;
-
     const token = ++this.#networkStateToken;
     const detectedOffline = await this.#getCurrentOfflineState();
     if (token !== this.#networkStateToken) {
       return isModeEffectivelyActive(this.store.state.status.network);
+    }
+
+    if (!this.#isNetworkEnabled()) {
+      if (
+        !detectedOffline &&
+        this.store.state.status.network.active &&
+        !this.#classifiedNetworkActive
+      ) {
+        this.setNetworkActive(false, { classified: false });
+      }
+
+      if (!detectedOffline && !this.isReplayBlocked()) {
+        this.#notifyGreenCycle();
+      }
+
+      return detectedOffline;
     }
 
     if (detectedOffline) {
@@ -988,6 +949,7 @@ export class SessionOfflineCoordinator {
     } = {},
   ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isNetworkEnabled();
     const nextActive = active;
     this.#classifiedNetworkActive = nextActive
@@ -1004,7 +966,7 @@ export class SessionOfflineCoordinator {
       lastRecoveryCheckAt:
         options.recoveryCheckAt ?? current.lastRecoveryCheckAt,
     }));
-    this.#handleConnectivityChange(wasEffectivelyOffline);
+    this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
   setOutageActive(
@@ -1012,6 +974,7 @@ export class SessionOfflineCoordinator {
     options: { recoveryCheckAt?: number } = {},
   ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isOutageEnabled();
     const nextActive = active;
 
@@ -1022,7 +985,7 @@ export class SessionOfflineCoordinator {
       lastRecoveryCheckAt:
         options.recoveryCheckAt ?? current.lastRecoveryCheckAt,
     }));
-    this.#handleConnectivityChange(wasEffectivelyOffline);
+    this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
   async classifyFailure(
@@ -1072,7 +1035,7 @@ export class SessionOfflineCoordinator {
     this.#cleanupNetworkListeners = null;
 
     if (
-      !this.#isNetworkEnabled() ||
+      !this.#canonicalConfig.hasNetworkConfig ||
       !this.#canonicalConfig.networkListenToBrowserEvents ||
       !isWindowAvailable()
     ) {

@@ -16,7 +16,6 @@ import { validateWithSchema } from '../validateWithSchema';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
 import {
-  getEffectiveOfflineFromModes,
   isModeEffectivelyActive,
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
@@ -203,6 +202,7 @@ export type OfflineStoreController<
   ) => Promise<void>;
   prepareForFetch: () => Promise<void>;
   getSessionStatus: () => { effectiveOffline: boolean } | null;
+  handleFetchSuccess: () => Promise<void>;
   evaluateOfflineFetchError: (
     error: unknown,
     operationName?: string,
@@ -338,22 +338,19 @@ export function createOfflineStoreController<
     }
 
     const status = current.session.getStatus();
-    if (!getEffectiveOfflineFromModes(status)) return;
+    if (!status.network.active && !status.outage.active) return;
 
     await current.session.refreshNetworkState();
 
     const statusAfterRefresh = current.session.getStatus();
-    if (
-      navigator.onLine !== false &&
-      isModeEffectivelyActive(statusAfterRefresh.network)
-    ) {
+    if (navigator.onLine !== false && statusAfterRefresh.network.active) {
       current.session.setNetworkActive(false, { classified: false });
     }
 
     const statusAfterNetworkClear = current.session.getStatus();
     if (
-      isModeEffectivelyActive(statusAfterNetworkClear.outage) &&
-      !isModeEffectivelyActive(statusAfterNetworkClear.network)
+      statusAfterNetworkClear.outage.active &&
+      !statusAfterNetworkClear.network.active
     ) {
       current.session.setOutageActive(false);
     }
@@ -2020,7 +2017,7 @@ export function createOfflineStoreController<
       replayScheduled ||
       replayRetryTimer !== null ||
       current.session.getStatus().effectiveOffline ||
-      current.session.isReplaySuppressed() ||
+      current.session.isReplayBlocked() ||
       !current.session.isLeader() ||
       queueEntries.size === 0
     ) {
@@ -2048,7 +2045,7 @@ export function createOfflineStoreController<
       if (!current) return;
       if (
         current.session.getStatus().effectiveOffline ||
-        current.session.isReplaySuppressed() ||
+        current.session.isReplayBlocked() ||
         !current.session.isLeader()
       ) {
         return;
@@ -2467,6 +2464,13 @@ export function createOfflineStoreController<
     return current?.session.getStatus() ?? null;
   }
 
+  async function handleFetchSuccess(): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+
+    await clearOfflineStatusOnSuccess(current.sessionKey);
+  }
+
   function canQueueMutation(): boolean {
     return getSessionKey() !== false;
   }
@@ -2488,6 +2492,7 @@ export function createOfflineStoreController<
     resolveOfflineResolution,
     prepareForFetch,
     getSessionStatus,
+    handleFetchSuccess,
     evaluateOfflineFetchError,
     ensureReplayScheduled,
   };

@@ -54,14 +54,6 @@ function getGlobalOfflineStatusSummary(sessionKey: string) {
   ]);
 }
 
-function toPersistedRecord(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Expected persisted queue payload to be an object');
-  }
-
-  return Object.fromEntries(Object.entries(value));
-}
-
 test('runtime mode enabled toggles are shared across stores in the same session', async () => {
   network.setOffline();
   const sessionKey = 'shared-runtime-offline-controls';
@@ -422,6 +414,18 @@ test('disabling active network mode pauses replay until network is re-enabled an
   `);
   expect(directMutationWhileDisabled).toHaveBeenCalledTimes(1);
 
+  // Reads should also bypass offline short-circuiting while runtime network
+  // handling is disabled, even if the browser still reports offline.
+  const requestHistoryBeforeDisabledFetch = structuredClone(
+    env.serverMock.fetchHistory,
+  );
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  expect(env.serverMock.fetchHistory).toHaveLength(
+    requestHistoryBeforeDisabledFetch.length + 1,
+  );
+
   await advanceTime(250);
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
@@ -570,7 +574,7 @@ test('disabled network support ignores classified network failures for new mutat
   `);
 });
 
-test('browser reconnects do not replay queued mutations while runtime network support stays disabled', async () => {
+test('browser reconnects replay queued mutations even while runtime network support stays disabled', async () => {
   network.setOffline();
   const sessionKey = 'runtime-network-remains-disabled-on-browser-reconnect';
   const storeName = 'runtime-network-remains-disabled-on-browser-reconnect-doc';
@@ -638,53 +642,41 @@ test('browser reconnects do not replay queued mutations while runtime network su
     sessionKey: 'runtime-network-remains-disabled-on-browser-reconnect'
   `);
 
-  // Browser connectivity can recover, but replay must stay paused and the
-  // remembered network-offline snapshot must stay frozen until runtime config
-  // explicitly re-enables network offline handling.
+  // Reads should use the same direct path while runtime network handling is
+  // disabled, rather than short-circuiting as offline.
+  const requestHistoryBeforeDisabledFetch = structuredClone(
+    env.serverMock.fetchHistory,
+  );
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  expect(env.serverMock.fetchHistory).toHaveLength(
+    requestHistoryBeforeDisabledFetch.length + 1,
+  );
+  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  // Once the browser really reconnects, the remembered network snapshot should
+  // clear and the already-queued mutation should replay without re-enabling the
+  // runtime network mode.
   act(() => {
     network.goOnline();
   });
   await flushAllTimers();
+  await waitForMicrotaskCondition(() => replayedInputs.length === 1);
   statusRenders.addMark('Browser reconnects while disabled');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
 
-  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
-  expect(
-    getOfflineQueueEntries(sessionKey, storeName).map(({ d }) =>
-      pick(toPersistedRecord(d), [
-        'attempts',
-        'createdAt',
-        'entityRefs',
-        'input',
-        'lastAttemptAt',
-        'operation',
-        'queueOrder',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'syncState',
-        'updatedAt',
-      ]),
-    ),
-  ).toMatchInlineSnapshot(`
-    - attempts: 0
-      createdAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 2 }
-      lastAttemptAt: null
-      operation: 'updateValue'
-      queueOrder: 1735689600000
-      sessionKey: 'runtime-network-remains-disabled-on-browser-reconnect'
-      storeName: 'runtime-network-remains-disabled-on-browser-reconnect-doc'
-      storeType: 'document'
-      syncState: 'pending'
-      updatedAt: 1735689600000
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
   `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
     effectiveMode: 'normal'
     effectiveOffline: '❌'
-    network: { active: '✅', enabled: '❌' }
+    network: { active: '❌', enabled: '❌' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'runtime-network-remains-disabled-on-browser-reconnect'
   `);
@@ -713,7 +705,7 @@ test('browser reconnects do not replay queued mutations while runtime network su
     ┌─
     ⋅ effectiveMode: normal
     ⋅ effectiveOffline: ❌
-    ⋅ network: {enabled:❌, active:✅}
+    ⋅ network: {enabled:❌, active:❌}
     ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: runtime-network-remains-disabled-on-browser-reconnect
     └─
@@ -1049,7 +1041,7 @@ test('disabling active outage mode pauses replay until outage is re-enabled and 
   `);
 });
 
-test('browser reconnects do not replay queued mutations while runtime outage support stays disabled', async () => {
+test('direct-path success replays queued mutations even while runtime outage support stays disabled', async () => {
   const sessionKey = 'runtime-outage-remains-disabled-on-browser-reconnect';
   const storeName = 'runtime-outage-remains-disabled-on-browser-reconnect-doc';
   const replayedInputs: { value: number }[] = [];
@@ -1118,8 +1110,8 @@ test('browser reconnects do not replay queued mutations while runtime outage sup
     sessionKey: 'runtime-outage-remains-disabled-on-browser-reconnect'
   `);
 
-  // Browser connectivity can flap, but outage replay must stay paused and the
-  // remembered outage snapshot must stay frozen until outage mode is re-enabled.
+  // Browser events alone should not clear outage mode while support is
+  // disabled; only a real direct-path success should prove recovery.
   act(() => {
     network.goOffline();
   });
@@ -1128,47 +1120,42 @@ test('browser reconnects do not replay queued mutations while runtime outage sup
     network.goOnline();
   });
   await flushAllTimers();
-  statusRenders.addMark('Browser reconnects while disabled');
-  statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
 
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
-  expect(
-    getOfflineQueueEntries(sessionKey, storeName).map(({ d }) =>
-      pick(d, [
-        'attempts',
-        'createdAt',
-        'entityRefs',
-        'input',
-        'lastAttemptAt',
-        'operation',
-        'queueOrder',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'syncState',
-        'updatedAt',
-      ]),
-    ),
-  ).toMatchInlineSnapshot(`
-    - attempts: 0
-      createdAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 2 }
-      lastAttemptAt: null
-      operation: 'updateValue'
-      queueOrder: 1735689600000
-      sessionKey: 'runtime-outage-remains-disabled-on-browser-reconnect'
-      storeName: 'runtime-outage-remains-disabled-on-browser-reconnect-doc'
-      storeType: 'document'
-      syncState: 'pending'
-      updatedAt: 1735689600000
-  `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
     effectiveMode: 'normal'
     effectiveOffline: '❌'
     network: { active: '❌', enabled: '❌' }
     outage: { active: '✅', enabled: '❌' }
+    sessionKey: 'runtime-outage-remains-disabled-on-browser-reconnect'
+  `);
+
+  // A successful direct-path fetch should clear the remembered outage state and
+  // immediately replay the mutation that was queued before outage support was disabled.
+  const requestHistoryBeforeRecoveryFetch = structuredClone(
+    env.serverMock.fetchHistory,
+  );
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+  await waitForMicrotaskCondition(() => replayedInputs.length === 1);
+  statusRenders.addMark('Direct fetch succeeds while disabled');
+  statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
+
+  expect(env.serverMock.fetchHistory).toHaveLength(
+    requestHistoryBeforeRecoveryFetch.length + 1,
+  );
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
+  `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    effectiveMode: 'normal'
+    effectiveOffline: '❌'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
     sessionKey: 'runtime-outage-remains-disabled-on-browser-reconnect'
   `);
   expect(statusRenders.changesSnapshot).toMatchInlineSnapshot(`
@@ -1191,13 +1178,13 @@ test('browser reconnects do not replay queued mutations while runtime outage sup
     ⋅ sessionKey: runtime-outage-remains-disabled-on-browser-reconnect
     └─
 
-    >>> Browser reconnects while disabled
+    >>> Direct fetch succeeds while disabled
 
     ┌─
     ⋅ effectiveMode: normal
     ⋅ effectiveOffline: ❌
     ⋅ network: {enabled:❌, active:❌}
-    ⋅ outage: {enabled:❌, active:✅}
+    ⋅ outage: {enabled:❌, active:❌}
     ⋅ sessionKey: runtime-outage-remains-disabled-on-browser-reconnect
     └─
     "
@@ -1453,7 +1440,6 @@ test('disabling runtime network support clears the bootstrap snapshot but preser
     .toMatchInlineSnapshot(`
       d:
         n: { a: 1, e: 1 }
-        s: 'runtime-disable-persistence-semantics'
         u: 1735689600000
     `);
 
