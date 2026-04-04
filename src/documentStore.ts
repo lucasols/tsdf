@@ -39,9 +39,11 @@ import {
   initializeOfflineStoreController,
   offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
-import type {
-  AnyOfflineOperationDefinition,
-  OfflineMutationInput,
+import {
+  defaultOfflineRuntimeConfig,
+  type AnyOfflineOperationDefinition,
+  type OfflineMutationInput,
+  type OfflineRuntimeConfigUpdate,
 } from './persistentStorage/offline/types';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
@@ -1262,6 +1264,15 @@ export function createDocumentStore<
       offlineController?.getOfflineResolutions() ?? [],
     resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
       offlineController?.resolveOfflineResolution(resolutionId, resolution),
+    getOfflineRuntimeConfig: () =>
+      offlineController?.getOfflineRuntimeConfig() ??
+      defaultOfflineRuntimeConfig,
+    setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => {
+      offlineController?.setOfflineRuntimeConfig(update);
+    },
+    resetOfflineRuntimeConfig: () => {
+      offlineController?.resetOfflineRuntimeConfig();
+    },
     useDocument,
     useListItemIsLoading,
     useListItemIsDeleted,

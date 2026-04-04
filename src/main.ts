@@ -96,6 +96,8 @@ export type {
   GlobalOfflineEntity,
   GlobalOfflineStatus,
   OfflineMutationInput,
+  OfflineRuntimeConfig,
+  OfflineRuntimeConfigUpdate,
   OfflineMutationQueueingConfig,
   OfflineMutationQueueingCause,
   OfflineMutationQueueingPolicy,
@@ -112,6 +114,8 @@ export type {
   OfflineTempEntityConfig,
   OfflineTempEntityPendingEntry,
 } from './persistentStorage/offline/types';
+
+export { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 
 export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
 

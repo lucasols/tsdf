@@ -94,6 +94,48 @@ export type OfflineMutationQueueingConfig = {
   outage?: OfflineMutationQueueingPolicy;
 };
 
+/**
+ * Effective runtime offline controls exposed through store instances.
+ *
+ * `network` and `outage` are session-scoped and may affect every store sharing
+ * the same session key. `mutationQueueing` remains store-local.
+ */
+export type OfflineRuntimeConfig = {
+  /** Effective network mode enablement for the current session. */
+  network: { enabled: boolean };
+  /** Effective outage mode enablement for the current session. */
+  outage: { enabled: boolean };
+  /** Effective store-local queue admission policy for offline-enabled mutations. */
+  mutationQueueing: {
+    network: OfflineMutationQueueingPolicy;
+    outage: OfflineMutationQueueingPolicy;
+  };
+};
+
+/** Default runtime config when offline is not configured or no session exists. */
+export const defaultOfflineRuntimeConfig: OfflineRuntimeConfig = {
+  network: { enabled: false },
+  outage: { enabled: false },
+  mutationQueueing: { network: 'allow', outage: 'allow' },
+};
+
+/**
+ * Partial runtime offline control update accepted by store instances.
+ *
+ * Provided fields shallow-merge into the current runtime config.
+ */
+export type OfflineRuntimeConfigUpdate = {
+  /** Optional session-scoped update for network mode enablement. */
+  network?: { enabled?: boolean };
+  /** Optional session-scoped update for outage mode enablement. */
+  outage?: { enabled?: boolean };
+  /** Optional store-local update for offline mutation queue admission policy. */
+  mutationQueueing?: {
+    network?: OfflineMutationQueueingPolicy;
+    outage?: OfflineMutationQueueingPolicy;
+  };
+};
+
 /** Context passed into offline failure classification hooks. */
 export type OfflineFailureContext = {
   /** Phase in which the failure was detected. */

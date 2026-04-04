@@ -39,6 +39,8 @@ import {
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
   type OfflineMutationInput,
+  type OfflineRuntimeConfigUpdate,
+  defaultOfflineRuntimeConfig,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -1926,6 +1928,15 @@ export function createCollectionStore<
       offlineController?.getOfflineResolutions() ?? [],
     resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
       offlineController?.resolveOfflineResolution(resolutionId, resolution),
+    getOfflineRuntimeConfig: () =>
+      offlineController?.getOfflineRuntimeConfig() ??
+      defaultOfflineRuntimeConfig,
+    setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => {
+      offlineController?.setOfflineRuntimeConfig(update);
+    },
+    resetOfflineRuntimeConfig: () => {
+      offlineController?.resetOfflineRuntimeConfig();
+    },
     startMutation,
     invalidateItem,
     updateItemState,

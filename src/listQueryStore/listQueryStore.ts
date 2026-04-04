@@ -25,6 +25,8 @@ import {
 import {
   offlineItemEntityRefSchema,
   type OfflineMutationInput,
+  type OfflineRuntimeConfigUpdate,
+  defaultOfflineRuntimeConfig,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -2244,6 +2246,15 @@ export function createListQueryStore<
       offlineController?.getOfflineResolutions() ?? [],
     resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
       offlineController?.resolveOfflineResolution(resolutionId, resolution),
+    getOfflineRuntimeConfig: () =>
+      offlineController?.getOfflineRuntimeConfig() ??
+      defaultOfflineRuntimeConfig,
+    setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => {
+      offlineController?.setOfflineRuntimeConfig(update);
+    },
+    resetOfflineRuntimeConfig: () => {
+      offlineController?.resetOfflineRuntimeConfig();
+    },
     preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,

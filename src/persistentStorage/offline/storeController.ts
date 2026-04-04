@@ -20,7 +20,10 @@ import {
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
   type OfflineModeConfig,
+  type OfflineRuntimeConfig,
+  type OfflineRuntimeConfigUpdate,
   type OfflineMutationQueueingCause,
+  type OfflineMutationQueueingPolicy,
   type OfflineMutationInput,
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
@@ -204,6 +207,9 @@ export type OfflineStoreController<
     operationName?: string,
   ) => Promise<void>;
   ensureReplayScheduled: () => Promise<void>;
+  getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
+  setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) => void;
+  resetOfflineRuntimeConfig: () => void;
 };
 
 type OfflineStoreControllerBootstrap = Pick<
@@ -244,6 +250,16 @@ export function createOfflineStoreController<
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
+  const baseOfflineRuntimeConfig: OfflineRuntimeConfig = {
+    network: { enabled: offlineMode.network?.enabled ?? false },
+    outage: { enabled: offlineMode.outage?.enabled ?? false },
+    mutationQueueing: {
+      network: offlineMode.mutationQueueing?.network ?? 'allow',
+      outage: offlineMode.mutationQueueing?.outage ?? 'allow',
+    },
+  };
+  let runtimeMutationQueueingOverrides: OfflineRuntimeConfigUpdate['mutationQueueing'] =
+    undefined;
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
@@ -292,7 +308,17 @@ export function createOfflineStoreController<
   function isMutationQueueingAllowed(
     cause: OfflineMutationQueueingCause,
   ): boolean {
-    return offlineMode.mutationQueueing?.[cause] !== 'disallow';
+    return resolveMutationQueueingPolicy(cause) !== 'disallow';
+  }
+
+  function resolveMutationQueueingPolicy(
+    cause: OfflineMutationQueueingCause,
+  ): OfflineMutationQueueingPolicy {
+    return (
+      runtimeMutationQueueingOverrides?.[cause] ??
+      offlineMode.mutationQueueing?.[cause] ??
+      'allow'
+    );
   }
 
   function getInitialOfflineMutationAction(
@@ -1976,6 +2002,7 @@ export function createOfflineStoreController<
       replayScheduled ||
       replayRetryTimer !== null ||
       current.session.getStatus().effectiveOffline ||
+      current.session.isReplaySuppressed() ||
       !current.session.isLeader() ||
       queueEntries.size === 0
     ) {
@@ -2003,6 +2030,7 @@ export function createOfflineStoreController<
       if (!current) return;
       if (
         current.session.getStatus().effectiveOffline ||
+        current.session.isReplaySuppressed() ||
         !current.session.isLeader()
       ) {
         return;
@@ -2417,6 +2445,50 @@ export function createOfflineStoreController<
     return current?.session.getStatus() ?? null;
   }
 
+  function getOfflineRuntimeConfig(): OfflineRuntimeConfig {
+    const current = ensureActiveSession();
+    const sessionRuntimeConfig = current?.session.getRuntimeConfig();
+
+    return {
+      network:
+        sessionRuntimeConfig?.network ?? baseOfflineRuntimeConfig.network,
+      outage: sessionRuntimeConfig?.outage ?? baseOfflineRuntimeConfig.outage,
+      mutationQueueing: {
+        network: resolveMutationQueueingPolicy('network'),
+        outage: resolveMutationQueueingPolicy('outage'),
+      },
+    };
+  }
+
+  function setOfflineRuntimeConfig(update: OfflineRuntimeConfigUpdate): void {
+    const current = ensureActiveSession();
+    if (
+      current &&
+      (update.network !== undefined || update.outage !== undefined)
+    ) {
+      current.session.setRuntimeConfig(update);
+    }
+
+    if (update.mutationQueueing !== undefined) {
+      const nextOverrides = {
+        ...(runtimeMutationQueueingOverrides ?? {}),
+        ...update.mutationQueueing,
+      };
+
+      runtimeMutationQueueingOverrides =
+        nextOverrides.network === undefined &&
+        nextOverrides.outage === undefined
+          ? undefined
+          : nextOverrides;
+    }
+  }
+
+  function resetOfflineRuntimeConfig(): void {
+    runtimeMutationQueueingOverrides = undefined;
+    const current = ensureActiveSession();
+    current?.session.resetRuntimeConfig();
+  }
+
   function canQueueMutation(): boolean {
     return getSessionKey() !== false;
   }
@@ -2440,5 +2512,8 @@ export function createOfflineStoreController<
     getSessionStatus,
     evaluateOfflineFetchError,
     ensureReplayScheduled,
+    getOfflineRuntimeConfig,
+    setOfflineRuntimeConfig,
+    resetOfflineRuntimeConfig,
   };
 }

@@ -105,9 +105,9 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-      error: { code: 0, id: 'offline', message: 'Offline' }
-      ok: '❌'
-    `);
+        error: { code: 0, id: 'offline', message: 'Offline' }
+        ok: '❌'
+      `);
     expect(directMutation).not.toHaveBeenCalled();
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -371,9 +371,9 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'network-disallowed-error' }
-      ok: '❌'
-    `);
+        error: { code: 500, id: 'fetch-error', message: 'network-disallowed-error' }
+        ok: '❌'
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -478,9 +478,9 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'outage-disallowed-error' }
-      ok: '❌'
-    `);
+        error: { code: 500, id: 'fetch-error', message: 'outage-disallowed-error' }
+        ok: '❌'
+      `);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -611,9 +611,9 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'first failure' }
-      ok: '❌'
-    `);
+        error: { code: 500, id: 'fetch-error', message: 'first failure' }
+        ok: '❌'
+      `);
     expect(classifyFailure).toHaveBeenCalledTimes(2);
     expect(
       getOfflineQueueEntries(sessionKey, storeNameA).concat(

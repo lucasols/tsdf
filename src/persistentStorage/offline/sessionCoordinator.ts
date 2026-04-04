@@ -37,6 +37,8 @@ import type {
   OfflineModeConfig,
   OfflineNetworkModeConfig,
   OfflineRecoveryProbeConfig,
+  OfflineRuntimeConfig,
+  OfflineRuntimeConfigUpdate,
   OfflineOperationSchemaShape,
   OfflineOutageModeConfig,
 } from './types';
@@ -353,12 +355,14 @@ type SessionRecoveryTarget = {
 
 type SessionCanonicalConfig = {
   adapter: StorageAdapter | null;
-  networkEnabled: boolean;
+  hasNetworkConfig: boolean;
+  networkEnabledByDefault: boolean;
   networkListenToBrowserEvents: boolean;
   getIsOffline?: () => boolean | Promise<boolean>;
   networkRecoveryCheck?: OfflineNetworkModeConfig['recoveryCheck'];
   networkRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
-  outageEnabled: boolean;
+  hasOutageConfig: boolean;
+  outageEnabledByDefault: boolean;
   classifyFailure?: OfflineModeConfig<
     Record<string, OfflineOperationSchemaShape>
   >['classifyFailure'];
@@ -374,7 +378,8 @@ function toCanonicalConfig(
 ): SessionCanonicalConfig {
   return {
     adapter,
-    networkEnabled: config?.network?.enabled ?? false,
+    hasNetworkConfig: config?.network !== undefined,
+    networkEnabledByDefault: config?.network?.enabled ?? false,
     networkListenToBrowserEvents:
       config?.network?.listenToBrowserEvents ?? true,
     getIsOffline: config?.network?.getIsOffline,
@@ -383,7 +388,8 @@ function toCanonicalConfig(
       config?.network?.recoveryProbe,
       DEFAULT_NETWORK_RECOVERY_PROBE,
     ),
-    outageEnabled: config?.outage?.enabled ?? false,
+    hasOutageConfig: config?.outage !== undefined,
+    outageEnabledByDefault: config?.outage?.enabled ?? false,
     classifyFailure: config?.classifyFailure,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
@@ -421,12 +427,14 @@ function sameCanonicalConfig(
 ): boolean {
   return (
     left.adapter === right.adapter &&
-    left.networkEnabled === right.networkEnabled &&
+    left.hasNetworkConfig === right.hasNetworkConfig &&
+    left.networkEnabledByDefault === right.networkEnabledByDefault &&
     left.networkListenToBrowserEvents === right.networkListenToBrowserEvents &&
     left.getIsOffline === right.getIsOffline &&
     left.networkRecoveryCheck === right.networkRecoveryCheck &&
     sameProbeConfig(left.networkRecoveryProbe, right.networkRecoveryProbe) &&
-    left.outageEnabled === right.outageEnabled &&
+    left.hasOutageConfig === right.hasOutageConfig &&
+    left.outageEnabledByDefault === right.outageEnabledByDefault &&
     left.classifyFailure === right.classifyFailure &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
@@ -476,9 +484,14 @@ export class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
+  #networkEnabledOverride: boolean | undefined;
+  #outageEnabledOverride: boolean | undefined;
+  #replaySuppressedByNetworkDisable = false;
+  #replaySuppressedByOutageDisable = false;
   #hydrated = false;
   #hydrationToken = 0;
   #protectedKeys: string[] = [];
+  #disposed = false;
 
   constructor({
     sessionKey,
@@ -555,11 +568,10 @@ export class SessionOfflineCoordinator {
     if (hydrationToken !== this.#hydrationToken) return;
 
     if (persistedStatus) {
-      const hydratedStatus = {
-        ...persistedStatus,
+      const hydratedStatus = this.#restampHydratedStatus(persistedStatus, {
         isLeader: this.isLeader(),
         updatedAt: Date.now(),
-      };
+      });
 
       this.store.setPartialState(
         { status: hydratedStatus },
@@ -636,6 +648,10 @@ export class SessionOfflineCoordinator {
   }
 
   registerStore(registration: SessionRegistration): () => void {
+    if (this.#disposed) {
+      return () => {};
+    }
+
     this.#registrations.set(registration.storeName, registration);
     this.#refreshLeadership();
 
@@ -653,6 +669,7 @@ export class SessionOfflineCoordinator {
     storeName: string,
     contribution: SessionStoreContribution,
   ): void {
+    if (this.#disposed) return;
     this.#storeContributions.set(storeName, contribution);
     this.#refreshAggregates();
   }
@@ -678,6 +695,13 @@ export class SessionOfflineCoordinator {
     return this.store.state.status;
   }
 
+  getRuntimeConfig(): Pick<OfflineRuntimeConfig, 'network' | 'outage'> {
+    return {
+      network: { enabled: this.#isNetworkEnabled() },
+      outage: { enabled: this.#isOutageEnabled() },
+    };
+  }
+
   getEntities(): GlobalOfflineEntity[] {
     return this.store.state.entities;
   }
@@ -690,8 +714,156 @@ export class SessionOfflineCoordinator {
     return this.#browserTabs.priority.getPriorityRank() <= 1;
   }
 
+  isReplaySuppressed(): boolean {
+    return (
+      this.#replaySuppressedByNetworkDisable ||
+      this.#replaySuppressedByOutageDisable
+    );
+  }
+
+  setRuntimeConfig(update: OfflineRuntimeConfigUpdate): void {
+    if (update.network?.enabled !== undefined) {
+      this.#setNetworkRuntimeEnabled(update.network.enabled);
+    }
+
+    if (update.outage?.enabled !== undefined) {
+      this.#setOutageRuntimeEnabled(update.outage.enabled);
+    }
+  }
+
+  resetRuntimeConfig(): void {
+    if (this.#networkEnabledOverride !== undefined) {
+      this.#setNetworkRuntimeEnabled(undefined);
+    }
+    if (this.#outageEnabledOverride !== undefined) {
+      this.#setOutageRuntimeEnabled(undefined);
+    }
+  }
+
   #browserReportsOnline(): boolean {
     return !isWindowAvailable() || navigator.onLine !== false;
+  }
+
+  #isNetworkEnabled(): boolean {
+    return (
+      this.#canonicalConfig.hasNetworkConfig &&
+      (this.#networkEnabledOverride ??
+        this.#canonicalConfig.networkEnabledByDefault)
+    );
+  }
+
+  #isOutageEnabled(): boolean {
+    return (
+      this.#canonicalConfig.hasOutageConfig &&
+      (this.#outageEnabledOverride ??
+        this.#canonicalConfig.outageEnabledByDefault)
+    );
+  }
+
+  #assertModeIsConfigured(mode: 'network' | 'outage'): void {
+    const isConfigured =
+      mode === 'network'
+        ? this.#canonicalConfig.hasNetworkConfig
+        : this.#canonicalConfig.hasOutageConfig;
+    if (isConfigured) return;
+
+    throw new Error(
+      `Offline runtime control "${mode}.enabled" is unavailable for session "${this.sessionKey}" because offlineMode.${mode} was not configured`,
+    );
+  }
+
+  #setNetworkRuntimeEnabled(enabled: boolean | undefined): void {
+    if (enabled !== undefined) {
+      this.#assertModeIsConfigured('network');
+    }
+
+    const wasActive = this.store.state.status.network.active;
+    this.#networkEnabledOverride = enabled;
+
+    if (!this.#isNetworkEnabled()) {
+      if (wasActive) {
+        this.#replaySuppressedByNetworkDisable = true;
+      }
+      this.setNetworkActive(false, { classified: false });
+      this.#syncNetworkListeners();
+      return;
+    }
+
+    this.#replaySuppressedByNetworkDisable = false;
+    this.#syncNetworkListeners();
+    this.#primeNetworkState();
+    void this.refreshNetworkState().then((isOffline) => {
+      if (
+        !isOffline &&
+        !this.isReplaySuppressed() &&
+        !this.store.state.status.effectiveOffline
+      ) {
+        this.#notifyGreenCycle();
+      }
+    });
+  }
+
+  #setOutageRuntimeEnabled(enabled: boolean | undefined): void {
+    if (enabled !== undefined) {
+      this.#assertModeIsConfigured('outage');
+    }
+
+    const wasActive = this.store.state.status.outage.active;
+    this.#outageEnabledOverride = enabled;
+
+    if (!this.#isOutageEnabled()) {
+      if (wasActive) {
+        this.#replaySuppressedByOutageDisable = true;
+      }
+      this.setOutageActive(false);
+      return;
+    }
+
+    if (this.#replaySuppressedByOutageDisable) {
+      this.#replaySuppressedByOutageDisable = false;
+      this.setOutageActive(true);
+      return;
+    }
+
+    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    this.#updateStatus((current) => ({
+      ...current,
+      outage: {
+        enabled: this.#isOutageEnabled(),
+        active: current.outage.active,
+      },
+    }));
+    this.#handleConnectivityChange(wasEffectivelyOffline);
+    this.#replaySuppressedByOutageDisable = false;
+    this.#syncRecoveryProbe();
+    if (
+      !this.store.state.status.effectiveOffline &&
+      !this.isReplaySuppressed()
+    ) {
+      this.#notifyGreenCycle();
+    }
+  }
+
+  #restampHydratedStatus(
+    status: GlobalOfflineStatus,
+    updates: Partial<Pick<GlobalOfflineStatus, 'isLeader' | 'updatedAt'>> = {},
+  ): GlobalOfflineStatus {
+    const networkEnabled = this.#isNetworkEnabled();
+    const outageEnabled = this.#isOutageEnabled();
+
+    return this.#deriveLocalStatus({
+      ...status,
+      network: {
+        enabled: networkEnabled,
+        active: networkEnabled ? status.network.active : false,
+      },
+      outage: {
+        enabled: outageEnabled,
+        active: outageEnabled ? status.outage.active : false,
+      },
+      isLeader: updates.isLeader ?? status.isLeader,
+      updatedAt: updates.updatedAt ?? status.updatedAt,
+    });
   }
 
   #syncClassifiedNetworkStateFromStatus(status: GlobalOfflineStatus): void {
@@ -713,7 +885,7 @@ export class SessionOfflineCoordinator {
   }
 
   async refreshNetworkState(): Promise<boolean> {
-    if (!this.#canonicalConfig.networkEnabled) {
+    if (!this.#isNetworkEnabled()) {
       this.setNetworkActive(false, { classified: false });
       return false;
     }
@@ -751,15 +923,19 @@ export class SessionOfflineCoordinator {
     } = {},
   ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
-    this.#classifiedNetworkActive = active
+    const nextEnabled = this.#isNetworkEnabled();
+    const nextActive = nextEnabled ? active : false;
+    this.#classifiedNetworkActive = nextActive
       ? (options.classified ?? this.#classifiedNetworkActive)
       : false;
 
     this.#updateStatus((current) => ({
       ...current,
-      network: { enabled: this.#canonicalConfig.networkEnabled, active },
+      network: { enabled: nextEnabled, active: nextActive },
       lastFailureAt:
-        active && options.recordFailureAt ? Date.now() : current.lastFailureAt,
+        nextActive && options.recordFailureAt
+          ? Date.now()
+          : current.lastFailureAt,
       lastRecoveryCheckAt:
         options.recoveryCheckAt ?? current.lastRecoveryCheckAt,
     }));
@@ -771,11 +947,13 @@ export class SessionOfflineCoordinator {
     options: { recoveryCheckAt?: number } = {},
   ): void {
     const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+    const nextEnabled = this.#isOutageEnabled();
+    const nextActive = nextEnabled ? active : false;
 
     this.#updateStatus((current) => ({
       ...current,
-      outage: { enabled: this.#canonicalConfig.outageEnabled, active },
-      lastFailureAt: active ? Date.now() : current.lastFailureAt,
+      outage: { enabled: nextEnabled, active: nextActive },
+      lastFailureAt: nextActive ? Date.now() : current.lastFailureAt,
       lastRecoveryCheckAt:
         options.recoveryCheckAt ?? current.lastRecoveryCheckAt,
     }));
@@ -796,13 +974,13 @@ export class SessionOfflineCoordinator {
     }
 
     if (result === 'outage') {
-      if (!this.#canonicalConfig.outageEnabled) return 'ignore';
+      if (!this.#isOutageEnabled()) return 'ignore';
       this.setOutageActive(true);
       return 'outage';
     }
 
     if (result === 'network') {
-      if (!this.#canonicalConfig.networkEnabled) return 'ignore';
+      if (!this.#isNetworkEnabled()) return 'ignore';
       this.setNetworkActive(true, { classified: true, recordFailureAt: true });
       return 'network';
     }
@@ -829,7 +1007,7 @@ export class SessionOfflineCoordinator {
     this.#cleanupNetworkListeners = null;
 
     if (
-      !this.#canonicalConfig.networkEnabled ||
+      !this.#isNetworkEnabled() ||
       !this.#canonicalConfig.networkListenToBrowserEvents ||
       !isWindowAvailable()
     ) {
@@ -859,7 +1037,7 @@ export class SessionOfflineCoordinator {
   }
 
   #primeNetworkState(): void {
-    if (!this.#canonicalConfig.networkEnabled) return;
+    if (!this.#isNetworkEnabled()) return;
 
     const initial = this.#getCurrentOfflineState();
 
@@ -952,6 +1130,7 @@ export class SessionOfflineCoordinator {
   }
 
   #publishSnapshot(): void {
+    if (this.#disposed) return;
     const status = this.store.state.status;
     this.#browserTabs.coordinator.publish({
       kind: 'offline-session-snapshot',
@@ -967,7 +1146,10 @@ export class SessionOfflineCoordinator {
 
     this.store.setState(
       {
-        status: this.#stampLocalStatus(message.status),
+        status: this.#restampHydratedStatus(message.status, {
+          isLeader: this.isLeader(),
+          updatedAt: Date.now(),
+        }),
         entities: message.entities,
         resolutions: message.resolutions,
       },
@@ -1017,7 +1199,7 @@ export class SessionOfflineCoordinator {
       this.store.state.status.network.active &&
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkEnabled &&
+      this.#isNetworkEnabled() &&
       this.#canonicalConfig.networkRecoveryCheck
     ) {
       return {
@@ -1030,7 +1212,7 @@ export class SessionOfflineCoordinator {
     if (
       this.store.state.status.outage.active &&
       !this.store.state.status.network.active &&
-      this.#canonicalConfig.outageEnabled &&
+      this.#isOutageEnabled() &&
       this.#canonicalConfig.outageRecoveryCheck
     ) {
       return {
@@ -1119,6 +1301,7 @@ export class SessionOfflineCoordinator {
   }
 
   dispose(): void {
+    this.#disposed = true;
     this.#stopRecoveryProbe();
     this.#cleanupNetworkListeners?.();
     this.#browserTabs.priority.close();
