@@ -4,6 +4,7 @@ import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { ListQueryOfflineOperationDefinition } from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -11,7 +12,6 @@ import {
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateListQueryUserOperations,
   deleteItemInputSchema,
@@ -82,8 +82,11 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -91,7 +94,7 @@ describe('list-query replay', () => {
                 execute,
               },
             },
-          }),
+          },
         },
       },
     );
@@ -328,8 +331,11 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -364,7 +370,7 @@ describe('list-query replay', () => {
                 },
               },
             },
-          }),
+          },
         },
       },
     );
@@ -542,8 +548,11 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               createUsers: {
                 inputSchema: batchCreateUserInputSchema,
@@ -587,7 +596,7 @@ describe('list-query replay', () => {
                 },
               },
             },
-          }),
+          },
         },
       },
     );
@@ -801,8 +810,11 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -848,7 +860,7 @@ describe('list-query replay', () => {
                 },
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1023,50 +1035,48 @@ describe('list-query replay', () => {
           schema: nestedUserRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-replay-nested-temp-create-chain-session',
-            {
-              network: network.config,
-              operations: {
-                createUser: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -1,
-                      name: input.name,
-                    }),
-                    reconcileServerEntity: (result) => ({
-                      finalPayload: `users||${result.id}`,
-                      finalData: result,
-                    }),
-                  },
-                  execute: createUserExecute,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () =>
+                'offline-replay-nested-temp-create-chain-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
                 },
-                createChildUser: {
-                  inputSchema: nestedChildCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -2,
-                      name: input.name,
-                      parentId: input.parentId,
-                    }),
-                    reconcileServerEntity: (result) => ({
-                      finalPayload: `users||${result.id}`,
-                      finalData: result,
-                    }),
-                  },
-                  execute: createChildUserExecute,
+                execute: createUserExecute,
+              },
+              createChildUser: {
+                inputSchema: nestedChildCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({
+                    id: -2,
+                    name: input.name,
+                    parentId: input.parentId,
+                  }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
                 },
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: patchUserExecute,
-                },
+                execute: createChildUserExecute,
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: patchUserExecute,
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1432,34 +1442,32 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-replay-temp-create-resolution-chain-session',
-            {
-              network: network.config,
-              operations: {
-                createUser: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -1,
-                      name: input.name,
-                    }),
-                    reconcileServerEntity: (result) => ({
-                      finalPayload: `users||${result.id}`,
-                      finalData: result,
-                    }),
-                  },
-                  execute: createUserExecute,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () =>
+                'offline-replay-temp-create-resolution-chain-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
                 },
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: patchUserExecute,
-                },
+                execute: createUserExecute,
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: patchUserExecute,
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1832,34 +1840,31 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-replay-temp-create-discard-session',
-            {
-              network: network.config,
-              operations: {
-                createUser: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -1,
-                      name: input.name,
-                    }),
-                    reconcileServerEntity: (result) => ({
-                      finalPayload: `users||${result.id}`,
-                      finalData: result,
-                    }),
-                  },
-                  execute: createUserExecute,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-replay-temp-create-discard-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
                 },
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: ({ input }) => ({ name: input.name }),
-                },
+                execute: createUserExecute,
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) => ({ name: input.name }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1994,33 +1999,30 @@ describe('list-query replay', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-replay-temp-list-query-session',
-            {
-              network: network.config,
-              operations: {
-                createUser: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -1,
-                      name: input.name,
-                    }),
-                    reconcileServerEntity: (result) => ({
-                      finalPayload: `users||${result.id}`,
-                      finalData: result,
-                    }),
-                  },
-                  execute: ({ input }) => {
-                    const result = { id: nextUserId, name: input.name };
-                    nextUserId += 1;
-                    return result;
-                  },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-replay-temp-list-query-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: ({ input }) => {
+                  const result = { id: nextUserId, name: input.name };
+                  nextUserId += 1;
+                  return result;
                 },
               },
             },
-          ),
+          },
         },
       },
     );

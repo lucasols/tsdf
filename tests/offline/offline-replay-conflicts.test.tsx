@@ -9,6 +9,7 @@ import {
   type ListQueryOfflineOperationDefinition,
   useGlobalOfflineEntities,
   useGlobalOfflineResolutions,
+  createOfflineSession,
 } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -19,7 +20,6 @@ import {
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type PatchUserOperations,
   type UpdateValueConflictOperations,
@@ -195,44 +195,42 @@ test('offline conflicts are detected before execute, surface through selectors, 
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-conflict-session',
-          {
-            network: { enabled: true },
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute,
-                conflictHandling: {
-                  schema: docConflictSchema,
-                  detectConflict: ({ input, enqueuedAt }) => {
-                    expect(input.value).toBe(2);
-                    expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-                    return { reason: 'server-changed' };
-                  },
-                  resolveConflict: ({
-                    input,
-                    conflict,
-                    resolution,
-                    enqueuedAt,
-                  }) => {
-                    expect(input.value).toBe(2);
-
-                    expect(conflict).toMatchInlineSnapshot(
-                      `reason: 'server-changed'`,
-                    );
-
-                    expect(resolution).toMatchInlineSnapshot(
-                      `resolution: 'accept-local'`,
-                    );
-                    resolveEnqueuedAt = enqueuedAt;
-                    return undefined;
-                  },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-conflict-session',
+            config: { network: { enabled: true } },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input, enqueuedAt }) => {
+                  expect(input.value).toBe(2);
+                  expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+                  return { reason: 'server-changed' };
+                },
+                resolveConflict: ({
+                  input,
+                  conflict,
+                  resolution,
+                  enqueuedAt,
+                }) => {
+                  expect(input.value).toBe(2);
+                  expect(conflict).toMatchInlineSnapshot(
+                    `reason: 'server-changed'`,
+                  );
+                  expect(resolution).toMatchInlineSnapshot(
+                    `resolution: 'accept-local'`,
+                  );
+                  resolveEnqueuedAt = enqueuedAt;
+                  return undefined;
                 },
               },
             },
           },
-        ),
+        },
       },
     },
   );
@@ -392,30 +390,30 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-conflict-requeue-session',
-          {
-            network: network.config,
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute: ({ input }) => {
-                  executedInputs.push(input.value);
-                  env.apiStore.updateState((draft) => {
-                    draft.value = input.value;
-                  });
-                  return input;
-                },
-                conflictHandling: {
-                  schema: docConflictSchema,
-                  detectConflict: ({ input }) =>
-                    input.value === 2 ? { reason: 'server-changed' } : false,
-                  resolveConflict,
-                },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-conflict-requeue-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => {
+                executedInputs.push(input.value);
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+                return input;
+              },
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input }) =>
+                  input.value === 2 ? { reason: 'server-changed' } : false,
+                resolveConflict,
               },
             },
           },
-        ),
+        },
       },
     },
   );
@@ -523,47 +521,45 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-conflict-temp-requeue-session',
-          {
-            network: network.config,
-            operations: {
-              createUser: {
-                inputSchema: collectionCreateInputSchema,
-                getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                execute: () =>
-                  new Promise<{ id: string; name: string }>((resolve) => {
-                    executeResolvers.push(resolve);
-                  }),
-                conflictHandling: {
-                  schema: docConflictSchema,
-                  detectConflict: ({ input }) =>
-                    input.name === 'Ada' ? { reason: 'server-changed' } : false,
-                  resolveConflict: ({ conflict, resolution }) => {
-                    expect(conflict).toMatchInlineSnapshot(
-                      `reason: 'server-changed'`,
-                    );
-
-                    expect(resolution).toMatchInlineSnapshot(
-                      `name: 'Ada resolved'`,
-                    );
-
-                    return { requeue: { input: { name: 'Ada resolved' } } };
-                  },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-conflict-temp-requeue-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              execute: () =>
+                new Promise<{ id: string; name: string }>((resolve) => {
+                  executeResolvers.push(resolve);
+                }),
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input }) =>
+                  input.name === 'Ada' ? { reason: 'server-changed' } : false,
+                resolveConflict: ({ conflict, resolution }) => {
+                  expect(conflict).toMatchInlineSnapshot(
+                    `reason: 'server-changed'`,
+                  );
+                  expect(resolution).toMatchInlineSnapshot(
+                    `name: 'Ada resolved'`,
+                  );
+                  return { requeue: { input: { name: 'Ada resolved' } } };
                 },
-                tempEntity: {
-                  buildPendingEntity: (input) => ({
-                    value: { name: `pending:${input.name}` },
-                  }),
-                  reconcileServerEntity: (result) => ({
-                    finalPayload: result.id,
-                    finalData: { value: { name: result.name } },
-                  }),
-                },
+              },
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: `pending:${input.name}` },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                  finalData: { value: { name: result.name } },
+                }),
               },
             },
           },
-        ),
+        },
       },
     },
   );
@@ -741,39 +737,40 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-replay-temp-create-conflict-chain-session',
-          {
-            network: network.config,
-            operations: {
-              createUser: {
-                inputSchema: collectionCreateInputSchema,
-                getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                tempEntity: {
-                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
-                  reconcileServerEntity: (result) => ({
-                    finalPayload: `users||${result.id}`,
-                    finalData: result,
-                  }),
-                },
-                execute: createUserExecute,
-                conflictHandling: {
-                  schema: docConflictSchema,
-                  detectConflict: ({ input }) =>
-                    input.name === 'Linus offline'
-                      ? { reason: 'server-changed' }
-                      : false,
-                  resolveConflict: () => undefined,
-                },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () =>
+              'offline-replay-temp-create-conflict-chain-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
               },
-              patchUserName: {
-                inputSchema: userPatchSchema,
-                getEntityRefs: ({ input }) => [input.itemId],
-                execute: patchUserExecute,
+              execute: createUserExecute,
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input }) =>
+                  input.name === 'Linus offline'
+                    ? { reason: 'server-changed' }
+                    : false,
+                resolveConflict: () => undefined,
               },
             },
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: patchUserExecute,
+            },
           },
-        ),
+        },
       },
     },
   );
@@ -1025,30 +1022,32 @@ test('conflict handling still works for mutations queued via fallback', async ()
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'hybrid-conflict-session',
-          {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => true,
-              recoveryProbe: quickRecoveryProbe,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'hybrid-conflict-session',
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => true,
+                recoveryProbe: quickRecoveryProbe,
+              },
             },
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute,
-                conflictHandling: {
-                  detectConflict: ({ input }) =>
-                    input.value === 2 ? { reason: 'server-changed' } : false,
-                  resolveConflict: () => undefined,
-                },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              conflictHandling: {
+                detectConflict: ({ input }) =>
+                  input.value === 2 ? { reason: 'server-changed' } : false,
+                resolveConflict: () => undefined,
               },
             },
           },
-        ),
+        },
       },
     },
   );

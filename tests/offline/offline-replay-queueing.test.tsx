@@ -4,12 +4,12 @@ import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateUserOperations,
   deleteItemInputSchema,
@@ -82,34 +82,34 @@ test('collection offline creates keep durable temp-id metadata and clear after r
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-temp-id-session',
-          {
-            network: network.config,
-            operations: {
-              createUser: {
-                inputSchema: collectionCreateInputSchema,
-                getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                accumulation: {
-                  mergeInput: ({ incomingInput }) => incomingInput,
-                },
-                tempEntity: {
-                  buildPendingEntity: (input) => ({
-                    value: { name: input.name },
-                  }),
-                  reconcileServerEntity: (result) => ({
-                    finalPayload: result.id,
-                    finalData: { value: { name: result.name } },
-                  }),
-                },
-                execute: () =>
-                  new Promise<{ id: string; name: string }>((resolve) => {
-                    resolveCreates.push(resolve);
-                  }),
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-temp-id-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
               },
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                  finalData: { value: { name: result.name } },
+                }),
+              },
+              execute: () =>
+                new Promise<{ id: string; name: string }>((resolve) => {
+                  resolveCreates.push(resolve);
+                }),
             },
           },
-        ),
+        },
       },
     },
   );
@@ -195,8 +195,11 @@ test('document offline accumulation keeps a single persisted queue entry and rep
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -204,7 +207,7 @@ test('document offline accumulation keeps a single persisted queue entry and rep
             execute,
           },
         },
-      }),
+      },
     },
   });
 
@@ -348,8 +351,11 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
@@ -363,7 +369,7 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
               execute: deleteExecute,
             },
           },
-        }),
+        },
       },
     },
   );
@@ -512,8 +518,11 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
         adapter: 'local-sync',
         schema: collectionWithRoleSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             setUserName: {
               inputSchema: setUserNameInputSchema,
@@ -527,7 +536,7 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
               execute: setUserRoleExecute,
             },
           },
-        }),
+        },
       },
     },
   );
@@ -675,19 +684,19 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'needs-confirmation-session',
-        {
-          network: network.config,
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              execute,
-              shouldSkipSync,
-            },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'needs-confirmation-session',
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            shouldSkipSync,
           },
         },
-      ),
+      },
     },
   });
 
@@ -754,19 +763,19 @@ test('needs-confirmation entries retry execute when shouldSkipSync returns false
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'needs-confirmation-no-outage-session',
-        {
-          network: network.config,
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              execute,
-              shouldSkipSync,
-            },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'needs-confirmation-no-outage-session',
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            shouldSkipSync,
           },
         },
-      ),
+      },
     },
   });
 
@@ -843,15 +852,15 @@ test('healthy replay failures are retried 5 times and then move into the resolut
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'retry-exhaustion-session',
-        {
-          network: network.config,
-          operations: {
-            updateValue: { inputSchema: docMutationInputSchema, execute },
-          },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'retry-exhaustion-session',
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
         },
-      ),
+      },
     },
   });
 
@@ -990,15 +999,15 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'retry-resolution-actions-session',
-        {
-          network: network.config,
-          operations: {
-            updateValue: { inputSchema: docMutationInputSchema, execute },
-          },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'retry-resolution-actions-session',
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
         },
-      ),
+      },
     },
   });
 
@@ -1175,29 +1184,34 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => 'retry-outage-session', {
-        network: { enabled: true },
-        classifyFailure: (error, ctx) =>
-          ctx.phase === 'sync' &&
-          error instanceof Error &&
-          error.message === 'outage'
-            ? 'outage'
-            : 'ignore',
-        outage: {
-          enabled: true,
-          recoveryCheck,
-          recoveryProbe: {
-            initialIntervalMs: 50,
-            maxIntervalMs: 50,
-            backoffMultiplier: 1,
-            jitterRatio: 0,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'retry-outage-session',
+          config: {
+            network: { enabled: true },
+            classifyFailure: (error, ctx) =>
+              ctx.phase === 'sync' &&
+              error instanceof Error &&
+              error.message === 'outage'
+                ? 'outage'
+                : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck,
+              recoveryProbe: {
+                initialIntervalMs: 50,
+                maxIntervalMs: 50,
+                backoffMultiplier: 1,
+                jitterRatio: 0,
+              },
+            },
+            replayRetry: { maxFailures: 2 },
           },
-        },
-        replayRetry: { maxFailures: 2 },
+        }),
         operations: {
           updateValue: { inputSchema: docMutationInputSchema, execute },
         },
-      }),
+      },
     },
   });
 
@@ -1252,15 +1266,15 @@ test('going offline again resets the healthy replay failure budget', async () =>
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'retry-budget-reset-session',
-        {
-          network: network.config,
-          operations: {
-            updateValue: { inputSchema: docMutationInputSchema, execute },
-          },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'retry-budget-reset-session',
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
         },
-      ),
+      },
     },
   });
 
@@ -1412,22 +1426,21 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'offline-needs-confirmation-accumulation-session',
-        {
-          network: { enabled: true },
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              accumulation: {
-                mergeInput: ({ incomingInput }) => incomingInput,
-              },
-              execute,
-              shouldSkipSync: () => false,
-            },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () =>
+            'offline-needs-confirmation-accumulation-session',
+          config: { network: { enabled: true } },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
+            execute,
+            shouldSkipSync: () => false,
           },
         },
-      ),
+      },
     },
   });
   await Promise.resolve();
@@ -1508,8 +1521,11 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1518,7 +1534,7 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
             shouldSkipSync: () => false,
           },
         },
-      }),
+      },
     },
   });
 
@@ -1644,19 +1660,19 @@ test('needs-confirmation entries keep retrying shouldSkipSync while the session 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'online-needs-confirmation-retry-session',
-        {
-          network: network.config,
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              execute,
-              shouldSkipSync,
-            },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'online-needs-confirmation-retry-session',
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            shouldSkipSync,
           },
         },
-      ),
+      },
     },
   });
 
@@ -1719,8 +1735,11 @@ test('session switches do not leave replayed queue entries in the old namespace'
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1730,7 +1749,7 @@ test('session switches do not leave replayed queue entries in the old namespace'
               }),
           },
         },
-      }),
+      },
     },
   });
 
@@ -1775,8 +1794,11 @@ describe('basic replay lifecycle', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1788,7 +1810,7 @@ describe('basic replay lifecycle', () => {
               },
             },
           },
-        }),
+        },
       },
     });
 
@@ -1902,15 +1924,20 @@ describe('hybrid fallback integration', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: quickRecoveryProbe,
+              },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1920,7 +1947,7 @@ describe('hybrid fallback integration', () => {
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -2003,30 +2030,32 @@ describe('hybrid fallback integration', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'hybrid-retry-exhaustion-session',
-          {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => true,
-              recoveryProbe: quickRecoveryProbe,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'hybrid-retry-exhaustion-session',
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => true,
+                recoveryProbe: quickRecoveryProbe,
+              },
+              replayRetry: { maxFailures: 2, intervalMs: 1 },
             },
-            replayRetry: { maxFailures: 2, intervalMs: 1 },
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute,
-                conflictHandling: {
-                  detectConflict: () => false,
-                  resolveConflict: () => undefined,
-                },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              conflictHandling: {
+                detectConflict: () => false,
+                resolveConflict: () => undefined,
               },
             },
           },
-        ),
+        },
       },
     });
 

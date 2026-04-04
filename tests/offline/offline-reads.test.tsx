@@ -3,6 +3,7 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
+import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -14,7 +15,6 @@ import {
   waitForScheduledCleanup,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import { userRowSchema } from './offlineReplayTestShared';
 import {
   collectionSchema,
@@ -49,10 +49,13 @@ test('when an already-loaded document refetches while offline, it keeps the last
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'offline-read-cache-session',
-        { network: network.config, operations: {} },
-      ),
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'offline-read-cache-session',
+          config: { network: network.config },
+        }),
+        operations: {},
+      },
     },
   });
 
@@ -94,10 +97,13 @@ test('when a document mounts offline with no cached snapshot, it returns the nor
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'offline-read-empty-session',
-        { network: network.config, operations: {} },
-      ),
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'offline-read-empty-session',
+          config: { network: network.config },
+        }),
+        operations: {},
+      },
     },
   });
 
@@ -143,10 +149,13 @@ test('when the app starts offline, startup cleanup keeps an expired document cac
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
         operations: {},
-      }),
+      },
     },
   });
 
@@ -192,10 +201,13 @@ test('when a loaded collection item refetches while offline, it keeps the last s
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-collection-cache-session',
-          { network: network.config, operations: {} },
-        ),
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-collection-cache-session',
+            config: { network: network.config },
+          }),
+          operations: {},
+        },
       },
     },
   );
@@ -250,10 +262,13 @@ test('when a loaded list query refetches while offline, it keeps the last succes
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-list-query-cache-session',
-          { network: network.config, operations: {} },
-        ),
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-list-query-cache-session',
+            config: { network: network.config },
+          }),
+          operations: {},
+        },
       },
     },
   );
@@ -322,10 +337,13 @@ test('when a loaded list-query item refetches while offline, it keeps the last s
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-list-item-cache-session',
-          { network: network.config, operations: {} },
-        ),
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-list-item-cache-session',
+            config: { network: network.config },
+          }),
+          operations: {},
+        },
       },
     },
   );
@@ -417,10 +435,13 @@ test('when the app starts offline, startup cleanup keeps an expired list-query c
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {},
-        }),
+        },
       },
     },
   );
@@ -489,10 +510,13 @@ test('when a list query mounts offline with no cached snapshot, it returns the n
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-list-query-empty-session',
-          { network: network.config, operations: {} },
-        ),
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-list-query-empty-session',
+            config: { network: network.config },
+          }),
+          operations: {},
+        },
       },
     },
   );

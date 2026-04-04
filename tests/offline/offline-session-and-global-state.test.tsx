@@ -19,7 +19,6 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateListQueryUserOperations,
   getOfflineQueueEntries,
@@ -121,15 +120,18 @@ test('stores unregister their previous offline session when the session key beco
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => currentSessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => currentSessionKey,
+          config: { network: network.config },
+        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
             execute: ({ input }: UpdateValueExecuteContext) => input,
           },
         },
-      }),
+      },
     },
   });
 
@@ -188,8 +190,11 @@ test('logging back into the same session replays durable offline mutations queue
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => currentSessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => currentSessionKey,
+          config: { network: network.config },
+        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -202,7 +207,7 @@ test('logging back into the same session replays durable offline mutations queue
             },
           },
         },
-      }),
+      },
     },
   });
 
@@ -344,8 +349,11 @@ test('a global offline view sees the same blocked temp item as the store after r
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -365,7 +373,7 @@ test('a global offline view sees the same blocked temp item as the store after r
               execute: ({ input }) => ({ name: input.name }),
             },
           },
-        }),
+        },
       },
     },
   );
@@ -537,8 +545,11 @@ test('offline mutations fail fast when no session key is available', async () =>
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        network: network.config,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -550,7 +561,7 @@ test('offline mutations fail fast when no session key is available', async () =>
             },
           },
         },
-      }),
+      },
     },
   });
 
@@ -613,8 +624,11 @@ test('global offline hooks can mount before a localStorage-backed store', async 
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -626,7 +640,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
               },
             },
           },
-        }),
+        },
       },
     });
 
@@ -779,10 +793,13 @@ test('global offline status is shared across stores in the same session', async 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        network: { enabled: true },
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: { enabled: true } },
+        }),
         operations: {},
-      }),
+      },
     },
   });
 
@@ -796,10 +813,13 @@ test('global offline status is shared across stores in the same session', async 
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: { enabled: true },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: { enabled: true } },
+          }),
           operations: {},
-        }),
+        },
       },
     },
   );
@@ -880,8 +900,11 @@ test('global and per-store offline entity selectors aggregate queued work across
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -893,7 +916,7 @@ test('global and per-store offline entity selectors aggregate queued work across
               },
             },
           },
-        }),
+        },
       },
     });
     return env;

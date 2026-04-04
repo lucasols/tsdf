@@ -5,6 +5,7 @@ import { rc_array, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -12,7 +13,6 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateUserOperations,
   getOfflineQueueEntries,
@@ -86,16 +86,21 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
-          mutationQueueing: { network: 'disallow' },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              network: network.config,
+              mutationQueueing: { network: 'disallow' },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -127,15 +132,18 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -170,15 +178,18 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -213,22 +224,27 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: quickRecoveryProbe,
+              },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -274,26 +290,31 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          classifyFailure: () => 'network' as const,
-          network: {
-            ...network.config,
-            recoveryCheck: () => false,
-            recoveryProbe: {
-              initialIntervalMs: 100,
-              maxIntervalMs: 100,
-              backoffMultiplier: 1,
-              jitterRatio: 0,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              classifyFailure: () => 'network' as const,
+              network: {
+                ...network.config,
+                recoveryCheck: () => false,
+                recoveryProbe: {
+                  initialIntervalMs: 100,
+                  maxIntervalMs: 100,
+                  backoffMultiplier: 1,
+                  jitterRatio: 0,
+                },
+              },
+              mutationQueueing: { network: 'disallow' },
             },
-          },
-          mutationQueueing: { network: 'disallow' },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -340,26 +361,31 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          classifyFailure: () => 'network' as const,
-          network: {
-            ...network.config,
-            recoveryCheck: () => false,
-            recoveryProbe: {
-              initialIntervalMs: 100,
-              maxIntervalMs: 100,
-              backoffMultiplier: 1,
-              jitterRatio: 0,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              classifyFailure: () => 'network' as const,
+              network: {
+                ...network.config,
+                recoveryCheck: () => false,
+                recoveryProbe: {
+                  initialIntervalMs: 100,
+                  maxIntervalMs: 100,
+                  backoffMultiplier: 1,
+                  jitterRatio: 0,
+                },
+              },
+              mutationQueueing: { network: 'disallow' },
             },
-          },
-          mutationQueueing: { network: 'disallow' },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -390,21 +416,26 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          classifyFailure: () => 'outage' as const,
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
-          mutationQueueing: { outage: 'disallow' },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              classifyFailure: () => 'outage' as const,
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: quickRecoveryProbe,
+              },
+              mutationQueueing: { outage: 'disallow' },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -451,21 +482,26 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          classifyFailure: () => 'outage' as const,
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
-          mutationQueueing: { outage: 'disallow' },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              classifyFailure: () => 'outage' as const,
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: quickRecoveryProbe,
+              },
+              mutationQueueing: { outage: 'disallow' },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -498,23 +534,28 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
-          mutationQueueing: { network: 'disallow', outage: 'allow' },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: quickRecoveryProbe,
+              },
+              mutationQueueing: { network: 'disallow', outage: 'allow' },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -570,21 +611,26 @@ describe('document', () => {
         persistentStorage: {
           adapter: 'local-sync',
           schema: docSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            classifyFailure,
-            outage: {
-              enabled: true,
-              recoveryCheck,
-              recoveryProbe: quickRecoveryProbe,
-            },
-            mutationQueueing: { outage: 'allow' },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: {
+                classifyFailure,
+                outage: {
+                  enabled: true,
+                  recoveryCheck,
+                  recoveryProbe: quickRecoveryProbe,
+                },
+                mutationQueueing: { outage: 'allow' },
+              },
+            }),
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
                 execute: ({ input }) => input,
               },
             },
-          }),
+          },
         },
       });
 
@@ -656,22 +702,27 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: quickRecoveryProbe,
+              },
+            },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -694,18 +745,18 @@ describe('document', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'hybrid-doc-void-online-session',
-          {
-            network: network.config,
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute: ({ input }) => input,
-              },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'hybrid-doc-void-online-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
             },
           },
-        ),
+        },
       },
     });
     const documentHook = renderHook(() =>
@@ -768,8 +819,11 @@ describe('collection', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -777,7 +831,7 @@ describe('collection', () => {
                 execute: ({ input }) => ({ value: { name: input.name } }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -848,8 +902,11 @@ describe('collection', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -878,7 +935,7 @@ describe('collection', () => {
                 execute: createItemsExecute,
               },
             },
-          }),
+          },
         },
       },
     );
@@ -986,8 +1043,11 @@ describe('collection', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               createItems: {
                 inputSchema: batchCollectionCreateInputSchema,
@@ -1016,7 +1076,7 @@ describe('collection', () => {
                   })),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1057,8 +1117,11 @@ describe('collection', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1066,7 +1129,7 @@ describe('collection', () => {
                 execute: ({ input }) => ({ value: { name: input.name } }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1113,15 +1176,22 @@ describe('collection', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => false,
-              recoveryProbe: quickRecoveryProbe,
-            },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: {
+                network: network.config,
+                classifyFailure: (error, ctx) =>
+                  classifyMutationOutage(error, ctx.phase)
+                    ? 'outage'
+                    : 'ignore',
+                outage: {
+                  enabled: true,
+                  recoveryCheck: () => false,
+                  recoveryProbe: quickRecoveryProbe,
+                },
+              },
+            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1129,7 +1199,7 @@ describe('collection', () => {
                 execute: ({ input }) => ({ value: { name: input.name } }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1185,15 +1255,22 @@ describe('collection', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => false,
-              recoveryProbe: quickRecoveryProbe,
-            },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: {
+                network: network.config,
+                classifyFailure: (error, ctx) =>
+                  classifyMutationOutage(error, ctx.phase)
+                    ? 'outage'
+                    : 'ignore',
+                outage: {
+                  enabled: true,
+                  recoveryCheck: () => false,
+                  recoveryProbe: quickRecoveryProbe,
+                },
+              },
+            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1201,7 +1278,7 @@ describe('collection', () => {
                 execute: ({ input }) => ({ value: { name: input.name } }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1244,8 +1321,11 @@ describe('list-query', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1253,7 +1333,7 @@ describe('list-query', () => {
                 execute: ({ input }) => ({ name: input.name }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1299,8 +1379,11 @@ describe('list-query', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1308,7 +1391,7 @@ describe('list-query', () => {
                 execute: ({ input }) => ({ name: input.name }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1352,19 +1435,19 @@ describe('list-query', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'hybrid-list-void-online-session',
-            {
-              network: network.config,
-              operations: {
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: ({ input }) => ({ name: input.name }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'hybrid-list-void-online-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) => ({ name: input.name }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1409,15 +1492,22 @@ describe('list-query', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => false,
-              recoveryProbe: quickRecoveryProbe,
-            },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: {
+                network: network.config,
+                classifyFailure: (error, ctx) =>
+                  classifyMutationOutage(error, ctx.phase)
+                    ? 'outage'
+                    : 'ignore',
+                outage: {
+                  enabled: true,
+                  recoveryCheck: () => false,
+                  recoveryProbe: quickRecoveryProbe,
+                },
+              },
+            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1425,7 +1515,7 @@ describe('list-query', () => {
                 execute: ({ input }) => ({ name: input.name }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1484,15 +1574,22 @@ describe('list-query', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => false,
-              recoveryProbe: quickRecoveryProbe,
-            },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: {
+                network: network.config,
+                classifyFailure: (error, ctx) =>
+                  classifyMutationOutage(error, ctx.phase)
+                    ? 'outage'
+                    : 'ignore',
+                outage: {
+                  enabled: true,
+                  recoveryCheck: () => false,
+                  recoveryProbe: quickRecoveryProbe,
+                },
+              },
+            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1500,7 +1597,7 @@ describe('list-query', () => {
                 execute: ({ input }) => ({ name: input.name }),
               },
             },
-          }),
+          },
         },
       },
     );
@@ -1528,25 +1625,27 @@ test('fallback queueing does not reapply the optimistic update', async () => {
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(
-        () => 'hybrid-doc-optimistic-session',
-        {
-          network: network.config,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-          outage: {
-            enabled: true,
-            recoveryCheck: () => false,
-            recoveryProbe: quickRecoveryProbe,
-          },
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'hybrid-doc-optimistic-session',
+          config: {
+            network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck: () => false,
+              recoveryProbe: quickRecoveryProbe,
             },
           },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: ({ input }) => input,
+          },
         },
-      ),
+      },
     },
   });
   const hook = renderHook(() => {
@@ -1622,15 +1721,20 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
-          classifyFailure: (error, ctx) =>
-            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-          outage: {
-            enabled: true,
-            recoveryCheck: () => true,
-            recoveryProbe: quickRecoveryProbe,
-          },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              network: network.config,
+              classifyFailure: (error, ctx) =>
+                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              outage: {
+                enabled: true,
+                recoveryCheck: () => true,
+                recoveryProbe: quickRecoveryProbe,
+              },
+            },
+          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -1647,7 +1751,7 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
               execute,
             },
           },
-        }),
+        },
       },
     },
   );

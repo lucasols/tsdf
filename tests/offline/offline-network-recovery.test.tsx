@@ -2,12 +2,15 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
+import {
+  getGlobalOfflineStatus,
+  useGlobalOfflineStatus,
+  createOfflineSession,
+} from '../../src/main';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import { docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -35,20 +38,25 @@ test('classified network failures activate network mode and shift fetches into o
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        classifyFailure,
-        network: {
-          ...network.config,
-          recoveryCheck: () => true,
-          recoveryProbe: {
-            initialIntervalMs: 100,
-            maxIntervalMs: 100,
-            backoffMultiplier: 1,
-            jitterRatio: 0,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: {
+            classifyFailure,
+            network: {
+              ...network.config,
+              recoveryCheck: () => true,
+              recoveryProbe: {
+                initialIntervalMs: 100,
+                maxIntervalMs: 100,
+                backoffMultiplier: 1,
+                jitterRatio: 0,
+              },
+            },
           },
-        },
+        }),
         operations: {},
-      }),
+      },
     },
   });
 
@@ -90,20 +98,25 @@ test('classified network recovery uses network-specific probes and clears networ
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        classifyFailure: () => 'network' as const,
-        network: {
-          ...network.config,
-          recoveryCheck,
-          recoveryProbe: {
-            initialIntervalMs: 100,
-            maxIntervalMs: 200,
-            backoffMultiplier: 2,
-            jitterRatio: 0,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: {
+            classifyFailure: () => 'network' as const,
+            network: {
+              ...network.config,
+              recoveryCheck,
+              recoveryProbe: {
+                initialIntervalMs: 100,
+                maxIntervalMs: 200,
+                backoffMultiplier: 2,
+                jitterRatio: 0,
+              },
+            },
           },
-        },
+        }),
         operations: {},
-      }),
+      },
     },
   });
   const statusHook = renderHook(() => {
@@ -178,10 +191,13 @@ test('network classifications are ignored when network mode is disabled', async 
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        classifyFailure,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { classifyFailure },
+        }),
         operations: {},
-      }),
+      },
     },
   });
 
@@ -212,20 +228,25 @@ test('browser offline events stop classified-network probing and hand control to
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        classifyFailure: () => 'network' as const,
-        network: {
-          ...network.config,
-          recoveryCheck,
-          recoveryProbe: {
-            initialIntervalMs: 50,
-            maxIntervalMs: 50,
-            backoffMultiplier: 1,
-            jitterRatio: 0,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: {
+            classifyFailure: () => 'network' as const,
+            network: {
+              ...network.config,
+              recoveryCheck,
+              recoveryProbe: {
+                initialIntervalMs: 50,
+                maxIntervalMs: 50,
+                backoffMultiplier: 1,
+                jitterRatio: 0,
+              },
+            },
           },
-        },
+        }),
         operations: {},
-      }),
+      },
     },
   });
   const statusHook = renderHook(() => {
@@ -314,20 +335,25 @@ test('coming back online after browser-driven network takeover clears the interr
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: createOfflineConfigForSessionKey(() => sessionKey, {
-        classifyFailure: () => 'network' as const,
-        network: {
-          ...network.config,
-          recoveryCheck,
-          recoveryProbe: {
-            initialIntervalMs: 50,
-            maxIntervalMs: 50,
-            backoffMultiplier: 1,
-            jitterRatio: 0,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: {
+            classifyFailure: () => 'network' as const,
+            network: {
+              ...network.config,
+              recoveryCheck,
+              recoveryProbe: {
+                initialIntervalMs: 50,
+                maxIntervalMs: 50,
+                backoffMultiplier: 1,
+                jitterRatio: 0,
+              },
+            },
           },
-        },
+        }),
         operations: {},
-      }),
+      },
     },
   });
   const statusHook = renderHook(() => {

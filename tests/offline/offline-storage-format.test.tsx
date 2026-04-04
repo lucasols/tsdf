@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
+import { createOfflineSession } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -10,7 +11,6 @@ import {
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import {
   getLocalStorageTree,
@@ -60,15 +60,18 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 
@@ -240,15 +243,18 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       persistentStorage: {
         adapter: opfsPersistentStorage,
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: ({ input }) => input,
             },
           },
-        }),
+        },
       },
     });
 

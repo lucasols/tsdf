@@ -18,6 +18,7 @@ import type {
   DefineListQueryOfflineOperations,
   DefineOfflineOperation,
 } from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -37,7 +38,6 @@ import {
 } from '../offline/offlineTestShared';
 import { flushAllTimers, range } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -425,19 +425,19 @@ describe('collection hook memoization', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(
-            () => 'collection-pending-sync-memoization',
-            {
-              network: network.config,
-              operations: {
-                patchName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: () => ({ name: 'ignored' }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'collection-pending-sync-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1018,19 +1018,19 @@ describe('list-query hook memoization', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'list-query-item-pending-sync-memoization',
-            {
-              network: network.config,
-              operations: {
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: () => ({ name: 'ignored' }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'list-query-item-pending-sync-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1101,19 +1101,19 @@ describe('list-query hook memoization', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'list-query-query-pending-sync-memoization',
-            {
-              network: network.config,
-              operations: {
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: () => ({ name: 'ignored' }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'list-query-query-pending-sync-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
               },
             },
-          ),
+          },
         },
       },
     );

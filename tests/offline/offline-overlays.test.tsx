@@ -7,6 +7,7 @@ import type {
   CollectionOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
 } from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -16,7 +17,6 @@ import {
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import {
   type CreateListQueryUserOperations,
   type PatchUserOperations,
@@ -100,26 +100,26 @@ describe('document overlays', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-doc-overlay-session',
-          {
-            network: network.config,
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute: ({ input }: UpdateValueExecuteContext) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      env.apiStore.updateState((draft) => {
-                        draft.value = input.value;
-                      });
-                      resolve(input);
-                    }, 2_000);
-                  }),
-              },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-doc-overlay-session',
+            config: { network: network.config },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }: UpdateValueExecuteContext) =>
+                new Promise((resolve) => {
+                  setTimeout(() => {
+                    env.apiStore.updateState((draft) => {
+                      draft.value = input.value;
+                    });
+                    resolve(input);
+                  }, 2000);
+                }),
             },
           },
-        ),
+        },
       },
     });
 
@@ -185,21 +185,23 @@ describe('document overlays', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(
-          () => 'offline-doc-overlay-resolution-session',
-          {
-            network: network.config,
-            replayRetry: { maxFailures: 1, intervalMs: 1 },
-            operations: {
-              updateValue: {
-                inputSchema: docMutationInputSchema,
-                execute: () => {
-                  throw new Error('Replay failed');
-                },
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => 'offline-doc-overlay-resolution-session',
+            config: {
+              network: network.config,
+              replayRetry: { maxFailures: 1, intervalMs: 1 },
+            },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: () => {
+                throw new Error('Replay failed');
               },
             },
           },
-        ),
+        },
       },
     });
 
@@ -276,27 +278,27 @@ describe('collection overlays', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-collection-overlay-session',
-            {
-              network: network.config,
-              operations: {
-                renameItem: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: () => ['users||1'],
-                  execute: ({ input }) =>
-                    new Promise((resolve) => {
-                      setTimeout(() => {
-                        env.apiStore.updateItemState('users||1', (draft) => {
-                          draft.value.name = input.name;
-                        });
-                        resolve({ value: { name: input.name } });
-                      }, 2_000);
-                    }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-collection-overlay-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              renameItem: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: () => ['users||1'],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.updateItemState('users||1', (draft) => {
+                        draft.value.name = input.name;
+                      });
+                      resolve({ value: { name: input.name } });
+                    }, 2000);
+                  }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -379,25 +381,25 @@ describe('collection overlays', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-collection-delete-overlay-session',
-            {
-              network: network.config,
-              operations: {
-                deleteItem: {
-                  inputSchema: deleteItemInputSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: ({ input }) =>
-                    new Promise((resolve) => {
-                      setTimeout(() => {
-                        env.apiStore.deleteItemState(input.itemId);
-                        resolve(undefined);
-                      }, 2_000);
-                    }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-collection-delete-overlay-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              deleteItem: {
+                inputSchema: deleteItemInputSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.deleteItemState(input.itemId);
+                      resolve(undefined);
+                    }, 2000);
+                  }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -478,22 +480,25 @@ describe('collection overlays', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-collection-overlay-resolution-session',
-            {
-              network: network.config,
-              replayRetry: { maxFailures: 1, intervalMs: 1 },
-              operations: {
-                renameItem: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: () => ['users||1'],
-                  execute: () => {
-                    throw new Error('Replay failed');
-                  },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () =>
+                'offline-collection-overlay-resolution-session',
+              config: {
+                network: network.config,
+                replayRetry: { maxFailures: 1, intervalMs: 1 },
+              },
+            }),
+            operations: {
+              renameItem: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: () => ['users||1'],
+                execute: () => {
+                  throw new Error('Replay failed');
                 },
               },
             },
-          ),
+          },
         },
       },
     );
@@ -573,24 +578,24 @@ describe('list-query overlays', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-overlay-patch-session',
-            {
-              network: network.config,
-              operations: {
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: ({ input }) =>
-                    new Promise((resolve) => {
-                      setTimeout(() => {
-                        resolve({ name: input.name });
-                      }, 2_000);
-                    }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-overlay-patch-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      resolve({ name: input.name });
+                    }, 2000);
+                  }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -689,28 +694,28 @@ describe('list-query overlays', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-list-item-overlay-session',
-            {
-              network: network.config,
-              operations: {
-                patchUserName: {
-                  inputSchema: userPatchSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: ({ input }) =>
-                    new Promise((resolve) => {
-                      setTimeout(() => {
-                        env.apiStore.updateItemState(input.itemId, (item) => ({
-                          ...item,
-                          name: input.name,
-                        }));
-                        resolve({ name: input.name });
-                      }, 2_000);
-                    }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-list-item-overlay-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.updateItemState(input.itemId, (item) => ({
+                        ...item,
+                        name: input.name,
+                      }));
+                      resolve({ name: input.name });
+                    }, 2000);
+                  }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -814,35 +819,32 @@ describe('list-query overlays', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-overlay-create-session',
-            {
-              network: network.config,
-              operations: {
-                createUser: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -1,
-                      name: input.name,
-                    }),
-                    reconcileServerEntity: (result) => ({
-                      finalPayload: `users||${result.id}`,
-                      finalData: result,
-                    }),
-                  },
-                  execute: ({ input }) =>
-                    new Promise((resolve) => {
-                      setTimeout(() => {
-                        resolve({ id: nextUserId, name: input.name });
-                        nextUserId += 1;
-                      }, 2_000);
-                    }),
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-overlay-create-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
                 },
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      resolve({ id: nextUserId, name: input.name });
+                      nextUserId += 1;
+                    }, 2000);
+                  }),
               },
             },
-          ),
+          },
         },
       },
     );
@@ -950,33 +952,32 @@ describe('list-query overlays', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-overlay-resolution-session',
-            {
-              network: network.config,
-              replayRetry: { maxFailures: 1, intervalMs: 1 },
-              operations: {
-                createUser: {
-                  inputSchema: collectionCreateInputSchema,
-                  getEntityRefs: ({ input }) => [`temp:${input.name}`],
-                  tempEntity: {
-                    buildPendingEntity: (input) => ({
-                      id: -1,
-                      name: input.name,
-                    }),
-                    reconcileServerEntity: () => {
-                      throw new Error(
-                        'Should not reconcile after replay failure',
-                      );
-                    },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-overlay-resolution-session',
+              config: {
+                network: network.config,
+                replayRetry: { maxFailures: 1, intervalMs: 1 },
+              },
+            }),
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: () => {
+                    throw new Error(
+                      'Should not reconcile after replay failure',
+                    );
                   },
-                  execute: () => {
-                    throw new Error('Replay failed');
-                  },
+                },
+                execute: () => {
+                  throw new Error('Replay failed');
                 },
               },
             },
-          ),
+          },
         },
       },
     );
@@ -1054,25 +1055,25 @@ describe('list-query overlays', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(
-            () => 'offline-list-delete-overlay-session',
-            {
-              network: network.config,
-              operations: {
-                deleteUser: {
-                  inputSchema: deleteItemInputSchema,
-                  getEntityRefs: ({ input }) => [input.itemId],
-                  execute: ({ input }) =>
-                    new Promise((resolve) => {
-                      setTimeout(() => {
-                        env.apiStore.deleteItemState(input.itemId);
-                        resolve(undefined);
-                      }, 2_000);
-                    }),
-                },
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'offline-list-delete-overlay-session',
+              config: { network: network.config },
+            }),
+            operations: {
+              deleteUser: {
+                inputSchema: deleteItemInputSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) =>
+                  new Promise((resolve) => {
+                    setTimeout(() => {
+                      env.apiStore.deleteItemState(input.itemId);
+                      resolve(undefined);
+                    }, 2000);
+                  }),
               },
             },
-          ),
+          },
         },
       },
     );

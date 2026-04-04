@@ -2,6 +2,7 @@ import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
+import { createOfflineSession } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { clearSessionProtectedKeysSnapshot } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
@@ -12,7 +13,6 @@ import {
   resolveAfterAllTimers,
 } from '../../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../../utils/offlineConfig';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
   getOpfsDirTree,
@@ -728,15 +728,18 @@ describe('async storage efficiency: maintenance', () => {
         persistentStorage: {
           adapter: opfsPersistentStorage,
           schema: wrappedDocumentSchema,
-          offline: createOfflineConfigForSessionKey(() => dottedSessionKey, {
-            network: offlineNetwork.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => dottedSessionKey,
+              config: { network: offlineNetwork.config },
+            }),
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
                 execute: ({ input }) => input,
               },
             },
-          }),
+          },
         },
       },
     );

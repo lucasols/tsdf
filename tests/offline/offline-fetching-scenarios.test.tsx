@@ -2,6 +2,7 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { createOfflineSession } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -15,7 +16,6 @@ import {
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { createOfflineConfigForSessionKey } from '../utils/offlineConfig';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { userRowSchema } from './offlineReplayTestShared';
 import {
@@ -53,10 +53,13 @@ describe('offline fetching scenarios', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {},
-        }),
+        },
       },
     });
 
@@ -97,10 +100,13 @@ describe('offline fetching scenarios', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {},
-        }),
+        },
       },
     });
 
@@ -125,10 +131,13 @@ describe('offline fetching scenarios', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {},
-        }),
+        },
       },
     });
 
@@ -186,10 +195,13 @@ describe('offline fetching scenarios', () => {
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {},
-        }),
+        },
       },
     });
 
@@ -230,10 +242,13 @@ describe('offline fetching scenarios', () => {
       persistentStorage: {
         adapter: opfsPersistentStorage,
         schema: docSchema,
-        offline: createOfflineConfigForSessionKey(() => sessionKey, {
-          network: network.config,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
           operations: {},
-        }),
+        },
       },
     });
 
@@ -270,10 +285,13 @@ describe('offline fetching scenarios', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -333,10 +351,13 @@ describe('offline fetching scenarios', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -384,10 +405,13 @@ describe('offline fetching scenarios', () => {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -446,10 +470,13 @@ describe('offline fetching scenarios', () => {
           adapter: opfsPersistentStorage,
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -491,10 +518,13 @@ describe('offline fetching scenarios', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -587,10 +617,13 @@ describe('offline fetching scenarios', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -666,10 +699,13 @@ describe('offline fetching scenarios', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
@@ -719,10 +755,13 @@ describe('offline fetching scenarios', () => {
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: createOfflineConfigForSessionKey(() => sessionKey, {
-            network: network.config,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: network.config },
+            }),
             operations: {},
-          }),
+          },
         },
       },
     );
