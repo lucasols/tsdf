@@ -1247,6 +1247,165 @@ test('runtime mutation queueing overrides are shared across stores in the same s
   `);
 });
 
+test('disabling runtime network mutation queueing does not change offline fetch behavior', async () => {
+  const sessionKey = 'runtime-mutation-queueing-fetch-network';
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    id: 'runtime-mutation-queueing-fetch-network-doc',
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { session: offlineSession, operations: {} },
+    },
+  });
+
+  await flushAllTimers();
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  offlineSession.setOfflineRuntimeConfig({
+    mutationQueueing: { network: 'disallow' },
+  });
+  await Promise.resolve();
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'disallow', outage: 'allow' }
+    network: { enabled: '✅' }
+    outage: { enabled: '❌' }
+  `);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'runtime-mutation-queueing-fetch-network'
+  `);
+
+  const requestHistoryBeforeOfflineFetch = structuredClone(
+    env.serverMock.fetchHistory,
+  );
+
+  // Disabling mutation queueing should not make reads bypass the active offline
+  // mode. Cached reads should still short-circuit without touching the server.
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  const awaitedResultPromise = env.apiStore.awaitFetch();
+  await flushAllTimers();
+  const awaitedResult = await awaitedResultPromise;
+
+  expect({
+    awaitedResult,
+    state: pick(env.store.state, ['data', 'error', 'status']),
+  }).toMatchInlineSnapshot(`
+    awaitedResult:
+      data: { value: 1 }
+      error: null
+
+    state:
+      data: { value: 1 }
+      error: null
+      status: 'success'
+  `);
+  expect(env.serverMock.fetchHistory).toEqual(requestHistoryBeforeOfflineFetch);
+});
+
+test('disabling runtime outage mutation queueing does not change outage fetch behavior', async () => {
+  const sessionKey = 'runtime-mutation-queueing-fetch-outage';
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: {
+      classifyFailure: () => 'outage' as const,
+      outage: {
+        enabled: true,
+        recoveryCheck: () => false,
+        recoveryProbe: {
+          initialIntervalMs: 100,
+          maxIntervalMs: 100,
+          backoffMultiplier: 1,
+          jitterRatio: 0,
+        },
+      },
+    },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    id: 'runtime-mutation-queueing-fetch-outage-doc',
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { session: offlineSession, operations: {} },
+    },
+  });
+
+  await flushAllTimers();
+
+  // First enter outage mode through the normal classified fetch path.
+  env.serverMock.setNextFetchError('boom');
+  env.scheduleFetch('highPriority');
+  await advanceTime(25);
+
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'runtime-mutation-queueing-fetch-outage'
+  `);
+
+  offlineSession.setOfflineRuntimeConfig({
+    mutationQueueing: { outage: 'disallow' },
+  });
+  await Promise.resolve();
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'disallow' }
+    network: { enabled: '❌' }
+    outage: { enabled: '✅' }
+  `);
+
+  const requestHistoryBeforeOfflineFetch = structuredClone(
+    env.serverMock.fetchHistory,
+  );
+
+  // Outage-mode reads should keep using the cached offline path even after
+  // queueing new outage-classified mutations is disabled.
+  env.scheduleFetch('highPriority');
+  await advanceTime(25);
+
+  const awaitedResultPromise = env.apiStore.awaitFetch();
+  await advanceTime(25);
+  const awaitedResult = await awaitedResultPromise;
+
+  expect({
+    awaitedResult,
+    state: pick(env.store.state, ['data', 'error', 'status']),
+  }).toMatchInlineSnapshot(`
+    awaitedResult:
+      data: { value: 1 }
+      error: null
+
+    state:
+      data: { value: 1 }
+      error: null
+      status: 'success'
+  `);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'runtime-mutation-queueing-fetch-outage'
+  `);
+  expect(env.serverMock.fetchHistory).toEqual(requestHistoryBeforeOfflineFetch);
+});
+
 test('configured runtime-disabled modes can be enabled later without rebuilding the session', async () => {
   network.setOffline();
   const sessionKey = 'runtime-disabled-by-default-modes';
