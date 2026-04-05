@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createOfflineSession } from '../../src/main';
@@ -71,6 +71,9 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   const resolveCreates: Array<(result: { id: string; name: string }) => void> =
     [];
 
+  // Set up a collection store with an offline createUser operation that uses
+  // temp entities — each create gets a temp ID until the server confirms the
+  // real one via reconcileServerEntity.
   const env = createCollectionStoreTestEnv<
     { name: string },
     CreateUserOperations
@@ -121,6 +124,8 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   });
   await Promise.resolve();
 
+  // Queue two create mutations for the same entity while offline. Both should
+  // accumulate under one temp-entity entry since they share the same entity ref.
   const queued = await env.apiStore.performMutation(null, {
     mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
     offline: { operation: 'createUser', input: { name: 'Ada' } },
@@ -132,6 +137,7 @@ test('collection offline creates keep durable temp-id metadata and clear after r
 
   expect(queued.ok).toBe(true);
 
+  // Both creates should be grouped under a single temp-entity with 2 pending mutations.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
@@ -151,6 +157,8 @@ test('collection offline creates keep durable temp-id metadata and clear after r
       updatedAt: 1735689600000
   `);
 
+  // Go online and replay creates one at a time. The first create resolves with
+  // a server-assigned ID, reconciling the temp entity into a real item.
   act(() => {
     network.goOnline();
   });
@@ -159,10 +167,13 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   resolveCreates[0]?.({ id: 'users||ada', name: 'Ada' });
   await vi.runAllTimersAsync();
   await Promise.resolve();
+
+  // The second queued create is replayed after the first finishes.
   expect(resolveCreates).toHaveLength(2);
   resolveCreates[1]?.({ id: 'users||ada-2', name: 'Ada' });
   await flushAllTimers();
 
+  // After both creates are confirmed, the temp-entity metadata is fully cleared.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
 
@@ -170,6 +181,7 @@ test('document offline accumulation keeps a single persisted queue entry and rep
   network.setOffline();
   const sessionKey = 'offline-accumulation-session';
   const storeName = 'offline-accumulation-doc';
+  // Track which inputs are actually replayed to prove only the merged value is sent.
   const execute = vi
     .fn<
       ({
@@ -212,6 +224,9 @@ test('document offline accumulation keeps a single persisted queue entry and rep
     },
   });
 
+  // Queue two mutations for the same entity while offline. With accumulation,
+  // the second mutation should merge into the first queue entry rather than
+  // creating a separate one.
   await env.apiStore.performMutation({
     optimisticUpdate: () => {
       env.apiStore.updateState((draft) => {
@@ -233,9 +248,11 @@ test('document offline accumulation keeps a single persisted queue entry and rep
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
+  // The optimistic state should reflect the latest mutation.
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 3
   `);
+  // Only one entity should be tracked since both mutations were accumulated.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
@@ -253,6 +270,8 @@ test('document offline accumulation keeps a single persisted queue entry and rep
       syncState: 'pending'
       updatedAt: 1735689600050
   `);
+  // The persisted queue should have exactly one entry with the merged input
+  // (value: 3), not separate entries for each mutation.
   expect(
     getOfflineQueueEntries(sessionKey, storeName).map((entry) => {
       const data = getOfflineQueueEntryData(entry);
@@ -291,14 +310,17 @@ test('document offline accumulation keeps a single persisted queue entry and rep
         updatedAt: 1735689600050
   `);
 
+  // Go online and let the queue drain. Only the merged value should be replayed.
   act(() => {
     network.goOnline();
   });
   await flushAllTimers();
 
+  // Execute was called exactly once, with the merged input (value: 3, not 2).
   expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
     - value: 3
   `);
+  // Queue and entities are fully cleared after successful replay.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
     `[]`,
@@ -646,10 +668,13 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
   );
 });
 
-test('needs-confirmation entries are skipped when shouldSkipSync returns true', async () => {
+test('ambiguous replay failures are discarded when the server confirms the mutation was already applied', async () => {
   network.setOffline();
   let skipCheckEnqueuedAt: number | null = null;
 
+  // The first execute throws to simulate an ambiguous failure — the mutation
+  // may or may not have reached the server, so the entry moves to
+  // needs-confirmation state.
   const execute = vi
     .fn<
       ({
@@ -664,6 +689,8 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
       throw new Error(`dispatch failed after send ${input.value}`);
     });
+  // shouldSkipSync returns true — confirming the mutation was already applied
+  // on the server, so the entry should be discarded without re-sending.
   const shouldSkipSync = vi
     .fn<
       ({
@@ -701,6 +728,9 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
     },
   });
 
+  trackDocumentReplayState(env);
+
+  // Queue a mutation while offline.
   await env.apiStore.performMutation({
     optimisticUpdate: () => {
       env.apiStore.updateState((draft) => {
@@ -710,21 +740,44 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
+  trackDocumentReplayState(env);
 
+  // Go online — the first replay attempt fails, moving the entry to
+  // needs-confirmation. After the retry interval, shouldSkipSync is called
+  // and returns true, so the entry is removed without retrying execute.
+  env.addTimelineComments('beforeNextAction', [
+    'go online — replay fails ambiguously, then shouldSkipSync confirms it was already applied',
+  ]);
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  trackDocumentReplayState(env);
   await advanceTime(5_000);
   await flushAllTimers();
+  trackDocumentReplayState(env);
 
+  // Execute was only called once (the failed attempt); shouldSkipSync
+  // confirmed the mutation was already applied, so no further retries.
   expect(execute).toHaveBeenCalledTimes(1);
   expect(shouldSkipSync).toHaveBeenCalledTimes(1);
   expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time | ui                               |
+    0    | "value:1 sync:none pending:0"    | ui-initialized
+    .    | "value:1 sync:none pending:0"    | offline:updateValue queued
+    .    | "value:2 sync:pending pending:1" | ui-changed
+    .    | "value:2 sync:pending pending:1" | -- go online — replay fails ambiguously, then shouldSkipSync confirms it was already applied
+    .    | "value:2 sync:pending pending:1" | offline:updateValue replay-started
+    .    | "value:2 sync:syncing pending:1" | ui-changed
+    5s   | "value:2 sync:none pending:0"    | ui-changed
+    "
+  `);
 });
 
-test('needs-confirmation entries retry execute when shouldSkipSync returns false', async () => {
+test('ambiguous replay failures are retried when the server confirms the mutation was not applied', async () => {
   network.setOffline();
   let skipCheckEnqueuedAt: number | null = null;
   const execute = vi
@@ -982,6 +1035,8 @@ test('healthy replay failures are retried 5 times and then move into the resolut
 
 test('retry-exhausted resolutions can retry or discard queued work', async () => {
   network.setOffline();
+  // First 5 calls fail (exhaust retry budget), 6th succeeds (after manual
+  // retry resolution), then all subsequent calls fail again (to test discard).
   const execute = vi
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
@@ -1018,8 +1073,10 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
+  // --- Phase 1: Exhaust the retry budget to produce a resolution ---
   await queueOfflineMutation();
 
+  // Go online and let all 5 retry attempts fail.
   act(() => {
     network.goOnline();
   });
@@ -1032,6 +1089,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   }
   await flushAllTimers();
 
+  // The mutation should now be in the resolution queue as retry-exhausted.
   const [resolution] = env.apiStore.getOfflineResolutions();
   if (!resolution || resolution.kind !== 'retry-exhausted') {
     throw new Error('Expected a retry-exhausted resolution');
@@ -1073,6 +1131,8 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     storeType: 'document'
     updatedAt: 1735689620000
   `);
+  // parseOfflineResolutionConflict should return a not-conflict error for
+  // retry-exhausted entries (they don't have conflict data to parse).
   const parseRetryResult =
     env.apiStore.parseOfflineResolutionConflict(resolution);
   expect(parseRetryResult.ok ? null : parseRetryResult.error).toBeInstanceOf(
@@ -1092,11 +1152,14 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     ok: '❌'
     operation: 'updateValue'
   `);
+
+  // --- Phase 2: Resolve with "retry" — should re-enqueue and succeed ---
   await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
     action: 'retry',
   });
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 
+  // The entry is back in the queue as pending.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
@@ -1115,10 +1178,12 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
       updatedAt: 1735689620000
   `);
 
+  // The 6th execute call succeeds, clearing the queue.
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 6);
   await flushAllTimers();
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 
+  // --- Phase 3: Queue another mutation and exhaust retries again to test discard ---
   act(() => {
     network.goOffline();
   });
@@ -1127,6 +1192,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   act(() => {
     network.goOnline();
   });
+  // All further execute calls fail — exhaust the retry budget again.
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 7);
   for (const attempt of [8, 9, 10, 11]) {
     await advanceTime(5_000);
@@ -1136,6 +1202,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   }
   await flushAllTimers();
 
+  // Another retry-exhausted resolution should be in the queue.
   const [discardResolution] = env.apiStore.getOfflineResolutions();
   if (!discardResolution || discardResolution.kind !== 'retry-exhausted') {
     throw new Error('Expected a retry-exhausted discard resolution');
@@ -1198,18 +1265,23 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     ok: '❌'
     operation: 'updateValue'
   `);
+  // --- Phase 4: Resolve with "discard" — should permanently remove the entry ---
   await env.apiStore.resolveOfflineResolution(
     discardResolution.id,
     'updateValue',
     { action: 'discard' },
   );
 
+  // Both resolutions and entities should be empty after discard.
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
 
 test('outage-classified replay failures do not count toward retry exhaustion', async () => {
   network.setOffline();
+  // First attempt fails with an outage error (should not count toward the retry
+  // budget), second attempt fails with a healthy error (should count), third
+  // attempt succeeds.
   const execute = vi
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
@@ -1221,6 +1293,8 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
     .fn<({ sessionKey }: { sessionKey: string }) => boolean>()
     .mockReturnValue(true);
 
+  // Configure a low retry budget (maxFailures: 2) so the test can verify that
+  // the outage failure doesn't consume from it while the healthy failure does.
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-outage-session',
     testScenario: 'loaded',
@@ -1258,20 +1332,28 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
     },
   });
 
+  // Queue a mutation while offline.
   await env.apiStore.performMutation({
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
+  // Go online and let two replay attempts run: the first triggers an outage
+  // (which fires a recovery probe), the second is a healthy failure.
   act(() => {
     network.goOnline();
   });
   await advanceTime(60);
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 2);
 
+  // The outage triggered one recovery check. Since maxFailures is 2 and only
+  // one healthy failure has occurred, the entry should NOT be in the resolution
+  // queue — it should still be retryable.
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 
+  // The entry remains in needs-confirmation rather than being exhausted,
+  // proving the outage failure did not count toward the retry budget.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
@@ -1454,8 +1536,9 @@ test('going offline again resets the healthy replay failure budget', async () =>
   `);
 });
 
-test('needs-confirmation entries do not accept new accumulation before shouldSkipSync runs', async () => {
+test('new mutations queue separately instead of merging into entries that may have already been applied', async () => {
   network.setOffline();
+  // First attempt fails (simulating ambiguous send), second attempt succeeds.
   const execute = vi
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
@@ -1463,6 +1546,8 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
     .mockRejectedValueOnce(new Error('dispatch failed after send'))
     .mockResolvedValue({ value: 3 });
 
+  // Use accumulation so we can verify that new mutations do NOT merge into an
+  // entry that may have already been applied on the server.
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'offline-needs-confirmation-accumulation-session',
     testScenario: 'loaded',
@@ -1488,35 +1573,30 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
   });
   await Promise.resolve();
 
+  // Queue a mutation while offline.
   await env.apiStore.performMutation({
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
+  // Go online — execute fails, moving the entry to needs-confirmation.
   act(() => {
     network.goOnline();
   });
   await advanceTime(1);
   await Promise.resolve();
 
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-needs-confirmation-accumulation-session:document-8:document'
-      pendingMutations: 1
-      requiresResolution: '❌'
-      sessionKey: 'offline-needs-confirmation-accumulation-session'
-      storeName: 'document-8'
-      storeType: 'document'
-      syncState: 'needs-confirmation'
-      updatedAt: 1735689600000
-  `);
+  // The entry is now in needs-confirmation — it may have already been applied
+  // on the server, so it's unsafe to merge new input into it.
+  expect(
+    env.apiStore
+      .getOfflineEntities()
+      .map((e) => pick(e, ['syncState', 'pendingMutations'])),
+  ).toMatchInlineSnapshot(
+    `- { pendingMutations: 1, syncState: 'needs-confirmation' }`,
+  );
 
+  // Go offline again and queue a second mutation.
   act(() => {
     network.goOffline();
   });
@@ -1527,26 +1607,19 @@ test('needs-confirmation entries do not accept new accumulation before shouldSki
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-needs-confirmation-accumulation-session:document-8:document'
-      pendingMutations: 2
-      requiresResolution: '❌'
-      sessionKey: 'offline-needs-confirmation-accumulation-session'
-      storeName: 'document-8'
-      storeType: 'document'
-      syncState: 'needs-confirmation'
-      updatedAt: 1735689600001
-  `);
+  // The second mutation creates a separate pending entry (pendingMutations: 2)
+  // rather than merging into the needs-confirmation entry — because the first
+  // entry may have already been applied and merging could corrupt the data.
+  expect(
+    env.apiStore
+      .getOfflineEntities()
+      .map((e) => pick(e, ['syncState', 'pendingMutations'])),
+  ).toMatchInlineSnapshot(
+    `- { pendingMutations: 2, syncState: 'needs-confirmation' }`,
+  );
 });
 
-test('same-entity supersede does not prune attempted needs-confirmation entries', async () => {
+test('supersede does not discard entries that may have already been applied on the server', async () => {
   network.setOffline();
   const sessionKey = 'offline-needs-confirmation-supersede-session';
   const storeName = 'offline-needs-confirmation-supersede-store';
@@ -1593,23 +1666,14 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
   await advanceTime(1);
   await Promise.resolve();
 
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-needs-confirmation-supersede-session:offline-needs-confirmation-supersede-store:document'
-      pendingMutations: 1
-      requiresResolution: '❌'
-      sessionKey: 'offline-needs-confirmation-supersede-session'
-      storeName: 'offline-needs-confirmation-supersede-store'
-      storeType: 'document'
-      syncState: 'needs-confirmation'
-      updatedAt: 1735689600000
-  `);
+  // Verify the first entry reached needs-confirmation before proceeding.
+  expect(
+    env.apiStore
+      .getOfflineEntities()
+      .map((e) => pick(e, ['syncState', 'pendingMutations'])),
+  ).toMatchInlineSnapshot(
+    `- { pendingMutations: 1, syncState: 'needs-confirmation' }`,
+  );
 
   act(() => {
     network.goOffline();
@@ -1622,6 +1686,8 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
+  // Both queue entries should be preserved: the needs-confirmation one and
+  // the new pending one.
   expect(
     getOfflineQueueEntries(sessionKey, storeName)
       .map((entry) => {
@@ -1645,28 +1711,22 @@ test('same-entity supersede does not prune attempted needs-confirmation entries'
       syncState: 'pending'
   `);
 
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-needs-confirmation-supersede-session:offline-needs-confirmation-supersede-store:document'
-      pendingMutations: 2
-      requiresResolution: '❌'
-      sessionKey: 'offline-needs-confirmation-supersede-session'
-      storeName: 'offline-needs-confirmation-supersede-store'
-      storeType: 'document'
-      syncState: 'needs-confirmation'
-      updatedAt: 1735689600001
-  `);
+  // The entity should now have 2 pending mutations: the original
+  // needs-confirmation entry was preserved (not superseded).
+  expect(
+    env.apiStore
+      .getOfflineEntities()
+      .map((e) => pick(e, ['syncState', 'pendingMutations'])),
+  ).toMatchInlineSnapshot(
+    `- { pendingMutations: 2, syncState: 'needs-confirmation' }`,
+  );
 });
 
-test('needs-confirmation entries keep retrying shouldSkipSync while the session stays online', async () => {
+test('ambiguous entries are periodically re-checked for server confirmation while online', async () => {
   network.setOffline();
   let skipCheckEnqueuedAt: number | null = null;
+  // First attempt throws (ambiguous failure), no further execute calls expected
+  // since shouldSkipSync keeps returning true to discard the entry.
   const execute = vi
     .fn<
       ({
@@ -1719,6 +1779,9 @@ test('needs-confirmation entries keep retrying shouldSkipSync while the session 
     },
   });
 
+  trackDocumentReplayState(env);
+
+  // Queue a mutation while offline.
   await env.apiStore.performMutation({
     optimisticUpdate: () => {
       env.apiStore.updateState((draft) => {
@@ -1728,7 +1791,13 @@ test('needs-confirmation entries keep retrying shouldSkipSync while the session 
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
+  trackDocumentReplayState(env);
 
+  // Go online — execute fails, entry moves to needs-confirmation.
+  // shouldSkipSync is NOT called immediately — only after the retry interval.
+  env.addTimelineComments('beforeNextAction', [
+    'go online — execute fails ambiguously, entry moves to needs-confirmation',
+  ]);
   act(() => {
     network.goOnline();
   });
@@ -1737,33 +1806,35 @@ test('needs-confirmation entries keep retrying shouldSkipSync while the session 
     () =>
       env.apiStore.getOfflineEntities()[0]?.syncState === 'needs-confirmation',
   );
+  trackDocumentReplayState(env);
   expect(execute).toHaveBeenCalledTimes(1);
   expect(shouldSkipSync).toHaveBeenCalledTimes(0);
 
-  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600000
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'online-needs-confirmation-retry-session:document-9:document'
-      pendingMutations: 1
-      requiresResolution: '❌'
-      sessionKey: 'online-needs-confirmation-retry-session'
-      storeName: 'document-9'
-      storeType: 'document'
-      syncState: 'needs-confirmation'
-      updatedAt: 1735689600000
-  `);
-
+  // After the retry interval elapses, shouldSkipSync is polled again. It
+  // returns true, so the entry is discarded (confirmed already applied).
+  env.addTimelineComments('beforeNextAction', [
+    'retry interval elapses — shouldSkipSync confirms mutation was applied, entry cleared',
+  ]);
   await advanceTime(5_000);
   await flushAllTimers();
+  trackDocumentReplayState(env);
 
   expect(shouldSkipSync).toHaveBeenCalledTimes(1);
   expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time | ui                                          |
+    0    | "value:1 sync:none pending:0"               | ui-initialized
+    .    | "value:1 sync:none pending:0"               | offline:updateValue queued
+    .    | "value:2 sync:pending pending:1"            | ui-changed
+    .    | "value:2 sync:pending pending:1"            | -- go online — execute fails ambiguously, entry moves to needs-confirmation
+    .    | "value:2 sync:pending pending:1"            | offline:updateValue replay-started
+    .    | "value:2 sync:needs-confirmation pending:1" | ui-changed
+    5s   | "value:2 sync:needs-confirmation pending:1" | -- retry interval elapses — shouldSkipSync confirms mutation was applied, entry cleared
+    .    | "value:2 sync:none pending:0"               | ui-changed
+    "
+  `);
 });
 
 test('session switches do not leave replayed queue entries in the old namespace', async () => {
@@ -1771,6 +1842,8 @@ test('session switches do not leave replayed queue entries in the old namespace'
   let sessionKey: string | false = 'replay-session-a';
   let resolveReplay: ((result: { value: number }) => void) | undefined;
 
+  // Use a manually-resolved execute so we can switch the session key while
+  // replay is in-flight and verify cleanup happens in the original namespace.
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'replay-session-switch-doc',
     getSessionKey: () => sessionKey,
@@ -1796,27 +1869,33 @@ test('session switches do not leave replayed queue entries in the old namespace'
     },
   });
 
+  // Queue a mutation under session-a.
   await env.apiStore.performMutation({
     mutation: () => Promise.resolve(2),
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
+  // Verify the queue entry was persisted under session-a's namespace.
   expect(
     getLocalStorageKeys().filter((key) =>
       key.startsWith('tsdf.replay-session-a.replay-session-switch-doc.oq.'),
     ),
   ).toHaveLength(1);
 
+  // Go online to start replay, but don't resolve yet.
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => resolveReplay !== undefined);
 
+  // Switch to a new session while replay is in-flight, then resolve.
+  // The completed entry should be cleaned from session-a's namespace.
   expect(resolveReplay).toBeDefined();
   sessionKey = 'replay-session-b';
   resolveReplay?.({ value: 2 });
   await flushAllTimers();
 
+  // No leftover queue entries in the old session namespace.
   expect(
     getLocalStorageKeys().filter((key) =>
       key.startsWith('tsdf.replay-session-a.replay-session-switch-doc.oq.'),
@@ -1824,250 +1903,260 @@ test('session switches do not leave replayed queue entries in the old namespace'
   ).toMatchInlineSnapshot(`[]`);
 });
 
-describe('basic replay lifecycle', () => {
-  test('document offline mutations are queued durably and replay when the browser comes back online', async () => {
-    network.setOffline();
+test('document offline mutations are queued durably and replay when the browser comes back online', async () => {
+  network.setOffline();
 
-    const sessionKey = 'offline-doc-session';
-    const storeName = 'offline-doc-store';
-    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      testScenario: 'loaded',
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                env.apiStore.updateState((draft) => {
-                  draft.value = input.value;
-                });
-                return input;
-              },
+  const sessionKey = 'offline-doc-session';
+  const storeName = 'offline-doc-store';
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+              return input;
             },
           },
         },
       },
-    });
-
-    const hook = renderHook(() => {
-      const doc = env.apiStore.useDocument();
-      env.trackUIChanges(
-        `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
-      );
-      return doc;
-    });
-
-    await Promise.resolve();
-
-    // Queue an optimistic document mutation while the browser is offline.
-    let mutationResult:
-      | Awaited<ReturnType<typeof env.apiStore.performMutation>>
-      | undefined;
-    await act(async () => {
-      mutationResult = await env.apiStore.performMutation({
-        optimisticUpdate: () => {
-          env.apiStore.updateState((draft) => {
-            draft.value = 2;
-          });
-        },
-        mutation: () => Promise.resolve(2),
-        offline: { operation: 'updateValue', input: { value: 2 } },
-      });
-    });
-
-    expect(mutationResult?.ok).toBe(true);
-    expect(env.store.state.data).toMatchInlineSnapshot(`
-      value: 2
-    `);
-
-    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-      - blockedByResolutionIds: []
-        blockedResolutionCount: 0
-        childResolutionCount: 0
-        childResolutionIds: []
-        createdAt: 1735689600000
-        entityKey: 'document'
-        entityKind: 'document'
-        id: 'offline-doc-session:offline-doc-store:document'
-        pendingMutations: 1
-        requiresResolution: '❌'
-        sessionKey: 'offline-doc-session'
-        storeName: 'offline-doc-store'
-        storeType: 'document'
-        syncState: 'pending'
-        updatedAt: 1735689600000
-    `);
-    expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
-
-    // The optimistic value should stay visible while replay is still pending.
-    expect(hook.result.current).toMatchInlineSnapshot(`
-      data: { value: 2 }
-      error: null
-      isLoading: '❌'
-      pendingSync: '✅'
-      status: 'success'
-    `);
-
-    // Once connectivity returns, replay should clear the queue and settle back onto the last confirmed server data.
-    act(() => {
-      network.goOnline();
-    });
-    await advanceTime(250);
-    await flushAllTimers();
-
-    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
-      `[]`,
-    );
-    expect(hook.result.current).toMatchInlineSnapshot(`
-      data: { value: 1 }
-      error: null
-      isLoading: '❌'
-      pendingSync: '❌'
-      status: 'success'
-    `);
-    expect(env.timelineString).toMatchInlineSnapshot(`
-      "
-      time  | ui                    |
-      0     | "value:1 pending:no"  | ui-initialized
-      .     | "value:2 pending:no"  | ui-changed
-      .     | "value:2 pending:yes" | ui-changed
-      .     | "value:2 pending:yes" | offline:updateValue queued
-      .     | "value:2 pending:yes" | offline:updateValue replay-started
-      .     | "value:2 pending:yes" | offline:updateValue replay-finished
-      .     | "value:2 pending:no"  | ui-changed
-      10ms  | "value:2 pending:no"  | 🔴 >fetch-started
-      810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
-      .     | "value:1 pending:no"  | ui-changed
-      "
-    `);
-    hook.unmount();
+    },
   });
-});
 
-describe('hybrid fallback integration', () => {
-  test('accumulation still merges entries when the queue starts from a fallback', async () => {
-    const sessionKey = 'hybrid-accumulation-session';
-    const storeName = 'hybrid-accumulation-store';
-    const directMutation = vi.fn(() =>
-      Promise.reject(new Error('offline-fallback')),
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(
+      `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
     );
-    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      testScenario: 'loaded',
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: quickRecoveryProbe,
-              },
-            },
-          }),
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              accumulation: {
-                mergeInput: ({ incomingInput }) => incomingInput,
-              },
-              execute: ({ input }) => input,
-            },
-          },
-        },
-      },
-    });
+    return doc;
+  });
 
-    // The first mutation becomes a fallback-queued entry. Once the session is
-    // in outage mode, the next mutation should merge into that persisted entry.
-    await env.apiStore.performMutation({
+  await Promise.resolve();
+
+  // Queue an optimistic document mutation while the browser is offline.
+  let mutationResult:
+    | Awaited<ReturnType<typeof env.apiStore.performMutation>>
+    | undefined;
+  await act(async () => {
+    mutationResult = await env.apiStore.performMutation({
       optimisticUpdate: () => {
         env.apiStore.updateState((draft) => {
           draft.value = 2;
         });
       },
-      mutation: directMutation,
+      mutation: () => Promise.resolve(2),
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
-    await env.apiStore.performMutation({
-      optimisticUpdate: () => {
-        env.apiStore.updateState((draft) => {
-          draft.value = 3;
-        });
-      },
-      mutation: () => Promise.resolve(3),
-      offline: { operation: 'updateValue', input: { value: 3 } },
-    });
+  });
 
-    expect(directMutation).toHaveBeenCalledTimes(1);
-    expect(env.store.state.data).toMatchInlineSnapshot(`
-      value: 3
-    `);
-    expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+  expect(mutationResult?.ok).toBe(true);
+  expect(env.store.state.data).toMatchInlineSnapshot(`
+    value: 2
+  `);
 
-    expect(
-      pick(
-        getOfflineQueueEntryData(
-          getOfflineQueueEntries(sessionKey, storeName)[0]!,
-        ),
-        [
-          'attempts',
-          'createdAt',
-          'entityRefs',
-          'input',
-          'lastAttemptAt',
-          'operation',
-          'queueOrder',
-          'sessionKey',
-          'storeName',
-          'storeType',
-          'syncState',
-          'updatedAt',
-        ],
-      ),
-    ).toMatchInlineSnapshot(`
-      attempts: 0
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
       createdAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 3 }
-      lastAttemptAt: null
-      operation: 'updateValue'
-      queueOrder: 1735689600000
-      sessionKey: 'hybrid-accumulation-session'
-      storeName: 'hybrid-accumulation-store'
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-doc-session:offline-doc-store:document'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-doc-session'
+      storeName: 'offline-doc-store'
       storeType: 'document'
       syncState: 'pending'
       updatedAt: 1735689600000
-    `);
+  `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  // The optimistic value should stay visible while replay is still pending.
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '✅'
+    status: 'success'
+  `);
+
+  // Once connectivity returns, replay should clear the queue and then
+  // revalidate from the server, settling back onto confirmed server data.
+  env.addTimelineComments('beforeNextAction', [
+    'browser comes back online — replay starts and a revalidation fetch follows',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(250);
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 1 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '❌'
+    status: 'success'
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui                    |
+    0     | "value:1 pending:no"  | ui-initialized
+    .     | "value:2 pending:no"  | ui-changed
+    .     | "value:2 pending:yes" | ui-changed
+    .     | "value:2 pending:yes" | offline:updateValue queued
+    .     | "value:2 pending:yes" | -- browser comes back online — replay starts and a revalidation fetch follows
+    .     | "value:2 pending:yes" | offline:updateValue replay-started
+    .     | "value:2 pending:yes" | offline:updateValue replay-finished
+    .     | "value:2 pending:no"  | ui-changed
+    10ms  | "value:2 pending:no"  | 🔴 >fetch-started
+    810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
+    .     | "value:1 pending:no"  | ui-changed
+    "
+  `);
+  hook.unmount();
+});
+
+test('accumulation still merges entries when the queue starts from a hybrid fallback', async () => {
+  const sessionKey = 'hybrid-accumulation-session';
+  const storeName = 'hybrid-accumulation-store';
+  // Simulates a mutation that fails at the network level (not queued offline
+  // preemptively, but falls back to the offline queue after the error).
+  const directMutation = vi.fn(() =>
+    Promise.reject(new Error('offline-fallback')),
+  );
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: {
+            network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck: () => false,
+              recoveryProbe: quickRecoveryProbe,
+            },
+          },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
+            execute: ({ input }) => input,
+          },
+        },
+      },
+    },
   });
 
-  test('mutations queued via hybrid fallback enter the resolution queue after replay retries are exhausted', async () => {
-    const execute = vi
-      .fn<
-        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
-      >()
-      .mockRejectedValue(new Error('replay failed'));
-    const env = createDocumentStoreTestEnv<
-      number,
-      UpdateValueConflictOperations
-    >(1, {
+  // The first mutation attempts a direct send, which fails with an outage
+  // error — falling back to the offline queue. The second mutation should
+  // merge into that fallback entry via accumulation rather than creating a
+  // separate queue entry.
+  await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: directMutation,
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+  await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 3;
+      });
+    },
+    mutation: () => Promise.resolve(3),
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+
+  // Only the first mutation attempted a direct send; the second was queued
+  // directly because the session is already in outage mode.
+  expect(directMutation).toHaveBeenCalledTimes(1);
+  expect(env.store.state.data).toMatchInlineSnapshot(`
+    value: 3
+  `);
+  // Accumulation merged both mutations into a single queue entry with the
+  // latest input (value: 3).
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  expect(
+    pick(
+      getOfflineQueueEntryData(
+        getOfflineQueueEntries(sessionKey, storeName)[0]!,
+      ),
+      [
+        'attempts',
+        'createdAt',
+        'entityRefs',
+        'input',
+        'lastAttemptAt',
+        'operation',
+        'queueOrder',
+        'sessionKey',
+        'storeName',
+        'storeType',
+        'syncState',
+        'updatedAt',
+      ],
+    ),
+  ).toMatchInlineSnapshot(`
+    attempts: 0
+    createdAt: 1735689600000
+    entityRefs:
+      - { entityKey: 'document', entityKind: 'document' }
+    input: { value: 3 }
+    lastAttemptAt: null
+    operation: 'updateValue'
+    queueOrder: 1735689600000
+    sessionKey: 'hybrid-accumulation-session'
+    storeName: 'hybrid-accumulation-store'
+    storeType: 'document'
+    syncState: 'pending'
+    updatedAt: 1735689600000
+  `);
+});
+
+test('mutations queued via hybrid fallback enter the resolution queue after replay retries are exhausted', async () => {
+  // Execute always fails, so the replay budget will be exhausted quickly.
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValue(new Error('replay failed'));
+  // Low retry budget (maxFailures: 2, intervalMs: 1) so the test completes
+  // quickly. recoveryCheck returns true so recovery probes don't block replay.
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
       getSessionKey: () => 'hybrid-retry-exhaustion-session',
       testScenario: 'loaded',
       persistentStorage: {
@@ -2100,69 +2189,75 @@ describe('hybrid fallback integration', () => {
           },
         },
       },
-    });
+    },
+  );
 
-    const result = await env.apiStore.performMutation({
-      mutation: () => Promise.reject(new Error('offline-fallback')),
-      offline: { operation: 'updateValue', input: { value: 2 } },
-    });
-
-    expect({ ok: result.ok, value: result.ok ? result.value : null })
-      .toMatchInlineSnapshot(`
-        ok: '✅'
-        value: { kind: 'queued' }
-      `);
-
-    await advanceTime(1);
-    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
-
-    await advanceTime(1);
-    await waitForMicrotaskCondition(
-      () => env.apiStore.getOfflineResolutions().length === 1,
-    );
-
-    expect(
-      env.apiStore
-        .getOfflineResolutions()
-        .map((resolution) => ({
-          ...pick(resolution, [
-            'blockedByResolutionIds',
-            'blockedResolutionCount',
-            'childResolutionCount',
-            'childResolutionIds',
-            'createdAt',
-            'enqueuedAt',
-            'entityRefs',
-            'input',
-            'kind',
-            'operation',
-            'sessionKey',
-            'storeName',
-            'storeType',
-            'updatedAt',
-          ]),
-          lastReplayError:
-            resolution.kind === 'retry-exhausted'
-              ? resolution.lastReplayError
-              : null,
-        })),
-    ).toMatchInlineSnapshot(`
-      - blockedByResolutionIds: []
-        blockedResolutionCount: 0
-        childResolutionCount: 0
-        childResolutionIds: []
-        createdAt: 1735689600002
-        enqueuedAt: 1735689600000
-        entityRefs:
-          - { entityKey: 'document', entityKind: 'document' }
-        input: { value: 2 }
-        kind: 'retry-exhausted'
-        lastReplayError: { message: 'replay failed' }
-        operation: 'updateValue'
-        sessionKey: 'hybrid-retry-exhaustion-session'
-        storeName: 'document-10'
-        storeType: 'document'
-        updatedAt: 1735689600002
-    `);
+  // The direct mutation fails, falling back to the offline queue.
+  const result = await env.apiStore.performMutation({
+    mutation: () => Promise.reject(new Error('offline-fallback')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
   });
+
+  // Fallback queueing reports success with a "queued" marker.
+  expect({ ok: result.ok, value: result.ok ? result.value : null })
+    .toMatchInlineSnapshot(`
+      ok: '✅'
+      value: { kind: 'queued' }
+    `);
+
+  // Let replay attempts exhaust the retry budget.
+  await advanceTime(1);
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+
+  await advanceTime(1);
+  await waitForMicrotaskCondition(
+    () => env.apiStore.getOfflineResolutions().length === 1,
+  );
+
+  // The fallback-queued mutation should end up as a retry-exhausted resolution,
+  // proving that hybrid fallback entries follow the same retry exhaustion path
+  // as preemptively queued entries.
+  expect(
+    env.apiStore
+      .getOfflineResolutions()
+      .map((resolution) => ({
+        ...pick(resolution, [
+          'blockedByResolutionIds',
+          'blockedResolutionCount',
+          'childResolutionCount',
+          'childResolutionIds',
+          'createdAt',
+          'enqueuedAt',
+          'entityRefs',
+          'input',
+          'kind',
+          'operation',
+          'sessionKey',
+          'storeName',
+          'storeType',
+          'updatedAt',
+        ]),
+        lastReplayError:
+          resolution.kind === 'retry-exhausted'
+            ? resolution.lastReplayError
+            : null,
+      })),
+  ).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600002
+      enqueuedAt: 1735689600000
+      entityRefs:
+        - { entityKey: 'document', entityKind: 'document' }
+      input: { value: 2 }
+      kind: 'retry-exhausted'
+      lastReplayError: { message: 'replay failed' }
+      operation: 'updateValue'
+      sessionKey: 'hybrid-retry-exhaustion-session'
+      storeName: 'document-10'
+      storeType: 'document'
+      updatedAt: 1735689600002
+  `);
 });

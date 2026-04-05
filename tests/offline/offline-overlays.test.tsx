@@ -166,6 +166,39 @@ describe('document overlays', () => {
       status: 'success'
     `);
 
+    // store state should reflect the last successful server snapshot, not the optimistic overlay.
+    expect({
+      data: env.store.state.data,
+      error: env.store.state.error,
+      status: env.store.state.status,
+    }).toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+      status: 'success'
+    `);
+
+    const awaitedResultPromise = env.apiStore.awaitFetch();
+    await waitForStaleInvalidationToFinish();
+    const awaitedResult = await awaitedResultPromise;
+
+    expect({
+      awaitedResult,
+      state: {
+        data: env.store.state.data,
+        error: env.store.state.error,
+        status: env.store.state.status,
+      },
+    }).toMatchInlineSnapshot(`
+      awaitedResult:
+        data: { value: 1 }
+        error: null
+
+      state:
+        data: { value: 1 }
+        error: null
+        status: 'success'
+    `);
+
     // Once replay settles, the optimistic overlay should no longer be needed.
     await waitForReplayToSettle();
 
