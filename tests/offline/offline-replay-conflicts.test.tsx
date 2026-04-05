@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   type CollectionOfflineOperationDefinition,
   createOfflineSession,
+  getGlobalOfflineStatus,
   type ListQueryOfflineOperationDefinition,
   useGlobalOfflineEntities,
   useGlobalOfflineResolutions,
@@ -1388,7 +1389,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
   offlineResolutionsHook.unmount();
 });
 
-test('conflict handling still works for mutations queued via fallback', async () => {
+test('mutations queued via hybrid fallback still enter the normal conflict resolution flow on replay', async () => {
   const execute = vi.fn(({ input }: { input: { value: number } }) => input);
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
     1,
@@ -1427,8 +1428,11 @@ test('conflict handling still works for mutations queued via fallback', async ()
       },
     },
   );
-  // A mutation that first fails online should still enter the normal replay
-  // conflict flow once it has been queued by the hybrid fallback.
+  // This first fails through the "online" mutation path, so the hybrid
+  // fallback queues it offline instead of treating it as a final failure.
+  // When replay runs on the next recovery tick, the queued mutation should
+  // still take the normal conflict path: detect the conflict, stop replay,
+  // and create a resolution for the UI.
   const result = await env.apiStore.performMutation({
     mutation: () => Promise.reject(new Error('offline-fallback')),
     offline: { operation: 'updateValue', input: { value: 2 } },
@@ -1439,6 +1443,19 @@ test('conflict handling still works for mutations queued via fallback', async ()
       ok: '✅'
       value: { kind: 'queued' }
     `);
+  expect(
+    pick(getGlobalOfflineStatus('hybrid-conflict-session'), [
+      'isOfflineMode',
+      'network',
+      'outage',
+      'sessionKey',
+    ]),
+  ).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'hybrid-conflict-session'
+  `);
 
   await act(async () => {
     await advanceTime(1);
@@ -1451,6 +1468,8 @@ test('conflict handling still works for mutations queued via fallback', async ()
     env.apiStore.useOfflineResolutions(),
   );
 
+  // Replay should stop at conflict detection, so the operation never reaches
+  // the executor and the entity becomes blocked on a user-facing resolution.
   expect(execute).not.toHaveBeenCalled();
   expect(summarizeOfflineEntities(storeOfflineHook.result.current))
     .toMatchInlineSnapshot(`
@@ -1471,14 +1490,14 @@ test('conflict handling still works for mutations queued via fallback', async ()
         updatedAt: 1735689600001
     `);
   env.addTimelineComments('afterLastAction', [
-    'the fallback-queued mutation reaches conflict detection on the first recovery tick',
+    'the queued fallback mutation reaches replay, hits conflict detection, and becomes a pending resolution',
   ]);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time |
     0    | offline:updateValue queued
     1ms  | offline:updateValue resolution-required
-    .    | -- the fallback-queued mutation reaches conflict detection on the first recovery tick
+    .    | -- the queued fallback mutation reaches replay, hits conflict detection, and becomes a pending resolution
     "
   `);
 
