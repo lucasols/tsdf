@@ -1085,6 +1085,8 @@ describe('collection', () => {
       },
     );
 
+    // This temp-entity definition only returns metadata for the first item in
+    // the batch, so the store should reject the mutation atomically.
     const result = await env.apiStore.performMutation(null, {
       mutation: () => Promise.resolve({ value: { name: 'unused' } }),
       offline: {
@@ -1093,6 +1095,8 @@ describe('collection', () => {
       },
     });
 
+    // A malformed temp-entity batch must not leave behind partial queue state
+    // or partially-created temp rows.
     expect(result.ok).toBe(false);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
@@ -1138,6 +1142,8 @@ describe('collection', () => {
       },
     );
 
+    // While online, offline-enabled mutations should still use the direct
+    // mutation path and skip creating replay state.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1146,6 +1152,7 @@ describe('collection', () => {
       },
     });
 
+    // The result should stay classified as online and leave the queue empty.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
@@ -1208,6 +1215,8 @@ describe('collection', () => {
       },
     );
 
+    // A classified connectivity failure should downgrade the mutation into a
+    // queued success instead of bubbling the direct error.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1216,6 +1225,8 @@ describe('collection', () => {
       },
     });
 
+    // The queue entry proves replay can happen later, and the session snapshot
+    // shows the shared offline mode visible to the rest of the app.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
@@ -1287,6 +1298,8 @@ describe('collection', () => {
       },
     );
 
+    // Domain failures should remain visible to callers even when the mutation
+    // definition includes offline metadata.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1295,6 +1308,8 @@ describe('collection', () => {
       },
     });
 
+    // Because this was not an offline/outage failure, nothing should be
+    // persisted for later replay.
     expect(result.ok).toBe(false);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
@@ -1342,6 +1357,8 @@ describe('list-query', () => {
       },
     );
 
+    // With the session already offline, list-query mutations should queue
+    // immediately and avoid touching the direct mutation callback.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1350,6 +1367,8 @@ describe('list-query', () => {
       },
     });
 
+    // The stored queue payload should match the original list-query mutation
+    // input exactly so replay can reconstruct the request.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
@@ -1400,6 +1419,8 @@ describe('list-query', () => {
       },
     );
 
+    // When connectivity is healthy, list-query mutations should behave like
+    // normal direct mutations and never create queued fallback work.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1408,6 +1429,7 @@ describe('list-query', () => {
       },
     });
 
+    // The success should keep its online result shape and leave the queue empty.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
@@ -1455,6 +1477,8 @@ describe('list-query', () => {
         },
       },
     );
+    // Even without a payload, the online success path should still notify
+    // consumers through the normal onSuccess callback contract.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: () => Promise.resolve(undefined),
       onSuccess,
@@ -1465,6 +1489,8 @@ describe('list-query', () => {
       },
     });
 
+    // The mutation remains an online success, and the callback receives the
+    // undefined payload plus the item id that was mutated.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
@@ -1524,6 +1550,8 @@ describe('list-query', () => {
       },
     );
 
+    // A classified connectivity failure from the direct path should fall back
+    // to durable queueing for later replay.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1532,6 +1560,8 @@ describe('list-query', () => {
       },
     });
 
+    // The queue snapshot and global offline status together show that replay is
+    // now possible and the app has entered offline mode.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
         ok: '✅'
@@ -1606,6 +1636,8 @@ describe('list-query', () => {
       },
     );
 
+    // Validation-style failures should stay visible to callers instead of
+    // being converted into queued work.
     const result = await env.apiStore.performMutation('users||1', {
       mutation: directMutation,
       offline: {
@@ -1614,6 +1646,8 @@ describe('list-query', () => {
       },
     });
 
+    // Since the failure was not connectivity-related, there should be no
+    // durable replay artifact left behind.
     expect(result.ok).toBe(false);
     expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
@@ -1676,6 +1710,8 @@ test('fallback queueing does not reapply the optimistic update', async () => {
     });
   });
 
+  // The final document state should show one optimistic increment plus
+  // pending-sync state, not a double-applied optimistic update.
   expect({ ok: result.ok, value: result.ok ? result.value : null })
     .toMatchInlineSnapshot(`
       ok: '✅'
@@ -1689,6 +1725,8 @@ test('fallback queueing does not reapply the optimistic update', async () => {
     status: 'success'
   `);
   expect(env.store.state.data).toMatchInlineSnapshot(`value: 2`);
+  // The timeline makes the regression obvious: one value change, then the
+  // pending-sync flag when the queued fallback is recorded.
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time | ui                    |
@@ -1767,6 +1805,8 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
 
+  // The fallback should immediately materialize a pending temp entity so the
+  // UI can render the optimistic row before replay succeeds.
   expect({ ok: result.ok, value: result.ok ? result.value : null })
     .toMatchInlineSnapshot(`
       ok: '✅'
@@ -1796,11 +1836,14 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
     env.store.state[getCompositeKey('temp:Ada')]?.data,
   ).toMatchInlineSnapshot(`value: { name: 'pending:Ada' }`);
 
+  // Advancing time lets the recovery probe replay the queued mutation.
   await act(async () => {
     await advanceTime(1);
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
 
+  // After replay, the temp entity should be fully reconciled into the final
+  // server entity and removed from offline bookkeeping.
   expect(execute).toHaveBeenCalledTimes(1);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
