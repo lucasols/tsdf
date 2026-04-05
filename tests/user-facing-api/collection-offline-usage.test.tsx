@@ -21,6 +21,7 @@ const todoPayloadSchema = rc_string;
 const todoInputSchema = rc_object({ id: rc_string, title: rc_string });
 const renameManyTodosInputSchema = rc_array(todoInputSchema);
 const createTodoInputSchema = rc_object({ title: rc_string });
+const todoConflictSchema = rc_object({ reason: rc_string });
 const conflictResolutionSchema = z.object({ title: z.string() });
 const FETCH_DELAY_MS = 30;
 
@@ -206,6 +207,7 @@ test('direct collection store offline public api', async () => {
             inputSchema: todoInputSchema,
             getEntityRefs: ({ input }) => [input.id],
             conflictHandling: {
+              schema: todoConflictSchema,
               detectConflict: ({ input, enqueuedAt, updatedAt }) => {
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
                 if (input.title !== 'Todo 1 conflict') return false;
@@ -456,7 +458,11 @@ test('direct collection store offline public api', async () => {
   });
 
   const [conflict] = collectionStore.getOfflineResolutions();
-  if (!conflict || conflict.kind !== 'conflict') {
+  if (
+    !conflict ||
+    conflict.kind !== 'conflict' ||
+    conflict.operation !== 'conflictTodo'
+  ) {
     throw new Error('Expected a conflict resolution');
   }
 
@@ -496,6 +502,15 @@ test('direct collection store offline public api', async () => {
     storeName: 'direct-collection-offline'
     storeType: 'collection'
     updatedAt: 1735689607000
+  `);
+  const parsedConflict =
+    collectionStore.parseOfflineResolutionConflict(conflict);
+  expect({
+    ok: parsedConflict.ok,
+    value: parsedConflict.ok ? parsedConflict.value : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { reason: 'server-changed' }
   `);
 
   expect(collectionStore.getOfflineEntities()).toMatchInlineSnapshot(`

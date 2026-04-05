@@ -26,6 +26,7 @@ const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
 const renameManyUsersInputSchema = rc_array(userInputSchema);
 const createUserInputSchema = rc_object({ name: rc_string });
+const userConflictSchema = rc_object({ reason: rc_string });
 const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
 const userPayloadSchema = z.union([
   z.string(),
@@ -248,6 +249,7 @@ test('direct list-query store offline public api', async () => {
             inputSchema: userInputSchema,
             getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
             conflictHandling: {
+              schema: userConflictSchema,
               detectConflict: ({ input, enqueuedAt, updatedAt }) => {
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
                 if (input.name !== 'Ada conflict') return false;
@@ -510,7 +512,11 @@ test('direct list-query store offline public api', async () => {
   });
 
   const [conflict] = listQueryStore.getOfflineResolutions();
-  if (!conflict || conflict.kind !== 'conflict') {
+  if (
+    !conflict ||
+    conflict.kind !== 'conflict' ||
+    conflict.operation !== 'conflictUser'
+  ) {
     throw new Error('Expected a conflict resolution');
   }
 
@@ -550,6 +556,15 @@ test('direct list-query store offline public api', async () => {
     storeName: 'direct-list-query-offline'
     storeType: 'listQuery'
     updatedAt: 1735689607000
+  `);
+  const parsedConflict =
+    listQueryStore.parseOfflineResolutionConflict(conflict);
+  expect({
+    ok: parsedConflict.ok,
+    value: parsedConflict.ok ? parsedConflict.value : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { reason: 'server-changed' }
   `);
 
   expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`

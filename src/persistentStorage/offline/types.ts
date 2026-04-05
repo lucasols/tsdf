@@ -10,9 +10,11 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
+import type { Result as ResultType } from 't-result';
 
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type { PersistentStorageSchema } from '../types';
+import type { SchemaValidationError } from '../validateWithSchema';
 
 /** Store kinds supported by offline replay and sync state tracking. */
 export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
@@ -763,6 +765,8 @@ export type OfflineConflictHandlingConfig<
   TConflict,
   TServerSnapshot = unknown,
 > = {
+  /** Schema used to validate and sanitize persisted conflict payloads. */
+  schema: PersistentStorageSchema<TConflict>;
   /**
    * Inspect remote state before replaying the mutation and return conflict payload
    * when the queued mutation can no longer be applied safely.
@@ -1273,6 +1277,7 @@ export type DocumentOfflineOperationDefinition<
  *   archive: {
  *     inputSchema: z.object({ reason: z.string() }),
  *     conflictHandling: {
+ *       schema: z.object({ code: z.string() }),
  *       detectConflict: () => false,
  *     },
  *     execute: () => undefined,
@@ -1544,6 +1549,77 @@ export type OfflineResolutionRecordForStore<
 > = {
   [K in TName]: OfflineResolutionRecordForOperation<TOperations, K>;
 }[TName];
+
+function formatSchemaValidationError(error: SchemaValidationError): string {
+  if (error.length === 0) return 'invalid-conflict-payload';
+  if (typeof error[0] === 'string') {
+    let message = error[0];
+    for (const entry of error.slice(1)) {
+      if (typeof entry !== 'string') return JSON.stringify(error);
+      message += `; ${entry}`;
+    }
+    return message;
+  }
+
+  return JSON.stringify(error);
+}
+
+export type OfflineResolutionConflictParseErrorCode =
+  | 'not-conflict'
+  | 'offline-not-configured'
+  | 'operation-not-found'
+  | 'conflict-handling-missing'
+  | 'invalid-conflict-payload';
+
+function getOfflineResolutionConflictParseErrorMessage(args: {
+  code: OfflineResolutionConflictParseErrorCode;
+  validationError?: SchemaValidationError;
+}): string {
+  if (args.code === 'invalid-conflict-payload' && args.validationError) {
+    return formatSchemaValidationError(args.validationError);
+  }
+
+  return args.code;
+}
+
+/** Error returned when decoding a stored offline conflict payload fails. */
+export class OfflineResolutionConflictParseError extends Error {
+  code: OfflineResolutionConflictParseErrorCode;
+  operation: string;
+  kind?: OfflineResolutionRecord['kind'];
+  rawValue?: unknown;
+  validationError?: SchemaValidationError;
+
+  constructor(args: {
+    code: OfflineResolutionConflictParseErrorCode;
+    operation: string;
+    kind?: OfflineResolutionRecord['kind'];
+    rawValue?: unknown;
+    validationError?: SchemaValidationError;
+  }) {
+    super(getOfflineResolutionConflictParseErrorMessage(args));
+    this.name = 'OfflineResolutionConflictParseError';
+    this.code = args.code;
+    this.operation = args.operation;
+    this.kind = args.kind;
+    this.rawValue = args.rawValue;
+    this.validationError = args.validationError;
+  }
+}
+
+/**
+ * Result returned when decoding a stored offline conflict payload.
+ *
+ * `ok: true` contains the typed conflict payload. `ok: false` contains a
+ * machine-readable parse error describing why decoding was not possible.
+ */
+export type ParsedOfflineResolutionConflictResultForOperation<
+  TOperations,
+  TName extends keyof TOperations & string,
+> = ResultType<
+  OperationConflict<TOperations, TName>,
+  OfflineResolutionConflictParseError
+>;
 
 /**
  * Base shape for each offline operation entry in `persistentStorage.offline.operations`.

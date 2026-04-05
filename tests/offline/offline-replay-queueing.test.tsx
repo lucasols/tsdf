@@ -24,6 +24,7 @@ import {
   classifyMutationOutage,
   collectionCreateInputSchema,
   collectionSchema,
+  docConflictSchema,
   docMutationInputSchema,
   docSchema,
   quickRecoveryProbe,
@@ -1072,6 +1073,25 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     storeType: 'document'
     updatedAt: 1735689620000
   `);
+  const parseRetryResult =
+    env.apiStore.parseOfflineResolutionConflict(resolution);
+  expect(parseRetryResult.ok ? null : parseRetryResult.error).toBeInstanceOf(
+    Error,
+  );
+  expect({
+    code: parseRetryResult.ok ? null : parseRetryResult.error.code,
+    kind:
+      parseRetryResult.ok || parseRetryResult.error.code !== 'not-conflict'
+        ? null
+        : parseRetryResult.error.kind,
+    ok: parseRetryResult.ok,
+    operation: parseRetryResult.ok ? null : parseRetryResult.error.operation,
+  }).toMatchInlineSnapshot(`
+    code: 'not-conflict'
+    kind: 'retry-exhausted'
+    ok: '❌'
+    operation: 'updateValue'
+  `);
   await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
     action: 'retry',
   });
@@ -1156,6 +1176,27 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     storeName: 'document-5'
     storeType: 'document'
     updatedAt: 1735689640000
+  `);
+  const parseDiscardResult =
+    env.apiStore.parseOfflineResolutionConflict(discardResolution);
+  expect(
+    parseDiscardResult.ok ? null : parseDiscardResult.error,
+  ).toBeInstanceOf(Error);
+  expect({
+    code: parseDiscardResult.ok ? null : parseDiscardResult.error.code,
+    kind:
+      parseDiscardResult.ok || parseDiscardResult.error.code !== 'not-conflict'
+        ? null
+        : parseDiscardResult.error.kind,
+    ok: parseDiscardResult.ok,
+    operation: parseDiscardResult.ok
+      ? null
+      : parseDiscardResult.error.operation,
+  }).toMatchInlineSnapshot(`
+    code: 'not-conflict'
+    kind: 'retry-exhausted'
+    ok: '❌'
+    operation: 'updateValue'
   `);
   await env.apiStore.resolveOfflineResolution(
     discardResolution.id,
@@ -2051,7 +2092,10 @@ describe('hybrid fallback integration', () => {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
-              conflictHandling: { detectConflict: () => false },
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: () => false,
+              },
             },
           },
         },

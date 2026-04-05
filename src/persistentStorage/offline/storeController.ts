@@ -3,6 +3,7 @@ import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import { rc_parse } from 'runcheck';
+import { Result } from 't-result';
 
 import type { ValidPayload } from '../../utils/storeShared';
 import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
@@ -12,7 +13,7 @@ import {
   OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
 } from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
-import { validateWithSchema } from '../validateWithSchema';
+import { parseWithSchema, validateWithSchema } from '../validateWithSchema';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
 import {
@@ -23,7 +24,10 @@ import {
   type OfflineMutationQueueingCause,
   type OfflineMutationQueueingPolicy,
   type OfflineMutationInput,
+  OfflineResolutionConflictParseError,
   type OfflineOperationSchemaShape,
+  type OperationConflict,
+  type ParsedOfflineResolutionConflictResultForOperation,
   type OfflineQueueEntry,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecordForStore,
@@ -196,6 +200,9 @@ export type OfflineStoreController<
   ) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
   getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
+  parseOfflineResolutionConflict: <TName extends keyof TOperations & string>(
+    resolution: OfflineResolutionRecordForStore<TOperations, TName>,
+  ) => ParsedOfflineResolutionConflictResultForOperation<TOperations, TName>;
   resolveOfflineResolution: <TName extends keyof TOperations & string>(
     resolutionId: string,
     operationName: TName,
@@ -525,6 +532,11 @@ export function createOfflineStoreController<
           void current.resolutionNamespace.remove(resolution.id);
           continue;
         }
+        const operation = operations[resolution.operation];
+        if (!operation) {
+          void current.resolutionNamespace.remove(resolution.id);
+          continue;
+        }
         resolutions.set(resolution.id, resolution);
       }
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
@@ -535,6 +547,70 @@ export function createOfflineStoreController<
     });
 
     return hydratedPromise;
+  }
+
+  function parseConflictPayloadForOperation<
+    TName extends keyof TOperations & string,
+  >(
+    operationName: TName,
+    conflict: unknown,
+  ): ParsedOfflineResolutionConflictResultForOperation<TOperations, TName> {
+    const operation = operations[operationName];
+    if (!operation) {
+      return Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'operation-not-found',
+          operation: operationName,
+        }),
+      );
+    }
+
+    const conflictHandling = operation.conflictHandling;
+    if (!conflictHandling) {
+      return Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'conflict-handling-missing',
+          operation: operationName,
+        }),
+      );
+    }
+
+    const parsedConflict = parseWithSchema<
+      OperationConflict<TOperations, TName>
+    >(conflictHandling.schema, conflict);
+    if (!parsedConflict.ok) {
+      return Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'invalid-conflict-payload',
+          operation: operationName,
+          rawValue: conflict,
+          validationError: parsedConflict.error,
+        }),
+      );
+    }
+
+    return Result.ok(parsedConflict.value);
+  }
+
+  function parseConflictPayloadForResolution<
+    TName extends keyof TOperations & string,
+  >(
+    resolution: OfflineResolutionRecordForStore<TOperations, TName>,
+  ): ParsedOfflineResolutionConflictResultForOperation<TOperations, TName> {
+    if (resolution.kind !== 'conflict') {
+      return Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'not-conflict',
+          kind: resolution.kind,
+          operation: resolution.operation,
+        }),
+      );
+    }
+
+    return parseConflictPayloadForOperation(
+      resolution.operation,
+      resolution.conflict,
+    );
   }
 
   function getOrCreateSet(
@@ -1655,14 +1731,27 @@ export function createOfflineStoreController<
     current: ActiveSessionState;
     entry: OfflineQueueEntry;
     conflict: unknown;
+    conflictHandling: NonNullable<
+      AnyOfflineOperationDefinition['conflictHandling']
+    >;
   }): Promise<void> {
+    const validatedConflict = validateWithSchema(
+      args.conflictHandling.schema,
+      args.conflict,
+    );
+    if (validatedConflict === null) {
+      throw new Error(
+        `Invalid offline conflict payload for operation "${args.entry.operation}"`,
+      );
+    }
+
     await persistManualResolutionChain({
       current: args.current,
       parentEntry: args.entry,
       parentResolution: buildConflictResolutionRecord(
         args.current,
         args.entry,
-        args.conflict,
+        validatedConflict,
       ),
     });
   }
@@ -2205,6 +2294,7 @@ export function createOfflineStoreController<
             current,
             entry: entryToUse,
             conflict,
+            conflictHandling,
           });
           continue;
         }
@@ -2538,6 +2628,7 @@ export function createOfflineStoreController<
     queueMutation,
     getOfflineEntities,
     getOfflineResolutions,
+    parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,
     prepareForFetch,
     getSessionStatus,

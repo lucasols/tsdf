@@ -6,10 +6,10 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import {
   type CollectionOfflineOperationDefinition,
+  createOfflineSession,
   type ListQueryOfflineOperationDefinition,
   useGlobalOfflineEntities,
   useGlobalOfflineResolutions,
-  createOfflineSession,
 } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -21,6 +21,7 @@ import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
+  getLocalStorageKeys,
   type PatchUserOperations,
   type UpdateValueConflictOperations,
   userPatchSchema,
@@ -30,10 +31,13 @@ import {
   classifyMutationOutage,
   collectionCreateInputSchema,
   collectionSchema,
+  docConflictSchema,
   docMutationInputSchema,
   docSchema,
   listQueryQueryPayloadSchema,
+  parsePersistedObject,
   quickRecoveryProbe,
+  toRecord,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -203,6 +207,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
               inputSchema: docMutationInputSchema,
               execute,
               conflictHandling: {
+                schema: docConflictSchema,
                 detectConflict: ({ input, enqueuedAt }) => {
                   expect(input.value).toBe(2);
                   expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
@@ -361,6 +366,7 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
                 return input;
               },
               conflictHandling: {
+                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.value === 2 ? { reason: 'server-changed' } : false,
               },
@@ -449,6 +455,159 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   storeResolutionHook.unmount();
 });
 
+test('invalid persisted conflict payloads remain hydrated and decode to error through the parser helper', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-conflict-hydration-session';
+  const storeName = 'offline-conflict-hydration-doc';
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => input,
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input }) =>
+                  input.value === 2 ? { reason: 'server-changed' } : false,
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: () => Promise.resolve(2),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineResolutions()).toHaveLength(1);
+
+  const persistedResolutionKey = getLocalStorageKeys().find((key) =>
+    key.startsWith(`tsdf.${sessionKey}.${storeName}.oc.`),
+  );
+  if (!persistedResolutionKey) {
+    throw new Error('Expected one persisted offline conflict entry');
+  }
+
+  const persistedResolutionRaw = localStorage.getItem(persistedResolutionKey);
+  if (!persistedResolutionRaw) {
+    throw new Error('Expected persisted offline conflict payload');
+  }
+
+  const persistedResolution = parsePersistedObject(persistedResolutionRaw);
+  const persistedResolutionData = toRecord(
+    'd' in persistedResolution
+      ? persistedResolution.d
+      : persistedResolution.data,
+    'Expected persisted offline conflict payload to be an object',
+  );
+  localStorage.setItem(
+    persistedResolutionKey,
+    JSON.stringify({
+      ...persistedResolution,
+      d: { ...persistedResolutionData, conflict: { wrong: 'shape' } },
+    }),
+  );
+
+  const rehydratedEnv = createDocumentStoreTestEnv<
+    number,
+    UpdateValueConflictOperations
+  >(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: ({ input }) => input,
+            conflictHandling: {
+              schema: docConflictSchema,
+              detectConflict: ({ input }) =>
+                input.value === 2 ? { reason: 'server-changed' } : false,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await flushAllTimers();
+
+  const [rehydratedResolution] = rehydratedEnv.apiStore.getOfflineResolutions();
+  if (!rehydratedResolution || rehydratedResolution.kind !== 'conflict') {
+    throw new Error('Expected one rehydrated conflict resolution');
+  }
+
+  expect(rehydratedEnv.apiStore.getOfflineResolutions()).toHaveLength(1);
+  const result =
+    rehydratedEnv.apiStore.parseOfflineResolutionConflict(rehydratedResolution);
+  assert(!result.ok);
+  expect(result.error).toBeInstanceOf(Error);
+  expect({
+    code: result.error.code,
+    error: result.error,
+    validationIssues: result.error.validationError,
+  }).toMatchInlineSnapshot(`
+    code: 'invalid-conflict-payload'
+
+    error{Error}:
+      message: "$.reason: Type 'undefined' is not assignable to 'string'"
+      name: 'OfflineResolutionConflictParseError'
+
+    validationIssues: ["$.reason: Type 'undefined' is not assignable to 'string'"]
+  `);
+  expect(rehydratedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'offline-conflict-hydration-session:offline-conflict-hydration-doc:document'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'offline-conflict-hydration-session'
+      storeName: 'offline-conflict-hydration-doc'
+      storeType: 'document'
+      syncState: 'resolution-required'
+      updatedAt: 1735689600000
+  `);
+});
+
 type CreateUserConflictOperations = {
   createUser: CollectionOfflineOperationDefinition<
     { value: { name: string } },
@@ -490,6 +649,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
                   executeResolvers.push(resolve);
                 }),
               conflictHandling: {
+                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.name === 'Ada' ? { reason: 'server-changed' } : false,
               },
@@ -661,6 +821,7 @@ test('committing a temp-entity conflict with an external result reconciles the o
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               execute,
               conflictHandling: {
+                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.name === 'Ada' ? { reason: 'server-changed' } : false,
               },
@@ -798,6 +959,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
               },
               execute: createUserExecute,
               conflictHandling: {
+                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.name === 'Linus offline'
                     ? { reason: 'server-changed' }
@@ -1081,6 +1243,7 @@ test('conflict handling still works for mutations queued via fallback', async ()
               inputSchema: docMutationInputSchema,
               execute,
               conflictHandling: {
+                schema: docConflictSchema,
                 detectConflict: ({ input }) =>
                   input.value === 2 ? { reason: 'server-changed' } : false,
               },

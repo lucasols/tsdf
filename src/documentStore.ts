@@ -33,14 +33,14 @@ import {
   getIsPendingOfflineSync,
 } from './persistentStorage/offline/entityMetadata';
 import {
-  runOfflineAwareFetch,
   isOfflineConnectivityError,
   offlineConnectivityError,
+  runOfflineAwareFetch,
 } from './persistentStorage/offline/fetchRuntime';
 import {
+  runHybridOfflineMutation,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
-  runHybridOfflineMutation,
 } from './persistentStorage/offline/mutationRuntime';
 import {
   useOfflineStoreEntities,
@@ -52,9 +52,12 @@ import {
   offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
 import {
+  OfflineResolutionConflictParseError,
   type AnyOfflineOperationDefinition,
   type OfflineMutationInput,
   type OfflineResolutionActionForOperation,
+  type OfflineResolutionRecordForOperation,
+  type ParsedOfflineResolutionConflictResultForOperation,
 } from './persistentStorage/offline/types';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
@@ -1339,6 +1342,24 @@ export function createDocumentStore<
     },
     getOfflineResolutions: () =>
       offlineController?.getOfflineResolutions() ?? [],
+    parseOfflineResolutionConflict: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolution: OfflineResolutionRecordForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ): ParsedOfflineResolutionConflictResultForOperation<
+      ResolvedOfflineOperations,
+      TName
+    > =>
+      offlineController?.parseOfflineResolutionConflict(resolution) ??
+      Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'offline-not-configured',
+          operation: resolution.operation,
+        }),
+      ),
     resolveOfflineResolution: <
       TName extends keyof ResolvedOfflineOperations & string,
     >(

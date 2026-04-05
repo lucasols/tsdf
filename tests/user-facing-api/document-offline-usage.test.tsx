@@ -17,6 +17,7 @@ import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const docSchema = rc_object({ value: rc_number, label: rc_string });
+const docConflictSchema = rc_object({ reason: rc_string });
 const setValueInputSchema = rc_object({ value: rc_number });
 const conflictResolutionSchema = z.object({ value: z.number() });
 const patchDocAccumulationZodSchema = z
@@ -283,6 +284,7 @@ test('direct document store offline public api', async () => {
               return { ...documentState };
             },
             conflictHandling: {
+              schema: docConflictSchema,
               detectConflict: ({
                 input,
                 enqueuedAt,
@@ -495,7 +497,11 @@ test('direct document store offline public api', async () => {
   expect(documentHook.result.current.pendingSync).toBe(false);
 
   const [conflict] = documentStore.getOfflineResolutions();
-  if (!conflict || conflict.kind !== 'conflict') {
+  if (
+    !conflict ||
+    conflict.kind !== 'conflict' ||
+    conflict.operation !== 'conflictValue'
+  ) {
     throw new Error('Expected a conflict resolution');
   }
 
@@ -534,6 +540,14 @@ test('direct document store offline public api', async () => {
     storeName: 'direct-document-offline'
     storeType: 'document'
     updatedAt: 1735689606040
+  `);
+  const parsedConflict = documentStore.parseOfflineResolutionConflict(conflict);
+  expect({
+    ok: parsedConflict.ok,
+    value: parsedConflict.ok ? parsedConflict.value : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { reason: 'stale-server-value' }
   `);
 
   expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`

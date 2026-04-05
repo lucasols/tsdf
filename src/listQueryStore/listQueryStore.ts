@@ -8,6 +8,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { useCallback } from 'react';
+import { Result } from 't-result';
 import { Store } from 't-state';
 
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
@@ -35,7 +36,10 @@ import {
 } from '../persistentStorage/offline/storeController';
 import {
   offlineItemEntityRefSchema,
+  OfflineResolutionConflictParseError,
   type OfflineMutationInput,
+  type ParsedOfflineResolutionConflictResultForOperation,
+  type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
@@ -2309,6 +2313,24 @@ export function createListQueryStore<
     },
     getOfflineResolutions: () =>
       offlineController?.getOfflineResolutions() ?? [],
+    parseOfflineResolutionConflict: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolution: OfflineResolutionRecordForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ): ParsedOfflineResolutionConflictResultForOperation<
+      ResolvedOfflineOperations,
+      TName
+    > =>
+      offlineController?.parseOfflineResolutionConflict(resolution) ??
+      Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'offline-not-configured',
+          operation: resolution.operation,
+        }),
+      ),
     resolveOfflineResolution: <
       TName extends keyof ResolvedOfflineOperations & string,
     >(
