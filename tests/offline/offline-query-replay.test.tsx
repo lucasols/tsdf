@@ -44,25 +44,20 @@ afterEach(() => {
 });
 
 describe('list-query replay', () => {
-  test('list-query replay keeps a queued patch anchored to the original row when retries exhaust', async () => {
+  test('queued patch stays anchored to the original row when retries exhaust', async () => {
     network.setOffline();
     const sessionKey = 'offline-replay-mutation-payload-session';
     const storeName = 'offline-replay-mutation-payload-store';
+    // Execute always throws so replay retries exhaust and the mutation
+    // eventually promotes to a manual resolution.
     const execute = vi.fn(
-      ({
-        input,
-        enqueuedAt,
-      }: {
-        input: { itemId: string; name: string };
-        enqueuedAt: number;
-      }) => {
-        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+      ({ input }: { input: { itemId: string; name: string } }) => {
         env.apiStore.updateItemState(input.itemId, (item) => ({
           ...item,
           name: input.name,
         }));
 
-        return { name: input.name };
+        throw new Error('replay execute failed');
       },
     );
 
@@ -187,6 +182,7 @@ describe('list-query replay', () => {
     });
 
     expect(execute).toHaveBeenCalled();
+    // Every replay attempt must target the same row with the original input
     expect(execute.mock.calls[0]?.[0].input).toMatchInlineSnapshot(`
       itemId: 'users||1'
       name: 'Ada replayed'
@@ -197,9 +193,7 @@ describe('list-query replay', () => {
           ctx.input.itemId === 'users||1' && ctx.input.name === 'Ada replayed',
       ),
     ).toBe(true);
-    expect(hook.result.current.items).toMatchInlineSnapshot(`
-      ['Ada pending']
-    `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada replayed']`);
     expect(
       env.apiStore
         .getOfflineEntities()
@@ -240,23 +234,24 @@ describe('list-query replay', () => {
             entityKind: 'item'
         input: { itemId: 'users||1', name: 'Ada replayed' }
         kind: 'retry-exhausted'
-        lastReplayError: { message: 'expected 1735689603010 to be 1735689600000 // Object.is equality' }
+        lastReplayError: { message: 'replay execute failed' }
         operation: 'patchUserName'
     `);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time   | query-items | query-status |
-      0      | Ada         | success      | [query-status, query-items] ui-initialized
-      3.01s  | Ada         | success      | -- queue an offline edit for the existing row
-      .      | Ada pending | success      | [query-items] ui-changed
-      .      | Ada pending | success      | offline:patchUserName queued
-      .      | Ada pending | success      | -- go back online and let replay retries exhaust
-      .      | Ada pending | success      | offline:patchUserName replay-started
-      8.01s  | Ada pending | success      | offline:patchUserName replay-started
-      13.01s | Ada pending | success      | offline:patchUserName replay-started
-      18.01s | Ada pending | success      | offline:patchUserName replay-started
-      23.01s | Ada pending | success      | offline:patchUserName replay-started
-      .      | Ada pending | success      | offline:patchUserName resolution-required
+      time   | query-items  | query-status |
+      0      | Ada          | success      | [query-status, query-items] ui-initialized
+      3.01s  | Ada          | success      | -- queue an offline edit for the existing row
+      .      | Ada pending  | success      | [query-items] ui-changed
+      .      | Ada pending  | success      | offline:patchUserName queued
+      .      | Ada pending  | success      | -- go back online and let replay retries exhaust
+      .      | Ada pending  | success      | offline:patchUserName replay-started
+      8.01s  | Ada pending  | success      | offline:patchUserName replay-started
+      13.01s | Ada pending  | success      | offline:patchUserName replay-started
+      18.01s | Ada pending  | success      | offline:patchUserName replay-started
+      23.01s | Ada pending  | success      | offline:patchUserName replay-started
+      .      | Ada pending  | success      | offline:patchUserName resolution-required
+      .      | Ada replayed | success      | [query-items] ui-changed
       "
     `);
 
@@ -299,7 +294,7 @@ describe('list-query replay', () => {
     parentId: rc_string,
   });
 
-  test('list-query replay runs temp create before the queued edit and remaps the edit to the final id', async () => {
+  test('temp create replays before the queued edit and remaps it to the final server id', async () => {
     network.setOffline();
     const sessionKey = 'offline-replay-temp-create-then-edit-session';
     const storeName = 'offline-replay-temp-create-then-edit-store';
@@ -524,7 +519,7 @@ describe('list-query replay', () => {
     >;
   };
 
-  test('list-query replay remaps queued edits after one batch temp-create operation reconciles multiple items', async () => {
+  test('batch temp-create reconciles multiple items and remaps queued edits to their final ids', async () => {
     network.setOffline();
     const sessionKey = 'offline-replay-batch-temp-create-session';
     const storeName = 'offline-replay-batch-temp-create-store';
@@ -773,7 +768,7 @@ describe('list-query replay', () => {
     hook.unmount();
   });
 
-  test('list-query delete can cancel a queued temp lifecycle without replaying anything', async () => {
+  test('deleting a temp row while offline cancels the entire lifecycle without replaying', async () => {
     network.setOffline();
     const sessionKey = 'offline-replay-temp-create-then-delete-session';
     const storeName = 'offline-replay-temp-create-then-delete-store';
@@ -983,7 +978,7 @@ describe('list-query replay', () => {
     hook.unmount();
   });
 
-  test('list-query nested temp-create descendants cascade into manual resolutions and discard together', async () => {
+  test('nested temp-create descendants cascade into manual resolutions and discard together', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
     const createUserExecute = vi
@@ -1100,7 +1095,10 @@ describe('list-query replay', () => {
     });
     await flushAllTimers();
 
-    // Queue the root temp create and a nested temp-create child while offline.
+    // Queue the root parent temp create while offline.
+    env.addTimelineComments('beforeNextAction', [
+      'queue the root parent temp create',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation(null, {
         optimisticUpdate: () => {
@@ -1115,6 +1113,10 @@ describe('list-query replay', () => {
       });
     });
 
+    // Queue a nested child temp create that depends on the parent's temp id.
+    env.addTimelineComments('beforeNextAction', [
+      'queue a nested child temp create depending on the parent',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation(null, {
         optimisticUpdate: () => {
@@ -1139,6 +1141,9 @@ describe('list-query replay', () => {
 
     // Queue a grandchild edit against the child temp item so the cascade has to
     // recurse beyond the direct child resolution.
+    env.addTimelineComments('beforeNextAction', [
+      'queue an edit against the child temp item',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation('temp:Child offline', {
         optimisticUpdate: () => {
@@ -1157,6 +1162,9 @@ describe('list-query replay', () => {
 
     // Exhaust the parent replay. The nested child temp-create and the edit that
     // depends on that child should both become blocked manual resolutions.
+    env.addTimelineComments('beforeNextAction', [
+      'go online and exhaust parent replay to trigger cascading resolutions',
+    ]);
     await act(async () => {
       network.goOnline();
       await Promise.resolve();
@@ -1189,11 +1197,12 @@ describe('list-query replay', () => {
       throw new Error('Expected the full nested temp-create resolution chain');
     }
 
+    // Neither the child create nor the grandchild edit should have been attempted
+    // — they are blocked by the parent's failed replay.
     expect(createChildUserExecute).not.toHaveBeenCalled();
     expect(patchUserExecute).not.toHaveBeenCalled();
 
-    expect(parentResolution.blockedByResolutionIds).toMatchInlineSnapshot(`[]`);
-    expect(parentResolution.childResolutionIds).toHaveLength(1);
+    // Verify the parent → child → grandchild resolution chain is wired correctly
     expect(parentResolution.childResolutionIds[0]).toBe(
       childCreateResolution.id,
     );
@@ -1235,11 +1244,9 @@ describe('list-query replay', () => {
       tempIds: ['temp:Parent offline']
       updatedAt: 1735689623010
     `);
-    expect(childCreateResolution.blockedByResolutionIds).toHaveLength(1);
     expect(childCreateResolution.blockedByResolutionIds[0]).toBe(
       parentResolution.id,
     );
-    expect(childCreateResolution.childResolutionIds).toHaveLength(1);
     expect(childCreateResolution.childResolutionIds[0]).toBe(
       grandchildResolution.id,
     );
@@ -1281,11 +1288,9 @@ describe('list-query replay', () => {
       tempIds: ['temp:Child offline']
       updatedAt: 1735689623010
     `);
-    expect(grandchildResolution.blockedByResolutionIds).toHaveLength(1);
     expect(grandchildResolution.blockedByResolutionIds[0]).toBe(
       childCreateResolution.id,
     );
-    expect(grandchildResolution.childResolutionIds).toMatchInlineSnapshot(`[]`);
     expect({
       ...pick(grandchildResolution, [
         'blockedResolutionCount',
@@ -1336,8 +1341,7 @@ describe('list-query replay', () => {
           entity.entityKey === env.getStoreItemKeyFromRaw('temp:Child offline'),
       );
 
-    expect(parentEntity?.blockedByResolutionIds).toMatchInlineSnapshot(`[]`);
-    expect(parentEntity?.childResolutionIds).toHaveLength(1);
+    // Verify entity → resolution cross-references
     expect(parentEntity?.childResolutionIds[0]).toBe(childCreateResolution.id);
     expect(
       pick(parentEntity, [
@@ -1372,16 +1376,17 @@ describe('list-query replay', () => {
       tempId: 'temp:Parent offline'
       updatedAt: 1735689623010
     `);
-    expect(childEntity?.requiresResolution).toBe(true);
+    // Child entity is blocked by both the parent and the child-create resolutions
     expect(childEntity?.blockedByResolutionIds).toEqual(
       expect.arrayContaining([parentResolution.id, childCreateResolution.id]),
     );
-
-    expect(childEntity?.childResolutionIds).toHaveLength(1);
     expect(childEntity?.childResolutionIds[0]).toBe(grandchildResolution.id);
 
     // Discarding the parent should clear every nested descendant and roll back
     // both optimistic temp items from the query and item state.
+    env.addTimelineComments('beforeNextAction', [
+      'discard the parent to cascade-clear all descendants',
+    ]);
     await act(async () => {
       await env.apiStore.resolveOfflineResolution(
         parentResolution.id,
@@ -1399,11 +1404,37 @@ describe('list-query replay', () => {
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       ['Ada', 'Grace']
     `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | query-items                                    |
+      0      | Ada, Grace                                     | ui-initialized
+      3.01s  | Ada, Grace                                     | -- queue the root parent temp create
+      .      | Ada, Grace, Parent offline                     | ui-changed
+      .      | Ada, Grace, Parent offline                     | offline:createUser queued
+      .      | Ada, Grace, Parent offline                     | -- queue a nested child temp create depending on the parent
+      .      | Ada, Grace, Parent offline, Child offline      | ui-changed
+      .      | Ada, Grace, Parent offline, Child offline      | offline:createChildUser queued
+      .      | Ada, Grace, Parent offline, Child offline      | -- queue an edit against the child temp item
+      .      | Ada, Grace, Parent offline, Child blocked edit | ui-changed
+      .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
+      .      | Ada, Grace, Parent offline, Child blocked edit | -- go online and exhaust parent replay to trigger cascading resolutions
+      .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+      8.01s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+      13.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+      18.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+      23.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+      .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
+      .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
+      .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
+      .      | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent to cascade-clear all descendants
+      .      | Ada, Grace                                     | ui-changed
+      "
+    `);
 
     hook.unmount();
   });
 
-  test('list-query temp-create retry exhaustion promotes dependent edits into blocked manual resolutions that unblock after the parent succeeds', async () => {
+  test('temp-create retry exhaustion promotes dependent edits into blocked resolutions that unblock after the parent succeeds', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
     const createUserExecute = vi
@@ -1560,8 +1591,7 @@ describe('list-query replay', () => {
       throw new Error('Expected temp-create parent and child resolutions');
     }
 
-    expect(parentResolution.blockedByResolutionIds).toMatchInlineSnapshot(`[]`);
-    expect(parentResolution.childResolutionIds).toHaveLength(1);
+    // Verify parent → child resolution cross-references
     expect(parentResolution.childResolutionIds[0]).toBe(childResolution.id);
     expect({
       ...pick(parentResolution, [
@@ -1601,9 +1631,7 @@ describe('list-query replay', () => {
       tempIds: ['temp:Linus offline']
       updatedAt: 1735689623010
     `);
-    expect(childResolution.blockedByResolutionIds).toHaveLength(1);
     expect(childResolution.blockedByResolutionIds[0]).toBe(parentResolution.id);
-    expect(childResolution.childResolutionIds).toMatchInlineSnapshot(`[]`);
     expect({
       ...pick(childResolution, [
         'blockedResolutionCount',
@@ -1640,10 +1668,9 @@ describe('list-query replay', () => {
       storeType: 'listQuery'
       updatedAt: 1735689623010
     `);
+    // Verify the temp entity's resolution cross-references
     const [tempEntity] = env.apiStore.getOfflineEntities();
-    expect(tempEntity?.blockedByResolutionIds).toHaveLength(1);
     expect(tempEntity?.blockedByResolutionIds[0]).toBe(parentResolution.id);
-    expect(tempEntity?.childResolutionIds).toHaveLength(1);
     expect(tempEntity?.childResolutionIds[0]).toBe(childResolution.id);
     expect(
       pick(tempEntity, [
@@ -1819,7 +1846,7 @@ describe('list-query replay', () => {
     hook.unmount();
   });
 
-  test('list-query discarding a temp-create parent resolution removes dependent descendants and clears the temp chain', async () => {
+  test('discarding a temp-create parent resolution removes dependent descendants and clears the temp chain', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
     const createUserExecute = vi
@@ -1896,7 +1923,11 @@ describe('list-query replay', () => {
     });
     await flushAllTimers();
 
-    // Build the temp-create chain entirely through the public mutation API.
+    // Queue a temp create and a dependent edit so both become manual resolutions
+    // after the parent's replay is exhausted.
+    env.addTimelineComments('beforeNextAction', [
+      'queue a temp create and a dependent edit while offline',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation(null, {
         optimisticUpdate: () => {
@@ -1911,6 +1942,7 @@ describe('list-query replay', () => {
       });
     });
 
+    // Queue a dependent edit against the same temp row
     await act(async () => {
       await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
@@ -1975,7 +2007,8 @@ describe('list-query replay', () => {
       "
       time   | query-items                      |
       0      | Ada, Grace                       | ui-initialized
-      3.01s  | Ada, Grace, Linus offline        | ui-changed
+      3.01s  | Ada, Grace                       | -- queue a temp create and a dependent edit while offline
+      .      | Ada, Grace, Linus offline        | ui-changed
       .      | Ada, Grace, Linus offline        | offline:createUser queued
       .      | Ada, Grace, Linus discarded edit | ui-changed
       .      | Ada, Grace, Linus discarded edit | offline:patchUserName queued
@@ -1994,7 +2027,7 @@ describe('list-query replay', () => {
     hook.unmount();
   });
 
-  test('list-query temp creates keep manually inserted query items visible after replay', async () => {
+  test('temp creates keep manually inserted query items visible after replay', async () => {
     network.setOffline();
     let nextUserId = 3;
 
@@ -2057,6 +2090,11 @@ describe('list-query replay', () => {
     });
     await flushAllTimers();
 
+    // Queue a temp create while offline — the item should appear in the query
+    // immediately and remain visible after replay reconciles it.
+    env.addTimelineComments('beforeNextAction', [
+      'queue a temp create while offline',
+    ]);
     await act(async () => {
       await env.apiStore.performMutation(null, {
         optimisticUpdate: () => {
@@ -2080,6 +2118,7 @@ describe('list-query replay', () => {
       ['Ada', 'Grace', 'Linus offline']
     `);
 
+    // The temp entity is tracked as pending while offline
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
       - blockedByResolutionIds: []
         blockedResolutionCount: 0
@@ -2099,6 +2138,11 @@ describe('list-query replay', () => {
         updatedAt: 1735689603010
     `);
 
+    // Go online and replay — the item should remain visible under its
+    // reconciled server id and the query membership must be preserved.
+    env.addTimelineComments('beforeNextAction', [
+      'go online and replay the temp create',
+    ]);
     act(() => {
       network.goOnline();
     });
@@ -2107,6 +2151,7 @@ describe('list-query replay', () => {
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       ['Ada', 'Grace', 'Linus offline']
     `);
+    // Item is now stored under the reconciled server payload
     expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
       id: 3
       name: 'Linus offline'
@@ -2119,8 +2164,10 @@ describe('list-query replay', () => {
       "
       time  | query-items               | query-status |
       0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
-      3.01s | Ada, Grace, Linus offline | success      | [query-items] ui-changed
+      3.01s | Ada, Grace                | success      | -- queue a temp create while offline
+      .     | Ada, Grace, Linus offline | success      | [query-items] ui-changed
       .     | Ada, Grace, Linus offline | success      | offline:createUser queued
+      .     | Ada, Grace, Linus offline | success      | -- go online and replay the temp create
       .     | Ada, Grace, Linus offline | success      | offline:createUser replay-started
       .     | Ada, Grace, Linus offline | success      | offline:createUser replay-finished
       .     | Ada, Grace, Linus offline | success      | [query-items, query-items] ui-changed

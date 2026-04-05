@@ -73,6 +73,7 @@ Each test env returns an object with:
 - `timelineString` — human-readable timeline of all actions (fetches, mutations, UI changes, etc.)
 - `actions` — raw action history array
 - `addTimelineComments(...)` — annotate the timeline with custom comments
+- `clearTimeline()` — clear the timeline history
 
 Test scenarios can be configured via the `testScenario` option to start tests in different states:
 

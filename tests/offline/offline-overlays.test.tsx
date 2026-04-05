@@ -93,6 +93,8 @@ describe('document overlays', () => {
   test('document invalidation keeps pending optimistic data visible until replay settles', async () => {
     network.setOffline();
 
+    // Start from a real loaded document so reconnecting can briefly fetch the
+    // stale server snapshot while the offline replay is still pending.
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: 'offline-doc-overlay-store',
       getSessionKey: () => 'offline-doc-overlay-session',
@@ -123,6 +125,7 @@ describe('document overlays', () => {
       },
     });
 
+    // Read the same document surface that application code would render.
     const hook = renderHook(() => env.apiStore.useDocument());
     await Promise.resolve();
 
@@ -139,6 +142,7 @@ describe('document overlays', () => {
       });
     });
 
+    // The pending overlay should immediately replace the last server value.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
       error: null
@@ -153,6 +157,7 @@ describe('document overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // The stale invalidation must not overwrite the optimistic value yet.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
       error: null
@@ -178,6 +183,8 @@ describe('document overlays', () => {
   test('document offline overlay stops deriving once replay requires manual resolution', async () => {
     network.setOffline();
 
+    // Start from loaded server data so a reconnect can restore that snapshot
+    // once replay gives up and turns the queued mutation into a resolution.
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: 'offline-doc-overlay-resolution-store',
       getSessionKey: () => 'offline-doc-overlay-resolution-session',
@@ -205,6 +212,7 @@ describe('document overlays', () => {
       },
     });
 
+    // Observe the user-facing document view rather than lower-level store internals.
     const hook = renderHook(() => env.apiStore.useDocument());
     await Promise.resolve();
 
@@ -227,6 +235,8 @@ describe('document overlays', () => {
     });
     await flushAllTimers();
 
+    // Once replay is blocked, the optimistic overlay should disappear and the
+    // UI should fall back to the last server-backed document value.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 1 }
       error: null
@@ -234,6 +244,8 @@ describe('document overlays', () => {
       pendingSync: '❌'
       status: 'success'
     `);
+
+    // The queued entity should remain visible only in the offline-resolution summary.
     expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
       .toMatchInlineSnapshot(`
         - entityKey: 'document'
@@ -265,6 +277,8 @@ describe('collection overlays', () => {
   test('collection invalidation keeps pending optimistic data visible until replay settles', async () => {
     network.setOffline();
 
+    // Seed a real loaded item so reconnecting can refetch stale server data
+    // while the queued offline rename is still waiting to replay.
     const env = createCollectionStoreTestEnv<
       { name: string },
       RenameCollectionItemOperations
@@ -303,6 +317,7 @@ describe('collection overlays', () => {
       },
     );
 
+    // Follow the rendered item surface instead of asserting through store internals.
     const hook = renderHook(() =>
       env.apiStore.useItem('users||1', {
         selector: (item) => item?.value.name ?? null,
@@ -323,6 +338,7 @@ describe('collection overlays', () => {
       });
     });
 
+    // The item should immediately show the optimistic name while replay is pending.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada pending'
       error: null
@@ -339,6 +355,7 @@ describe('collection overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // The stale refetch must not revert the item back to the old server name.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada pending'
       error: null
@@ -368,6 +385,8 @@ describe('collection overlays', () => {
   test('collection invalidation keeps pending deletes hidden until replay settles', async () => {
     network.setOffline();
 
+    // Start from a loaded collection item so reconnecting can refetch the stale
+    // server row while the offline delete is still queued.
     const env = createCollectionStoreTestEnv<
       { name: string },
       DeleteCollectionItemOperations
@@ -404,6 +423,7 @@ describe('collection overlays', () => {
       },
     );
 
+    // Watch the same item selector a component would render after a delete.
     const hook = renderHook(() =>
       env.apiStore.useItem('users||1', {
         selector: (item) => item?.value.name ?? null,
@@ -422,6 +442,7 @@ describe('collection overlays', () => {
       });
     });
 
+    // The optimistic delete should hide the item immediately from the UI.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: null
       error: null
@@ -438,6 +459,7 @@ describe('collection overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // A stale refetch must not resurrect a row that is still pending deletion.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: null
       error: null
@@ -467,6 +489,8 @@ describe('collection overlays', () => {
   test('collection offline overlay stops deriving once replay requires manual resolution', async () => {
     network.setOffline();
 
+    // Use loaded collection data so replay failure can restore the last
+    // server-backed item once the optimistic overlay stops deriving.
     const env = createCollectionStoreTestEnv<
       { name: string },
       RenameCollectionItemOperations
@@ -503,6 +527,7 @@ describe('collection overlays', () => {
       },
     );
 
+    // Observe the rendered item name instead of lower-level offline bookkeeping.
     const hook = renderHook(() =>
       env.apiStore.useItem('users||1', {
         selector: (item) => item?.value.name ?? null,
@@ -529,6 +554,8 @@ describe('collection overlays', () => {
     });
     await flushAllTimers();
 
+    // Replay failure should drop the optimistic name and restore the last
+    // successful server-backed item in the rendered view.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada'
       error: null
@@ -538,6 +565,8 @@ describe('collection overlays', () => {
       pendingSync: '❌'
       status: 'success'
     `);
+
+    // The unresolved work should now live only in the offline entity summary.
     expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
       .toMatchInlineSnapshot(`
         - entityKey: '"users||1'
@@ -562,6 +591,9 @@ describe('list-query overlays', () => {
   test('list-query invalidation keeps a pending patched row visible until replay settles', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
+
+    // Start from a loaded query so reconnecting can refetch the stale server
+    // list while the queued optimistic row patch is still pending replay.
     const env = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
@@ -628,6 +660,7 @@ describe('list-query overlays', () => {
       });
     });
 
+    // The pending overlay should be visible through the normal query surface.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -646,6 +679,7 @@ describe('list-query overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // The stale query refetch must not blank or revert the optimistic row.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -678,6 +712,9 @@ describe('list-query overlays', () => {
 
   test('list-query item invalidation keeps pending optimistic data visible until replay settles', async () => {
     const usersQuery = { tableId: 'users' } as const;
+
+    // Load both query and standalone item state so this test proves the item
+    // overlay path works even when it is not relying on query-derived data.
     const env = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
@@ -752,6 +789,7 @@ describe('list-query overlays', () => {
       });
     });
 
+    // The standalone item view should switch to the optimistic value immediately.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada pending'
       error: null
@@ -768,6 +806,7 @@ describe('list-query overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // The direct item refetch must not restore the stale server value yet.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: 'Ada pending'
       error: null
@@ -798,6 +837,9 @@ describe('list-query overlays', () => {
     network.setOffline();
     let nextUserId = 3;
     const usersQuery = { tableId: 'users' } as const;
+
+    // Start from a loaded ordered list so the test can verify the temporary row
+    // stays anchored to its optimistic position across a stale refetch.
     const env = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
@@ -875,6 +917,7 @@ describe('list-query overlays', () => {
       });
     });
 
+    // The optimistic temp row should appear at the end of the rendered list.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -893,6 +936,7 @@ describe('list-query overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // The stale query refresh must keep the temp row in the same optimistic slot.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -931,6 +975,8 @@ describe('list-query overlays', () => {
   test('list-query overlay stops deriving temp rows once replay needs manual resolution', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
+    // Start from a loaded list so replay failure can fall back to the last
+    // server-backed query membership once the temp overlay stops deriving.
     const env = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
@@ -1014,7 +1060,8 @@ describe('list-query overlays', () => {
     });
     await flushAllTimers();
 
-    // Once the queue entry becomes a resolution, the derived row should disappear.
+    // The temp row should disappear from the rendered list once replay becomes
+    // a manual-resolution problem instead of a still-pending optimistic entry.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -1026,6 +1073,7 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
+    // The unresolved temp entity should survive only in offline resolution state.
     expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
       .toMatchInlineSnapshot(`
         - entityKey: '"temp:Linus blocked'
@@ -1039,6 +1087,8 @@ describe('list-query overlays', () => {
   test('list-query invalidation keeps pending deletes hidden until replay settles', async () => {
     network.setOffline();
     const usersQuery = { tableId: 'users' } as const;
+    // Start from a loaded list so reconnecting can refetch the stale server row
+    // while the offline delete is still represented only as an overlay.
     const env = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
@@ -1096,6 +1146,7 @@ describe('list-query overlays', () => {
       });
     });
 
+    // The optimistic delete should immediately remove the row from the list UI.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -1107,6 +1158,8 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
+    // The pending delete still has to exist in offline state even though the
+    // rendered list already looks deleted.
     expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
       .toMatchInlineSnapshot(`
         - entityKey: '"users||1'
@@ -1121,6 +1174,7 @@ describe('list-query overlays', () => {
     });
     await waitForStaleInvalidationToFinish();
 
+    // A stale query refetch must not bring the deleted row back into the list.
     expect(hook.result.current).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -1132,6 +1186,8 @@ describe('list-query overlays', () => {
       queryKey: '{tableId:"users"}'
       status: 'success'
     `);
+    // Reconnecting moves the delete from pending to syncing, but it is still
+    // not fully settled until replay finishes.
     expect(summarizeOfflineEntitySyncState(env.apiStore.getOfflineEntities()))
       .toMatchInlineSnapshot(`
         - entityKey: '"users||1'
