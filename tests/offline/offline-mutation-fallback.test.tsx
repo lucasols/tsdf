@@ -28,8 +28,8 @@ import {
   collectionSchema,
   docMutationInputSchema,
   docSchema,
-  quickRecoveryProbe,
   listQueryQueryPayloadSchema,
+  quickRecoveryProbe,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -1098,6 +1098,12 @@ describe('collection', () => {
     // A malformed temp-entity batch must not leave behind partial queue state
     // or partially-created temp rows.
     expect(result.ok).toBe(false);
+    assert(result.ok === false);
+    expect(result.error).toMatchInlineSnapshot(`
+      code: 500
+      id: 'fetch-error'
+      message: 'Temp entities for "createItems" must match the resolved temp ids'
+    `);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );
