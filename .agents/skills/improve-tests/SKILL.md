@@ -28,7 +28,7 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 3. Implement the test changes.
 4. Validate realism, abstraction level, and test value.
 5. Validate readability, assertion quality, and determinism.
-6. Validate comments and annotations.
+6. Validate comments, annotations, and comment placement.
 7. Run relevant tests and lint/type-check when appropriate.
 8. Summarize what changed, what improved, and any remaining gaps.
 
@@ -67,6 +67,7 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Strengthen assertions so failures explain the regression clearly.
 - Prefer readable snapshots, timelines, and helpers over dense low-level expectations.
 - Improve naming, comments, and structure so the scenario is obvious at a glance.
+- Prefer the most local explanatory comment possible. When confusion comes from a specific callback body, invalid fixture entry, timer advance, mock branch, or config line, put the explanation there instead of only at the test level.
 - Delete or consolidate tests that are redundant, low-signal, or only test speculative low-risk edges through synthetic setup.
 
 ## 4) Validate Realism, Abstraction Level, And Test Value
@@ -140,11 +141,25 @@ Comments are not optional polish — they are a core readability requirement. A 
 ### Code comments
 
 - **Every non-trivial test must include comments.** The default expectation is that each important setup step, action, and assertion has a short comment explaining its purpose — especially in time-based, persistence, hydration, retry, sync, cross-tab, or otherwise stateful scenarios.
+- **Comment setup, not just behavior.** If the setup itself carries meaning — for example why the env starts in `loaded`, why a mock is configured a certain way, why offline mode is enabled, or why a fixture shape is chosen — add a short comment before that setup so the reader understands how the scenario is being constructed.
 - **Comments must explain _why_, not just label _what_.** A comment like `// refetch` adds nothing — the code already says that. A comment like `// refetch while previous request is still in-flight — should deduplicate` explains the scenario and the expected behavior in one line.
 - **Use comments to separate phases.** Label the setup, action, and assertion phases so a reader can scan the test structure without parsing every line. This is especially important in longer tests with multiple sequential steps.
+- **Place comments where the confusion is.** If the hard part is a specific line inside setup — for example an intentionally invalid `buildPendingEntities`, a suspicious `classifyFailure`, a weird timer duration, or a one-off mock branch — put the explanation directly on that line or callback, not only above the test action.
+- **Comment intentionally invalid or surprising fixture code locally.** Any setup that is deliberately malformed, incomplete, asymmetric, or otherwise “wrong on purpose” must be annotated at the exact line that makes it wrong. Do not make the reader infer the bad setup from later assertions.
+- **Do a local-comment pass before finishing.** After adding scenario-level comments, scan again for any callback, object entry, or helper call that would still be confusing if read in isolation. Add a short why-comment there.
 - **Flag tests where the reader must cross-reference production code to understand what is being tested.** If the test comment says `// trigger the edge case` without explaining which edge case or why it matters, the comment is not doing its job.
 - **Every user interaction point must have a comment.** Any line that simulates a user or system action — fetches, mutations, navigation, reconnection, tab switches, timer advances, invalidations — must be preceded by a comment explaining what is happening and why. These are the critical moments that drive the test scenario; without comments, the reader must decode function calls to reconstruct the story.
 - **Don't add noise comments.** Comments that restate the code (`// create the store` above `createStore()`) or that describe obvious operations add clutter. Every comment should earn its place by explaining something the code alone does not make clear.
+
+### Comment placement checklist
+
+Before considering a test readable, verify all four layers:
+
+1. **Scenario comment**: does the test explain the overall behavior being protected?
+2. **Setup comments**: does the setup explain how the scenario is constructed and why those fixtures/config values were chosen?
+3. **Action comments**: does every meaningful user/system action explain why it happens?
+4. **Assertion comments**: do the main assertions explain what regression they catch?
+5. **Local weirdness comments**: does every intentionally confusing or invalid setup line explain itself exactly where it appears?
 
 ### Timeline and snapshot annotations
 
