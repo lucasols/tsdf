@@ -150,7 +150,7 @@ function summarizeResolutionForUI(resolution: ConflictResolutionSummaryInput) {
           : null,
     nextStep:
       blockedResolutionCount > 0
-        ? 'Resolve the parent resolution first'
+        ? 'Resolve the blocking resolution first'
         : resolution.kind === 'conflict'
           ? 'Commit accepted result or requeue with adjusted input'
           : resolution.kind === 'retry-exhausted'
@@ -1233,9 +1233,9 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
       - blockedBy: '1 resolution'
         blocks: 'none'
         entities: ['item:temp:Linus offline']
-        nextStep: 'Resolve the parent resolution first'
+        nextStep: 'Resolve the blocking resolution first'
         operation: 'patchUserName'
-        reason: 'Blocked by unresolved temp create dependency'
+        reason: 'Blocked by unresolved dependency'
         status: 'blocked'
         summary: 'itemId="temp:Linus offline", name="Linus blocked edit"'
     `);
@@ -1314,7 +1314,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
         entityKind: 'item'
     input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' }
     kind: 'retry-exhausted'
-    lastReplayError: { message: 'Blocked by unresolved temp create dependency' }
+    lastReplayError: { message: 'Blocked by unresolved dependency' }
     operation: 'patchUserName'
     sessionKey: 'offline-replay-temp-create-conflict-chain-session'
     storeName: 'offline-replay-temp-create-conflict-chain-store'
@@ -1366,7 +1366,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
       action: 'retry',
     }),
   ).rejects.toThrow(
-    'Cannot resolve a blocked offline resolution before its parent temp create is cleared',
+    'Cannot resolve a blocked offline resolution before its blocking dependencies are cleared',
   );
 
   expect(env.timelineString).toMatchInlineSnapshot(`

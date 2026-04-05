@@ -38,8 +38,8 @@ import {
 
 const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 5;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
-const BLOCKED_TEMP_CREATE_RESOLUTION_MESSAGE =
-  'Blocked by unresolved temp create dependency';
+const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
+  'Blocked by unresolved dependency';
 
 type OfflineEntityRef = {
   entityKey: string;
@@ -151,6 +151,10 @@ function normalizeEntityRefs(entityRefs: OfflineEntityRef[]): string {
   );
 }
 
+function serializePayload(value: ValidPayload): string {
+  return JSON.stringify(value);
+}
+
 function compareQueueEntries(
   left: OfflineQueueEntry,
   right: OfflineQueueEntry,
@@ -167,9 +171,8 @@ function compareQueueEntries(
   return left.id.localeCompare(right.id);
 }
 
-type TempCreateDependencySource = {
+type TempLifecycleDependencySource = {
   entityKey: string;
-  tempId?: ValidPayload;
   resolutionId?: string;
   sourceType: 'queue' | 'resolution';
 };
@@ -259,6 +262,7 @@ export function createOfflineStoreController<
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
+  const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
@@ -401,6 +405,41 @@ export function createOfflineStoreController<
     countedReplayFailures.clear();
   }
 
+  const resolveEntityRef = <TRef extends ValidPayload>(
+    entityRef: TRef,
+  ): TRef => {
+    let currentRef: ValidPayload = entityRef;
+    const seen = new Set<string>();
+
+    while (true) {
+      const serializedRef = serializePayload(currentRef);
+      if (seen.has(serializedRef)) {
+        // WORKAROUND: The resolver preserves the caller's entity-ref payload shape,
+        // but the remap table stores refs behind the shared ValidPayload boundary.
+        return __LEGIT_CAST__<TRef, ValidPayload>(currentRef);
+      }
+
+      seen.add(serializedRef);
+      const nextRef = resolvedEntityRefBySerializedRef.get(serializedRef);
+      if (nextRef === undefined || deepEqual(nextRef, currentRef)) {
+        // WORKAROUND: Same ValidPayload-to-TRef boundary as above.
+        return __LEGIT_CAST__<TRef, ValidPayload>(currentRef);
+      }
+
+      currentRef = nextRef;
+    }
+  };
+
+  function rememberResolvedEntityRef(
+    previousRef: ValidPayload,
+    nextRef: ValidPayload,
+  ): void {
+    resolvedEntityRefBySerializedRef.set(
+      serializePayload(previousRef),
+      resolveEntityRef(nextRef),
+    );
+  }
+
   function scheduleReplayRetry(): void {
     if (replayRetryTimer !== null) return;
 
@@ -418,6 +457,7 @@ export function createOfflineStoreController<
     activeSession?.unregister?.();
     activeSession = null;
     resetReplayRetryState();
+    resolvedEntityRefBySerializedRef.clear();
     queueEntries.clear();
     resolutions.clear();
     nextQueueOrder = 0;
@@ -640,25 +680,46 @@ export function createOfflineStoreController<
     );
   }
 
-  function getTempCreateDependencySources(
+  function resolveNormalizedRefs(rawRefs: unknown[]): OfflineEntityRef[] {
+    if (rawRefs.length === 0) return [];
+
+    if (storeAdapter.normalizeEntityRefs) {
+      return storeAdapter.normalizeEntityRefs(rawRefs);
+    }
+
+    // WORKAROUND: When no normalizer is provided, the operation already
+    // returned normalized refs and the controller preserves that runtime shape.
+    return __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawRefs);
+  }
+
+  function getTempLifecycleEntityKeys(
     workItem: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
       'operation' | 'tempIds' | 'entityRefs'
     >,
-  ): TempCreateDependencySource[] {
+  ): string[] {
     if (!workItem.tempIds || workItem.tempIds.length === 0) return [];
     if (!isTempCreateOperation(workItem.operation)) return [];
 
-    const itemEntityRefs = workItem.entityRefs.filter(
-      (entityRef) => entityRef.entityKind === 'item',
-    );
+    return workItem.entityRefs
+      .filter((entityRef) => entityRef.entityKind === 'item')
+      .map((entityRef) => entityRef.entityKey);
+  }
 
-    return itemEntityRefs.flatMap((entityRef, index) => {
-      const tempId = workItem.tempIds?.[index];
-      return tempId === undefined
-        ? []
-        : [{ entityKey: entityRef.entityKey, tempId, sourceType: 'queue' }];
-    });
+  function getDependencyBlockerEntityKeys(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'input' | 'operation'
+    >,
+  ): Set<string> {
+    const operation = operations[workItem.operation];
+    if (!operation?.dependsOn) return new Set();
+
+    return new Set(
+      resolveNormalizedRefs(operation.dependsOn({ input: workItem.input })).map(
+        (entityRef) => entityRef.entityKey,
+      ),
+    );
   }
 
   function getTempIdForEntityRef(args: {
@@ -687,9 +748,9 @@ export function createOfflineStoreController<
   }
 
   function createResolutionDependencySnapshot(): ResolutionDependencySnapshot {
-    const tempDependencySourcesByEntityKey = new Map<
+    const dependencySourcesByEntityKey = new Map<
       string,
-      TempCreateDependencySource
+      TempLifecycleDependencySource
     >();
     const blockedByResolutionIdsByResolutionId = new Map<string, Set<string>>();
     const childResolutionIdsByResolutionId = new Map<string, Set<string>>();
@@ -698,18 +759,18 @@ export function createOfflineStoreController<
     const blockedResolutionIdsByResolutionId = new Map<string, Set<string>>();
 
     for (const entry of queueEntries.values()) {
-      for (const source of getTempCreateDependencySources(entry)) {
-        tempDependencySourcesByEntityKey.set(source.entityKey, {
-          ...source,
+      for (const entityKey of getTempLifecycleEntityKeys(entry)) {
+        dependencySourcesByEntityKey.set(entityKey, {
+          entityKey,
           sourceType: 'queue',
         });
       }
     }
 
     for (const resolution of resolutions.values()) {
-      for (const source of getTempCreateDependencySources(resolution)) {
-        tempDependencySourcesByEntityKey.set(source.entityKey, {
-          ...source,
+      for (const entityKey of getTempLifecycleEntityKeys(resolution)) {
+        dependencySourcesByEntityKey.set(entityKey, {
+          entityKey,
           resolutionId: resolution.id,
           sourceType: 'resolution',
         });
@@ -717,9 +778,9 @@ export function createOfflineStoreController<
     }
 
     for (const resolution of resolutions.values()) {
-      for (const dependencySource of tempDependencySourcesByEntityKey.values()) {
+      for (const dependencySource of dependencySourcesByEntityKey.values()) {
         if (
-          !workItemDependsOnTempCreateSource({
+          !workItemDependsOnDependencySource({
             workItem: resolution,
             dependencySource,
           })
@@ -1149,31 +1210,16 @@ export function createOfflineStoreController<
     };
   }
 
-  function hasPayloadReference(value: unknown, target: ValidPayload): boolean {
-    if (deepEqual(value, target)) return true;
-    if (!Array.isArray(value) && !isObject(value)) return false;
-
-    if (Array.isArray(value)) {
-      return value.some((entryValue) =>
-        hasPayloadReference(entryValue, target),
-      );
-    }
-
-    return Object.values(value).some((entryValue) =>
-      hasPayloadReference(entryValue, target),
-    );
-  }
-
-  function workItemDependsOnTempCreateSource(args: {
+  function workItemDependsOnDependencySource(args: {
     workItem: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
       'entityRefs' | 'input' | 'operation' | 'tempIds'
     >;
-    dependencySource: TempCreateDependencySource;
+    dependencySource: TempLifecycleDependencySource;
   }): boolean {
     if (
-      getTempCreateDependencySources(args.workItem).some(
-        (source) => source.entityKey === args.dependencySource.entityKey,
+      getTempLifecycleEntityKeys(args.workItem).includes(
+        args.dependencySource.entityKey,
       )
     ) {
       return false;
@@ -1187,9 +1233,8 @@ export function createOfflineStoreController<
       return true;
     }
 
-    return (
-      args.dependencySource.tempId !== undefined &&
-      hasPayloadReference(args.workItem.input, args.dependencySource.tempId)
+    return getDependencyBlockerEntityKeys(args.workItem).has(
+      args.dependencySource.entityKey,
     );
   }
 
@@ -1251,15 +1296,20 @@ export function createOfflineStoreController<
         : (storeAdapter.getEntityRefs?.({ operationName, input }) ?? []);
 
     if (rawEntityRefs.length === 0) return fallbackEntityRefs;
+    return resolveNormalizedRefs(rawEntityRefs);
+  }
 
-    if (storeAdapter.normalizeEntityRefs) {
-      return storeAdapter.normalizeEntityRefs(rawEntityRefs);
-    }
-
-    // WORKAROUND: Custom store adapters can return a concrete payload-key array
-    // shape that is structurally compatible with OfflineEntityRef[], but TypeScript
-    // cannot connect that erased generic to this controller-level union.
-    return __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
+  function buildOperationBaseContext(args: {
+    input: unknown;
+    enqueuedAt: number;
+    updatedAt: number;
+  }) {
+    return {
+      input: args.input,
+      enqueuedAt: args.enqueuedAt,
+      updatedAt: args.updatedAt,
+      resolveEntityRef,
+    };
   }
 
   function rewriteEntryInput(
@@ -1303,6 +1353,7 @@ export function createOfflineStoreController<
     tempId: ValidPayload;
     finalPayload: ValidPayload;
   }): Promise<void> {
+    rememberResolvedEntityRef(args.tempId, args.finalPayload);
     const changedQueueEntries: OfflineQueueEntry[] = [];
 
     for (const entry of queueEntries.values()) {
@@ -1488,16 +1539,14 @@ export function createOfflineStoreController<
 
   function collectTempCreateDescendants(args: {
     parentEntityKey: string;
-    parentTempId?: ValidPayload;
     parentEntryId?: string;
     parentResolutionId?: string;
   }): TempCreateDescendantCollection {
-    const sourcesByEntityKey = new Map<string, TempCreateDependencySource>([
+    const sourcesByEntityKey = new Map<string, TempLifecycleDependencySource>([
       [
         args.parentEntityKey,
         {
           entityKey: args.parentEntityKey,
-          tempId: args.parentTempId,
           resolutionId: args.parentResolutionId,
           sourceType: args.parentResolutionId ? 'resolution' : 'queue',
         },
@@ -1525,7 +1574,7 @@ export function createOfflineStoreController<
           continue;
         }
         if (
-          !workItemDependsOnTempCreateSource({
+          !workItemDependsOnDependencySource({
             workItem: entry,
             dependencySource,
           })
@@ -1534,13 +1583,13 @@ export function createOfflineStoreController<
         }
 
         descendantQueueEntries.set(entry.id, entry);
-        for (const descendantSource of getTempCreateDependencySources(entry)) {
-          if (seenEntityKeys.has(descendantSource.entityKey)) continue;
+        for (const descendantEntityKey of getTempLifecycleEntityKeys(entry)) {
+          if (seenEntityKeys.has(descendantEntityKey)) continue;
 
-          seenEntityKeys.add(descendantSource.entityKey);
-          pendingEntityKeys.push(descendantSource.entityKey);
-          sourcesByEntityKey.set(descendantSource.entityKey, {
-            ...descendantSource,
+          seenEntityKeys.add(descendantEntityKey);
+          pendingEntityKeys.push(descendantEntityKey);
+          sourcesByEntityKey.set(descendantEntityKey, {
+            entityKey: descendantEntityKey,
             sourceType: 'queue',
           });
         }
@@ -1554,7 +1603,7 @@ export function createOfflineStoreController<
           continue;
         }
         if (
-          !workItemDependsOnTempCreateSource({
+          !workItemDependsOnDependencySource({
             workItem: resolution,
             dependencySource,
           })
@@ -1563,15 +1612,15 @@ export function createOfflineStoreController<
         }
 
         descendantResolutions.set(resolution.id, resolution);
-        for (const descendantSource of getTempCreateDependencySources(
+        for (const descendantEntityKey of getTempLifecycleEntityKeys(
           resolution,
         )) {
-          if (seenEntityKeys.has(descendantSource.entityKey)) continue;
+          if (seenEntityKeys.has(descendantEntityKey)) continue;
 
-          seenEntityKeys.add(descendantSource.entityKey);
-          pendingEntityKeys.push(descendantSource.entityKey);
-          sourcesByEntityKey.set(descendantSource.entityKey, {
-            ...descendantSource,
+          seenEntityKeys.add(descendantEntityKey);
+          pendingEntityKeys.push(descendantEntityKey);
+          sourcesByEntityKey.set(descendantEntityKey, {
+            entityKey: descendantEntityKey,
             resolutionId: resolution.id,
             sourceType: 'resolution',
           });
@@ -1622,10 +1671,9 @@ export function createOfflineStoreController<
   }): Promise<void> {
     const descendantQueueEntries = new Map<string, OfflineQueueEntry>();
 
-    for (const source of getTempCreateDependencySources(args.parentEntry)) {
+    for (const entityKey of getTempLifecycleEntityKeys(args.parentEntry)) {
       const descendants = collectTempCreateDescendants({
-        parentEntityKey: source.entityKey,
-        parentTempId: source.tempId,
+        parentEntityKey: entityKey,
         parentResolutionId: args.parentResolutionId,
       });
 
@@ -1638,7 +1686,7 @@ export function createOfflineStoreController<
       await removeEntry(dependentEntry.id, args.current, true);
       await persistResolution(
         buildRetryExhaustedResolutionRecord(args.current, dependentEntry, {
-          message: BLOCKED_TEMP_CREATE_RESOLUTION_MESSAGE,
+          message: BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE,
         }),
         args.current,
         true,
@@ -1677,8 +1725,8 @@ export function createOfflineStoreController<
   }): Promise<void> {
     await removeResolution(args.resolution.id, args.current, true);
 
-    const parentSources = getTempCreateDependencySources(args.resolution);
-    if (parentSources.length === 0) {
+    const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
+    if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
       return;
     }
@@ -1689,10 +1737,9 @@ export function createOfflineStoreController<
       PersistedOfflineResolutionRecord
     >();
 
-    for (const source of parentSources) {
+    for (const entityKey of parentEntityKeys) {
       const descendants = collectTempCreateDescendants({
-        parentEntityKey: source.entityKey,
-        parentTempId: source.tempId,
+        parentEntityKey: entityKey,
         parentResolutionId: args.resolution.id,
       });
 
@@ -1870,10 +1917,7 @@ export function createOfflineStoreController<
             operationName,
             input: validatedInput,
           }) ?? []);
-    const resolvedEntityRefs = storeAdapter.normalizeEntityRefs
-      ? storeAdapter.normalizeEntityRefs(rawEntityRefs)
-      : // WORKAROUND: When no normalizer is provided, entity refs already come from the operation definition, but the controller stores them as unknown[].
-        __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
+    const resolvedEntityRefs = resolveNormalizedRefs(rawEntityRefs);
     const hasTempLifecycle =
       tempEntity !== undefined || tempEntities !== undefined;
     const entityRefs =
@@ -2233,11 +2277,11 @@ export function createOfflineStoreController<
       const shouldCheckSkipBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
       const conflictHandling = operation.conflictHandling;
-      const replayCheckBaseCtx = {
+      const replayCheckBaseCtx = buildOperationBaseContext({
         input: nextEntry.input,
         enqueuedAt: nextEntry.createdAt,
         updatedAt: nextEntry.updatedAt,
-      };
+      });
       let entryToUse: OfflineQueueEntry = {
         ...nextEntry,
         syncState: 'syncing',
@@ -2295,11 +2339,13 @@ export function createOfflineStoreController<
           continue;
         }
 
-        const result = await operation.execute({
-          input: entryToUse.input,
-          enqueuedAt: entryToUse.createdAt,
-          updatedAt: entryToUse.updatedAt,
-        });
+        const result = await operation.execute(
+          buildOperationBaseContext({
+            input: entryToUse.input,
+            enqueuedAt: entryToUse.createdAt,
+            updatedAt: entryToUse.updatedAt,
+          }),
+        );
 
         if (entryToUse.tempIds) {
           await reconcileTempEntitiesFromResult({
@@ -2480,7 +2526,7 @@ export function createOfflineStoreController<
 
     if (isPersistedResolutionBlocked(resolutionRecord)) {
       throw new Error(
-        'Cannot resolve a blocked offline resolution before its parent temp create is cleared',
+        'Cannot resolve a blocked offline resolution before its blocking dependencies are cleared',
       );
     }
 

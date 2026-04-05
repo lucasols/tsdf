@@ -345,6 +345,9 @@ type InternalCollectionOfflineOperations<
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
     }) => CollectionOfflineEntityRef<ItemPayload>[];
+    dependsOn?: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => CollectionOfflineEntityRef<ItemPayload>[];
   }
 > &
   ([ItemState | ItemPayload] extends [never] ? never : unknown);
@@ -417,6 +420,9 @@ export type InternalListQueryOfflineOperations<
   string,
   AnyOfflineOperationDefinition & {
     getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => ListQueryOfflineEntityRef<ItemPayload>[];
+    dependsOn?: (ctx: {
       input: __LEGIT_ANY__;
     }) => ListQueryOfflineEntityRef<ItemPayload>[];
   }

@@ -301,11 +301,11 @@ export type GlobalOfflineEntity = {
   requiresResolution: boolean;
   /** Resolution ids currently blocking this entity from being resolved/applied. */
   blockedByResolutionIds: string[];
-  /** Child resolution ids currently derived from this entity's temp-create chain. */
+  /** Child resolution ids currently derived from this entity's dependency chain. */
   childResolutionIds: string[];
   /** Number of blocking parent resolutions currently affecting this entity. */
   blockedResolutionCount: number;
-  /** Number of child resolutions currently derived from this entity's temp-create chain. */
+  /** Number of child resolutions currently derived from this entity's dependency chain. */
   childResolutionCount: number;
   /** Creation timestamp for lifecycle bookkeeping. */
   createdAt: number;
@@ -362,7 +362,7 @@ type OfflineConflictResolutionRecordBase<
 export type OfflineResolutionDependencyMetadata = {
   /** Parent resolution ids that must be cleared before this resolution can be retried or discarded. */
   blockedByResolutionIds: string[];
-  /** Child manual resolutions currently derived from this resolution's temp-create dependency chain. */
+  /** Child manual resolutions currently derived from this resolution's dependency chain. */
   childResolutionIds: string[];
   /** Number of blocking parent resolutions affecting this resolution. */
   blockedResolutionCount: number;
@@ -734,6 +734,13 @@ type OperationBaseContext<TInput> = {
   enqueuedAt: number;
   /** Timestamp when the queued entry or conflict record was last updated. */
   updatedAt: number;
+  /**
+   * Resolves a previously temp-backed entity ref to its latest known final ref
+   * when one has been reconciled.
+   */
+  resolveEntityRef: <TEntityRef extends ValidPayload>(
+    entityRef: TEntityRef,
+  ) => TEntityRef;
 };
 
 type IsUnknown<T> = unknown extends T
@@ -1120,11 +1127,10 @@ type OperationEntityRefsContext<TInput> = {
 /** Non-store-specific offline operation definition alias. */
 export type AnyOfflineOperationDefinition = {
   inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
-  conflictHandling?: OfflineConflictHandlingConfig<
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >;
+  conflictHandling?: {
+    schema: PersistentStorageSchema<__LEGIT_ANY__>;
+    detectConflict: (ctx: __LEGIT_ANY__) => unknown;
+  };
   accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
   supersedes?: OfflineSupersedeConfig;
   tempEntity?: OfflineTempEntityConfig<
@@ -1137,13 +1143,14 @@ export type AnyOfflineOperationDefinition = {
     __LEGIT_ANY__,
     __LEGIT_ANY__
   >;
-  getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
-  execute: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
-  shouldSkipSync?: (
-    ctx: OperationReplayCheckContext<__LEGIT_ANY__, __LEGIT_ANY__>,
-  ) => Promise<boolean> | boolean;
+  getServerSnapshot?: (ctx: __LEGIT_ANY__) => unknown;
+  execute: (ctx: __LEGIT_ANY__) => unknown;
+  shouldSkipSync?: (ctx: __LEGIT_ANY__) => Promise<boolean> | boolean;
 } & {
   getEntityRefs?: (ctx: OperationEntityRefsContext<__LEGIT_ANY__>) => unknown[];
+  dependsOn?: (
+    ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
+  ) => __LEGIT_ANY__[];
 };
 
 /**
@@ -1344,6 +1351,13 @@ export type CollectionOfflineOperationDefinition<
   getEntityRefs: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
+  /**
+   * Declares which collection item refs must resolve before replaying this
+   * operation.
+   */
+  dependsOn?: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
 } & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
 
 /**
@@ -1443,6 +1457,13 @@ export type ListQueryOfflineOperationDefinition<
    * convert each payload with the configured item key logic.
    */
   getEntityRefs: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
+  /**
+   * Declares which list item refs must resolve before replaying this
+   * operation.
+   */
+  dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
