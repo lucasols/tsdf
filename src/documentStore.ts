@@ -936,9 +936,22 @@ export function createDocumentStore<
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
+  /**
+   * Runs a document mutation with optional optimistic updates and revalidation.
+   *
+   * Returns the direct server result when offline replay is not configured for
+   * this call.
+   */
   async function performMutation<T>(
     args: DocumentOnlineMutationArgs<T>,
   ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  /**
+   * Runs a document mutation that may fall back to durable offline queueing.
+   *
+   * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
+   * the server payload. Use this overload when you want the mutation to keep
+   * working while offline or during classified outages.
+   */
   async function performMutation<T>(
     args: DocumentOfflineMutationArgs<T>,
   ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;

@@ -730,10 +730,25 @@ export function createMutationApi<
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
+  /**
+   * Runs a list-query mutation for one or more existing item payloads, or for a
+   * mutation with no current item target.
+   *
+   * Pass `null` for create mutations that do not have a pre-generated item
+   * payload yet. Returns the direct server result when offline replay is not
+   * configured for this call.
+   */
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOnlineMutationArgs<T>,
   ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  /**
+   * Runs a list-query mutation that may fall back to durable offline queueing.
+   *
+   * Pass `null` for create mutations that do not have a pre-generated item
+   * payload yet. When the mutation is queued, the result is `{ kind: 'queued' }`
+   * instead of the server payload.
+   */
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOfflineMutationArgs<T>,

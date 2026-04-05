@@ -1662,10 +1662,25 @@ export function createCollectionStore<
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
+  /**
+   * Runs a collection mutation for one or more existing item payloads, or for a
+   * mutation with no current item target.
+   *
+   * Pass `null` for create mutations that do not have a pre-generated item id
+   * yet. Returns the direct server result when offline replay is not
+   * configured for this call.
+   */
   async function performMutation<T>(
     payload: CollectionMutationPayload,
     args: CollectionOnlineMutationArgs<T>,
   ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  /**
+   * Runs a collection mutation that may fall back to durable offline queueing.
+   *
+   * Pass `null` for create mutations that do not have a pre-generated item id
+   * yet. When the mutation is queued, the result is `{ kind: 'queued' }`
+   * instead of the server payload.
+   */
   async function performMutation<T>(
     payload: CollectionMutationPayload,
     args: CollectionOfflineMutationArgs<T>,
