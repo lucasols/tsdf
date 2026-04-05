@@ -1758,7 +1758,7 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
 
   // Even though the request started online, the queued fallback still needs
   // to materialize the temp entity so replay can reconcile it later.
-  const result = await env.apiStore.performMutation('__create__', {
+  const result = await env.apiStore.performMutation(null, {
     mutation: directMutation,
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });

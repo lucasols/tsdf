@@ -668,7 +668,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
       },
     },
   );
-  await env.apiStore.performMutation('__create__', {
+  await env.apiStore.performMutation(null, {
     mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
@@ -841,7 +841,7 @@ test('committing a temp-entity conflict with an external result reconciles the o
     },
   );
 
-  await env.apiStore.performMutation('__create__', {
+  await env.apiStore.performMutation(null, {
     mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });

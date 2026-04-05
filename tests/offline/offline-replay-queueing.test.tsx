@@ -121,11 +121,11 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   });
   await Promise.resolve();
 
-  const queued = await env.apiStore.performMutation('__create__', {
+  const queued = await env.apiStore.performMutation(null, {
     mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
-  await env.apiStore.performMutation('__create__', {
+  await env.apiStore.performMutation(null, {
     mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });

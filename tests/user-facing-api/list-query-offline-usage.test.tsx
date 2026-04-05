@@ -409,7 +409,7 @@ test('direct list-query store offline public api', async () => {
   });
 
   await act(async () => {
-    await listQueryStore.performMutation('__create__', {
+    await listQueryStore.performMutation(null, {
       mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
       offline: { operation: 'createUser', input: { name: 'Linus offline' } },
     });
