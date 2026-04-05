@@ -30,6 +30,7 @@ import {
   docMutationInputSchema,
   docSchema,
   quickRecoveryProbe,
+  summarizeResolution,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -1017,48 +1018,13 @@ test('healthy replay failures are retried 5 times and then move into the resolut
       updatedAt: 1735689620000
   `);
 
-  expect(
-    env.apiStore
-      .getOfflineResolutions()
-      .map((resolution) => ({
-        ...pick(resolution, [
-          'blockedByResolutionIds',
-          'blockedResolutionCount',
-          'childResolutionCount',
-          'childResolutionIds',
-          'createdAt',
-          'enqueuedAt',
-          'entityRefs',
-          'input',
-          'kind',
-          'operation',
-          'sessionKey',
-          'storeName',
-          'storeType',
-          'updatedAt',
-        ]),
-        lastReplayError:
-          resolution.kind === 'retry-exhausted'
-            ? resolution.lastReplayError
-            : null,
-      })),
-  ).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689620000
-      enqueuedAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 2 }
+  expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+    .toMatchInlineSnapshot(`
+    - error: 'replay failed'
+      input: 'value: 2'
       kind: 'retry-exhausted'
-      lastReplayError: { message: 'replay failed' }
-      operation: 'updateValue'
-      sessionKey: 'retry-exhaustion-session'
-      storeName: 'document-4'
-      storeType: 'document'
-      updatedAt: 1735689620000
+      on: 'document:document'
+      op: 'updateValue'
   `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -1150,41 +1116,12 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     throw new Error('Expected a retry-exhausted resolution');
   }
 
-  expect({
-    ...pick(resolution, [
-      'blockedByResolutionIds',
-      'blockedResolutionCount',
-      'childResolutionCount',
-      'childResolutionIds',
-      'createdAt',
-      'enqueuedAt',
-      'entityRefs',
-      'input',
-      'kind',
-      'operation',
-      'sessionKey',
-      'storeName',
-      'storeType',
-      'updatedAt',
-    ]),
-    lastReplayError: resolution.lastReplayError,
-  }).toMatchInlineSnapshot(`
-    blockedByResolutionIds: []
-    blockedResolutionCount: 0
-    childResolutionCount: 0
-    childResolutionIds: []
-    createdAt: 1735689620000
-    enqueuedAt: 1735689600000
-    entityRefs:
-      - { entityKey: 'document', entityKind: 'document' }
-    input: { value: 2 }
+  expect(summarizeResolution(resolution)).toMatchInlineSnapshot(`
+    error: 'replay failed'
+    input: 'value: 2'
     kind: 'retry-exhausted'
-    lastReplayError: { message: 'replay failed' }
-    operation: 'updateValue'
-    sessionKey: 'retry-resolution-actions-session'
-    storeName: 'document-5'
-    storeType: 'document'
-    updatedAt: 1735689620000
+    on: 'document:document'
+    op: 'updateValue'
   `);
   // parseOfflineResolutionConflict should return a not-conflict error for
   // retry-exhausted entries (they don't have conflict data to parse).
@@ -1263,41 +1200,12 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     throw new Error('Expected a retry-exhausted discard resolution');
   }
 
-  expect({
-    ...pick(discardResolution, [
-      'blockedByResolutionIds',
-      'blockedResolutionCount',
-      'childResolutionCount',
-      'childResolutionIds',
-      'createdAt',
-      'enqueuedAt',
-      'entityRefs',
-      'input',
-      'kind',
-      'operation',
-      'sessionKey',
-      'storeName',
-      'storeType',
-      'updatedAt',
-    ]),
-    lastReplayError: discardResolution.lastReplayError,
-  }).toMatchInlineSnapshot(`
-    blockedByResolutionIds: []
-    blockedResolutionCount: 0
-    childResolutionCount: 0
-    childResolutionIds: []
-    createdAt: 1735689641000
-    enqueuedAt: 1735689621000
-    entityRefs:
-      - { entityKey: 'document', entityKind: 'document' }
-    input: { value: 2 }
+  expect(summarizeResolution(discardResolution)).toMatchInlineSnapshot(`
+    error: 'replay failed'
+    input: 'value: 2'
     kind: 'retry-exhausted'
-    lastReplayError: { message: 'replay failed' }
-    operation: 'updateValue'
-    sessionKey: 'retry-resolution-actions-session'
-    storeName: 'document-5'
-    storeType: 'document'
-    updatedAt: 1735689641000
+    on: 'document:document'
+    op: 'updateValue'
   `);
   const parseDiscardResult =
     env.apiStore.parseOfflineResolutionConflict(discardResolution);
@@ -1536,48 +1444,13 @@ test('going offline again resets the healthy replay failure budget', async () =>
   await flushAllTimers();
   trackDocumentReplayState(env);
 
-  expect(
-    env.apiStore
-      .getOfflineResolutions()
-      .map((resolution) => ({
-        ...pick(resolution, [
-          'blockedByResolutionIds',
-          'blockedResolutionCount',
-          'childResolutionCount',
-          'childResolutionIds',
-          'createdAt',
-          'enqueuedAt',
-          'entityRefs',
-          'input',
-          'kind',
-          'operation',
-          'sessionKey',
-          'storeName',
-          'storeType',
-          'updatedAt',
-        ]),
-        lastReplayError:
-          resolution.kind === 'retry-exhausted'
-            ? resolution.lastReplayError
-            : null,
-      })),
-  ).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689630000
-      enqueuedAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 2 }
+  expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+    .toMatchInlineSnapshot(`
+    - error: 'healthy failure 8'
+      input: 'value: 2'
       kind: 'retry-exhausted'
-      lastReplayError: { message: 'healthy failure 8' }
-      operation: 'updateValue'
-      sessionKey: 'retry-budget-reset-session'
-      storeName: 'document-7'
-      storeType: 'document'
-      updatedAt: 1735689630000
+      on: 'document:document'
+      op: 'updateValue'
   `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -2326,47 +2199,12 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
   // The fallback-queued mutation should end up as a retry-exhausted resolution,
   // proving that hybrid fallback entries follow the same retry exhaustion path
   // as preemptively queued entries.
-  expect(
-    env.apiStore
-      .getOfflineResolutions()
-      .map((resolution) => ({
-        ...pick(resolution, [
-          'blockedByResolutionIds',
-          'blockedResolutionCount',
-          'childResolutionCount',
-          'childResolutionIds',
-          'createdAt',
-          'enqueuedAt',
-          'entityRefs',
-          'input',
-          'kind',
-          'operation',
-          'sessionKey',
-          'storeName',
-          'storeType',
-          'updatedAt',
-        ]),
-        lastReplayError:
-          resolution.kind === 'retry-exhausted'
-            ? resolution.lastReplayError
-            : null,
-      })),
-  ).toMatchInlineSnapshot(`
-    - blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600002
-      enqueuedAt: 1735689600000
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      input: { value: 2 }
+  expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+    .toMatchInlineSnapshot(`
+    - error: 'replay failed'
+      input: 'value: 2'
       kind: 'retry-exhausted'
-      lastReplayError: { message: 'replay failed' }
-      operation: 'updateValue'
-      sessionKey: 'hybrid-retry-exhaustion-session'
-      storeName: 'document-10'
-      storeType: 'document'
-      updatedAt: 1735689600002
+      on: 'document:document'
+      op: 'updateValue'
   `);
 });

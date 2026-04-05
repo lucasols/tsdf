@@ -28,6 +28,7 @@ import {
 import {
   collectionCreateInputSchema,
   listQueryQueryPayloadSchema,
+  summarizeResolution,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -246,33 +247,16 @@ describe('list-query replay', () => {
         syncState: 'resolution-required'
     `);
     expect(
-      env.apiStore
-        .getOfflineResolutions()
-        .map((resolution) => ({
-          ...pick(resolution, [
-            'blockedResolutionCount',
-            'childResolutionCount',
-            'entityRefs',
-            'input',
-            'kind',
-            'operation',
-          ]),
-          lastReplayError:
-            resolution.kind === 'retry-exhausted'
-              ? resolution.lastReplayError
-              : null,
-        })),
-    ).toMatchInlineSnapshot(`
-      - blockedResolutionCount: 0
-        childResolutionCount: 0
-        entityRefs:
-          - entityKey: '"users||1'
-            entityKind: 'item'
-        input: { itemId: 'users||1', name: 'Ada replayed' }
-        kind: 'retry-exhausted'
-        lastReplayError: { message: 'replay execute failed' }
-        operation: 'patchUserName'
-    `);
+      env.apiStore.getOfflineResolutions().map(summarizeResolution),
+    ).toMatchInlineSnapshot(
+      `
+        - error: 'replay execute failed'
+          input: 'itemId: "users||1", name: "Ada replayed"'
+          kind: 'retry-exhausted'
+          on: 'item:users||1'
+          op: 'patchUserName'
+      `,
+    );
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time   | query-items | query-status |
@@ -1262,127 +1246,48 @@ describe('list-query replay', () => {
     expect(parentResolution.childResolutionIds[0]).toBe(
       childCreateResolution.id,
     );
-    expect({
-      ...pick(parentResolution, [
-        'blockedResolutionCount',
-        'childResolutionCount',
-        'createdAt',
-        'enqueuedAt',
-        'entityRefs',
-        'input',
-        'kind',
-        'operation',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'tempIds',
-        'updatedAt',
-      ]),
-      lastReplayError:
-        parentResolution.kind === 'retry-exhausted'
-          ? parentResolution.lastReplayError
-          : null,
-    }).toMatchInlineSnapshot(`
-      blockedResolutionCount: 0
-      childResolutionCount: 1
-      createdAt: 1735689623010
-      enqueuedAt: 1735689603010
-      entityRefs:
-        - entityKey: '"temp:Parent offline'
-          entityKind: 'item'
-      input: { name: 'Parent offline' }
-      kind: 'retry-exhausted'
-      lastReplayError: { message: 'create replay failed' }
-      operation: 'createUser'
-      sessionKey: 'offline-replay-nested-temp-create-chain-session'
-      storeName: 'offline-replay-nested-temp-create-chain-store'
-      storeType: 'listQuery'
-      tempIds: ['temp:Parent offline']
-      updatedAt: 1735689623010
-    `);
+    expect(summarizeResolution(parentResolution)).toMatchInlineSnapshot(
+      `
+        blocks: 1
+        error: 'create replay failed'
+        input: 'name: "Parent offline"'
+        kind: 'retry-exhausted'
+        on: 'item:temp:Parent offline'
+        op: 'createUser'
+        tempIds: ['temp:Parent offline']
+      `,
+    );
     expect(childCreateResolution.blockedByResolutionIds[0]).toBe(
       parentResolution.id,
     );
     expect(childCreateResolution.childResolutionIds[0]).toBe(
       grandchildResolution.id,
     );
-    expect({
-      ...pick(childCreateResolution, [
-        'blockedResolutionCount',
-        'childResolutionCount',
-        'createdAt',
-        'enqueuedAt',
-        'entityRefs',
-        'input',
-        'kind',
-        'operation',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'tempIds',
-        'updatedAt',
-      ]),
-      lastReplayError:
-        childCreateResolution.kind === 'retry-exhausted'
-          ? childCreateResolution.lastReplayError
-          : null,
-    }).toMatchInlineSnapshot(`
-      blockedResolutionCount: 1
-      childResolutionCount: 1
-      createdAt: 1735689623010
-      enqueuedAt: 1735689603010
-      entityRefs:
-        - entityKey: '"temp:Child offline'
-          entityKind: 'item'
-      input: { name: 'Child offline', parentId: 'temp:Parent offline' }
-      kind: 'retry-exhausted'
-      lastReplayError: { message: 'Blocked by unresolved dependency' }
-      operation: 'createChildUser'
-      sessionKey: 'offline-replay-nested-temp-create-chain-session'
-      storeName: 'offline-replay-nested-temp-create-chain-store'
-      storeType: 'listQuery'
-      tempIds: ['temp:Child offline']
-      updatedAt: 1735689623010
-    `);
+    expect(summarizeResolution(childCreateResolution)).toMatchInlineSnapshot(
+      `
+        blockedBy: 1
+        blocks: 1
+        error: 'Blocked by unresolved dependency'
+        input: 'name: "Child offline", parentId: "temp:Parent offline"'
+        kind: 'retry-exhausted'
+        on: 'item:temp:Child offline'
+        op: 'createChildUser'
+        tempIds: ['temp:Child offline']
+      `,
+    );
     expect(grandchildResolution.blockedByResolutionIds[0]).toBe(
       childCreateResolution.id,
     );
-    expect({
-      ...pick(grandchildResolution, [
-        'blockedResolutionCount',
-        'childResolutionCount',
-        'createdAt',
-        'enqueuedAt',
-        'entityRefs',
-        'input',
-        'kind',
-        'operation',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'updatedAt',
-      ]),
-      lastReplayError:
-        grandchildResolution.kind === 'retry-exhausted'
-          ? grandchildResolution.lastReplayError
-          : null,
-    }).toMatchInlineSnapshot(`
-      blockedResolutionCount: 1
-      childResolutionCount: 0
-      createdAt: 1735689623010
-      enqueuedAt: 1735689603010
-      entityRefs:
-        - entityKey: '"temp:Child offline'
-          entityKind: 'item'
-      input: { itemId: 'temp:Child offline', name: 'Child blocked edit' }
-      kind: 'retry-exhausted'
-      lastReplayError: { message: 'Blocked by unresolved dependency' }
-      operation: 'patchUserName'
-      sessionKey: 'offline-replay-nested-temp-create-chain-session'
-      storeName: 'offline-replay-nested-temp-create-chain-store'
-      storeType: 'listQuery'
-      updatedAt: 1735689623010
-    `);
+    expect(summarizeResolution(grandchildResolution)).toMatchInlineSnapshot(
+      `
+        blockedBy: 1
+        error: 'Blocked by unresolved dependency'
+        input: 'itemId: "temp:Child offline", name: "Child blocked edit"'
+        kind: 'retry-exhausted'
+        on: 'item:temp:Child offline'
+        op: 'patchUserName'
+      `,
+    );
     const parentEntity = env.apiStore
       .getOfflineEntities()
       .find(
@@ -1661,81 +1566,28 @@ describe('list-query replay', () => {
 
     // Verify parent → child resolution cross-references
     expect(parentResolution.childResolutionIds[0]).toBe(childResolution.id);
-    expect({
-      ...pick(parentResolution, [
-        'blockedResolutionCount',
-        'childResolutionCount',
-        'createdAt',
-        'enqueuedAt',
-        'entityRefs',
-        'input',
-        'kind',
-        'operation',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'tempIds',
-        'updatedAt',
-      ]),
-      lastReplayError:
-        parentResolution.kind === 'retry-exhausted'
-          ? parentResolution.lastReplayError
-          : null,
-    }).toMatchInlineSnapshot(`
-      blockedResolutionCount: 0
-      childResolutionCount: 1
-      createdAt: 1735689623010
-      enqueuedAt: 1735689603010
-      entityRefs:
-        - entityKey: '"temp:Linus offline'
-          entityKind: 'item'
-      input: { name: 'Linus offline' }
-      kind: 'retry-exhausted'
-      lastReplayError: { message: 'create replay failed' }
-      operation: 'createUser'
-      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
-      storeName: 'offline-replay-temp-create-resolution-chain-store'
-      storeType: 'listQuery'
-      tempIds: ['temp:Linus offline']
-      updatedAt: 1735689623010
-    `);
+    expect(summarizeResolution(parentResolution)).toMatchInlineSnapshot(
+      `
+        blocks: 1
+        error: 'create replay failed'
+        input: 'name: "Linus offline"'
+        kind: 'retry-exhausted'
+        on: 'item:temp:Linus offline'
+        op: 'createUser'
+        tempIds: ['temp:Linus offline']
+      `,
+    );
     expect(childResolution.blockedByResolutionIds[0]).toBe(parentResolution.id);
-    expect({
-      ...pick(childResolution, [
-        'blockedResolutionCount',
-        'childResolutionCount',
-        'createdAt',
-        'enqueuedAt',
-        'entityRefs',
-        'input',
-        'kind',
-        'operation',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'updatedAt',
-      ]),
-      lastReplayError:
-        childResolution.kind === 'retry-exhausted'
-          ? childResolution.lastReplayError
-          : null,
-    }).toMatchInlineSnapshot(`
-      blockedResolutionCount: 1
-      childResolutionCount: 0
-      createdAt: 1735689623010
-      enqueuedAt: 1735689603010
-      entityRefs:
-        - entityKey: '"temp:Linus offline'
-          entityKind: 'item'
-      input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' }
-      kind: 'retry-exhausted'
-      lastReplayError: { message: 'Blocked by unresolved dependency' }
-      operation: 'patchUserName'
-      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
-      storeName: 'offline-replay-temp-create-resolution-chain-store'
-      storeType: 'listQuery'
-      updatedAt: 1735689623010
-    `);
+    expect(summarizeResolution(childResolution)).toMatchInlineSnapshot(
+      `
+        blockedBy: 1
+        error: 'Blocked by unresolved dependency'
+        input: 'itemId: "temp:Linus offline", name: "Linus blocked edit"'
+        kind: 'retry-exhausted'
+        on: 'item:temp:Linus offline'
+        op: 'patchUserName'
+      `,
+    );
     // Verify the temp entity's resolution cross-references
     const [tempEntity] = env.apiStore.getOfflineEntities();
     expect(tempEntity?.blockedByResolutionIds[0]).toBe(parentResolution.id);
@@ -1810,46 +1662,15 @@ describe('list-query replay', () => {
       .find((resolution) => resolution.operation === 'patchUserName');
     expect(env.apiStore.getOfflineResolutions()).toHaveLength(1);
 
-    expect({
-      ...pick(remappedChildResolution, [
-        'blockedByResolutionIds',
-        'blockedResolutionCount',
-        'childResolutionCount',
-        'childResolutionIds',
-        'createdAt',
-        'enqueuedAt',
-        'entityRefs',
-        'input',
-        'kind',
-        'operation',
-        'sessionKey',
-        'storeName',
-        'storeType',
-        'updatedAt',
-      ]),
-      lastReplayError:
-        remappedChildResolution?.kind === 'retry-exhausted'
-          ? remappedChildResolution.lastReplayError
-          : null,
-    }).toMatchInlineSnapshot(`
-      blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689623010
-      enqueuedAt: 1735689603010
-      entityRefs:
-        - entityKey: '"users||3'
-          entityKind: 'item'
-      input: { itemId: 'users||3', name: 'Linus blocked edit' }
-      kind: 'retry-exhausted'
-      lastReplayError: { message: 'Blocked by unresolved dependency' }
-      operation: 'patchUserName'
-      sessionKey: 'offline-replay-temp-create-resolution-chain-session'
-      storeName: 'offline-replay-temp-create-resolution-chain-store'
-      storeType: 'listQuery'
-      updatedAt: 1735689623010
-    `);
+    expect(summarizeResolution(remappedChildResolution!)).toMatchInlineSnapshot(
+      `
+        error: 'Blocked by unresolved dependency'
+        input: 'itemId: "users||3", name: "Linus blocked edit"'
+        kind: 'retry-exhausted'
+        on: 'item:users||3'
+        op: 'patchUserName'
+      `,
+    );
 
     // Once the child is remapped onto the final payload, it becomes eligible for
     // retry and should apply cleanly against the server-backed item.

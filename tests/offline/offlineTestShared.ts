@@ -8,6 +8,7 @@ import {
   rc_unknown,
 } from 'runcheck';
 
+import type { OfflineResolutionRecord } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import type { FilterOperator } from '../mocks/serverTableMock';
@@ -103,4 +104,75 @@ export async function waitForMicrotaskCondition(
   for (let turn = 0; turn < maxTurns && !condition(); turn += 1) {
     await Promise.resolve();
   }
+}
+
+/**
+ * Compact summary of a resolution record for test snapshots.
+ *
+ * Only includes fields that carry signal — no `'none'` fillers, no derived
+ * UI labels. Dependency counts (`blockedBy`, `blocks`) and `tempIds` are
+ * omitted when zero/absent.
+ */
+export function summarizeResolution(resolution: OfflineResolutionRecord) {
+  return {
+    kind: resolution.kind,
+    op: resolution.operation,
+    on: resolution.entityRefs
+      .map((ref) => `${ref.entityKind}:${normalizeEntityKey(ref.entityKey)}`)
+      .join(', '),
+    ...(resolution.kind === 'conflict'
+      ? { reason: extractReason(resolution.conflict) }
+      : { error: resolution.lastReplayError.message }),
+    input: formatCompactValue(resolution.input),
+    ...(resolution.blockedResolutionCount > 0
+      ? { blockedBy: resolution.blockedResolutionCount }
+      : {}),
+    ...(resolution.childResolutionCount > 0
+      ? { blocks: resolution.childResolutionCount }
+      : {}),
+    ...(resolution.tempIds !== undefined
+      ? {
+          tempIds: resolution.tempIds.map((id) =>
+            typeof id === 'string'
+              ? normalizeEntityKey(id)
+              : formatCompactValue(id),
+          ),
+        }
+      : {}),
+  };
+}
+
+function formatCompactValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => formatCompactValue(item)).join(', ');
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, v]) => `${key}: ${formatCompactValue(v)}`)
+      .join(', ');
+  }
+
+  return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+function extractReason(value: unknown): string {
+  if (!value || typeof value !== 'object') {
+    return value == null ? 'none' : formatCompactValue(value);
+  }
+
+  if ('reason' in value && typeof value.reason === 'string') {
+    return value.reason;
+  }
+
+  if ('message' in value && typeof value.message === 'string') {
+    return value.message;
+  }
+
+  return formatCompactValue(value);
+}
+
+function normalizeEntityKey(value: string) {
+  return value.startsWith('"') ? value.slice(1) : value;
 }

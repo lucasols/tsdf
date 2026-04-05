@@ -9,6 +9,7 @@ import {
   createOfflineSession,
   getGlobalOfflineStatus,
   type ListQueryOfflineOperationDefinition,
+  type OfflineResolutionRecord,
   useGlobalOfflineEntities,
   useGlobalOfflineResolutions,
 } from '../../src/main';
@@ -42,6 +43,7 @@ import {
   listQueryQueryPayloadSchema,
   parsePersistedObject,
   quickRecoveryProbe,
+  summarizeResolution,
   toRecord,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
@@ -106,124 +108,7 @@ function summarizeOfflineEntities(
   }));
 }
 
-type ConflictResolutionSummaryInput = {
-  blockedByResolutionIds?: string[];
-  blockedResolutionCount?: number;
-  childResolutionCount?: number;
-  childResolutionIds?: string[];
-  conflict?: unknown;
-  createdAt: number;
-  enqueuedAt: number;
-  entityRefs: Array<{ entityKey: string; entityKind: string }>;
-  id: string;
-  input: unknown;
-  kind: string;
-  operation: string;
-  sessionKey: string;
-  storeName: string;
-  storeType: string;
-  updatedAt: number;
-  lastReplayError?: unknown;
-  tempIds?: readonly unknown[];
-};
-
-function summarizeResolutionForUI(resolution: ConflictResolutionSummaryInput) {
-  const blockedResolutionCount = resolution.blockedResolutionCount ?? 0;
-  const childResolutionCount = resolution.childResolutionCount ?? 0;
-
-  return {
-    operation: resolution.operation,
-    status:
-      blockedResolutionCount > 0
-        ? 'blocked'
-        : resolution.kind === 'conflict'
-          ? 'needs-decision'
-          : resolution.kind === 'retry-exhausted'
-            ? 'needs-action'
-            : resolution.kind,
-    summary: summarizeUiValue(resolution.input),
-    entities: resolution.entityRefs.map(
-      (entityRef) =>
-        `${entityRef.entityKind}:${normalizeUiEntityKey(entityRef.entityKey)}`,
-    ),
-    reason:
-      resolution.kind === 'conflict'
-        ? summarizeUiReason(resolution.conflict)
-        : resolution.kind === 'retry-exhausted'
-          ? summarizeUiReason(resolution.lastReplayError)
-          : null,
-    nextStep:
-      blockedResolutionCount > 0
-        ? 'Resolve the blocking resolution first'
-        : resolution.kind === 'conflict'
-          ? 'Commit accepted result or requeue with adjusted input'
-          : resolution.kind === 'retry-exhausted'
-            ? 'Retry or discard the queued mutation'
-            : 'Review resolution',
-    blockedBy: formatUiCount(blockedResolutionCount, 'resolution'),
-    blocks: formatUiCount(childResolutionCount, 'child resolution'),
-    ...(resolution.tempIds === undefined
-      ? {}
-      : {
-          tempIds: resolution.tempIds.map((tempId) =>
-            normalizeUiTempId(tempId),
-          ),
-        }),
-  };
-}
-
-function summarizeUiValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.map((item) => summarizeUiValue(item)).join(', ');
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.entries(value)
-      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-      .map(([key, entryValue]) => `${key}=${summarizeUiValue(entryValue)}`)
-      .join(', ');
-  }
-
-  return typeof value === 'string' ? JSON.stringify(value) : String(value);
-}
-
-function summarizeUiReason(value: unknown): string | null {
-  if (!value || typeof value !== 'object') {
-    return value == null ? null : summarizeUiValue(value);
-  }
-
-  if ('reason' in value && typeof value.reason === 'string') {
-    return value.reason;
-  }
-
-  if ('message' in value && typeof value.message === 'string') {
-    return value.message;
-  }
-
-  return summarizeUiValue(value);
-}
-
-function normalizeUiEntityKey(value: string) {
-  return value.startsWith('"') ? value.slice(1) : value;
-}
-
-function normalizeUiTempId(value: unknown) {
-  if (typeof value !== 'string') {
-    return summarizeUiValue(value);
-  }
-
-  return normalizeUiEntityKey(value);
-}
-
-function formatUiCount(count: number, noun: string) {
-  if (count === 0) return 'none';
-
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
-function summarizeConflictResolution(
-  resolution: ConflictResolutionSummaryInput,
-) {
+function summarizeConflictResolution(resolution: OfflineResolutionRecord) {
   if (resolution.kind !== 'conflict') {
     throw new Error('Expected a persisted offline conflict');
   }
@@ -244,7 +129,7 @@ function summarizeConflictResolution(
 }
 
 function summarizeDetailedConflictResolution(
-  resolution: ConflictResolutionSummaryInput,
+  resolution: OfflineResolutionRecord,
 ) {
   return {
     ...pick(resolution, [
@@ -403,16 +288,13 @@ test('offline conflicts are detected before execute, surface through selectors, 
         storeType: 'document'
         updatedAt: 1735689600000
     `);
-  expect(storeResolutionHook.result.current.map(summarizeResolutionForUI))
+  expect(storeResolutionHook.result.current.map(summarizeResolution))
     .toMatchInlineSnapshot(`
-      - blockedBy: 'none'
-        blocks: 'none'
-        entities: ['document:document']
-        nextStep: 'Commit accepted result or requeue with adjusted input'
-        operation: 'updateValue'
+      - input: 'value: 2'
+        kind: 'conflict'
+        on: 'document:document'
+        op: 'updateValue'
         reason: 'server-changed'
-        status: 'needs-decision'
-        summary: 'value=2'
     `);
   expect(globalResolutionHook.result.current).toEqual(
     storeResolutionHook.result.current,
@@ -525,15 +407,12 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   const conflict = getSingleConflictResolution(
     storeResolutionHook.result.current,
   );
-  expect(summarizeResolutionForUI(conflict)).toMatchInlineSnapshot(`
-    blockedBy: 'none'
-    blocks: 'none'
-    entities: ['document:document']
-    nextStep: 'Commit accepted result or requeue with adjusted input'
-    operation: 'updateValue'
+  expect(summarizeResolution(conflict)).toMatchInlineSnapshot(`
+    input: 'value: 2'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
     reason: 'server-changed'
-    status: 'needs-decision'
-    summary: 'value=2'
   `);
   expect(executedInputs).toMatchInlineSnapshot(`[]`);
   expect(summarizeOfflineEntities(storeOfflineHook.result.current))
@@ -724,15 +603,12 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
   }
 
   expect(rehydratedEnv.apiStore.getOfflineResolutions()).toHaveLength(1);
-  expect(summarizeResolutionForUI(rehydratedResolution)).toMatchInlineSnapshot(`
-    blockedBy: 'none'
-    blocks: 'none'
-    entities: ['document:document']
-    nextStep: 'Commit accepted result or requeue with adjusted input'
-    operation: 'updateValue'
-    reason: 'wrong="shape"'
-    status: 'needs-decision'
-    summary: 'value=2'
+  expect(summarizeResolution(rehydratedResolution)).toMatchInlineSnapshot(`
+    input: 'value: 2'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
+    reason: 'wrong: "shape"'
   `);
   const result =
     rehydratedEnv.apiStore.parseOfflineResolutionConflict(rehydratedResolution);
@@ -898,15 +774,12 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   const conflict = getSingleConflictResolution(
     offlineResolutionsHook.result.current,
   );
-  expect(summarizeResolutionForUI(conflict)).toMatchInlineSnapshot(`
-    blockedBy: 'none'
-    blocks: 'none'
-    entities: ['item:temp:Ada']
-    nextStep: 'Commit accepted result or requeue with adjusted input'
-    operation: 'createUser'
+  expect(summarizeResolution(conflict)).toMatchInlineSnapshot(`
+    input: 'name: "Ada"'
+    kind: 'conflict'
+    on: 'item:temp:Ada'
+    op: 'createUser'
     reason: 'server-changed'
-    status: 'needs-decision'
-    summary: 'name="Ada"'
     tempIds: ['temp:Ada']
   `);
 
@@ -1042,15 +915,12 @@ test('committing a temp-entity conflict with an external result reconciles the o
   const conflict = getSingleConflictResolution(
     env.apiStore.getOfflineResolutions(),
   );
-  expect(summarizeResolutionForUI(conflict)).toMatchInlineSnapshot(`
-    blockedBy: 'none'
-    blocks: 'none'
-    entities: ['item:temp:Ada']
-    nextStep: 'Commit accepted result or requeue with adjusted input'
-    operation: 'createUser'
+  expect(summarizeResolution(conflict)).toMatchInlineSnapshot(`
+    input: 'name: "Ada"'
+    kind: 'conflict'
+    on: 'item:temp:Ada'
+    op: 'createUser'
     reason: 'server-changed'
-    status: 'needs-decision'
-    summary: 'name="Ada"'
     tempIds: ['temp:Ada']
   `);
 
@@ -1267,25 +1137,21 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
   `);
   expect(parentResolution.childResolutionIds).toHaveLength(1);
   expect(parentResolution.childResolutionIds[0]).toBe(childResolution.id);
-  expect(offlineResolutionsHook.result.current.map(summarizeResolutionForUI))
+  expect(offlineResolutionsHook.result.current.map(summarizeResolution))
     .toMatchInlineSnapshot(`
-      - blockedBy: 'none'
-        blocks: '1 child resolution'
-        entities: ['item:temp:Linus offline']
-        nextStep: 'Commit accepted result or requeue with adjusted input'
-        operation: 'createUser'
+      - blocks: 1
+        input: 'name: "Linus offline"'
+        kind: 'conflict'
+        on: 'item:temp:Linus offline'
+        op: 'createUser'
         reason: 'server-changed'
-        status: 'needs-decision'
-        summary: 'name="Linus offline"'
         tempIds: ['temp:Linus offline']
-      - blockedBy: '1 resolution'
-        blocks: 'none'
-        entities: ['item:temp:Linus offline']
-        nextStep: 'Resolve the blocking resolution first'
-        operation: 'patchUserName'
-        reason: 'Blocked by unresolved dependency'
-        status: 'blocked'
-        summary: 'itemId="temp:Linus offline", name="Linus blocked edit"'
+      - blockedBy: 1
+        error: 'Blocked by unresolved dependency'
+        input: 'itemId: "temp:Linus offline", name: "Linus blocked edit"'
+        kind: 'retry-exhausted'
+        on: 'item:temp:Linus offline'
+        op: 'patchUserName'
     `);
 
   expect({
@@ -1330,44 +1196,13 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
   expect(childResolution.blockedByResolutionIds).toHaveLength(1);
   expect(childResolution.blockedByResolutionIds[0]).toBe(parentResolution.id);
   expect(childResolution.childResolutionIds).toMatchInlineSnapshot(`[]`);
-  expect({
-    ...pick(childResolution, [
-      'blockedResolutionCount',
-      'childResolutionCount',
-      'createdAt',
-      'enqueuedAt',
-      'entityRefs',
-      'input',
-      'kind',
-      'operation',
-      'sessionKey',
-      'storeName',
-      'storeType',
-      'updatedAt',
-    ]),
-    conflict:
-      childResolution.kind === 'conflict' ? childResolution.conflict : null,
-    lastReplayError:
-      childResolution.kind === 'retry-exhausted'
-        ? childResolution.lastReplayError
-        : null,
-  }).toMatchInlineSnapshot(`
-    blockedResolutionCount: 1
-    childResolutionCount: 0
-    conflict: null
-    createdAt: 1735689603010
-    enqueuedAt: 1735689603010
-    entityRefs:
-      - entityKey: '"temp:Linus offline'
-        entityKind: 'item'
-    input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' }
+  expect(summarizeResolution(childResolution)).toMatchInlineSnapshot(`
+    blockedBy: 1
+    error: 'Blocked by unresolved dependency'
+    input: 'itemId: "temp:Linus offline", name: "Linus blocked edit"'
     kind: 'retry-exhausted'
-    lastReplayError: { message: 'Blocked by unresolved dependency' }
-    operation: 'patchUserName'
-    sessionKey: 'offline-replay-temp-create-conflict-chain-session'
-    storeName: 'offline-replay-temp-create-conflict-chain-store'
-    storeType: 'listQuery'
-    updatedAt: 1735689603010
+    on: 'item:temp:Linus offline'
+    op: 'patchUserName'
   `);
 
   const [tempEntity] = offlineEntitiesHook.result.current;
@@ -1576,16 +1411,13 @@ test('mutations queued via hybrid fallback still enter the normal conflict resol
       storeType: 'document'
       updatedAt: 1735689600001
   `);
-  expect(storeResolutionHook.result.current.map(summarizeResolutionForUI))
+  expect(storeResolutionHook.result.current.map(summarizeResolution))
     .toMatchInlineSnapshot(`
-      - blockedBy: 'none'
-        blocks: 'none'
-        entities: ['document:document']
-        nextStep: 'Commit accepted result or requeue with adjusted input'
-        operation: 'updateValue'
+      - input: 'value: 2'
+        kind: 'conflict'
+        on: 'document:document'
+        op: 'updateValue'
         reason: 'server-changed'
-        status: 'needs-decision'
-        summary: 'value=2'
     `);
   storeOfflineHook.unmount();
   storeResolutionHook.unmount();
