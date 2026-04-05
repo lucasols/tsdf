@@ -409,10 +409,12 @@ test('disabling active network mode preserves offline state while future operati
 
   // Reads should also bypass offline short-circuiting while runtime network
   // handling is disabled, even if the browser still reports offline.
-  env.errorInNextFetch('disabled-network-fetch-error');
+  await flushAllTimers();
+
   const requestHistoryBeforeDisabledFetch = structuredClone(
     env.serverMock.fetchHistory,
   );
+  env.errorInNextFetch('disabled-network-fetch-error');
   env.scheduleFetch('highPriority');
   await flushAllTimers();
 
