@@ -1062,13 +1062,12 @@ export type OfflineOperationDefinition<
          * offline replay.
          *
          * Provide a callback when replay should update the live store after the
-         * server-side execute succeeds. Use `null` when replay should not trigger
-         * any extra live-store sync.
+         * server-side execute succeeds.
          */
         onSuccessExecute: OfflineOperationExecuteSuccessHandler<
           TInput,
           TTempResult
-        > | null;
+        >;
       } & NoTempEntityFields)
     | ({
         /**
@@ -1126,7 +1125,7 @@ export type AnyOfflineOperationDefinition = {
   onSuccessExecute?: OfflineOperationExecuteSuccessHandler<
     __LEGIT_ANY__,
     __LEGIT_ANY__
-  > | null;
+  >;
   shouldSkipSync?: (
     ctx: OperationReplayCheckContext<__LEGIT_ANY__, __LEGIT_ANY__>,
   ) => Promise<boolean> | boolean;
