@@ -410,7 +410,6 @@ test('disabling active network mode preserves offline state while future operati
   // Reads should also bypass offline short-circuiting while runtime network
   // handling is disabled, even if the browser still reports offline.
   await flushAllTimers();
-
   const requestHistoryBeforeDisabledFetch = structuredClone(
     env.serverMock.fetchHistory,
   );
@@ -418,16 +417,18 @@ test('disabling active network mode preserves offline state while future operati
   env.scheduleFetch('highPriority');
   await flushAllTimers();
 
-  const awaitedFetchResultPromise = env.apiStore.awaitFetch();
-  await flushAllTimers();
-  const awaitedFetchResult = await awaitedFetchResultPromise;
-
-  expect(awaitedFetchResult).toMatchInlineSnapshot(`
-    data: null
-    error:
-      code: 500
-      id: 'fetch-error'
-      message: 'disabled-network-fetch-error'
+  expect(pick(env.store.state, ['data', 'error', 'status']))
+    .toMatchInlineSnapshot(`
+      data: { value: 2 }
+      error: { code: 500, id: 'fetch-error', message: 'disabled-network-fetch-error' }
+      status: 'error'
+    `);
+  expect(
+    env.serverMock.fetchHistory
+      .slice(requestHistoryBeforeDisabledFetch.length)
+      .map(({ error, result }) => ({ error: error?.message ?? null, result })),
+  ).toMatchInlineSnapshot(`
+    - { error: 'disabled-network-fetch-error', result: 'error' }
   `);
 
   expect(env.serverMock.fetchHistory).toHaveLength(
@@ -709,6 +710,12 @@ test('browser reconnects replay queued mutations even while runtime network supp
   env.scheduleFetch('highPriority');
   await flushAllTimers();
 
+  expect(pick(env.store.state, ['data', 'error', 'status']))
+    .toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+      status: 'success'
+    `);
   expect(env.serverMock.fetchHistory).toHaveLength(
     requestHistoryBeforeDisabledFetch.length + 1,
   );
