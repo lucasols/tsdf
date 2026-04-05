@@ -1174,51 +1174,64 @@ test('runtime mutation queueing overrides are shared across stores in the same s
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-a'),
   ).toHaveLength(1);
 
-  // Tighten runtime queueing rules; only future mutations should be rejected.
+  // Tighten runtime queueing rules; future mutations should stop queueing but
+  // still follow the normal direct mutation path.
   offlineSession.setOfflineRuntimeConfig({
     mutationQueueing: { network: 'disallow' },
   });
 
+  const directMutationA = vi.fn(() =>
+    navigator.onLine
+      ? Promise.resolve(3)
+      : Promise.reject(new Error('runtime-network-disallowed-direct-error-a')),
+  );
   const disallowedResult = await envA.apiStore.performMutation({
     optimisticUpdate: () => {
       envA.apiStore.updateState((draft) => {
         draft.value = 3;
       });
     },
-    mutation: () => Promise.resolve(3),
+    mutation: directMutationA,
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
   expect(disallowedResult.ok).toBe(false);
   expect(disallowedResult.error).toMatchInlineSnapshot(
     `
-      code: 0
-      id: 'offline'
-      message: 'Offline'
+      code: 500
+      id: 'fetch-error'
+      message: 'runtime-network-disallowed-direct-error-a'
     `,
   );
+  expect(directMutationA).toHaveBeenCalledTimes(1);
   expect(
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-a'),
   ).toHaveLength(1);
 
+  const directMutationB = vi.fn(() =>
+    navigator.onLine
+      ? Promise.resolve(2)
+      : Promise.reject(new Error('runtime-network-disallowed-direct-error-b')),
+  );
   const otherStoreResult = await envB.apiStore.performMutation({
     optimisticUpdate: () => {
       envB.apiStore.updateState((draft) => {
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: directMutationB,
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
   expect(otherStoreResult.ok).toBe(false);
   expect(otherStoreResult.error).toMatchInlineSnapshot(
     `
-      code: 0
-      id: 'offline'
-      message: 'Offline'
+      code: 500
+      id: 'fetch-error'
+      message: 'runtime-network-disallowed-direct-error-b'
     `,
   );
+  expect(directMutationB).toHaveBeenCalledTimes(1);
   expect(
     getOfflineQueueEntries(sessionKey, 'runtime-mutation-queueing-b'),
   ).toHaveLength(0);

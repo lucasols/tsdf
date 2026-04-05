@@ -1,4 +1,3 @@
-import { offlineConnectivityError } from './fetchRuntime';
 import type {
   OfflineMutationInput,
   OfflineOperationSchemaShape,
@@ -15,7 +14,7 @@ export type OfflineMutationResult<T> =
   | { kind: 'queued' };
 
 export type PreparedOfflineMutation = {
-  initialAction: 'run' | 'queue' | 'reject-offline';
+  initialAction: 'run' | 'queue';
   queueMutation: () => Promise<void>;
   classifyError: (error: unknown) => Promise<boolean>;
   handleDirectSuccess: () => Promise<void>;
@@ -48,13 +47,6 @@ export async function runHybridOfflineMutation<
   }
 
   const prepared = await controller.prepareForMutation(offline);
-
-  if (prepared.initialAction === 'reject-offline') {
-    throw Object.assign(
-      new Error(offlineConnectivityError.message),
-      offlineConnectivityError,
-    );
-  }
 
   if (prepared.initialAction === 'queue') {
     await prepared.queueMutation();

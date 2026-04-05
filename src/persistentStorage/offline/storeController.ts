@@ -337,10 +337,6 @@ export function createOfflineStoreController<
 
     if (isMutationQueueingAllowed(cause)) return 'queue';
 
-    if (cause === 'network' && navigator.onLine === false) {
-      return 'reject-offline';
-    }
-
     return 'run';
   }
 

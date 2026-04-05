@@ -74,11 +74,15 @@ afterEach(() => {
 });
 
 describe('document', () => {
-  test('disallowed browser-offline network mode returns the normalized offline error without attempting the mutation', async () => {
+  test('disallowed browser-offline network mode still runs the direct mutation and preserves its error', async () => {
     network.setOffline();
     const sessionKey = 'hybrid-doc-network-disallowed-offline-session';
     const storeName = 'hybrid-doc-network-disallowed-offline-store';
-    const directMutation = vi.fn(() => Promise.resolve(2));
+    const directMutation = vi.fn(() =>
+      navigator.onLine
+        ? Promise.resolve(2)
+        : Promise.reject(new Error('browser-offline-direct-error')),
+    );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
@@ -111,10 +115,10 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-        error: { code: 0, id: 'offline', message: 'Offline' }
+        error: { code: 500, id: 'fetch-error', message: 'browser-offline-direct-error' }
         ok: '❌'
       `);
-    expect(directMutation).not.toHaveBeenCalled();
+    expect(directMutation).toHaveBeenCalledTimes(1);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );
