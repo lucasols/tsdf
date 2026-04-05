@@ -450,6 +450,11 @@ describe('list-query replay', () => {
       - input: { itemId: 'temp:Linus offline', name: 'Linus edited' }
         operation: 'patchUserName'
     `);
+    const storeEvents: unknown[] = [];
+
+    env.apiStore.storeEvents.on('*', (event) => {
+      storeEvents.push(event);
+    });
 
     // Reconnect and drain replay. The create must run first, and the edit must
     // target the final payload produced by that create instead of the temp one.
@@ -477,6 +482,10 @@ describe('list-query replay', () => {
       name: 'Linus edited'
     `);
     expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
+    expect(storeEvents).toMatchInlineSnapshot(`
+      - payload: { finalPayload: 'users||3', tempId: 'temp:Linus offline' }
+        type: 'tempEntityReconciled'
+    `);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,

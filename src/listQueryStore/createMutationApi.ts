@@ -44,6 +44,8 @@ export type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationStart: { mutationId: number; items: ItemPayload[] };
   /** Emitted when a mutation completes or fails */
   mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
+  /** Emitted when an offline temp item is reconciled to its final payload. */
+  tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
 type InvalidateQueryEvent = { priority: FetchType; queryKey: string };

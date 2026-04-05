@@ -1299,6 +1299,11 @@ export function createListQueryStore<
             deleteItemState(tempPayload);
             addItemToState(finalPayload, finalData);
 
+            storeEvents.emit('tempEntityReconciled', {
+              tempId: tempPayload,
+              finalPayload,
+            });
+
             if (queryMemberships.length === 0) return;
 
             store.produceState(

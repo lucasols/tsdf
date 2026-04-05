@@ -179,6 +179,8 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationStart: { mutationId: number; items: ItemPayload[] };
   /** Emitted when a mutation completes or fails */
   mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
+  /** Emitted when an offline temp item is reconciled to its final payload. */
+  tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
 export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
@@ -578,27 +580,27 @@ export function createCollectionStore<
               );
             },
             reconcileTempEntity: ({ tempId, reconciliation }) => {
-              const currentItem = getItemState(
+              const tempPayload =
                 // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
-                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-              );
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
+              const currentItem = getItemState(tempPayload);
               const finalData =
                 reconciliation.finalData !== undefined
                   ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
                     __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
                   : (currentItem?.data ?? undefined);
               if (finalData === undefined) return;
-              deleteItemState(
-                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload before deleting the temp entry.
-                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
-              );
-              addItemToState(
+              deleteItemState(tempPayload);
+              const finalPayload =
                 // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
                 __LEGIT_CAST__<ItemPayload, ValidPayload>(
                   reconciliation.finalPayload,
-                ),
-                finalData,
-              );
+                );
+              addItemToState(finalPayload, finalData);
+              storeEvents.emit('tempEntityReconciled', {
+                tempId: tempPayload,
+                finalPayload,
+              });
             },
             captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
               if (offlineOverlaySessionKey !== sessionKey)
