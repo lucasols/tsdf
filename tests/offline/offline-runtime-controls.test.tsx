@@ -535,9 +535,7 @@ test('disabled network support ignores classified network failures while startin
     },
   });
 
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
     testScenario: 'loaded',
@@ -549,8 +547,10 @@ test('disabled network support ignores classified network failures while startin
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) =>
-              replayDocumentValueWithDelay(env, input),
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              const result = replayDocumentValueWithDelay(env, input);
+              return result;
+            },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
@@ -604,9 +604,7 @@ test('disabled outage support ignores outage classifications while starting from
     },
   });
 
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
     testScenario: 'loaded',
@@ -618,8 +616,10 @@ test('disabled outage support ignores outage classifications while starting from
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) =>
-              replayDocumentValueWithDelay(env, input),
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              const result = replayDocumentValueWithDelay(env, input);
+              return result;
+            },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
@@ -1192,9 +1192,7 @@ test('runtime mutation queueing overrides are shared across stores in the same s
   });
 
   function createEnv(storeName: string) {
-    const env: ReturnType<
-      typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-    > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
@@ -1206,8 +1204,10 @@ test('runtime mutation queueing overrides are shared across stores in the same s
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) =>
-                replayDocumentValueWithDelay(env, input),
+              execute: ({ input }: UpdateValueExecuteContext) => {
+                const result = replayDocumentValueWithDelay(env, input);
+                return result;
+              },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
                   draft.value = input.value;
@@ -1505,9 +1505,7 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
     },
   });
 
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'runtime-disabled-by-default-doc',
     getSessionKey: () => sessionKey,
     testScenario: 'loaded',
@@ -1519,8 +1517,10 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) =>
-              replayDocumentValueWithDelay(env, input),
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              const result = replayDocumentValueWithDelay(env, input);
+              return result;
+            },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
@@ -1594,9 +1594,7 @@ test('disabling runtime network support preserves both bootstrap and raw persist
     config: { network: network.config },
   });
 
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'runtime-disable-persistence-doc',
     getSessionKey: () => sessionKey,
     persistentStorage: {
@@ -1607,8 +1605,10 @@ test('disabling runtime network support preserves both bootstrap and raw persist
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) =>
-              replayDocumentValueWithDelay(env, input),
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              const result = replayDocumentValueWithDelay(env, input);
+              return result;
+            },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;

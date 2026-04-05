@@ -693,9 +693,7 @@ describe('document', () => {
       )
       .mockResolvedValueOnce('ignore');
     const createEnv = (id: string) => {
-      const env: ReturnType<
-        typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-      > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
         id,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
@@ -718,8 +716,10 @@ describe('document', () => {
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
-                execute: ({ input }) =>
-                  replayDocumentValueWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayDocumentValueWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateState((draft) => {
                     draft.value = input.value;
@@ -951,8 +951,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) =>
-                  replayCollectionRenameWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayCollectionRenameWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1208,14 +1210,16 @@ describe('collection', () => {
                       finalData: { value: { name: item.name } },
                     })),
                 },
-                execute: ({ input }) =>
-                  replayBatchCollectionCreateWithDelay(
+                execute: ({ input }) => {
+                  const result = replayBatchCollectionCreateWithDelay(
                     env,
                     input.map((item) => ({
                       id: `users||${item.name.toLowerCase()}`,
                       name: item.name,
                     })),
-                  ),
+                  );
+                  return result;
+                },
               },
             },
           },
@@ -1283,8 +1287,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) =>
-                  replayCollectionRenameWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayCollectionRenameWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1367,8 +1373,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) =>
-                  replayCollectionRenameWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayCollectionRenameWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1461,8 +1469,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) =>
-                  replayCollectionRenameWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayCollectionRenameWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1533,8 +1543,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  replayListQueryPatchWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayListQueryPatchWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1609,8 +1621,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  replayListQueryPatchWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayListQueryPatchWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1682,8 +1696,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  replayListQueryPatchWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayListQueryPatchWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1768,8 +1784,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  replayListQueryPatchWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayListQueryPatchWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1868,8 +1886,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  replayListQueryPatchWithDelay(env, input),
+                execute: ({ input }) => {
+                  const result = replayListQueryPatchWithDelay(env, input);
+                  return result;
+                },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,

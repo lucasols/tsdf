@@ -115,9 +115,7 @@ test('stores unregister their previous offline session when the session key beco
   network.setOffline();
 
   let currentSessionKey: string | false = 'offline-session-cleanup';
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'offline-session-cleanup-doc',
     getSessionKey: () => currentSessionKey,
     testScenario: 'loaded',
@@ -132,8 +130,10 @@ test('stores unregister their previous offline session when the session key beco
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) =>
-              replayDocumentValueWithDelay(env, input),
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              const result = replayDocumentValueWithDelay(env, input);
+              return result;
+            },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
@@ -193,9 +193,7 @@ test('logging back into the same session replays durable offline mutations queue
   let currentSessionKey: string | false = sessionKey;
   const replayedInputs: { value: number }[] = [];
 
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => currentSessionKey,
     testScenario: 'loaded',
@@ -565,9 +563,7 @@ test('offline mutations fail fast when no session key is available', async () =>
   network.setOffline();
   const sessionKey: string | false = false;
 
-  const env: ReturnType<
-    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
-  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => sessionKey,
     testScenario: 'loaded',
     persistentStorage: {
@@ -581,8 +577,10 @@ test('offline mutations fail fast when no session key is available', async () =>
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) =>
-              replayDocumentValueWithDelay(env, input),
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              const result = replayDocumentValueWithDelay(env, input);
+              return result;
+            },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
@@ -661,8 +659,10 @@ test('global offline hooks can mount before a localStorage-backed store', async 
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) =>
-                replayDocumentValueWithDelay(env, input),
+              execute: ({ input }: UpdateValueExecuteContext) => {
+                const result = replayDocumentValueWithDelay(env, input);
+                return result;
+              },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
                   draft.value = input.value;
