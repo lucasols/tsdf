@@ -130,7 +130,7 @@ type ListQueryReplayEnv = {
   serverTable: {
     delayedSetItem: (
       itemId: string,
-      data: { id: number; name: string },
+      data: { id: number; name: string; parentId?: string },
       options?: { durationMs?: number },
     ) => Promise<void>;
     delayedUpdateItem: (
@@ -155,7 +155,7 @@ export async function replayListQueryPatchWithDelay(
 
 export async function replayListQueryCreateWithDelay(
   env: ListQueryReplayEnv,
-  result: { id: number; name: string },
+  result: { id: number; name: string; parentId?: string },
 ) {
   await env.serverTable.delayedSetItem(`users||${result.id}`, result);
   return result;

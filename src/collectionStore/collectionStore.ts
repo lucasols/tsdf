@@ -485,6 +485,34 @@ export function createCollectionStore<
     offlineOverlayStore.setState({});
   }
 
+  function rebindOfflineOverlays(
+    itemKeyRewrites: readonly {
+      previousItemKey: string;
+      nextItemKey: string;
+    }[],
+  ): void {
+    if (itemKeyRewrites.length === 0) return;
+
+    offlineOverlayStore.produceState((draft) => {
+      for (const { previousItemKey, nextItemKey } of itemKeyRewrites) {
+        if (previousItemKey === nextItemKey) continue;
+
+        const existingOverlay = draft[previousItemKey];
+        if (existingOverlay === undefined) continue;
+
+        if (draft[nextItemKey] === undefined) {
+          draft[nextItemKey] = {
+            data: existingOverlay.data ?? null,
+            payload:
+              store.state[nextItemKey]?.payload ?? existingOverlay.payload,
+          };
+        }
+
+        delete draft[previousItemKey];
+      }
+    });
+  }
+
   function captureOfflineOverlays(itemKeys: readonly string[]): void {
     const targetItemKeys = [...new Set(itemKeys)];
     if (targetItemKeys.length === 0) return;
@@ -610,6 +638,12 @@ export function createCollectionStore<
                   return ref.entityKind === 'item' ? [ref.entityKey] : [];
                 }),
               );
+            },
+            rebindQueuedMutationOverlays: ({ itemKeyRewrites, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey)
+                clearOfflineOverlays(sessionKey);
+
+              rebindOfflineOverlays(itemKeyRewrites);
             },
             syncEntityOverlays: ({ entities, sessionKey }) => {
               if (offlineOverlaySessionKey !== sessionKey)

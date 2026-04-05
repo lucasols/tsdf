@@ -566,7 +566,15 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
 
 /** Built-in resolution actions for retry exhaustion records. */
 export type OfflineRetryExhaustedResolutionAction =
-  | { action: 'retry' }
+  | {
+      action: 'retry';
+      /**
+       * Controls whether retrying a resolution should also requeue retryable
+       * descendants from the same temp-lifecycle dependency chain.
+       * @default 'self-and-descendants'
+       */
+      scope?: 'self' | 'self-and-descendants';
+    }
   | { action: 'discard' };
 
 /**

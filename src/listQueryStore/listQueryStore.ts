@@ -1339,6 +1339,12 @@ export function createListQueryStore<
               }),
             );
           },
+          rebindQueuedMutationOverlays: ({ itemKeyRewrites, sessionKey }) => {
+            if (offlineOverlaySessionKey !== sessionKey)
+              clearOfflineOverlays(sessionKey);
+
+            rebindOfflineOverlays(itemKeyRewrites);
+          },
           syncEntityOverlays: ({ entities, sessionKey }) => {
             if (offlineOverlaySessionKey !== sessionKey)
               clearOfflineOverlays(sessionKey);
@@ -1435,6 +1441,36 @@ export function createListQueryStore<
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
+  }
+
+  function rebindOfflineOverlays(
+    itemKeyRewrites: readonly {
+      previousItemKey: string;
+      nextItemKey: string;
+    }[],
+  ): void {
+    if (itemKeyRewrites.length === 0) return;
+
+    offlineOverlayStore.produceState((draft) => {
+      for (const { previousItemKey, nextItemKey } of itemKeyRewrites) {
+        if (previousItemKey === nextItemKey) continue;
+
+        const existingOverlay = draft[previousItemKey];
+        if (existingOverlay === undefined) continue;
+
+        if (draft[nextItemKey] === undefined) {
+          draft[nextItemKey] = {
+            item: existingOverlay.item ?? null,
+            itemPayload:
+              store.state.itemQueries[nextItemKey]?.payload ??
+              existingOverlay.itemPayload,
+            queryMemberships: existingOverlay.queryMemberships,
+          };
+        }
+
+        delete draft[previousItemKey];
+      }
+    });
   }
 
   function captureOfflineOverlays(itemKeys: readonly string[]): void {

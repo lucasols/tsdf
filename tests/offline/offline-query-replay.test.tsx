@@ -494,11 +494,10 @@ describe('list-query replay', () => {
       .     | Ada, Grace, Linus edited  | success      | offline:createUser replay-started
       4.21s | Ada, Grace, Linus edited  | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
       .     | Ada, Grace, Linus edited  | success      | offline:createUser replay-finished
-      .     | Ada, Grace, Linus offline | success      | [query-items, query-items] ui-changed
-      .     | Ada, Grace, Linus offline | success      | offline:patchUserName replay-started
-      5.41s | Ada, Grace, Linus offline | success      | [users||3] server-data-changed (value: {"name":"Linus edited"})
-      .     | Ada, Grace, Linus offline | success      | offline:patchUserName replay-finished
-      .     | Ada, Grace, Linus edited  | success      | [query-items] ui-changed
+      .     | Ada, Grace, Linus edited  | success      | [query-items, query-items] ui-changed
+      .     | Ada, Grace, Linus edited  | success      | offline:patchUserName replay-started
+      5.41s | Ada, Grace, Linus edited  | success      | [users||3] server-data-changed (value: {"name":"Linus edited"})
+      .     | Ada, Grace, Linus edited  | success      | offline:patchUserName replay-finished
       "
     `);
 
@@ -765,15 +764,13 @@ describe('list-query replay', () => {
       4.21s | Ada, Grace, Ada rebound, Linus rebound | [users||3] server-data-changed (value: {"id":3,"name":"Ada offline"})
       5.41s | Ada, Grace, Ada rebound, Linus rebound | [users||4] server-data-changed (value: {"id":4,"name":"Linus offline"})
       .     | Ada, Grace, Ada rebound, Linus rebound | offline:createUsers replay-finished
-      .     | Ada, Grace, Ada offline, Linus offline | [batch-query-items, batch-query-items, batch-query-items] ui-changed
-      .     | Ada, Grace, Ada offline, Linus offline | offline:patchUserName replay-started
-      6.61s | Ada, Grace, Ada offline, Linus offline | [users||3] server-data-changed (value: {"name":"Ada rebound"})
-      .     | Ada, Grace, Ada offline, Linus offline | offline:patchUserName replay-finished
-      .     | Ada, Grace, Ada rebound, Linus offline | [batch-query-items] ui-changed
-      .     | Ada, Grace, Ada rebound, Linus offline | offline:patchUserName replay-started
-      7.81s | Ada, Grace, Ada rebound, Linus offline | [users||4] server-data-changed (value: {"name":"Linus rebound"})
-      .     | Ada, Grace, Ada rebound, Linus offline | offline:patchUserName replay-finished
-      .     | Ada, Grace, Ada rebound, Linus rebound | [batch-query-items] ui-changed
+      .     | Ada, Grace, Ada rebound, Linus rebound | [batch-query-items, batch-query-items, batch-query-items, batch-query-items] ui-changed
+      .     | Ada, Grace, Ada rebound, Linus rebound | offline:patchUserName replay-started
+      6.61s | Ada, Grace, Ada rebound, Linus rebound | [users||3] server-data-changed (value: {"name":"Ada rebound"})
+      .     | Ada, Grace, Ada rebound, Linus rebound | offline:patchUserName replay-finished
+      .     | Ada, Grace, Ada rebound, Linus rebound | offline:patchUserName replay-started
+      7.81s | Ada, Grace, Ada rebound, Linus rebound | [users||4] server-data-changed (value: {"name":"Linus rebound"})
+      .     | Ada, Grace, Ada rebound, Linus rebound | offline:patchUserName replay-finished
       "
     `);
 
@@ -1640,9 +1637,9 @@ describe('list-query replay', () => {
     );
 
     // Retrying the parent should reconcile the temp payload to a real id and
-    // leave the child manual resolution unblocked and remapped.
+    // automatically replay the descendant against the remapped id.
     env.addTimelineComments('beforeNextAction', [
-      'retry the parent resolution so the temp payload can reconcile',
+      'retry the parent resolution so the remapped descendant replays too',
     ]);
     await act(async () => {
       await env.apiStore.resolveOfflineResolution(
@@ -1655,36 +1652,6 @@ describe('list-query replay', () => {
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === 6,
     );
-    await flushAllTimers();
-
-    const remappedChildResolution = env.apiStore
-      .getOfflineResolutions()
-      .find((resolution) => resolution.operation === 'patchUserName');
-    expect(env.apiStore.getOfflineResolutions()).toHaveLength(1);
-
-    expect(summarizeResolution(remappedChildResolution!)).toMatchInlineSnapshot(
-      `
-        error: 'Blocked by unresolved dependency'
-        input: 'itemId: "users||3", name: "Linus blocked edit"'
-        kind: 'retry-exhausted'
-        on: 'item:users||3'
-        op: 'patchUserName'
-      `,
-    );
-
-    // Once the child is remapped onto the final payload, it becomes eligible for
-    // retry and should apply cleanly against the server-backed item.
-    env.addTimelineComments('beforeNextAction', [
-      'retry the remapped child resolution',
-    ]);
-    await act(async () => {
-      await env.apiStore.resolveOfflineResolution(
-        remappedChildResolution!.id,
-        'patchUserName',
-        { action: 'retry' },
-      );
-      await Promise.resolve();
-    });
     await waitForMicrotaskCondition(
       () => patchUserExecute.mock.calls.length === 1,
     );
@@ -1704,6 +1671,9 @@ describe('list-query replay', () => {
     expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(env.timelineString).not.toContain(
+      'Linus offline      | success      | offline:patchUserName replay-started',
+    );
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time   | query-items                    | query-status |
@@ -1721,16 +1691,14 @@ describe('list-query replay', () => {
       23.01s | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
-      .      | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the temp payload can reconcile
+      .      | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the remapped descendant replays too
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       24.21s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-finished
-      .      | Ada, Grace, Linus offline      | success      | [query-items] ui-changed
-      25.21s | Ada, Grace, Linus offline      | success      | -- retry the remapped child resolution
-      .      | Ada, Grace, Linus offline      | success      | offline:patchUserName replay-started
-      26.41s | Ada, Grace, Linus offline      | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
-      .      | Ada, Grace, Linus offline      | success      | offline:patchUserName replay-finished
-      .      | Ada, Grace, Linus blocked edit | success      | [query-items] ui-changed
+      .      | Ada, Grace, Linus blocked edit | success      | [query-items, query-items] ui-changed
+      .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-started
+      25.41s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+      .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-finished
       "
     `);
 

@@ -1020,12 +1020,12 @@ test('healthy replay failures are retried 5 times and then move into the resolut
 
   expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
     .toMatchInlineSnapshot(`
-    - error: 'replay failed'
-      input: 'value: 2'
-      kind: 'retry-exhausted'
-      on: 'document:document'
-      op: 'updateValue'
-  `);
+      - error: 'replay failed'
+        input: 'value: 2'
+        kind: 'retry-exhausted'
+        on: 'document:document'
+        op: 'updateValue'
+    `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time | ui                                           |
@@ -1446,12 +1446,12 @@ test('going offline again resets the healthy replay failure budget', async () =>
 
   expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
     .toMatchInlineSnapshot(`
-    - error: 'healthy failure 8'
-      input: 'value: 2'
-      kind: 'retry-exhausted'
-      on: 'document:document'
-      op: 'updateValue'
-  `);
+      - error: 'healthy failure 8'
+        input: 'value: 2'
+        kind: 'retry-exhausted'
+        on: 'document:document'
+        op: 'updateValue'
+    `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time | ui                                           |
@@ -2201,10 +2201,10 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
   // as preemptively queued entries.
   expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
     .toMatchInlineSnapshot(`
-    - error: 'replay failed'
-      input: 'value: 2'
-      kind: 'retry-exhausted'
-      on: 'document:document'
-      op: 'updateValue'
-  `);
+      - error: 'replay failed'
+        input: 'value: 2'
+        kind: 'retry-exhausted'
+        on: 'document:document'
+        op: 'updateValue'
+    `);
 });
