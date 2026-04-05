@@ -338,8 +338,6 @@ test('a global offline view sees the same blocked temp item as the store after r
     >()
     .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'))
-    .mockRejectedValueOnce(new Error('create replay failed'))
-    .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'));
 
   const env = createListQueryStoreTestEnv<
@@ -458,7 +456,7 @@ test('a global offline view sees the same blocked temp item as the store after r
   await waitForMicrotaskCondition(
     () => createUserExecute.mock.calls.length === 1,
   );
-  for (const attempt of [2, 3, 4, 5]) {
+  for (const attempt of [2, 3]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === attempt,
@@ -512,7 +510,7 @@ test('a global offline view sees the same blocked temp item as the store after r
   ).toMatchInlineSnapshot(`
     blockedResolutionCount: 1
     childResolutionCount: 1
-    createdAt: 1735689623010
+    createdAt: 1735689613010
     entityKey: '"temp:Linus offline'
     entityKind: 'item'
     id: 'offline-session-temp-create-dependencies:offline-session-temp-create-dependencies-store:"temp:Linus offline'
@@ -523,7 +521,7 @@ test('a global offline view sees the same blocked temp item as the store after r
     storeType: 'listQuery'
     syncState: 'resolution-required'
     tempId: 'temp:Linus offline'
-    updatedAt: 1735689623010
+    updatedAt: 1735689613010
   `);
 
   // The global session-level view should surface the exact same unresolved
@@ -547,8 +545,6 @@ test('a global offline view sees the same blocked temp item as the store after r
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     8.01s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    18.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    23.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
     "

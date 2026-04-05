@@ -211,7 +211,7 @@ export type OfflineOutageModeConfig = {
 export type OfflineReplayRetryConfig = {
   /**
    * Max counted failures before manual resolution is required.
-   * @default 5
+   * @default 3
    */
   maxFailures?: number;
   /**

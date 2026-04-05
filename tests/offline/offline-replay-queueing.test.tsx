@@ -932,7 +932,7 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
   `);
 });
 
-test('healthy replay failures are retried 5 times and then move into the resolution queue', async () => {
+test('healthy replay failures are retried 3 times and then move into the resolution queue', async () => {
   network.setOffline();
   const execute = vi
     .fn<
@@ -989,7 +989,7 @@ test('healthy replay failures are retried 5 times and then move into the resolut
   env.addTimelineComments('beforeNextAction', [
     'keep the session online long enough to spend the remaining healthy retry budget',
   ]);
-  for (const attempt of [2, 3, 4, 5]) {
+  for (const attempt of [2, 3]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => execute.mock.calls.length === attempt,
@@ -998,14 +998,14 @@ test('healthy replay failures are retried 5 times and then move into the resolut
   await flushAllTimers();
   trackDocumentReplayState(env);
 
-  expect(execute).toHaveBeenCalledTimes(5);
+  expect(execute).toHaveBeenCalledTimes(3);
 
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689620000
+      createdAt: 1735689610000
       entityKey: 'document'
       entityKind: 'document'
       id: 'retry-exhaustion-session:document-4:document'
@@ -1015,7 +1015,7 @@ test('healthy replay failures are retried 5 times and then move into the resolut
       storeName: 'document-4'
       storeType: 'document'
       syncState: 'resolution-required'
-      updatedAt: 1735689620000
+      updatedAt: 1735689610000
   `);
 
   expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
@@ -1038,8 +1038,6 @@ test('healthy replay failures are retried 5 times and then move into the resolut
     5s   | "value:1 sync:syncing pending:1"             | -- keep the session online long enough to spend the remaining healthy retry budget
     .    | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
     10s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    15s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    20s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
     .    | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
     .    | "value:1 sync:resolution-required pending:0" | ui-changed
     "
@@ -1097,12 +1095,12 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   // --- Phase 1: Exhaust the retry budget to produce a resolution ---
   await queueOfflineMutation();
 
-  // Go online and let all 5 retry attempts fail.
+  // Go online and let all 3 retry attempts fail.
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
-  for (const attempt of [2, 3, 4, 5]) {
+  for (const attempt of [2, 3]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => execute.mock.calls.length === attempt,
@@ -1157,7 +1155,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689620000
+      createdAt: 1735689610000
       entityKey: 'document'
       entityKind: 'document'
       id: 'retry-resolution-actions-session:document-5:document'
@@ -1167,11 +1165,11 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
       storeName: 'document-5'
       storeType: 'document'
       syncState: 'pending'
-      updatedAt: 1735689620000
+      updatedAt: 1735689610000
   `);
 
-  // The 6th execute call succeeds, clearing the queue.
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 6);
+  // The 4th execute call succeeds, clearing the queue.
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 4);
   await flushAllTimers();
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 
@@ -1185,8 +1183,8 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     network.goOnline();
   });
   // All further execute calls fail — exhaust the retry budget again.
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 7);
-  for (const attempt of [8, 9, 10, 11]) {
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 5);
+  for (const attempt of [6, 7]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => execute.mock.calls.length === attempt,
@@ -1404,7 +1402,7 @@ test('going offline again resets the healthy replay failure budget', async () =>
   env.addTimelineComments('beforeNextAction', [
     'keep retrying until the mutation has spent only part of its healthy retry budget',
   ]);
-  for (const attempt of [2, 3]) {
+  for (const attempt of [2]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => execute.mock.calls.length === attempt,
@@ -1429,13 +1427,13 @@ test('going offline again resets the healthy replay failure budget', async () =>
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 4);
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 3);
   trackDocumentReplayState(env);
 
   env.addTimelineComments('beforeNextAction', [
     'spend the fresh retry budget; only after these new failures should the mutation require resolution',
   ]);
-  for (const attempt of [5, 6, 7, 8]) {
+  for (const attempt of [4, 5]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => execute.mock.calls.length === attempt,
@@ -1446,7 +1444,7 @@ test('going offline again resets the healthy replay failure budget', async () =>
 
   expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
     .toMatchInlineSnapshot(`
-      - error: 'healthy failure 8'
+      - error: 'healthy failure 5'
         input: 'value: 2'
         kind: 'retry-exhausted'
         on: 'document:document'
@@ -1463,17 +1461,14 @@ test('going offline again resets the healthy replay failure budget', async () =>
     .    | "value:1 sync:syncing pending:1"             | ui-changed
     5s   | "value:1 sync:syncing pending:1"             | -- keep retrying until the mutation has spent only part of its healthy retry budget
     .    | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    10s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
     .    | "value:1 sync:needs-confirmation pending:1"  | ui-changed
     .    | "value:1 sync:needs-confirmation pending:1"  | -- go offline again while the queued mutation is paused in needs-confirmation
     .    | "value:1 sync:needs-confirmation pending:1"  | -- come back online and verify the paused mutation gets a fresh healthy retry budget
     .    | "value:1 sync:needs-confirmation pending:1"  | offline:updateValue replay-started
     .    | "value:1 sync:syncing pending:1"             | ui-changed
-    15s  | "value:1 sync:syncing pending:1"             | -- spend the fresh retry budget; only after these new failures should the mutation require resolution
+    10s  | "value:1 sync:syncing pending:1"             | -- spend the fresh retry budget; only after these new failures should the mutation require resolution
     .    | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    20s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    25s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    30s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    15s  | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
     .    | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
     .    | "value:1 sync:resolution-required pending:0" | ui-changed
     "

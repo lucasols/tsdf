@@ -36,7 +36,7 @@ import {
   type PersistedOfflineResolutionRecord,
 } from './types';
 
-const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 5;
+const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 3;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';

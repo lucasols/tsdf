@@ -268,8 +268,6 @@ describe('list-query replay', () => {
       .      | Ada pending | success      | offline:patchUserName replay-started
       8.01s  | Ada pending | success      | offline:patchUserName replay-started
       13.01s | Ada pending | success      | offline:patchUserName replay-started
-      18.01s | Ada pending | success      | offline:patchUserName replay-started
-      23.01s | Ada pending | success      | offline:patchUserName replay-started
       .      | Ada pending | success      | offline:patchUserName resolution-required
       "
     `);
@@ -1024,8 +1022,6 @@ describe('list-query replay', () => {
       >()
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
-      .mockRejectedValueOnce(new Error('create replay failed'))
-      .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'));
     const createChildUserExecute = vi
       .fn<
@@ -1209,7 +1205,7 @@ describe('list-query replay', () => {
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === 1,
     );
-    for (const attempt of [2, 3, 4, 5]) {
+    for (const attempt of [2, 3]) {
       await advanceTime(5_000);
       await waitForMicrotaskCondition(
         () => createUserExecute.mock.calls.length === attempt,
@@ -1321,7 +1317,7 @@ describe('list-query replay', () => {
     ).toMatchInlineSnapshot(`
       blockedResolutionCount: 0
       childResolutionCount: 1
-      createdAt: 1735689623010
+      createdAt: 1735689613010
       entityKey: '"temp:Parent offline'
       entityKind: 'item'
       id: 'offline-replay-nested-temp-create-chain-session:offline-replay-nested-temp-create-chain-store:"temp:Parent offline'
@@ -1332,7 +1328,7 @@ describe('list-query replay', () => {
       storeType: 'listQuery'
       syncState: 'resolution-required'
       tempId: 'temp:Parent offline'
-      updatedAt: 1735689623010
+      updatedAt: 1735689613010
     `);
     // Child entity is blocked by both the parent and the child-create resolutions
     expect(childEntity?.blockedByResolutionIds).toEqual(
@@ -1379,8 +1375,6 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
       8.01s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
       13.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-      18.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-      23.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
@@ -1403,8 +1397,6 @@ describe('list-query replay', () => {
           input: { name: string };
         }) => Promise<{ id: number; name: string }>
       >()
-      .mockRejectedValueOnce(new Error('create replay failed'))
-      .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
@@ -1540,7 +1532,7 @@ describe('list-query replay', () => {
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === 1,
     );
-    for (const attempt of [2, 3, 4, 5]) {
+    for (const attempt of [2, 3]) {
       await advanceTime(5_000);
       await waitForMicrotaskCondition(
         () => createUserExecute.mock.calls.length === attempt,
@@ -1609,7 +1601,7 @@ describe('list-query replay', () => {
     ).toMatchInlineSnapshot(`
       blockedResolutionCount: 1
       childResolutionCount: 1
-      createdAt: 1735689623010
+      createdAt: 1735689613010
       entityKey: '"temp:Linus offline'
       entityKind: 'item'
       id: 'offline-replay-temp-create-resolution-chain-session:offline-replay-temp-create-resolution-chain-store:"temp:Linus offline'
@@ -1620,7 +1612,7 @@ describe('list-query replay', () => {
       storeType: 'listQuery'
       syncState: 'resolution-required'
       tempId: 'temp:Linus offline'
-      updatedAt: 1735689623010
+      updatedAt: 1735689613010
     `);
     expect(patchUserExecute).not.toHaveBeenCalled();
 
@@ -1650,7 +1642,7 @@ describe('list-query replay', () => {
       await Promise.resolve();
     });
     await waitForMicrotaskCondition(
-      () => createUserExecute.mock.calls.length === 6,
+      () => createUserExecute.mock.calls.length === 4,
     );
     await waitForMicrotaskCondition(
       () => patchUserExecute.mock.calls.length === 1,
@@ -1687,17 +1679,15 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       8.01s  | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       13.01s | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
-      18.01s | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
-      23.01s | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser resolution-required
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName resolution-required
       .      | Ada, Grace, Linus blocked edit | success      | -- retry the parent resolution so the remapped descendant replays too
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-started
-      24.21s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+      14.21s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
       .      | Ada, Grace, Linus blocked edit | success      | offline:createUser replay-finished
       .      | Ada, Grace, Linus blocked edit | success      | [query-items, query-items] ui-changed
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-started
-      25.41s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+      15.41s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-finished
       "
     `);
@@ -1716,8 +1706,6 @@ describe('list-query replay', () => {
           input: { name: string };
         }) => Promise<{ id: number; name: string }>
       >()
-      .mockRejectedValueOnce(new Error('create replay failed'))
-      .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'));
@@ -1844,7 +1832,7 @@ describe('list-query replay', () => {
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === 1,
     );
-    for (const attempt of [2, 3, 4, 5]) {
+    for (const attempt of [2, 3]) {
       await advanceTime(5_000);
       await waitForMicrotaskCondition(
         () => createUserExecute.mock.calls.length === attempt,
@@ -1890,8 +1878,6 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Linus discarded edit | offline:createUser replay-started
       8.01s  | Ada, Grace, Linus discarded edit | offline:createUser replay-started
       13.01s | Ada, Grace, Linus discarded edit | offline:createUser replay-started
-      18.01s | Ada, Grace, Linus discarded edit | offline:createUser replay-started
-      23.01s | Ada, Grace, Linus discarded edit | offline:createUser replay-started
       .      | Ada, Grace, Linus discarded edit | offline:createUser resolution-required
       .      | Ada, Grace, Linus discarded edit | offline:patchUserName resolution-required
       .      | Ada, Grace                       | ui-changed

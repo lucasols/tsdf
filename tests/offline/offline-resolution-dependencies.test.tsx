@@ -101,8 +101,8 @@ async function replayNestedListQueryCreateWithDelay(
 }
 
 /**
- * Exhaust the default healthy replay retry budget (5 attempts at 5 s intervals).
- * Waits for the first attempt, then advances through the remaining 4.
+ * Exhaust the default healthy replay retry budget (3 attempts at 5 s intervals).
+ * Waits for the first attempt, then advances through the remaining 2.
  */
 async function exhaustDefaultRetryBudget(
   executeMock: { mock: { calls: unknown[] } },
@@ -111,7 +111,7 @@ async function exhaustDefaultRetryBudget(
   await waitForMicrotaskCondition(
     () => executeMock.mock.calls.length === startingCallCount + 1,
   );
-  for (const attempt of [2, 3, 4, 5]) {
+  for (const attempt of [2, 3]) {
     await advanceTime(5_000);
     await waitForMicrotaskCondition(
       () => executeMock.mock.calls.length === startingCallCount + attempt,
@@ -294,10 +294,10 @@ test('nested descendants cascade into blocked resolutions and discard together',
     });
   });
 
-  // Reconnect and let the parent replay exhaust its 5-attempt budget so the
+  // Reconnect and let the parent replay exhaust its 3-attempt budget so the
   // whole chain (parent → child → grandchild) promotes into manual resolutions.
   env.addTimelineComments('beforeNextAction', [
-    'go online — parent create replay will fail 5 times, cascading blocked status to descendants',
+    'go online — parent create replay will fail 3 times, cascading blocked status to descendants',
   ]);
   await act(async () => {
     network.goOnline();
@@ -393,12 +393,10 @@ test('nested descendants cascade into blocked resolutions and discard together',
     .      | Ada, Grace, Parent offline, Child offline      | offline:createChildUser queued
     .      | Ada, Grace, Parent offline, Child blocked edit | ui-changed
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
-    .      | Ada, Grace, Parent offline, Child blocked edit | -- go online — parent create replay will fail 5 times, cascading blocked status to descendants
+    .      | Ada, Grace, Parent offline, Child blocked edit | -- go online — parent create replay will fail 3 times, cascading blocked status to descendants
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
     8.01s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
     13.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    18.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    23.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
@@ -709,8 +707,6 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
     >()
     .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'))
-    .mockRejectedValueOnce(new Error('create replay failed'))
-    .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'));
   const patchUserExecute =
     vi.fn<(ctx: PatchUserReplayContext) => Promise<{ name: string }>>();
@@ -825,7 +821,7 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
   // Reconnect and let the create exhaust so both operations become manual
   // resolutions with an explicit parent/child dependency.
   env.addTimelineComments('beforeNextAction', [
-    'go online — parent create fails 5 times, both operations become manual resolutions',
+    'go online — parent create fails 3 times, both operations become manual resolutions',
   ]);
   act(() => {
     network.goOnline();
@@ -867,7 +863,7 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
     await Promise.resolve();
   });
   await waitForMicrotaskCondition(
-    () => createUserExecute.mock.calls.length === 6,
+    () => createUserExecute.mock.calls.length === 4,
   );
   await waitForMicrotaskCondition(
     () => patchUserExecute.mock.calls.length === 1,
@@ -900,21 +896,19 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
     .      | Ada, Grace, Linus offline      | offline:createUser queued
     .      | Ada, Grace, Linus blocked edit | [query-items] ui-changed
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName queued
-    .      | Ada, Grace, Linus blocked edit | -- go online — parent create fails 5 times, both operations become manual resolutions
+    .      | Ada, Grace, Linus blocked edit | -- go online — parent create fails 3 times, both operations become manual resolutions
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     8.01s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    18.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    23.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
     .      | Ada, Grace, Linus blocked edit | -- retry parent — child edit input should be remapped from temp:Linus offline → users||3
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    24.21s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+    14.21s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-finished
     .      | Ada, Grace, Linus blocked edit | [query-items, query-items] ui-changed
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
-    25.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+    15.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
     "
   `);
@@ -934,8 +928,6 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
         input: { name: string };
       }) => Promise<{ id: number; name: string }>
     >()
-    .mockRejectedValueOnce(new Error('create replay failed'))
-    .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'))
     .mockRejectedValueOnce(new Error('create replay failed'));
@@ -1047,7 +1039,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
 
   // Reconnect and let the parent exhaust before resolving it manually.
   env.addTimelineComments('beforeNextAction', [
-    'go online — parent create fails 5 times, both operations become manual resolutions',
+    'go online — parent create fails 3 times, both operations become manual resolutions',
   ]);
   act(() => {
     network.goOnline();
@@ -1079,7 +1071,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     await Promise.resolve();
   });
   await waitForMicrotaskCondition(
-    () => createUserExecute.mock.calls.length === 6,
+    () => createUserExecute.mock.calls.length === 4,
   );
   await flushAllTimers();
 
@@ -1154,22 +1146,20 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     .      | Ada, Grace, Linus offline      | offline:createUser queued
     .      | Ada, Grace, Linus blocked edit | [query-items] ui-changed
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName queued
-    .      | Ada, Grace, Linus blocked edit | -- go online — parent create fails 5 times, both operations become manual resolutions
+    .      | Ada, Grace, Linus blocked edit | -- go online — parent create fails 3 times, both operations become manual resolutions
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     8.01s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    18.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    23.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
     .      | Ada, Grace, Linus blocked edit | -- retry parent with scope=self — child should be remapped but NOT auto-replayed
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    24.21s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
+    14.21s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-finished
     .      | Ada, Grace, Linus offline      | [query-items] ui-changed
-    25.21s | Ada, Grace, Linus offline      | -- retry remapped child — should patch users||3 directly
+    15.21s | Ada, Grace, Linus offline      | -- retry remapped child — should patch users||3 directly
     .      | Ada, Grace, Linus offline      | offline:patchUserName replay-started
-    26.41s | Ada, Grace, Linus offline      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+    16.41s | Ada, Grace, Linus offline      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
     .      | Ada, Grace, Linus offline      | offline:patchUserName replay-finished
     "
   `);
