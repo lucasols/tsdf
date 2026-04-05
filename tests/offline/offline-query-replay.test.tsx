@@ -18,10 +18,6 @@ import {
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   type PatchUserOperations,
-  replayBatchListQueryCreateWithDelay,
-  replayListQueryCreateWithDelay,
-  replayListQueryDeleteWithDelay,
-  replayListQueryPatchWithDelay,
   userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
@@ -156,7 +152,12 @@ describe('list-query replay', () => {
             name: 'Ada pending',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Ada replayed' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('users||1', {
+            name: 'Ada replayed',
+          });
+          return { name: 'Ada replayed' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'users||1', name: 'Ada replayed' },
@@ -285,8 +286,26 @@ describe('list-query replay', () => {
       operation: 'createUser' | 'patchUserName';
       input: { itemId: string; name: string } | { name: string };
     }> = [];
+    const applyCreateUserResult = async (result: {
+      id: number;
+      name: string;
+    }) => {
+      await env.serverTable.delayedSetItem(`users||${result.id}`, result);
+      return result;
+    };
+    const applyPatchUserResult = (input: { itemId: string; name: string }) =>
+      env.serverTable
+        .delayedUpdateItem(input.itemId, { name: input.name })
+        .then(() => ({ name: input.name }));
 
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        CreateAndPatchListQueryUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -327,34 +346,27 @@ describe('list-query replay', () => {
                   replayedOperations.push({ operation: 'createUser', input });
                   const result = { id: nextUserId, name: input.name };
                   nextUserId += 1;
-                  const replayResult = replayListQueryCreateWithDelay(
-                    env,
-                    result,
-                  );
-
-                  return replayResult;
+                  return applyCreateUserResult(result);
                 },
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
+                execute: ({ input }): Promise<{ name: string }> => {
                   replayedOperations.push({
                     operation: 'patchUserName',
                     input,
                   });
-                  const replayResult = replayListQueryPatchWithDelay(
-                    env,
-                    input,
-                  );
-
-                  return replayResult;
+                  return applyPatchUserResult(input);
                 },
                 onSuccessExecute: ({ input }) => {
-                  env.apiStore.updateItemState(input.itemId, (item) => ({
-                    ...item,
-                    name: input.name,
-                  }));
+                  env.apiStore.updateItemState(
+                    input.itemId,
+                    (item: { id: number; name: string }) => ({
+                      ...item,
+                      name: input.name,
+                    }),
+                  );
                 },
               },
             },
@@ -365,7 +377,7 @@ describe('list-query replay', () => {
 
     const hook = renderHook(() => {
       const query = env.apiStore.useListQuery(usersQuery, {
-        itemSelector: (item) => item.name,
+        itemSelector: (item: { id: number; name: string }) => item.name,
       });
 
       env.trackItemUI('query-status', query.status);
@@ -388,7 +400,11 @@ describe('list-query replay', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        mutation: async () => {
+          const result = { id: 3, name: 'Linus offline' };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus offline' } },
       });
     });
@@ -401,12 +417,20 @@ describe('list-query replay', () => {
     await act(async () => {
       await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
-          env.apiStore.updateItemState('temp:Linus offline', (item) => ({
-            ...item,
-            name: 'Linus edited',
-          }));
+          env.apiStore.updateItemState(
+            'temp:Linus offline',
+            (item: { id: number; name: string }) => ({
+              ...item,
+              name: 'Linus edited',
+            }),
+          );
         },
-        mutation: () => Promise.resolve({ name: 'Linus edited' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+            name: 'Linus edited',
+          });
+          return { name: 'Linus edited' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Linus offline', name: 'Linus edited' },
@@ -524,8 +548,27 @@ describe('list-query replay', () => {
       operation: 'createUsers' | 'patchUserName';
       input: { itemId: string; name: string } | { name: string }[];
     }> = [];
+    const applyBatchCreateResults = async (
+      results: { id: number; name: string }[],
+    ) => {
+      for (const result of results) {
+        await env.serverTable.delayedSetItem(`users||${result.id}`, result);
+      }
+      return results;
+    };
+    const applyPatchUserResult = (input: { itemId: string; name: string }) =>
+      env.serverTable
+        .delayedUpdateItem(input.itemId, { name: input.name })
+        .then(() => ({ name: input.name }));
 
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        CreateManyListQueryUserOperations & PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -576,34 +619,27 @@ describe('list-query replay', () => {
                     nextUserId += 1;
                     return result;
                   });
-                  const replayResult = replayBatchListQueryCreateWithDelay(
-                    env,
-                    results,
-                  );
-
-                  return replayResult;
+                  return applyBatchCreateResults(results);
                 },
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
+                execute: ({ input }): Promise<{ name: string }> => {
                   replayedOperations.push({
                     operation: 'patchUserName',
                     input,
                   });
-                  const replayResult = replayListQueryPatchWithDelay(
-                    env,
-                    input,
-                  );
-
-                  return replayResult;
+                  return applyPatchUserResult(input);
                 },
                 onSuccessExecute: ({ input }) => {
-                  env.apiStore.updateItemState(input.itemId, (item) => ({
-                    ...item,
-                    name: input.name,
-                  }));
+                  env.apiStore.updateItemState(
+                    input.itemId,
+                    (item: { id: number; name: string }) => ({
+                      ...item,
+                      name: input.name,
+                    }),
+                  );
                 },
               },
             },
@@ -614,7 +650,7 @@ describe('list-query replay', () => {
 
     const hook = renderHook(() => {
       const query = env.apiStore.useListQuery(usersQuery, {
-        itemSelector: (item) => item.name,
+        itemSelector: (item: { id: number; name: string }) => item.name,
       });
 
       env.trackItemUI('batch-query-items', query.items.join(', '));
@@ -641,7 +677,16 @@ describe('list-query replay', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve([]),
+        mutation: async () => {
+          const results = [
+            { id: 3, name: 'Ada offline' },
+            { id: 4, name: 'Linus offline' },
+          ];
+          for (const result of results) {
+            await env.serverTable.delayedSetItem(`users||${result.id}`, result);
+          }
+          return results;
+        },
         offline: {
           operation: 'createUsers',
           input: [{ name: 'Ada offline' }, { name: 'Linus offline' }],
@@ -657,12 +702,20 @@ describe('list-query replay', () => {
     await act(async () => {
       await env.apiStore.performMutation('temp:Ada offline', {
         optimisticUpdate: () => {
-          env.apiStore.updateItemState('temp:Ada offline', (item) => ({
-            ...item,
-            name: 'Ada rebound',
-          }));
+          env.apiStore.updateItemState(
+            'temp:Ada offline',
+            (item: { id: number; name: string }) => ({
+              ...item,
+              name: 'Ada rebound',
+            }),
+          );
         },
-        mutation: () => Promise.resolve({ name: 'Ada rebound' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Ada offline', {
+            name: 'Ada rebound',
+          });
+          return { name: 'Ada rebound' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Ada offline', name: 'Ada rebound' },
@@ -670,12 +723,20 @@ describe('list-query replay', () => {
       });
       await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
-          env.apiStore.updateItemState('temp:Linus offline', (item) => ({
-            ...item,
-            name: 'Linus rebound',
-          }));
+          env.apiStore.updateItemState(
+            'temp:Linus offline',
+            (item: { id: number; name: string }) => ({
+              ...item,
+              name: 'Linus rebound',
+            }),
+          );
         },
-        mutation: () => Promise.resolve({ name: 'Linus rebound' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+            name: 'Linus rebound',
+          });
+          return { name: 'Linus rebound' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Linus offline', name: 'Linus rebound' },
@@ -846,10 +907,9 @@ describe('list-query replay', () => {
                 },
                 execute: async ({ input }) => {
                   replayedOperations.push({ operation: 'createUser', input });
-                  return replayListQueryCreateWithDelay(env, {
-                    id: 3,
-                    name: input.name,
-                  });
+                  const result = { id: 3, name: input.name };
+                  await env.serverTable.delayedSetItem('users||3', result);
+                  return result;
                 },
               },
               patchUserName: {
@@ -860,12 +920,9 @@ describe('list-query replay', () => {
                     operation: 'patchUserName',
                     input,
                   });
-                  const replayResult = replayListQueryPatchWithDelay(
-                    env,
-                    input,
-                  );
-
-                  return replayResult;
+                  return env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name }));
                 },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
@@ -883,12 +940,7 @@ describe('list-query replay', () => {
                 },
                 execute: ({ input }) => {
                   replayedOperations.push({ operation: 'deleteUser', input });
-                  const replayResult = replayListQueryDeleteWithDelay(
-                    env,
-                    input,
-                  );
-
-                  return replayResult;
+                  return env.serverTable.delayedRemoveItem(input.itemId);
                 },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.deleteItemState(input.itemId);
@@ -924,7 +976,11 @@ describe('list-query replay', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        mutation: async () => {
+          const result = { id: 3, name: 'Linus offline' };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus offline' } },
       });
     });
@@ -941,7 +997,12 @@ describe('list-query replay', () => {
             name: 'Linus edited',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Linus edited' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+            name: 'Linus edited',
+          });
+          return { name: 'Linus edited' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Linus offline', name: 'Linus edited' },
@@ -958,7 +1019,7 @@ describe('list-query replay', () => {
         optimisticUpdate: () => {
           env.apiStore.deleteItemState('temp:Linus offline');
         },
-        mutation: () => Promise.resolve(undefined),
+        mutation: () => env.serverTable.delayedRemoveItem('temp:Linus offline'),
         offline: {
           operation: 'deleteUser',
           input: { itemId: 'temp:Linus offline' },
@@ -1037,14 +1098,20 @@ describe('list-query replay', () => {
         return result;
       });
     const patchUserExecute = vi.fn(
-      ({ input }: { input: { itemId: string; name: string } }) => {
-        const replayResult = replayListQueryPatchWithDelay(env, input);
-
-        return replayResult;
-      },
+      ({ input }: { input: { itemId: string; name: string } }) =>
+        env.serverTable
+          .delayedUpdateItem(input.itemId, { name: input.name })
+          .then(() => ({ name: input.name })),
     );
 
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        NestedListQueryUserRow,
+        false,
+        false,
+        NestedTempCreateListQueryUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       NestedListQueryUserRow,
       false,
       false,
@@ -1141,7 +1208,11 @@ describe('list-query replay', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Parent offline' }),
+        mutation: async () => {
+          const result = { id: 3, name: 'Parent offline' };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
         offline: { operation: 'createUser', input: { name: 'Parent offline' } },
       });
     });
@@ -1185,7 +1256,12 @@ describe('list-query replay', () => {
             name: 'Child blocked edit',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Child blocked edit' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Child offline', {
+            name: 'Child blocked edit',
+          });
+          return { name: 'Child blocked edit' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Child offline', name: 'Child blocked edit' },
@@ -1400,15 +1476,18 @@ describe('list-query replay', () => {
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
       .mockRejectedValueOnce(new Error('create replay failed'))
-      .mockImplementationOnce(async ({ input }: { input: { name: string } }) =>
-        replayListQueryCreateWithDelay(env, { id: 3, name: input.name }),
+      .mockImplementationOnce(
+        async ({ input }: { input: { name: string } }) => {
+          const result = { id: 3, name: input.name };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
       );
     const patchUserExecute = vi.fn(
-      ({ input }: { input: { itemId: string; name: string } }) => {
-        const replayResult = replayListQueryPatchWithDelay(env, input);
-
-        return replayResult;
-      },
+      ({ input }: { input: { itemId: string; name: string } }) =>
+        env.serverTable
+          .delayedUpdateItem(input.itemId, { name: input.name })
+          .then(() => ({ name: input.name })),
     );
 
     const env: ReturnType<
@@ -1500,7 +1579,11 @@ describe('list-query replay', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        mutation: async () => {
+          const result = { id: 3, name: 'Linus offline' };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus offline' } },
       });
     });
@@ -1513,7 +1596,12 @@ describe('list-query replay', () => {
             name: 'Linus blocked edit',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+            name: 'Linus blocked edit',
+          });
+          return { name: 'Linus blocked edit' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
@@ -1760,12 +1848,9 @@ describe('list-query replay', () => {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) => {
-                  const replayResult = replayListQueryPatchWithDelay(
-                    env,
-                    input,
-                  );
-
-                  return replayResult;
+                  return env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name }));
                 },
                 onSuccessExecute: null,
               },
@@ -1799,7 +1884,11 @@ describe('list-query replay', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        mutation: async () => {
+          const result = { id: 3, name: 'Linus offline' };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus offline' } },
       });
     });
@@ -1813,7 +1902,12 @@ describe('list-query replay', () => {
             name: 'Linus discarded edit',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Linus discarded edit' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+            name: 'Linus discarded edit',
+          });
+          return { name: 'Linus discarded edit' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'temp:Linus offline', name: 'Linus discarded edit' },
@@ -1929,12 +2023,11 @@ describe('list-query replay', () => {
                 execute: async ({ input }) => {
                   const result = { id: nextUserId, name: input.name };
                   nextUserId += 1;
-                  const replayResult = replayListQueryCreateWithDelay(
-                    env,
+                  await env.serverTable.delayedSetItem(
+                    `users||${result.id}`,
                     result,
                   );
-
-                  return replayResult;
+                  return result;
                 },
               },
             },
@@ -1973,7 +2066,11 @@ describe('list-query replay', () => {
             },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        mutation: async () => {
+          const result = { id: 3, name: 'Linus offline' };
+          await env.serverTable.delayedSetItem('users||3', result);
+          return result;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus offline' } },
       });
     });

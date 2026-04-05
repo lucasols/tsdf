@@ -13,7 +13,6 @@ import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   getOfflineQueueEntries,
-  replayDocumentValueWithDelay,
   type UpdateValueExecuteContext,
   type UpdateValueOperations,
   userRowSchema,
@@ -336,9 +335,8 @@ test('disabling active network mode preserves offline state while future operati
             inputSchema: docMutationInputSchema,
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -370,7 +368,10 @@ test('disabling active network mode preserves offline state while future operati
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -547,9 +548,9 @@ test('disabled network support ignores classified network failures while startin
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
-              const result = replayDocumentValueWithDelay(env, input);
-              return result;
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -616,9 +617,9 @@ test('disabled outage support ignores outage classifications while starting from
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
-              const result = replayDocumentValueWithDelay(env, input);
-              return result;
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -682,9 +683,8 @@ test('browser reconnects replay queued mutations even while runtime network supp
             inputSchema: docMutationInputSchema,
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -708,7 +708,10 @@ test('browser reconnects replay queued mutations even while runtime network supp
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -843,9 +846,8 @@ test('disabling classified network mode preserves recovery and replay for alread
             inputSchema: docMutationInputSchema,
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -970,9 +972,8 @@ test('disabling active outage mode preserves recovery and replay for already-act
             inputSchema: docMutationInputSchema,
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1087,9 +1088,8 @@ test('browser events do not clear preserved outage state while runtime outage su
             inputSchema: docMutationInputSchema,
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1204,9 +1204,9 @@ test('runtime mutation queueing overrides are shared across stores in the same s
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) => {
-                const result = replayDocumentValueWithDelay(env, input);
-                return result;
+              execute: async ({ input }: UpdateValueExecuteContext) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -1239,7 +1239,10 @@ test('runtime mutation queueing overrides are shared across stores in the same s
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await envA.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
   expect(firstResult.ok).toBe(true);
@@ -1255,7 +1258,7 @@ test('runtime mutation queueing overrides are shared across stores in the same s
 
   const directMutationA = vi.fn(() =>
     navigator.onLine
-      ? Promise.resolve(3)
+      ? envA.serverMock.delayedSetData(3).then(() => 3)
       : Promise.reject(new Error('runtime-network-disallowed-direct-error-a')),
   );
   const disallowedResult = await envA.apiStore.performMutation({
@@ -1283,7 +1286,7 @@ test('runtime mutation queueing overrides are shared across stores in the same s
 
   const directMutationB = vi.fn(() =>
     navigator.onLine
-      ? Promise.resolve(2)
+      ? envB.serverMock.delayedSetData(2).then(() => 2)
       : Promise.reject(new Error('runtime-network-disallowed-direct-error-b')),
   );
   const otherStoreResult = await envB.apiStore.performMutation({
@@ -1318,7 +1321,10 @@ test('runtime mutation queueing overrides are shared across stores in the same s
         draft.value = 4;
       });
     },
-    mutation: () => Promise.resolve(4),
+    mutation: async () => {
+      await envA.serverMock.delayedSetData(4);
+      return 4;
+    },
     offline: { operation: 'updateValue', input: { value: 4 } },
   });
 
@@ -1517,9 +1523,9 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
-              const result = replayDocumentValueWithDelay(env, input);
-              return result;
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1605,9 +1611,9 @@ test('disabling runtime network support preserves both bootstrap and raw persist
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
-              const result = replayDocumentValueWithDelay(env, input);
-              return result;
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {

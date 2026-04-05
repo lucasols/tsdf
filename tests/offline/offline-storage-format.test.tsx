@@ -18,10 +18,7 @@ import {
   getParsedLocalStorageValue,
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
-import {
-  replayDocumentValueWithDelay,
-  type UpdateValueOperations,
-} from './offlineReplayTestShared';
+import { type UpdateValueOperations } from './offlineReplayTestShared';
 import { docMutationInputSchema, docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -71,10 +68,9 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -98,7 +94,10 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
             draft.value = 2;
           });
         },
-        mutation: () => Promise.resolve(2),
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+          return 2;
+        },
         offline: { operation: 'updateValue', input: { value: 2 } },
       }),
     );
@@ -263,10 +262,9 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -290,7 +288,10 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
             draft.value = 2;
           });
         },
-        mutation: () => Promise.resolve(2),
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+          return 2;
+        },
         offline: { operation: 'updateValue', input: { value: 2 } },
       }),
     );

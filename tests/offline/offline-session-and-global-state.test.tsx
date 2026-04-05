@@ -23,8 +23,6 @@ import {
   type CreateListQueryUserOperations,
   getOfflineQueueEntries,
   type PatchUserOperations,
-  replayDocumentValueWithDelay,
-  replayListQueryPatchWithDelay,
   type UpdateValueExecuteContext,
   type UpdateValueOperations,
   userPatchSchema,
@@ -130,9 +128,9 @@ test('stores unregister their previous offline session when the session key beco
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
-              const result = replayDocumentValueWithDelay(env, input);
-              return result;
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -152,7 +150,10 @@ test('stores unregister their previous offline session when the session key beco
           draft.value = 2;
         });
       },
-      mutation: () => Promise.resolve(2),
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
   });
@@ -210,9 +211,8 @@ test('logging back into the same session replays durable offline mutations queue
             inputSchema: docMutationInputSchema,
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -243,7 +243,10 @@ test('logging back into the same session replays durable offline mutations queue
           draft.value = 2;
         });
       },
-      mutation: () => Promise.resolve(2),
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
   });
@@ -382,10 +385,11 @@ test('a global offline view sees the same blocked temp item as the store after r
             patchUserName: {
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
-              execute: ({ input }) => {
-                const replayResult = replayListQueryPatchWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  name: input.name,
+                });
+                return { name: input.name };
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateItemState(input.itemId, (item) => ({
@@ -424,7 +428,11 @@ test('a global offline view sees the same blocked temp item as the store after r
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      mutation: async () => {
+        const data = { id: 3, name: 'Linus offline' };
+        await env.serverTable.delayedSetItem('users||3', data);
+        return data;
+      },
       offline: { operation: 'createUser', input: { name: 'Linus offline' } },
     });
   });
@@ -437,7 +445,12 @@ test('a global offline view sees the same blocked temp item as the store after r
           name: 'Linus blocked edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+          name: 'Linus blocked edit',
+        });
+        return { name: 'Linus blocked edit' };
+      },
       offline: {
         operation: 'patchUserName',
         input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
@@ -573,9 +586,9 @@ test('offline mutations fail fast when no session key is available', async () =>
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
-              const result = replayDocumentValueWithDelay(env, input);
-              return result;
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -596,7 +609,10 @@ test('offline mutations fail fast when no session key is available', async () =>
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -655,9 +671,9 @@ test('global offline hooks can mount before a localStorage-backed store', async 
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) => {
-                const result = replayDocumentValueWithDelay(env, input);
-                return result;
+              execute: async ({ input }: UpdateValueExecuteContext) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -682,7 +698,10 @@ test('global offline hooks can mount before a localStorage-backed store', async 
             draft.value = 2;
           });
         },
-        mutation: () => Promise.resolve(2),
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+          return 2;
+        },
         offline: { operation: 'updateValue', input: { value: 2 } },
       })
     ).ok;
@@ -937,9 +956,10 @@ test('global and per-store offline entity selectors aggregate queued work across
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: (_ctx_: UpdateValueExecuteContext) =>
-                pendingReplay.then((result) =>
-                  replayDocumentValueWithDelay(env, result),
-                ),
+                pendingReplay.then(async (result) => {
+                  await env.serverMock.delayedSetData(result.value);
+                  return result;
+                }),
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
                   draft.value = input.value;
@@ -970,7 +990,10 @@ test('global and per-store offline entity selectors aggregate queued work across
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await envA.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -981,7 +1004,10 @@ test('global and per-store offline entity selectors aggregate queued work across
         draft.value = 3;
       });
     },
-    mutation: () => Promise.resolve(3),
+    mutation: async () => {
+      await envB.serverMock.delayedSetData(3);
+      return 3;
+    },
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 

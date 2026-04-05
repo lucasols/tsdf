@@ -11,18 +11,17 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateUserOperations,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   type PatchUserOperations,
-  replayBatchCollectionCreateWithDelay,
-  replayCollectionCreateWithDelay,
-  replayCollectionRenameWithDelay,
-  replayDocumentValueWithDelay,
-  replayListQueryPatchWithDelay,
   type UpdateValueOperations,
   userPatchSchema,
   userRowSchema,
@@ -85,7 +84,7 @@ describe('document', () => {
     const storeName = 'hybrid-doc-network-disallowed-offline-store';
     const directMutation = vi.fn(() =>
       navigator.onLine
-        ? Promise.resolve(2)
+        ? env.serverMock.delayedSetData(2).then(() => 2)
         : Promise.reject(new Error('browser-offline-direct-error')),
     );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
@@ -107,8 +106,8 @@ describe('document', () => {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute: async ({ input }) => {
-                const result = await replayDocumentValueWithDelay(env, input);
-                return result;
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -141,7 +140,9 @@ describe('document', () => {
     network.setOffline();
     const sessionKey = 'hybrid-doc-offline-session';
     const storeName = 'hybrid-doc-offline-store';
-    const directMutation = vi.fn(() => Promise.resolve(2));
+    const directMutation = vi.fn(() =>
+      env.serverMock.delayedSetData(2).then(() => 2),
+    );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
@@ -157,10 +158,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -196,7 +196,9 @@ describe('document', () => {
   test('call the direct mutation while online and skip queueing on success', async () => {
     const sessionKey = 'hybrid-doc-online-session';
     const storeName = 'hybrid-doc-online-store';
-    const directMutation = vi.fn(() => Promise.resolve(2));
+    const directMutation = vi.fn(() =>
+      env.serverMock.delayedSetData(2).then(() => 2),
+    );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
@@ -212,10 +214,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -230,10 +231,12 @@ describe('document', () => {
 
     // Online offline-enabled mutations should behave like normal direct
     // mutations until a failure is classified as connectivity-related.
-    const result = await env.apiStore.performMutation({
+    const pendingResult = env.apiStore.performMutation({
       mutation: directMutation,
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
+    await flushAllTimers();
+    const result = await pendingResult;
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
@@ -276,10 +279,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -326,7 +328,9 @@ describe('document', () => {
   test('disallowed classified network mode still retries the direct mutation while the browser is online', async () => {
     const sessionKey = 'hybrid-doc-network-disallowed-online-session';
     const storeName = 'hybrid-doc-network-disallowed-online-store';
-    const directMutation = vi.fn(() => Promise.resolve(2));
+    const directMutation = vi.fn(() =>
+      env.serverMock.delayedSetData(2).then(() => 2),
+    );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
@@ -355,10 +359,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -375,10 +378,12 @@ describe('document', () => {
     env.apiStore.scheduleFetch('highPriority');
     await advanceTime(25);
 
-    const result = await env.apiStore.performMutation({
-      mutation: directMutation,
-      offline: { operation: 'updateValue', input: { value: 2 } },
-    });
+    const result = await resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        mutation: directMutation,
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      }),
+    );
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
@@ -393,11 +398,11 @@ describe('document', () => {
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
-      lastRecoveryCheckAt: null
+      lastRecoveryCheckAt: 1735689601210
       network: { active: '❌', enabled: '✅' }
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'hybrid-doc-network-disallowed-online-session'
-      updatedAt: 1735689600025
+      updatedAt: 1735689601225
     `);
   });
 
@@ -435,10 +440,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -470,7 +474,9 @@ describe('document', () => {
   test('disallowed outage mode still retries the direct mutation before deciding not to queue', async () => {
     const sessionKey = 'hybrid-doc-outage-disallowed-online-session';
     const storeName = 'hybrid-doc-outage-disallowed-online-store';
-    const directMutation = vi.fn(() => Promise.resolve(2));
+    const directMutation = vi.fn(() =>
+      env.serverMock.delayedSetData(2).then(() => 2),
+    );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
@@ -494,10 +500,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -514,10 +519,12 @@ describe('document', () => {
     env.apiStore.scheduleFetch('highPriority');
     await advanceTime(25);
 
-    const result = await env.apiStore.performMutation({
+    const pendingResult = env.apiStore.performMutation({
       mutation: directMutation,
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
+    await flushAllTimers();
+    const result = await pendingResult;
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
@@ -532,11 +539,11 @@ describe('document', () => {
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
-      lastRecoveryCheckAt: 1735689600025
+      lastRecoveryCheckAt: 1735689601224
       network: { active: '❌', enabled: '❌' }
       outage: { active: '❌', enabled: '✅' }
       sessionKey: 'hybrid-doc-outage-disallowed-online-session'
-      updatedAt: 1735689600025
+      updatedAt: 1735689601225
     `);
   });
 
@@ -569,10 +576,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -632,10 +638,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -716,9 +721,9 @@ describe('document', () => {
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
-                execute: ({ input }) => {
-                  const result = replayDocumentValueWithDelay(env, input);
-                  return result;
+                execute: async ({ input }) => {
+                  await env.serverMock.delayedSetData(input.value);
+                  return input;
                 },
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateState((draft) => {
@@ -819,10 +824,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -862,10 +866,9 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -886,11 +889,15 @@ describe('document', () => {
 
     env.serverMock.setData(2);
 
-    const result = await env.apiStore.performMutation({
-      mutation: () => Promise.resolve(undefined),
-      revalidateOnSuccess: true,
-      offline: { operation: 'updateValue', input: { value: 2 } },
-    });
+    const result = await resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+        },
+        revalidateOnSuccess: true,
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      }),
+    );
 
     expect({ ok: result.ok, value: result.ok ? result.value : null })
       .toMatchInlineSnapshot(`
@@ -922,7 +929,9 @@ describe('collection', () => {
     const sessionKey = 'hybrid-collection-offline-session';
     const storeName = 'hybrid-collection-offline-store';
     const directMutation = vi.fn(() =>
-      Promise.resolve({ value: { name: 'Grace' } }),
+      env.serverTable
+        .delayedUpdateItem('users||1', { name: 'Grace' })
+        .then(() => ({ value: { name: 'Grace' } })),
     );
     const env: ReturnType<
       typeof createCollectionStoreTestEnv<
@@ -951,10 +960,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => {
-                  const result = replayCollectionRenameWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.id, { name: input.name })
+                    .then(() => ({ value: { name: input.name } })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1002,25 +1011,37 @@ describe('collection', () => {
     network.setOffline();
     const sessionKey = 'hybrid-collection-batch-temp-session';
     const storeName = 'hybrid-collection-batch-temp-store';
+    const applyBatchCreateResults = async (
+      results: { id: string; name: string }[],
+    ) => {
+      for (const result of results) {
+        await env.serverTable.delayedSetItem(result.id, { name: result.name });
+      }
+      return results;
+    };
+    const applyRenameResult = (input: { id: string; name: string }) =>
+      env.serverTable
+        .delayedUpdateItem(input.id, { name: input.name })
+        .then(() => ({ value: { name: input.name } }));
     const createItemsExecute = vi.fn(
-      ({ input }: { input: { name: string }[] }) =>
-        Promise.resolve(
-          input.map((item) => ({
-            id: `users||${item.name.toLowerCase()}`,
-            name: item.name,
-          })),
-        ),
-    );
-    const renameItemExecute = vi.fn(
-      ({ input }: { input: { id: string; name: string } }) => {
-        env.apiStore.updateItemState(input.id, () => ({
-          value: { name: input.name },
+      async ({ input }: { input: { name: string }[] }) => {
+        const results = input.map((item) => ({
+          id: `users||${item.name.toLowerCase()}`,
+          name: item.name,
         }));
-
-        return Promise.resolve({ value: { name: input.name } });
+        return applyBatchCreateResults(results);
       },
     );
-    const env = createCollectionStoreTestEnv<
+    const renameItemExecute = vi.fn(
+      ({ input }: { input: { id: string; name: string } }) =>
+        applyRenameResult(input),
+    );
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        BatchCollectionCreateOperations
+      >
+    > = createCollectionStoreTestEnv<
       { name: string },
       BatchCollectionCreateOperations
     >(
@@ -1077,7 +1098,18 @@ describe('collection', () => {
     );
 
     const createResult = await env.apiStore.performMutation(null, {
-      mutation: () => Promise.resolve({ ok: true }),
+      mutation: async () => {
+        const results = [
+          { id: 'users||ada queued', name: 'Ada queued' },
+          { id: 'users||grace queued', name: 'Grace queued' },
+        ];
+        for (const result of results) {
+          await env.serverTable.delayedSetItem(result.id, {
+            name: result.name,
+          });
+        }
+        return results;
+      },
       offline: {
         operation: 'createItems',
         input: [{ name: 'Ada queued' }, { name: 'Grace queued' }],
@@ -1111,14 +1143,20 @@ describe('collection', () => {
     ).toMatchInlineSnapshot(`value: { name: 'pending:Grace queued' }`);
 
     await env.apiStore.performMutation('temp:Ada queued', {
-      mutation: () => Promise.resolve({ value: { name: 'Ada rebound' } }),
+      mutation: () =>
+        env.serverTable
+          .delayedUpdateItem('temp:Ada queued', { name: 'Ada rebound' })
+          .then(() => ({ value: { name: 'Ada rebound' } })),
       offline: {
         operation: 'renameItem',
         input: { id: 'temp:Ada queued', name: 'Ada rebound' },
       },
     });
     await env.apiStore.performMutation('temp:Grace queued', {
-      mutation: () => Promise.resolve({ value: { name: 'Grace rebound' } }),
+      mutation: () =>
+        env.serverTable
+          .delayedUpdateItem('temp:Grace queued', { name: 'Grace rebound' })
+          .then(() => ({ value: { name: 'Grace rebound' } })),
       offline: {
         operation: 'renameItem',
         input: { id: 'temp:Grace queued', name: 'Grace rebound' },
@@ -1128,10 +1166,10 @@ describe('collection', () => {
     act(() => {
       network.goOnline();
     });
-    await advanceTime(250);
     await waitForMicrotaskCondition(
-      () => renameItemExecute.mock.calls.length === 2,
+      () => createItemsExecute.mock.calls.length === 1,
     );
+    await flushAllTimers();
 
     expect(createItemsExecute).toHaveBeenCalledTimes(1);
     expect(renameItemExecute.mock.calls.map((call) => call[0].input))
@@ -1210,15 +1248,17 @@ describe('collection', () => {
                       finalData: { value: { name: item.name } },
                     })),
                 },
-                execute: ({ input }) => {
-                  const result = replayBatchCollectionCreateWithDelay(
-                    env,
-                    input.map((item) => ({
-                      id: `users||${item.name.toLowerCase()}`,
-                      name: item.name,
-                    })),
-                  );
-                  return result;
+                execute: async ({ input }) => {
+                  const results = input.map((item) => ({
+                    id: `users||${item.name.toLowerCase()}`,
+                    name: item.name,
+                  }));
+                  for (const result of results) {
+                    await env.serverTable.delayedSetItem(result.id, {
+                      name: result.name,
+                    });
+                  }
+                  return results;
                 },
               },
             },
@@ -1230,7 +1270,18 @@ describe('collection', () => {
     // This temp-entity definition only returns metadata for the first item in
     // the batch, so the store should reject the mutation atomically.
     const result = await env.apiStore.performMutation(null, {
-      mutation: () => Promise.resolve({ value: { name: 'unused' } }),
+      mutation: async () => {
+        const results = [
+          { id: 'users||temp a', name: 'Temp A' },
+          { id: 'users||temp b', name: 'Temp B' },
+        ];
+        for (const result of results) {
+          await env.serverTable.delayedSetItem(result.id, {
+            name: result.name,
+          });
+        }
+        return results;
+      },
       offline: {
         operation: 'createItems',
         input: [{ name: 'Temp A' }, { name: 'Temp B' }],
@@ -1258,7 +1309,9 @@ describe('collection', () => {
     const sessionKey = 'hybrid-collection-online-session';
     const storeName = 'hybrid-collection-online-store';
     const directMutation = vi.fn(() =>
-      Promise.resolve({ value: { name: 'Grace' } }),
+      env.serverTable
+        .delayedUpdateItem('users||1', { name: 'Grace' })
+        .then(() => ({ value: { name: 'Grace' } })),
     );
     const env: ReturnType<
       typeof createCollectionStoreTestEnv<
@@ -1287,10 +1340,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => {
-                  const result = replayCollectionRenameWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.id, { name: input.name })
+                    .then(() => ({ value: { name: input.name } })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1305,13 +1358,15 @@ describe('collection', () => {
 
     // While online, offline-enabled mutations should still use the direct
     // mutation path and skip creating replay state.
-    const result = await env.apiStore.performMutation('users||1', {
-      mutation: directMutation,
-      offline: {
-        operation: 'renameItem',
-        input: { id: 'users||1', name: 'Grace' },
-      },
-    });
+    const result = await resolveAfterAllTimers(
+      env.apiStore.performMutation('users||1', {
+        mutation: directMutation,
+        offline: {
+          operation: 'renameItem',
+          input: { id: 'users||1', name: 'Grace' },
+        },
+      }),
+    );
 
     // The result should stay classified as online and leave the queue empty.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
@@ -1373,10 +1428,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => {
-                  const result = replayCollectionRenameWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.id, { name: input.name })
+                    .then(() => ({ value: { name: input.name } })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1469,10 +1524,10 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => {
-                  const result = replayCollectionRenameWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.id, { name: input.name })
+                    .then(() => ({ value: { name: input.name } })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.id, () => ({
                     value: { name: input.name },
@@ -1510,7 +1565,11 @@ describe('list-query', () => {
     network.setOffline();
     const sessionKey = 'hybrid-list-offline-session';
     const storeName = 'hybrid-list-offline-store';
-    const directMutation = vi.fn(() => Promise.resolve({ name: 'Grace' }));
+    const directMutation = vi.fn(() =>
+      env.serverTable
+        .delayedUpdateItem('users||1', { name: 'Grace' })
+        .then(() => ({ name: 'Grace' })),
+    );
     const env: ReturnType<
       typeof createListQueryStoreTestEnv<
         { id: number; name: string },
@@ -1543,10 +1602,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
-                  const result = replayListQueryPatchWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1588,7 +1647,11 @@ describe('list-query', () => {
   test('call the direct mutation while online and skip queueing on success', async () => {
     const sessionKey = 'hybrid-list-online-session';
     const storeName = 'hybrid-list-online-store';
-    const directMutation = vi.fn(() => Promise.resolve({ name: 'Grace' }));
+    const directMutation = vi.fn(() =>
+      env.serverTable
+        .delayedUpdateItem('users||1', { name: 'Grace' })
+        .then(() => ({ name: 'Grace' })),
+    );
     const env: ReturnType<
       typeof createListQueryStoreTestEnv<
         { id: number; name: string },
@@ -1621,10 +1684,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
-                  const result = replayListQueryPatchWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1640,13 +1703,15 @@ describe('list-query', () => {
 
     // When connectivity is healthy, list-query mutations should behave like
     // normal direct mutations and never create queued fallback work.
-    const result = await env.apiStore.performMutation('users||1', {
-      mutation: directMutation,
-      offline: {
-        operation: 'patchUserName',
-        input: { itemId: 'users||1', name: 'Grace' },
-      },
-    });
+    const result = await resolveAfterAllTimers(
+      env.apiStore.performMutation('users||1', {
+        mutation: directMutation,
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Grace' },
+        },
+      }),
+    );
 
     // The success should keep its online result shape and leave the queue empty.
     expect({ ok: result.ok, value: result.ok ? result.value : null })
@@ -1696,10 +1761,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
-                  const result = replayListQueryPatchWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1714,15 +1779,21 @@ describe('list-query', () => {
     );
     // Even without a payload, the online success path should still notify
     // consumers through the normal onSuccess callback contract.
-    const result = await env.apiStore.performMutation('users||1', {
-      mutation: () => Promise.resolve(undefined),
-      onSuccess,
-      revalidateOnSuccess: true,
-      offline: {
-        operation: 'patchUserName',
-        input: { itemId: 'users||1', name: 'Grace' },
-      },
-    });
+    const result = await resolveAfterAllTimers(
+      env.apiStore.performMutation('users||1', {
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('users||1', {
+            name: 'Grace',
+          });
+        },
+        onSuccess,
+        revalidateOnSuccess: true,
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Grace' },
+        },
+      }),
+    );
 
     // The mutation remains an online success, and the callback receives the
     // undefined payload plus the item id that was mutated.
@@ -1784,10 +1855,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
-                  const result = replayListQueryPatchWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1886,10 +1957,10 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => {
-                  const result = replayListQueryPatchWithDelay(env, input);
-                  return result;
-                },
+                execute: ({ input }) =>
+                  env.serverTable
+                    .delayedUpdateItem(input.itemId, { name: input.name })
+                    .then(() => ({ name: input.name })),
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateItemState(input.itemId, (item) => ({
                     ...item,
@@ -1947,10 +2018,9 @@ test('fallback queueing does not reapply the optimistic update', async () => {
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }) => {
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+            execute: async ({ input }) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -2022,12 +2092,11 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
   const directMutation = vi.fn(() =>
     Promise.reject(new Error('offline-fallback')),
   );
-  const execute = vi.fn(({ input }: { input: { name: string } }) =>
-    replayCollectionCreateWithDelay(env, {
-      id: 'users||ada',
-      name: input.name,
-    }),
-  );
+  const execute = vi.fn(async ({ input }: { input: { name: string } }) => {
+    const result = { id: 'users||ada', name: input.name };
+    await env.serverTable.delayedSetItem(result.id, { name: result.name });
+    return result;
+  });
   const env = createCollectionStoreTestEnv<
     { name: string },
     CreateUserOperations

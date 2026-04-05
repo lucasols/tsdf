@@ -25,10 +25,6 @@ import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   getLocalStorageKeys,
   type PatchUserOperations,
-  replayCollectionCreateWithDelay,
-  replayDocumentValueWithDelay,
-  replayListQueryCreateWithDelay,
-  replayListQueryPatchWithDelay,
   type UpdateValueConflictOperations,
   userPatchSchema,
   userRowSchema,
@@ -171,9 +167,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
     }) => {
       expect(input.value).toBe(2);
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      const replayResult = replayDocumentValueWithDelay(env, input);
-
-      return replayResult;
+      return env.serverMock.delayedSetData(input.value).then(() => input);
     },
   );
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
@@ -220,7 +214,10 @@ test('offline conflicts are detected before execute, surface through selectors, 
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -361,9 +358,8 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
               inputSchema: docMutationInputSchema,
               execute: async ({ input }) => {
                 executedInputs.push(input.value);
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -389,7 +385,10 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -490,10 +489,9 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
-                const replayResult = replayDocumentValueWithDelay(env, input);
-
-                return replayResult;
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
               },
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -518,7 +516,10 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -574,10 +575,9 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }) => {
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+            execute: async ({ input }) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -685,11 +685,11 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
               execute: () =>
                 new Promise<{ id: string; name: string }>((resolve) => {
                   executeResolvers.push((result) => {
-                    void replayCollectionCreateWithDelay(env, result).then(
-                      () => {
+                    void env.serverTable
+                      .delayedSetItem(result.id, { name: result.name })
+                      .then(() => {
                         resolve(result);
-                      },
-                    );
+                      });
                   });
                 }),
               conflictHandling: {
@@ -713,7 +713,11 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     },
   );
   await env.apiStore.performMutation(null, {
-    mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
+    mutation: async () => {
+      const result = { id: 'users||ada', name: 'Ada' };
+      await env.serverTable.delayedSetItem(result.id, { name: result.name });
+      return result;
+    },
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
 
@@ -853,9 +857,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
 
 test('committing a temp-entity conflict with an external result reconciles the original temp row', async () => {
   network.setOffline();
-  const execute = vi.fn(() =>
-    Promise.resolve({ id: 'users||should-not-run', name: 'Should not run' }),
-  );
+  const execute = vi.fn<() => Promise<{ id: string; name: string }>>();
   const env = createCollectionStoreTestEnv<
     { name: string },
     CreateUserConflictOperations
@@ -898,9 +900,18 @@ test('committing a temp-entity conflict with an external result reconciles the o
       },
     },
   );
+  execute.mockImplementation(async () => {
+    const result = { id: 'users||should-not-run', name: 'Should not run' };
+    await env.serverTable.delayedSetItem(result.id, { name: result.name });
+    return result;
+  });
 
   await env.apiStore.performMutation(null, {
-    mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
+    mutation: async () => {
+      const result = { id: 'users||ada', name: 'Ada' };
+      await env.serverTable.delayedSetItem(result.id, { name: result.name });
+      return result;
+    },
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
 
@@ -971,12 +982,19 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
   network.setOffline();
   const usersQuery = { tableId: 'users' } as const;
   const createUserExecute = vi.fn(
-    async ({ input }: { input: { name: string } }) =>
-      replayListQueryCreateWithDelay(env, { id: 3, name: input.name }),
+    async ({ input }: { input: { name: string } }) => {
+      const result = { id: 3, name: input.name };
+      await env.serverTable.delayedSetItem('users||3', result);
+      return result;
+    },
   );
   const patchUserExecute = vi.fn(
-    ({ input }: { input: { itemId: string; name: string } }) =>
-      replayListQueryPatchWithDelay(env, input),
+    async ({ input }: { input: { itemId: string; name: string } }) => {
+      await env.serverTable.delayedUpdateItem(input.itemId, {
+        name: input.name,
+      });
+      return { name: input.name };
+    },
   );
 
   const env: ReturnType<
@@ -1075,7 +1093,11 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      mutation: async () => {
+        const result = { id: 3, name: 'Linus offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
       offline: { operation: 'createUser', input: { name: 'Linus offline' } },
     });
   });
@@ -1088,7 +1110,12 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
           name: 'Linus blocked edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+          name: 'Linus blocked edit',
+        });
+        return { name: 'Linus blocked edit' };
+      },
       offline: {
         operation: 'patchUserName',
         input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
@@ -1273,9 +1300,10 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
 });
 
 test('mutations queued via hybrid fallback still enter the normal conflict resolution flow on replay', async () => {
-  const execute = vi.fn(({ input }: { input: { value: number } }) =>
-    replayDocumentValueWithDelay(env, input),
-  );
+  const execute = vi.fn(async ({ input }: { input: { value: number } }) => {
+    await env.serverMock.delayedSetData(input.value);
+    return input;
+  });
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
     1,
     {

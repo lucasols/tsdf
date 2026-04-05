@@ -16,8 +16,6 @@ import {
   getLocalStorageKeys,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
-  replayCollectionCreateWithDelay,
-  replayDocumentValueWithDelay,
   type UpdateValueConflictOperations,
   type UpdateValueOperations,
   userPatchSchema,
@@ -113,11 +111,11 @@ test('collection offline creates keep durable temp-id metadata and clear after r
               execute: () =>
                 new Promise<{ id: string; name: string }>((resolve) => {
                   resolveCreates.push((result) => {
-                    void replayCollectionCreateWithDelay(env, result).then(
-                      () => {
+                    void env.serverTable
+                      .delayedSetItem(result.id, { name: result.name })
+                      .then(() => {
                         resolve(result);
-                      },
-                    );
+                      });
                   });
                 }),
             },
@@ -136,11 +134,19 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   // Queue two create mutations for the same entity while offline. Both should
   // accumulate under one temp-entity entry since they share the same entity ref.
   const queued = await env.apiStore.performMutation(null, {
-    mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
+    mutation: async () => {
+      const result = { id: 'users||ada', name: 'Ada' };
+      await env.serverTable.delayedSetItem(result.id, { name: result.name });
+      return result;
+    },
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
   await env.apiStore.performMutation(null, {
-    mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
+    mutation: async () => {
+      const result = { id: 'users||ada-2', name: 'Ada' };
+      await env.serverTable.delayedSetItem(result.id, { name: result.name });
+      return result;
+    },
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
 
@@ -203,9 +209,8 @@ test('document offline accumulation keeps a single persisted queue entry and rep
     >()
     .mockImplementation(async ({ input, enqueuedAt }) => {
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      const replayResult = replayDocumentValueWithDelay(env, input);
-
-      return replayResult;
+      await env.serverMock.delayedSetData(input.value);
+      return input;
     });
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
@@ -244,7 +249,10 @@ test('document offline accumulation keeps a single persisted queue entry and rep
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -255,7 +263,10 @@ test('document offline accumulation keeps a single persisted queue entry and rep
         draft.value = 3;
       });
     },
-    mutation: () => Promise.resolve(3),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(3);
+      return 3;
+    },
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
@@ -425,7 +436,12 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
         name: 'Ada renamed offline',
       }));
     },
-    mutation: () => Promise.resolve({ name: 'Ada renamed offline' }),
+    mutation: async () => {
+      await env.serverTable.delayedUpdateItem('users||1', {
+        name: 'Ada renamed offline',
+      });
+      return { name: 'Ada renamed offline' };
+    },
     offline: {
       operation: 'patchUserName',
       input: { itemId: 'users||1', name: 'Ada renamed offline' },
@@ -437,7 +453,9 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
     optimisticUpdate: () => {
       env.apiStore.deleteItemState('users||1');
     },
-    mutation: () => Promise.resolve(undefined),
+    mutation: async () => {
+      await env.serverTable.delayedRemoveItem('users||1');
+    },
     offline: { operation: 'deleteUser', input: { itemId: 'users||1' } },
   });
 
@@ -603,7 +621,10 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
         role: 'admin',
       }));
     },
-    mutation: () => Promise.resolve({ role: 'admin' }),
+    mutation: async () => {
+      await env.serverTable.delayedUpdateItem('users||1', { role: 'admin' });
+      return { role: 'admin' };
+    },
     offline: {
       operation: 'setUserRole',
       input: { itemId: 'users||1', role: 'admin' },
@@ -617,7 +638,12 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
         name: 'Ada first',
       }));
     },
-    mutation: () => Promise.resolve({ name: 'Ada first' }),
+    mutation: async () => {
+      await env.serverTable.delayedUpdateItem('users||1', {
+        name: 'Ada first',
+      });
+      return { name: 'Ada first' };
+    },
     offline: {
       operation: 'setUserName',
       input: { itemId: 'users||1', name: 'Ada first' },
@@ -634,7 +660,12 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
         name: 'Ada latest',
       }));
     },
-    mutation: () => Promise.resolve({ name: 'Ada latest' }),
+    mutation: async () => {
+      await env.serverTable.delayedUpdateItem('users||1', {
+        name: 'Ada latest',
+      });
+      return { name: 'Ada latest' };
+    },
     offline: {
       operation: 'setUserName',
       input: { itemId: 'users||1', name: 'Ada latest' },
@@ -772,7 +803,10 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
   trackDocumentReplayState(env);
@@ -881,7 +915,10 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
   trackDocumentReplayState(env);
@@ -969,7 +1006,10 @@ test('healthy replay failures are retried 3 times and then move into the resolut
   trackDocumentReplayState(env);
 
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
   trackDocumentReplayState(env);
@@ -1088,7 +1128,10 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
 
   const queueOfflineMutation = () =>
     env.apiStore.performMutation({
-      mutation: () => Promise.resolve(2),
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
@@ -1303,7 +1346,10 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
 
   // Queue a mutation while offline.
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -1383,7 +1429,10 @@ test('going offline again resets the healthy replay failure budget', async () =>
   trackDocumentReplayState(env);
 
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
   trackDocumentReplayState(env);
@@ -1519,7 +1568,10 @@ test('new mutations queue separately instead of merging into entries that may ha
 
   // Queue a mutation while offline.
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -1547,7 +1599,10 @@ test('new mutations queue separately instead of merging into entries that may ha
   await Promise.resolve();
 
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(3),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(3);
+      return 3;
+    },
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
@@ -1605,7 +1660,10 @@ test('supersede does not discard entries that may have already been applied on t
 
   // Let the first queued mutation reach needs-confirmation before adding a new one.
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -1631,7 +1689,10 @@ test('supersede does not discard entries that may have already been applied on t
 
   // The new superseding entry should not remove the already-attempted one.
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(3),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(3);
+      return 3;
+    },
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
@@ -1742,7 +1803,10 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
         draft.value = 2;
       });
     },
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
   trackDocumentReplayState(env);
@@ -1830,7 +1894,10 @@ test('session switches do not leave replayed queue entries in the old namespace'
 
   // Queue a mutation under session-a.
   await env.apiStore.performMutation({
-    mutation: () => Promise.resolve(2),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
     offline: { operation: 'updateValue', input: { value: 2 } },
   });
 
@@ -1882,10 +1949,9 @@ test('document offline mutations are queued durably and replay when the browser 
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }) => {
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+            execute: async ({ input }) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1919,7 +1985,10 @@ test('document offline mutations are queued durably and replay when the browser 
           draft.value = 2;
         });
       },
-      mutation: () => Promise.resolve(2),
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
   });
@@ -2031,10 +2100,9 @@ test('accumulation still merges entries when the queue starts from a hybrid fall
           updateValue: {
             inputSchema: docMutationInputSchema,
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
-            execute: ({ input }) => {
-              const replayResult = replayDocumentValueWithDelay(env, input);
-
-              return replayResult;
+            execute: async ({ input }) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
             },
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -2066,7 +2134,10 @@ test('accumulation still merges entries when the queue starts from a hybrid fall
         draft.value = 3;
       });
     },
-    mutation: () => Promise.resolve(3),
+    mutation: async () => {
+      await env.serverMock.delayedSetData(3);
+      return 3;
+    },
     offline: { operation: 'updateValue', input: { value: 3 } },
   });
 

@@ -148,7 +148,10 @@ describe('document overlays', () => {
             draft.value = 2;
           });
         },
-        mutation: () => Promise.resolve(2),
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+          return 2;
+        },
         offline: { operation: 'updateValue', input: { value: 2 } },
       });
     });
@@ -280,7 +283,10 @@ describe('document overlays', () => {
             draft.value = 2;
           });
         },
-        mutation: () => Promise.resolve(2),
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+          return 2;
+        },
         offline: { operation: 'updateValue', input: { value: 2 } },
       });
     });
@@ -411,7 +417,12 @@ describe('collection overlays', () => {
             draft.value.name = 'Ada pending';
           });
         },
-        mutation: () => Promise.resolve({ value: { name: 'Ada replayed' } }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('users||1', {
+            name: 'Ada replayed',
+          });
+          return { value: { name: 'Ada replayed' } };
+        },
         offline: { operation: 'renameItem', input: { name: 'Ada replayed' } },
       });
     });
@@ -516,7 +527,9 @@ describe('collection overlays', () => {
         optimisticUpdate: () => {
           env.apiStore.deleteItemState('users||1');
         },
-        mutation: () => Promise.resolve(undefined),
+        mutation: async () => {
+          await env.serverTable.delayedRemoveItem('users||1');
+        },
         offline: { operation: 'deleteItem', input: { itemId: 'users||1' } },
       });
     });
@@ -622,7 +635,12 @@ describe('collection overlays', () => {
             draft.value.name = 'Ada pending';
           });
         },
-        mutation: () => Promise.resolve({ value: { name: 'Ada replayed' } }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('users||1', {
+            name: 'Ada replayed',
+          });
+          return { value: { name: 'Ada replayed' } };
+        },
         offline: { operation: 'renameItem', input: { name: 'Ada replayed' } },
       });
     });
@@ -752,7 +770,12 @@ describe('list-query overlays', () => {
             name: 'Ada pending',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Ada replayed' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('users||1', {
+            name: 'Ada replayed',
+          });
+          return { name: 'Ada replayed' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'users||1', name: 'Ada replayed' },
@@ -879,7 +902,12 @@ describe('list-query overlays', () => {
             name: 'Ada pending',
           }));
         },
-        mutation: () => Promise.resolve({ name: 'Ada replayed' }),
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem('users||1', {
+            name: 'Ada replayed',
+          });
+          return { name: 'Ada replayed' };
+        },
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'users||1', name: 'Ada replayed' },
@@ -1015,7 +1043,11 @@ describe('list-query overlays', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        mutation: async () => {
+          const data = { id: 3, name: 'Linus offline' };
+          await env.serverTable.delayedSetItem('users||3', data);
+          return data;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus offline' } },
       });
     });
@@ -1145,7 +1177,11 @@ describe('list-query overlays', () => {
             { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
           );
         },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus blocked' }),
+        mutation: async () => {
+          const data = { id: 3, name: 'Linus blocked' };
+          await env.serverTable.delayedSetItem('users||3', data);
+          return data;
+        },
         offline: { operation: 'createUser', input: { name: 'Linus blocked' } },
       });
     });
@@ -1253,7 +1289,9 @@ describe('list-query overlays', () => {
         optimisticUpdate: () => {
           env.apiStore.deleteItemState('users||1');
         },
-        mutation: () => Promise.resolve(undefined),
+        mutation: async () => {
+          await env.serverTable.delayedRemoveItem('users||1');
+        },
         offline: { operation: 'deleteUser', input: { itemId: 'users||1' } },
       });
     });

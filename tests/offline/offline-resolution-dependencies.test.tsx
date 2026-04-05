@@ -15,8 +15,6 @@ import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
   type PatchUserOperations,
-  replayListQueryCreateWithDelay,
-  replayListQueryPatchWithDelay,
   userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
@@ -83,22 +81,6 @@ const patchWithAuditSchema = rc_object({
   name: rc_string,
   auditRef: rc_string,
 });
-
-async function replayNestedListQueryCreateWithDelay(
-  env: {
-    serverTable: {
-      delayedSetItem: (
-        itemId: string,
-        data: NestedListQueryUserRow,
-        options?: { durationMs?: number },
-      ) => Promise<void>;
-    };
-  },
-  result: NestedListQueryUserRow,
-) {
-  await env.serverTable.delayedSetItem(`users||${result.id}`, result);
-  return result;
-}
 
 /**
  * Exhaust the default healthy replay retry budget (3 attempts at 5 s intervals).
@@ -220,16 +202,17 @@ test('nested descendants cascade into blocked resolutions and discard together',
     },
   );
   createChildUserExecute.mockImplementation(
-    async ({ input }: { input: { name: string; parentId: string } }) =>
-      replayNestedListQueryCreateWithDelay(env, {
-        id: 4,
-        name: input.name,
-        parentId: input.parentId,
-      }),
+    async ({ input }: { input: { name: string; parentId: string } }) => {
+      const result = { id: 4, name: input.name, parentId: input.parentId };
+      await env.serverTable.delayedSetItem('users||4', result);
+      return result;
+    },
   );
   patchUserExecute.mockImplementation(
     async ({ input }: { input: { itemId: string; name: string } }) =>
-      replayListQueryPatchWithDelay(env, input),
+      env.serverTable
+        .delayedUpdateItem(input.itemId, { name: input.name })
+        .then(() => ({ name: input.name })),
   );
 
   const hook = renderHook(() => {
@@ -253,7 +236,11 @@ test('nested descendants cascade into blocked resolutions and discard together',
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Parent offline' }),
+      mutation: async () => {
+        const result = { id: 3, name: 'Parent offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
       offline: { operation: 'createUser', input: { name: 'Parent offline' } },
     });
   });
@@ -268,8 +255,11 @@ test('nested descendants cascade into blocked resolutions and discard together',
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () =>
-        Promise.resolve({ id: 4, name: 'Child offline', parentId: 'users||3' }),
+      mutation: async () => {
+        const result = { id: 4, name: 'Child offline', parentId: 'users||3' };
+        await env.serverTable.delayedSetItem('users||4', result);
+        return result;
+      },
       offline: {
         operation: 'createChildUser',
         input: { name: 'Child offline', parentId: 'temp:Parent offline' },
@@ -286,7 +276,12 @@ test('nested descendants cascade into blocked resolutions and discard together',
           name: 'Child blocked edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Child blocked edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Child offline', {
+          name: 'Child blocked edit',
+        });
+        return { name: 'Child blocked edit' };
+      },
       offline: {
         operation: 'patchUserName',
         input: { itemId: 'temp:Child offline', name: 'Child blocked edit' },
@@ -508,20 +503,24 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     },
   );
   createUserExecute.mockImplementationOnce(
-    async ({ input }: { input: { name: string } }) =>
-      replayListQueryCreateWithDelay(env, { id: 3, name: input.name }),
+    async ({ input }: { input: { name: string } }) => {
+      const result = { id: 3, name: input.name };
+      await env.serverTable.delayedSetItem('users||3', result);
+      return result;
+    },
   );
   createChildUserExecute.mockImplementation(
-    async ({ input }: { input: { name: string; parentId: string } }) =>
-      replayNestedListQueryCreateWithDelay(env, {
-        id: 4,
-        name: input.name,
-        parentId: input.parentId,
-      }),
+    async ({ input }: { input: { name: string; parentId: string } }) => {
+      const result = { id: 4, name: input.name, parentId: input.parentId };
+      await env.serverTable.delayedSetItem('users||4', result);
+      return result;
+    },
   );
   patchUserExecute.mockImplementation(
     async ({ input }: { input: { itemId: string; name: string } }) =>
-      replayListQueryPatchWithDelay(env, input),
+      env.serverTable
+        .delayedUpdateItem(input.itemId, { name: input.name })
+        .then(() => ({ name: input.name })),
   );
 
   const hook = renderHook(() => {
@@ -544,7 +543,11 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Parent offline' }),
+      mutation: async () => {
+        const result = { id: 3, name: 'Parent offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
       offline: { operation: 'createUser', input: { name: 'Parent offline' } },
     });
   });
@@ -559,12 +562,15 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () =>
-        Promise.resolve({
+      mutation: async () => {
+        const result = {
           id: 4,
           name: 'Child offline',
           parentId: 'temp:Parent offline',
-        }),
+        };
+        await env.serverTable.delayedSetItem('users||4', result);
+        return result;
+      },
       offline: {
         operation: 'createChildUser',
         input: { name: 'Child offline', parentId: 'temp:Parent offline' },
@@ -582,7 +588,12 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
           name: 'Child blocked edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Child blocked edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Child offline', {
+          name: 'Child blocked edit',
+        });
+        return { name: 'Child blocked edit' };
+      },
       offline: {
         operation: 'patchUserName',
         input: { itemId: 'temp:Child offline', name: 'Child blocked edit' },
@@ -631,10 +642,10 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
   await waitForMicrotaskCondition(
     () => createChildUserExecute.mock.calls.length === 1,
   );
+  await flushAllTimers();
   await waitForMicrotaskCondition(
     () => patchUserExecute.mock.calls.length === 1,
   );
-  await flushAllTimers();
 
   // The child create received the parent's final payload as parentId, proving
   // the dependency remap worked through the replay chain.
@@ -766,12 +777,17 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
       },
     },
   );
-  createUserExecute.mockImplementationOnce(async () =>
-    replayListQueryCreateWithDelay(env, { id: 3, name: 'Linus offline' }),
-  );
+  createUserExecute.mockImplementationOnce(async () => {
+    const result = { id: 3, name: 'Linus offline' };
+    await env.serverTable.delayedSetItem('users||3', result);
+    return result;
+  });
   patchUserExecute.mockImplementation(async (ctx: PatchUserReplayContext) => {
     resolvedRefsSeen.push(ctx.resolveEntityRef('temp:Linus offline'));
-    return replayListQueryPatchWithDelay(env, ctx.input);
+    await env.serverTable.delayedUpdateItem(ctx.input.itemId, {
+      name: ctx.input.name,
+    });
+    return { name: ctx.input.name };
   });
 
   const hook = renderHook(() => {
@@ -795,7 +811,11 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      mutation: async () => {
+        const result = { id: 3, name: 'Linus offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
       offline: { operation: 'createUser', input: { name: 'Linus offline' } },
     });
   });
@@ -810,7 +830,12 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
           name: 'Linus blocked edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+          name: 'Linus blocked edit',
+        });
+        return { name: 'Linus blocked edit' };
+      },
       offline: {
         operation: 'patchUserName',
         input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
@@ -985,13 +1010,18 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
       },
     },
   );
-  createUserExecute.mockImplementationOnce(async () =>
-    replayListQueryCreateWithDelay(env, { id: 3, name: 'Linus offline' }),
-  );
+  createUserExecute.mockImplementationOnce(async () => {
+    const result = { id: 3, name: 'Linus offline' };
+    await env.serverTable.delayedSetItem('users||3', result);
+    return result;
+  });
   patchUserExecute.mockImplementation(
     async ({ input }: PatchUserReplayContext) => {
       resolvedRefsSeen.push(input.itemId);
-      return replayListQueryPatchWithDelay(env, input);
+      await env.serverTable.delayedUpdateItem(input.itemId, {
+        name: input.name,
+      });
+      return { name: input.name };
     },
   );
 
@@ -1014,7 +1044,11 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      mutation: async () => {
+        const result = { id: 3, name: 'Linus offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
       offline: { operation: 'createUser', input: { name: 'Linus offline' } },
     });
   });
@@ -1029,7 +1063,12 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
           name: 'Linus blocked edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+          name: 'Linus blocked edit',
+        });
+        return { name: 'Linus blocked edit' };
+      },
       offline: {
         operation: 'patchUserName',
         input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
@@ -1286,7 +1325,11 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
           { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
         );
       },
-      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      mutation: async () => {
+        const result = { id: 3, name: 'Linus offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
       offline: { operation: 'createUser', input: { name: 'Linus offline' } },
     });
   });
@@ -1302,7 +1345,12 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
           name: 'Ada unrelated edit',
         }));
       },
-      mutation: () => Promise.resolve({ name: 'Ada unrelated edit' }),
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', {
+          name: 'Ada unrelated edit',
+        });
+        return { name: 'Ada unrelated edit' };
+      },
       offline: {
         operation: 'patchUserNameWithAudit',
         input: {
