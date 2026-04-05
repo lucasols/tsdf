@@ -24,6 +24,10 @@ import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   getLocalStorageKeys,
   type PatchUserOperations,
+  replayCollectionCreateWithDelay,
+  replayDocumentValueWithDelay,
+  replayListQueryCreateWithDelay,
+  replayListQueryPatchWithDelay,
   type UpdateValueConflictOperations,
   userPatchSchema,
   userRowSchema,
@@ -282,7 +286,9 @@ test('offline conflicts are detected before execute, surface through selectors, 
     }) => {
       expect(input.value).toBe(2);
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      return input;
+      const replayResult = replayDocumentValueWithDelay(env, input);
+
+      return replayResult;
     },
   );
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
@@ -303,6 +309,11 @@ test('offline conflicts are detected before execute, surface through selectors, 
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
               conflictHandling: {
                 schema: docConflictSchema,
                 detectConflict: ({ input, enqueuedAt }) => {
@@ -466,12 +477,16 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => {
+              execute: async ({ input }) => {
                 executedInputs.push(input.value);
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
                   draft.value = input.value;
                 });
-                return input;
               },
               conflictHandling: {
                 schema: docConflictSchema,
@@ -566,6 +581,7 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
     .    | offline:updateValue resolution-required
     1s   | -- resolve the conflict with a replacement value and replay it immediately
     .    | offline:updateValue replay-started
+    2.2s | server-data-changed (value: 7)
     .    | offline:updateValue replay-finished
     "
   `);
@@ -595,7 +611,16 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
               conflictHandling: {
                 schema: docConflictSchema,
                 detectConflict: ({ input }) =>
@@ -670,7 +695,16 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }) => input,
+            execute: ({ input }) => {
+              const replayResult = replayDocumentValueWithDelay(env, input);
+
+              return replayResult;
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             conflictHandling: {
               schema: docConflictSchema,
               detectConflict: ({ input }) =>
@@ -774,7 +808,13 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               execute: () =>
                 new Promise<{ id: string; name: string }>((resolve) => {
-                  executeResolvers.push(resolve);
+                  executeResolvers.push((result) => {
+                    void replayCollectionCreateWithDelay(env, result).then(
+                      () => {
+                        resolve(result);
+                      },
+                    );
+                  });
                 }),
               conflictHandling: {
                 schema: docConflictSchema,
@@ -918,15 +958,16 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     "
     time  | temp:Ada             |
     0     | -                    | offline:createUser queued
-    .     | pending:Ada          | ui-initialized
+    .     | pending:Ada          | [temp:Ada] ui-initialized
     1.01s | pending:Ada          | -- replay the queued temp create and persist the conflict
     .     | pending:Ada          | offline:createUser resolution-required
     .     | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
-    .     | pending:Ada resolved | ui-changed
+    .     | pending:Ada resolved | [temp:Ada] ui-changed
     .     | pending:Ada resolved | offline:createUser replay-started
-    .     | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
+    2.21s | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
+    .     | pending:Ada resolved | [users||ada-resolved] server-data-changed (value: {"name":"Ada resolved"})
     .     | pending:Ada resolved | offline:createUser replay-finished
-    .     | ···                  | ui-changed
+    .     | ···                  | [temp:Ada] ui-changed
     "
   `);
 
@@ -1059,22 +1100,23 @@ type CreateAndPatchListQueryUserConflictOperations = PatchUserOperations & {
 test('list-query temp-create conflicts promote dependent edits into blocked resolutions that the UI can inspect', async () => {
   network.setOffline();
   const usersQuery = { tableId: 'users' } as const;
-  const createUserExecute = vi.fn(({ input }: { input: { name: string } }) => ({
-    id: 3,
-    name: input.name,
-  }));
+  const createUserExecute = vi.fn(
+    async ({ input }: { input: { name: string } }) =>
+      replayListQueryCreateWithDelay(env, { id: 3, name: input.name }),
+  );
   const patchUserExecute = vi.fn(
-    ({ input }: { input: { itemId: string; name: string } }) => {
-      env.apiStore.updateItemState(input.itemId, (item) => ({
-        ...item,
-        name: input.name,
-      }));
-
-      return { name: input.name };
-    },
+    ({ input }: { input: { itemId: string; name: string } }) =>
+      replayListQueryPatchWithDelay(env, input),
   );
 
-  const env = createListQueryStoreTestEnv<
+  const env: ReturnType<
+    typeof createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateAndPatchListQueryUserConflictOperations
+    >
+  > = createListQueryStoreTestEnv<
     { id: number; name: string },
     false,
     false,
@@ -1125,6 +1167,12 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
           },
         },
@@ -1390,7 +1438,9 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
 });
 
 test('mutations queued via hybrid fallback still enter the normal conflict resolution flow on replay', async () => {
-  const execute = vi.fn(({ input }: { input: { value: number } }) => input);
+  const execute = vi.fn(({ input }: { input: { value: number } }) =>
+    replayDocumentValueWithDelay(env, input),
+  );
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
     1,
     {
@@ -1417,6 +1467,11 @@ test('mutations queued via hybrid fallback still enter the normal conflict resol
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
               conflictHandling: {
                 schema: docConflictSchema,
                 detectConflict: ({ input }) =>

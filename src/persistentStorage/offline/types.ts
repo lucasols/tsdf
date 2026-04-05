@@ -743,6 +743,21 @@ type OperationBaseContext<TInput> = {
   ) => TEntityRef;
 };
 
+/** Context passed to the post-replay success hook after `execute(...)` settles. */
+export type OfflineOperationExecuteSuccessContext<TInput, TResult> =
+  OperationBaseContext<TInput> & {
+    /** Replay result returned by `execute(...)`. */
+    result: TResult;
+  };
+
+/**
+ * Optional callback used to synchronize UI/cache state after a successful
+ * offline replay execute.
+ */
+export type OfflineOperationExecuteSuccessHandler<TInput, TResult> = (
+  ctx: OfflineOperationExecuteSuccessContext<TInput, TResult>,
+) => Promise<void> | void;
+
 type IsUnknown<T> = unknown extends T
   ? [keyof T] extends [never]
     ? true
@@ -953,40 +968,9 @@ export type OfflineTempEntitiesConfig<
   >[];
 };
 
-type OptionalTempEntityFields<
-  TInput,
-  TTempResult,
-  TTempId extends ValidPayload,
-  TPendingEntity = unknown,
-  TFinalPayload extends ValidPayload = ValidPayload,
-  TFinalData = unknown,
-> =
-  | {
-      /** Optional temporary-entity lifecycle for optimistic create/update operations. */
-      tempEntity?: OfflineTempEntityConfig<
-        TInput,
-        TTempResult,
-        TTempId,
-        TPendingEntity,
-        TFinalPayload,
-        TFinalData
-      >;
-      tempEntities?: never;
-    }
-  | {
-      tempEntity?: never;
-      /** Optional temporary-entity lifecycle for optimistic batch create/update operations. */
-      tempEntities?: OfflineTempEntitiesConfig<
-        TInput,
-        TTempResult,
-        TTempId,
-        TPendingEntity,
-        TFinalPayload,
-        TFinalData
-      >;
-    };
+type NoTempEntityFields = { tempEntity?: never; tempEntities?: never };
 
-type RequiredTempEntityFields<
+type ConfiguredTempEntityFields<
   TInput,
   TTempResult,
   TTempId extends ValidPayload,
@@ -995,7 +979,6 @@ type RequiredTempEntityFields<
   TFinalData = unknown,
 > =
   | {
-      /** Required when the operation declares a concrete temp-entity replay result. */
       tempEntity: OfflineTempEntityConfig<
         TInput,
         TTempResult,
@@ -1008,7 +991,6 @@ type RequiredTempEntityFields<
     }
   | {
       tempEntity?: never;
-      /** Required when the operation declares a concrete batch temp-entity replay result. */
       tempEntities: OfflineTempEntitiesConfig<
         TInput,
         TTempResult,
@@ -1018,41 +1000,6 @@ type RequiredTempEntityFields<
         TFinalData
       >;
     };
-
-type TempEntityField<
-  TInput,
-  TTempResult,
-  TTempId extends ValidPayload,
-  TPendingEntity = unknown,
-  TFinalPayload extends ValidPayload = ValidPayload,
-  TFinalData = unknown,
-> =
-  IsUnknown<TTempResult> extends true
-    ? OptionalTempEntityFields<
-        TInput,
-        TTempResult,
-        TTempId,
-        TPendingEntity,
-        TFinalPayload,
-        TFinalData
-      >
-    : [TTempResult] extends [void]
-      ? OptionalTempEntityFields<
-          TInput,
-          TTempResult,
-          TTempId,
-          TPendingEntity,
-          TFinalPayload,
-          TFinalData
-        >
-      : RequiredTempEntityFields<
-          TInput,
-          TTempResult,
-          TTempId,
-          TPendingEntity,
-          TFinalPayload,
-          TFinalData
-        >;
 
 /**
  * Shape used by `persistentStorage.offline.operations` for each operation name.
@@ -1100,14 +1047,37 @@ export type OfflineOperationDefinition<
   ) => Promise<boolean> | boolean;
 } & ConflictHandlingField<TInput, TConflict, TServerSnapshot> &
   ServerSnapshotField<TInput, TServerSnapshot> &
-  TempEntityField<
-    TInput,
-    TTempResult,
-    TTempId,
-    TPendingEntity,
-    TFinalPayload,
-    TFinalData
-  >;
+  (
+    | ({
+        /**
+         * Explicit store-sync step that runs after `execute(...)` succeeds during
+         * offline replay.
+         *
+         * Provide a callback when replay should update the live store after the
+         * server-side execute succeeds. Use `null` when replay should not trigger
+         * any extra live-store sync.
+         */
+        onSuccessExecute: OfflineOperationExecuteSuccessHandler<
+          TInput,
+          TTempResult
+        > | null;
+      } & NoTempEntityFields)
+    | ({
+        /**
+         * Temp-entity operations already reconcile the live store through
+         * `tempEntity` / `tempEntities`, so they must not declare an extra
+         * success sync callback.
+         */
+        onSuccessExecute?: never;
+      } & ConfiguredTempEntityFields<
+        TInput,
+        TTempResult,
+        TTempId,
+        TPendingEntity,
+        TFinalPayload,
+        TFinalData
+      >)
+  );
 
 type WithoutTempEntity<
   T extends { tempEntity?: unknown; tempEntities?: unknown },
@@ -1143,9 +1113,15 @@ export type AnyOfflineOperationDefinition = {
     __LEGIT_ANY__,
     __LEGIT_ANY__
   >;
-  getServerSnapshot?: (ctx: __LEGIT_ANY__) => unknown;
-  execute: (ctx: __LEGIT_ANY__) => unknown;
-  shouldSkipSync?: (ctx: __LEGIT_ANY__) => Promise<boolean> | boolean;
+  getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
+  execute: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
+  onSuccessExecute?: OfflineOperationExecuteSuccessHandler<
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  > | null;
+  shouldSkipSync?: (
+    ctx: OperationReplayCheckContext<__LEGIT_ANY__, __LEGIT_ANY__>,
+  ) => Promise<boolean> | boolean;
 } & {
   getEntityRefs?: (ctx: OperationEntityRefsContext<__LEGIT_ANY__>) => unknown[];
   dependsOn?: (

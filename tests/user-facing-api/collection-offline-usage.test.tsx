@@ -5,13 +5,14 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
-  createOfflineSession,
   createCollectionStore,
+  createOfflineSession,
   type DefineCollectionOfflineOperations,
   type DefineOfflineOperation,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -120,6 +121,18 @@ type DirectCollectionOfflineOperations = DefineCollectionOfflineOperations<
   }
 >;
 
+type InvalidCollectionTempSuccessOperations = DefineCollectionOfflineOperations<
+  TodoItem,
+  TodoPayload,
+  {
+    createTodo: DefineOfflineOperation<
+      CreateTodoInput,
+      unknown,
+      CreateTodoResult
+    >;
+  }
+>;
+
 // tests using the collection store directly without test envs to verify the public API usage
 test('direct collection store offline public api', async () => {
   const network = createOfflineNetworkMock();
@@ -131,10 +144,10 @@ test('direct collection store offline public api', async () => {
   });
 
   let nextTodoId = 3;
-  const todoState = new Map<string, TodoItem>([
-    ['1', { title: 'Todo 1', completed: false }],
-    ['2', { title: 'Todo 2', completed: false }],
-  ]);
+  const serverTable = createServerTableMock<TodoItem>({
+    '1': { title: 'Todo 1', completed: false },
+    '2': { title: 'Todo 2', completed: false },
+  });
 
   const collectionStore = createCollectionStore<
     TodoItem,
@@ -145,7 +158,7 @@ test('direct collection store offline public api', async () => {
     getSessionKey: () => sessionKey,
     fetchFn: async (payload: TodoPayload) => {
       await delay(FETCH_DELAY_MS);
-      const item = todoState.get(payload);
+      const item = serverTable.get(payload);
       if (!item) {
         throw new Error(`Missing todo ${payload}`);
       }
@@ -168,7 +181,12 @@ test('direct collection store offline public api', async () => {
             getEntityRefs: ({ input }) => [input.id],
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute: ({ input }) => {
-              todoState.set(input.id, { title: input.title, completed: false });
+              serverTable.updateItem(input.id, {
+                title: input.title,
+                completed: false,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
               collectionStore.updateItemState(input.id, (item) => ({
                 ...item,
                 title: input.title,
@@ -180,7 +198,14 @@ test('direct collection store offline public api', async () => {
             getEntityRefs: ({ input }) => input.map((item) => item.id),
             execute: ({ input }) => {
               for (const item of input) {
-                todoState.set(item.id, { title: item.title, completed: false });
+                serverTable.updateItem(item.id, {
+                  title: item.title,
+                  completed: false,
+                });
+              }
+            },
+            onSuccessExecute: ({ input }) => {
+              for (const item of input) {
                 collectionStore.updateItemState(item.id, (currentItem) => ({
                   ...currentItem,
                   title: item.title,
@@ -194,6 +219,7 @@ test('direct collection store offline public api', async () => {
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.title}`);
             },
+            onSuccessExecute: null,
             shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
               expect(input).toMatchInlineSnapshot(`
                 id: '1'
@@ -215,7 +241,12 @@ test('direct collection store offline public api', async () => {
               },
             },
             execute: ({ input }) => {
-              todoState.set(input.id, { title: input.title, completed: false });
+              serverTable.updateItem(input.id, {
+                title: input.title,
+                completed: false,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
               collectionStore.updateItemState(input.id, (item) => ({
                 ...item,
                 title: input.title,
@@ -239,7 +270,7 @@ test('direct collection store offline public api', async () => {
               const id = String(nextTodoId);
               nextTodoId += 1;
               const result = { id, title: input.title, completed: false };
-              todoState.set(result.id, {
+              serverTable.setItem(result.id, {
                 title: result.title,
                 completed: result.completed,
               });
@@ -279,6 +310,80 @@ test('direct collection store offline public api', async () => {
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-collection-offline-session'
     updatedAt: 1735689600010
+  `);
+
+  const invalidTempSuccessServerTable = createServerTableMock<TodoItem>({});
+  const invalidTempSuccessCollectionStore = createCollectionStore<
+    TodoItem,
+    TodoPayload,
+    InvalidCollectionTempSuccessOperations
+  >({
+    id: 'invalid-temp-success-callback-collection',
+    getSessionKey: () => sessionKey,
+    fetchFn: () => Promise.resolve({ title: 'Todo', completed: false }),
+    getCollectionItemKey: (payload: TodoPayload) => payload,
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: todoSchema,
+      payloadSchema: todoPayloadSchema,
+      offline: {
+        session: offlineSession,
+        operations: {
+          // @ts-expect-error - runtime validation should reject tempEntity plus success callback
+          createTodo: {
+            inputSchema: createTodoInputSchema,
+            getEntityRefs: ({ input }: { input: CreateTodoInput }) => [
+              `temp:${input.title}`,
+            ],
+            tempEntity: {
+              buildPendingEntity: (input: CreateTodoInput) => ({
+                title: input.title,
+                completed: false,
+              }),
+              reconcileServerEntity: (result: CreateTodoResult) => ({
+                finalPayload: result.id,
+                finalData: { title: result.title, completed: result.completed },
+              }),
+            },
+            execute: ({ input }: { input: CreateTodoInput }) => {
+              invalidTempSuccessServerTable.setItem('3', {
+                title: input.title,
+                completed: false,
+              });
+              return { id: '3', title: input.title, completed: false };
+            },
+            onSuccessExecute: () => undefined,
+          },
+        },
+      },
+    },
+  });
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  const invalidTempSuccessResult =
+    await invalidTempSuccessCollectionStore.performMutation(null, {
+      mutation: () => Promise.resolve({ title: 'Todo', completed: false }),
+      offline: { operation: 'createTodo', input: { title: 'Invalid temp' } },
+    });
+
+  expect({
+    error: invalidTempSuccessResult.ok ? null : invalidTempSuccessResult.error,
+    ok: invalidTempSuccessResult.ok,
+  }).toMatchInlineSnapshot(`
+    error:
+      code: 500
+      id: 'fetch-error'
+      message: 'Offline operation "createTodo" cannot configure onSuccessExecute when tempEntity or tempEntities is present'
+
+    ok: '❌'
   `);
 
   act(() => {

@@ -18,7 +18,10 @@ import {
   getParsedLocalStorageValue,
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
-import type { UpdateValueOperations } from './offlineReplayTestShared';
+import {
+  replayDocumentValueWithDelay,
+  type UpdateValueOperations,
+} from './offlineReplayTestShared';
 import { docMutationInputSchema, docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -68,7 +71,16 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -251,7 +263,16 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },

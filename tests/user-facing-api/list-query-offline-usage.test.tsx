@@ -18,6 +18,7 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -46,6 +47,10 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function getUserServerItemId(id: number) {
+  return `users||${id}`;
 }
 
 type UserPayload = { tableId: 'users'; id: number } | string;
@@ -138,6 +143,13 @@ type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
   }
 >;
 
+type InvalidListQueryTempSuccessOperations = DefineListQueryOfflineOperations<
+  User,
+  UsersQueryPayload,
+  UserPayload,
+  { createUser: DefineOfflineOperation<CreateUserInput, unknown, User> }
+>;
+
 // tests using the list-query store directly without test envs to verify the public API usage
 test('direct list-query store offline public api', async () => {
   const network = createOfflineNetworkMock();
@@ -149,10 +161,10 @@ test('direct list-query store offline public api', async () => {
   });
 
   let nextUserId = 3;
-  const userState = new Map<number, User>([
-    [1, { id: 1, name: 'Ada' }],
-    [2, { id: 2, name: 'Grace' }],
-  ]);
+  const serverTable = createServerTableMock<User>({
+    [getUserServerItemId(1)]: { id: 1, name: 'Ada' },
+    [getUserServerItemId(2)]: { id: 2, name: 'Grace' },
+  });
 
   const listQueryStore = createListQueryStore<
     User,
@@ -166,14 +178,16 @@ test('direct list-query store offline public api', async () => {
     getSessionKey: () => sessionKey,
     fetchListFn: async (_payload_, size: number) => {
       await delay(FETCH_DELAY_MS);
+      const listResult = serverTable.listSync({
+        tableId: 'users',
+        limit: size,
+      });
       return {
-        items: [...userState.values()]
-          .slice(0, size)
-          .map((user) => ({
-            itemPayload: getUserItemPayload(user.id),
-            data: { ...user },
-          })),
-        hasMore: userState.size > size,
+        items: listResult.items.map(({ data }) => ({
+          itemPayload: getUserItemPayload(data.id),
+          data: { ...data },
+        })),
+        hasMore: listResult.hasMore,
       };
     },
     fetchItemFn: async (payload: UserPayload) => {
@@ -182,7 +196,7 @@ test('direct list-query store offline public api', async () => {
         throw new Error(`Missing user ${payload}`);
       }
 
-      const item = userState.get(payload.id);
+      const item = serverTable.get(getUserServerItemId(payload.id));
       if (!item) {
         throw new Error(`Missing user ${payload.id}`);
       }
@@ -209,7 +223,12 @@ test('direct list-query store offline public api', async () => {
             getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute: ({ input }) => {
-              userState.set(input.id, { id: input.id, name: input.name });
+              serverTable.updateItem(getUserServerItemId(input.id), {
+                id: input.id,
+                name: input.name,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
               listQueryStore.updateItemState(
                 getUserItemPayload(input.id),
                 (item) => ({ ...item, name: input.name }),
@@ -222,7 +241,14 @@ test('direct list-query store offline public api', async () => {
               input.map((item) => getUserItemPayload(item.id)),
             execute: ({ input }) => {
               for (const item of input) {
-                userState.set(item.id, { id: item.id, name: item.name });
+                serverTable.updateItem(getUserServerItemId(item.id), {
+                  id: item.id,
+                  name: item.name,
+                });
+              }
+            },
+            onSuccessExecute: ({ input }) => {
+              for (const item of input) {
                 listQueryStore.updateItemState(
                   getUserItemPayload(item.id),
                   (currentItem) => ({ ...currentItem, name: item.name }),
@@ -236,6 +262,7 @@ test('direct list-query store offline public api', async () => {
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.name}`);
             },
+            onSuccessExecute: null,
             shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
               expect(input).toMatchInlineSnapshot(`
                 id: 1
@@ -257,7 +284,12 @@ test('direct list-query store offline public api', async () => {
               },
             },
             execute: ({ input }) => {
-              userState.set(input.id, { id: input.id, name: input.name });
+              serverTable.updateItem(getUserServerItemId(input.id), {
+                id: input.id,
+                name: input.name,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
               listQueryStore.updateItemState(
                 getUserItemPayload(input.id),
                 (item) => ({ ...item, name: input.name }),
@@ -277,7 +309,7 @@ test('direct list-query store offline public api', async () => {
             execute: ({ input }) => {
               const result = { id: nextUserId, name: input.name };
               nextUserId += 1;
-              userState.set(result.id, result);
+              serverTable.setItem(getUserServerItemId(result.id), result);
               return result;
             },
           },
@@ -313,6 +345,93 @@ test('direct list-query store offline public api', async () => {
     status: 'success'
   `);
 
+  const invalidTempSuccessServerTable = createServerTableMock<User>({});
+  const invalidTempSuccessListQueryStore = createListQueryStore<
+    User,
+    UsersQueryPayload,
+    UserPayload,
+    false,
+    false,
+    InvalidListQueryTempSuccessOperations
+  >({
+    id: 'invalid-temp-success-callback-list-query',
+    getSessionKey: () => sessionKey,
+    fetchListFn: () => Promise.resolve({ items: [], hasMore: false }),
+    fetchItemFn: () => Promise.resolve({ id: 1, name: 'Ada' }),
+    getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
+    getItemKey: (payload: UserPayload) =>
+      typeof payload === 'string' ? payload : getUserEntityKey(payload.id),
+    errorNormalizer: normalizeError,
+    defaultQuerySize: 3,
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: userSchema,
+      itemPayloadSchema: userPayloadSchema,
+      queryPayloadSchema: usersQueryPayloadSchema,
+      offline: {
+        session: offlineSession,
+        operations: {
+          // @ts-expect-error - runtime validation should reject tempEntity plus success callback
+          createUser: {
+            inputSchema: createUserInputSchema,
+            getEntityRefs: ({ input }: { input: CreateUserInput }) => [
+              `temp:${input.name}`,
+            ],
+            tempEntity: {
+              buildPendingEntity: (input: CreateUserInput) => ({
+                id: -1,
+                name: input.name,
+              }),
+              reconcileServerEntity: (result: User) => ({
+                finalPayload: getUserItemPayload(result.id),
+                finalData: { ...result },
+              }),
+            },
+            execute: ({ input }: { input: CreateUserInput }) => {
+              invalidTempSuccessServerTable.setItem(getUserServerItemId(3), {
+                id: 3,
+                name: input.name,
+              });
+              return { id: 3, name: input.name };
+            },
+            onSuccessExecute: () => undefined,
+          },
+        },
+      },
+    },
+  });
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  const invalidTempSuccessResult =
+    await invalidTempSuccessListQueryStore.performMutation(null, {
+      mutation: () => Promise.resolve({ id: 3, name: 'Invalid temp' }),
+      offline: { operation: 'createUser', input: { name: 'Invalid temp' } },
+    });
+
+  expect({
+    error: invalidTempSuccessResult.ok ? null : invalidTempSuccessResult.error,
+    ok: invalidTempSuccessResult.ok,
+  }).toMatchInlineSnapshot(`
+    error:
+      code: 500
+      id: 'fetch-error'
+      message: 'Offline operation "createUser" cannot configure onSuccessExecute when tempEntity or tempEntities is present'
+
+    ok: '❌'
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await Promise.resolve();
+
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isLeader: '✅'
     isOfflineMode: '❌'
@@ -321,7 +440,7 @@ test('direct list-query store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-list-query-offline-session'
-    updatedAt: 1735689600010
+    updatedAt: 1735689602000
   `);
 
   act(() => {

@@ -16,6 +16,8 @@ import {
   getLocalStorageKeys,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
+  replayCollectionCreateWithDelay,
+  replayDocumentValueWithDelay,
   type UpdateValueConflictOperations,
   type UpdateValueOperations,
   userPatchSchema,
@@ -109,7 +111,13 @@ test('collection offline creates keep durable temp-id metadata and clear after r
               },
               execute: () =>
                 new Promise<{ id: string; name: string }>((resolve) => {
-                  resolveCreates.push(resolve);
+                  resolveCreates.push((result) => {
+                    void replayCollectionCreateWithDelay(env, result).then(
+                      () => {
+                        resolve(result);
+                      },
+                    );
+                  });
                 }),
             },
           },
@@ -190,17 +198,14 @@ test('document offline accumulation keeps a single persisted queue entry and rep
       }: {
         input: { value: number };
         enqueuedAt: number;
-      }) => { value: number }
+      }) => Promise<{ value: number }>
     >()
-    .mockImplementation(({ input, enqueuedAt }) => {
+    .mockImplementation(async ({ input, enqueuedAt }) => {
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      env.apiStore.updateState((draft) => {
-        draft.value = input.value;
-      });
+      const replayResult = replayDocumentValueWithDelay(env, input);
 
-      return input;
+      return replayResult;
     });
-
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
@@ -218,6 +223,11 @@ test('document offline accumulation keeps a single persisted queue entry and rep
             inputSchema: docMutationInputSchema,
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
           },
         },
       },
@@ -332,19 +342,19 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
   const sessionKey = 'offline-supersede-delete-session';
   const storeName = 'offline-supersede-delete-store';
   const patchExecute = vi.fn(
-    ({ input }: { input: { itemId: string; name: string } }) => {
-      env.apiStore.updateItemState(input.itemId, (item) => ({
-        ...item,
+    async ({ input }: { input: { itemId: string; name: string } }) => {
+      await env.serverTable.delayedUpdateItem(input.itemId, {
         name: input.name,
-      }));
-
+      });
       return { name: input.name };
     },
   );
-  const deleteExecute = vi.fn(({ input }: { input: { itemId: string } }) => {
-    env.apiStore.deleteItemState(input.itemId);
-    return undefined;
-  });
+  const deleteExecute = vi.fn(
+    async ({ input: input_ }: { input: { itemId: string } }) => {
+      await env.serverTable.delayedRemoveItem(input_.itemId);
+      return undefined;
+    },
+  );
 
   type SupersedeCollectionOperations = {
     patchUserName: CollectionOfflineOperationDefinition<
@@ -384,12 +394,21 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchExecute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
             deleteUser: {
               inputSchema: deleteItemInputSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               supersedes: { scope: 'same-entity' },
               execute: deleteExecute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.deleteItemState(input.itemId);
+              },
             },
           },
         },
@@ -482,22 +501,20 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
     | { operation: 'setUserName'; input: { itemId: string; name: string } }
   > = [];
   const setUserNameExecute = vi.fn(
-    ({ input }: { input: { itemId: string; name: string } }) => {
+    async ({ input }: { input: { itemId: string; name: string } }) => {
       replayedOperations.push({ operation: 'setUserName', input });
-      env.apiStore.updateItemState(input.itemId, (item) => ({
-        ...item,
+      await env.serverTable.delayedUpdateItem(input.itemId, {
         name: input.name,
-      }));
+      });
       return { name: input.name };
     },
   );
   const setUserRoleExecute = vi.fn(
-    ({ input }: { input: { itemId: string; role: string } }) => {
+    async ({ input }: { input: { itemId: string; role: string } }) => {
       replayedOperations.push({ operation: 'setUserRole', input });
-      env.apiStore.updateItemState(input.itemId, (item) => ({
-        ...item,
+      await env.serverTable.delayedUpdateItem(input.itemId, {
         role: input.role,
-      }));
+      });
       return { role: input.role };
     },
   );
@@ -552,11 +569,23 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
               getEntityRefs: ({ input }) => [input.itemId],
               supersedes: { scope: 'same-entity', operations: 'self' },
               execute: setUserNameExecute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
             setUserRole: {
               inputSchema: setUserRoleInputSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               execute: setUserRoleExecute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  role: input.role,
+                }));
+              },
             },
           },
         },
@@ -721,6 +750,11 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
           updateValue: {
             inputSchema: docMutationInputSchema,
             execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             shouldSkipSync,
           },
         },
@@ -826,6 +860,11 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
           updateValue: {
             inputSchema: docMutationInputSchema,
             execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             shouldSkipSync,
           },
         },
@@ -912,7 +951,15 @@ test('healthy replay failures are retried 5 times and then move into the resolut
           config: { network: network.config },
         }),
         operations: {
-          updateValue: { inputSchema: docMutationInputSchema, execute },
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
         },
       },
     },
@@ -1061,7 +1108,15 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
           config: { network: network.config },
         }),
         operations: {
-          updateValue: { inputSchema: docMutationInputSchema, execute },
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
         },
       },
     },
@@ -1231,8 +1286,8 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     blockedResolutionCount: 0
     childResolutionCount: 0
     childResolutionIds: []
-    createdAt: 1735689640000
-    enqueuedAt: 1735689620000
+    createdAt: 1735689641000
+    enqueuedAt: 1735689621000
     entityRefs:
       - { entityKey: 'document', entityKind: 'document' }
     input: { value: 2 }
@@ -1242,7 +1297,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     sessionKey: 'retry-resolution-actions-session'
     storeName: 'document-5'
     storeType: 'document'
-    updatedAt: 1735689640000
+    updatedAt: 1735689641000
   `);
   const parseDiscardResult =
     env.apiStore.parseOfflineResolutionConflict(discardResolution);
@@ -1326,7 +1381,15 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
           },
         }),
         operations: {
-          updateValue: { inputSchema: docMutationInputSchema, execute },
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
         },
       },
     },
@@ -1397,7 +1460,15 @@ test('going offline again resets the healthy replay failure budget', async () =>
           config: { network: network.config },
         }),
         operations: {
-          updateValue: { inputSchema: docMutationInputSchema, execute },
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
         },
       },
     },
@@ -1565,6 +1636,11 @@ test('new mutations queue separately instead of merging into entries that may ha
             inputSchema: docMutationInputSchema,
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             shouldSkipSync: () => false,
           },
         },
@@ -1647,6 +1723,11 @@ test('supersede does not discard entries that may have already been applied on t
             inputSchema: docMutationInputSchema,
             supersedes: { scope: 'same-entity' },
             execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             shouldSkipSync: () => false,
           },
         },
@@ -1772,6 +1853,11 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
           updateValue: {
             inputSchema: docMutationInputSchema,
             execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             shouldSkipSync,
           },
         },
@@ -1861,8 +1947,13 @@ test('session switches do not leave replayed queue entries in the old namespace'
             inputSchema: docMutationInputSchema,
             execute: () =>
               new Promise<{ value: number }>((resolve) => {
-                resolveReplay = resolve;
+                resolveReplay = (result) => {
+                  void env.serverMock.delayedSetData(result.value).then(() => {
+                    resolve(result);
+                  });
+                };
               }),
+            onSuccessExecute: null,
           },
         },
       },
@@ -1924,10 +2015,14 @@ test('document offline mutations are queued durably and replay when the browser 
           updateValue: {
             inputSchema: docMutationInputSchema,
             execute: ({ input }) => {
+              const replayResult = replayDocumentValueWithDelay(env, input);
+
+              return replayResult;
+            },
+            onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
               });
-              return input;
             },
           },
         },
@@ -2010,7 +2105,7 @@ test('document offline mutations are queued durably and replay when the browser 
     `[]`,
   );
   expect(hook.result.current).toMatchInlineSnapshot(`
-    data: { value: 1 }
+    data: { value: 2 }
     error: null
     isLoading: '❌'
     pendingSync: '❌'
@@ -2025,11 +2120,11 @@ test('document offline mutations are queued durably and replay when the browser 
     .     | "value:2 pending:yes" | offline:updateValue queued
     .     | "value:2 pending:yes" | -- browser comes back online — replay starts and a revalidation fetch follows
     .     | "value:2 pending:yes" | offline:updateValue replay-started
+    10ms  | "value:2 pending:yes" | 🔴 >fetch-started
+    810ms | "value:2 pending:yes" | 🔴 <fetch-finished (value: 1)
+    1.2s  | "value:2 pending:yes" | server-data-changed (value: 2)
     .     | "value:2 pending:yes" | offline:updateValue replay-finished
     .     | "value:2 pending:no"  | ui-changed
-    10ms  | "value:2 pending:no"  | 🔴 >fetch-started
-    810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
-    .     | "value:1 pending:no"  | ui-changed
     "
   `);
   hook.unmount();
@@ -2068,7 +2163,16 @@ test('accumulation still merges entries when the queue starts from a hybrid fall
           updateValue: {
             inputSchema: docMutationInputSchema,
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
-            execute: ({ input }) => input,
+            execute: ({ input }) => {
+              const replayResult = replayDocumentValueWithDelay(env, input);
+
+              return replayResult;
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
           },
         },
       },
@@ -2181,6 +2285,11 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
               conflictHandling: {
                 schema: docConflictSchema,
                 detectConflict: () => false,

@@ -23,6 +23,8 @@ import {
   type CreateListQueryUserOperations,
   getOfflineQueueEntries,
   type PatchUserOperations,
+  replayDocumentValueWithDelay,
+  replayListQueryPatchWithDelay,
   type UpdateValueExecuteContext,
   type UpdateValueOperations,
   userPatchSchema,
@@ -113,7 +115,9 @@ test('stores unregister their previous offline session when the session key beco
   network.setOffline();
 
   let currentSessionKey: string | false = 'offline-session-cleanup';
-  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env: ReturnType<
+    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'offline-session-cleanup-doc',
     getSessionKey: () => currentSessionKey,
     testScenario: 'loaded',
@@ -128,7 +132,13 @@ test('stores unregister their previous offline session when the session key beco
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => input,
+            execute: ({ input }: UpdateValueExecuteContext) =>
+              replayDocumentValueWithDelay(env, input),
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
           },
         },
       },
@@ -183,7 +193,9 @@ test('logging back into the same session replays durable offline mutations queue
   let currentSessionKey: string | false = sessionKey;
   const replayedInputs: { value: number }[] = [];
 
-  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env: ReturnType<
+    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => currentSessionKey,
     testScenario: 'loaded',
@@ -198,12 +210,16 @@ test('logging back into the same session replays durable offline mutations queue
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
+            execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
+              const replayResult = replayDocumentValueWithDelay(env, input);
+
+              return replayResult;
+            },
+            onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
               });
-              return input;
             },
           },
         },
@@ -296,11 +312,11 @@ test('logging back into the same session replays durable offline mutations queue
     1.82s | "value:1 pending:yes" | ui-changed
     .     | "value:1 pending:yes" | 🟠 >fetch-started
     .     | "value:1 pending:yes" | offline:updateValue replay-started
+    2.62s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
+    3.02s | "value:1 pending:yes" | server-data-changed (value: 2)
     .     | "value:1 pending:yes" | offline:updateValue replay-finished
     .     | "value:2 pending:yes" | ui-changed
     .     | "value:2 pending:no"  | ui-changed
-    2.62s | "value:2 pending:no"  | 🟠 <fetch-finished (value: 1)
-    .     | "value:1 pending:no"  | ui-changed
     "
   `);
   hook.unmount();
@@ -370,7 +386,17 @@ test('a global offline view sees the same blocked temp item as the store after r
             patchUserName: {
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
-              execute: ({ input }) => ({ name: input.name }),
+              execute: ({ input }) => {
+                const replayResult = replayListQueryPatchWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
           },
         },
@@ -539,7 +565,9 @@ test('offline mutations fail fast when no session key is available', async () =>
   network.setOffline();
   const sessionKey: string | false = false;
 
-  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+  const env: ReturnType<
+    typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+  > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => sessionKey,
     testScenario: 'loaded',
     persistentStorage: {
@@ -553,11 +581,12 @@ test('offline mutations fail fast when no session key is available', async () =>
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }: UpdateValueExecuteContext) => {
+            execute: ({ input }: UpdateValueExecuteContext) =>
+              replayDocumentValueWithDelay(env, input),
+            onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
                 draft.value = input.value;
               });
-              return input;
             },
           },
         },
@@ -632,11 +661,12 @@ test('global offline hooks can mount before a localStorage-backed store', async 
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) => {
+              execute: ({ input }: UpdateValueExecuteContext) =>
+                replayDocumentValueWithDelay(env, input),
+              onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
                   draft.value = input.value;
                 });
-                return input;
               },
             },
           },
@@ -893,7 +923,9 @@ test('global and per-store offline entity selectors aggregate queued work across
   const pendingReplay = new Promise<{ value: number }>(() => {});
 
   function createEnv(storeName: string) {
-    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    const env: ReturnType<
+      typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+    > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
@@ -908,11 +940,14 @@ test('global and per-store offline entity selectors aggregate queued work across
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) => {
+              execute: (_ctx_: UpdateValueExecuteContext) =>
+                pendingReplay.then((result) =>
+                  replayDocumentValueWithDelay(env, result),
+                ),
+              onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
                   draft.value = input.value;
                 });
-                return pendingReplay;
               },
             },
           },

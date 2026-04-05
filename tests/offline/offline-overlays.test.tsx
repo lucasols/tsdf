@@ -110,13 +110,17 @@ describe('document overlays', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }: UpdateValueExecuteContext) =>
-                new Promise((resolve) => {
-                  setTimeout(() => {
-                    env.serverMock.setData(input.value);
-                    resolve(input);
-                  }, 2000);
-                }),
+              execute: async ({ input }: UpdateValueExecuteContext) => {
+                await env.serverMock.delayedSetData(input.value, {
+                  durationMs: 2000,
+                });
+                return input;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -215,7 +219,7 @@ describe('document overlays', () => {
       2s    | "value:2 pending:yes" | -- replay settles — optimistic overlay no longer needed
       .     | "value:2 pending:yes" | server-data-changed (value: 2)
       .     | "value:2 pending:yes" | offline:updateValue replay-finished
-      .     | "value:1 pending:no"  | ui-changed
+      .     | "value:2 pending:no"  | ui-changed
       "
     `);
 
@@ -248,6 +252,7 @@ describe('document overlays', () => {
               execute: () => {
                 throw new Error('Replay failed');
               },
+              onSuccessExecute: null,
             },
           },
         },
@@ -364,15 +369,19 @@ describe('collection overlays', () => {
               renameItem: {
                 inputSchema: collectionCreateInputSchema,
                 getEntityRefs: () => ['users||1'],
-                execute: ({ input }) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      env.serverTable.updateItem('users||1', {
-                        name: input.name,
-                      });
-                      resolve({ value: { name: input.name } });
-                    }, 2000);
-                  }),
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedUpdateItem(
+                    'users||1',
+                    { name: input.name },
+                    { durationMs: 2000 },
+                  );
+                  return { value: { name: input.name } };
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState('users||1', (draft) => {
+                    draft.value.name = input.name;
+                  });
+                },
               },
             },
           },
@@ -424,20 +433,20 @@ describe('collection overlays', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | name        | pending |
-      0     | Ada         | no      | [name, pending] ui-initialized
-      .     | Ada         | no      | -- queue an optimistic rename while offline
-      .     | Ada pending | yes     | [name, pending] ui-changed
-      .     | Ada pending | yes     | offline:renameItem queued
-      .     | Ada pending | yes     | -- reconnect — stale refetch must not revert the optimistic name
-      .     | Ada pending | yes     | [users||1] scheduled-fetch-coalesced
-      .     | Ada pending | yes     | offline:renameItem replay-started
-      10ms  | Ada pending | yes     | 🔴 [users||1] >fetch-started
-      810ms | Ada pending | yes     | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
-      2s    | Ada pending | yes     | -- replay settles — overlay collapses into real item state
-      .     | Ada pending | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
-      .     | Ada pending | yes     | offline:renameItem replay-finished
-      .     | Ada         | no      | [name, pending] ui-changed
+      time  | name         | pending |
+      0     | Ada          | no      | [name, pending] ui-initialized
+      .     | Ada          | no      | -- queue an optimistic rename while offline
+      .     | Ada pending  | yes     | [name, pending] ui-changed
+      .     | Ada pending  | yes     | offline:renameItem queued
+      .     | Ada pending  | yes     | -- reconnect — stale refetch must not revert the optimistic name
+      .     | Ada pending  | yes     | [users||1] scheduled-fetch-coalesced
+      .     | Ada pending  | yes     | offline:renameItem replay-started
+      10ms  | Ada pending  | yes     | 🔴 [users||1] >fetch-started
+      810ms | Ada pending  | yes     | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
+      2s    | Ada pending  | yes     | -- replay settles — overlay collapses into real item state
+      .     | Ada pending  | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
+      .     | Ada pending  | yes     | offline:renameItem replay-finished
+      .     | Ada replayed | no      | [name, pending] ui-changed
       "
     `);
 
@@ -471,13 +480,14 @@ describe('collection overlays', () => {
               deleteItem: {
                 inputSchema: deleteItemInputSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      env.serverTable.removeItem(input.itemId);
-                      resolve(undefined);
-                    }, 2000);
-                  }),
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedRemoveItem(input.itemId, {
+                    durationMs: 2000,
+                  });
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.deleteItemState(input.itemId);
+                },
               },
             },
           },
@@ -541,7 +551,7 @@ describe('collection overlays', () => {
       2s    | null | yes     | deleted | -- replay settles — delete metadata clears, UI stays deleted
       .     | null | yes     | deleted | [users||1] server-item-removed
       .     | null | yes     | deleted | offline:deleteItem replay-finished
-      .     | Ada  | no      | success | [name, status, pending] ui-changed
+      .     | null | no      | deleted | [pending] ui-changed
       "
     `);
 
@@ -582,6 +592,7 @@ describe('collection overlays', () => {
                 execute: () => {
                   throw new Error('Replay failed');
                 },
+                onSuccessExecute: null,
               },
             },
           },
@@ -696,15 +707,20 @@ describe('list-query overlays', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      env.serverTable.updateItem(input.itemId, {
-                        name: input.name,
-                      });
-                      resolve({ name: input.name });
-                    }, 2000);
-                  }),
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedUpdateItem(
+                    input.itemId,
+                    { name: input.name },
+                    { durationMs: 2000 },
+                  );
+                  return { name: input.name };
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -761,20 +777,20 @@ describe('list-query overlays', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | pending | query-items | query-status |
-      0     | no      | Ada         | success      | [query-status, query-items, pending] ui-initialized
-      3.01s | no      | Ada         | success      | -- queue an optimistic row patch while offline
-      .     | yes     | Ada pending | success      | [query-items, pending] ui-changed
-      .     | yes     | Ada pending | success      | offline:patchUserName queued
-      .     | yes     | Ada pending | success      | -- reconnect — stale refetch must not revert the optimistic row
-      .     | yes     | Ada pending | success      | scheduled-fetch-triggered
-      .     | yes     | Ada pending | success      | offline:patchUserName replay-started
-      3.02s | yes     | Ada pending | success      | 🔴 >list-fetch-started
-      3.82s | yes     | Ada pending | success      | 🔴 <list-fetch-finished (value: {"count":1})
-      5.01s | yes     | Ada pending | success      | -- replay settles — overlay disappears
-      .     | yes     | Ada pending | success      | [users||1] server-data-changed (value: {"name":"Ada replayed"})
-      .     | yes     | Ada pending | success      | offline:patchUserName replay-finished
-      .     | no      | Ada         | success      | [query-items, pending] ui-changed
+      time  | pending | query-items  | query-status |
+      0     | no      | Ada          | success      | [query-status, query-items, pending] ui-initialized
+      3.01s | no      | Ada          | success      | -- queue an optimistic row patch while offline
+      .     | yes     | Ada pending  | success      | [query-items, pending] ui-changed
+      .     | yes     | Ada pending  | success      | offline:patchUserName queued
+      .     | yes     | Ada pending  | success      | -- reconnect — stale refetch must not revert the optimistic row
+      .     | yes     | Ada pending  | success      | scheduled-fetch-triggered
+      .     | yes     | Ada pending  | success      | offline:patchUserName replay-started
+      3.02s | yes     | Ada pending  | success      | 🔴 >list-fetch-started
+      3.82s | yes     | Ada pending  | success      | 🔴 <list-fetch-finished (value: {"count":1})
+      5.01s | yes     | Ada pending  | success      | -- replay settles — overlay disappears
+      .     | yes     | Ada pending  | success      | [users||1] server-data-changed (value: {"name":"Ada replayed"})
+      .     | yes     | Ada pending  | success      | offline:patchUserName replay-finished
+      .     | no      | Ada replayed | success      | [query-items, pending] ui-changed
       "
     `);
 
@@ -811,15 +827,20 @@ describe('list-query overlays', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      env.serverTable.updateItem(input.itemId, {
-                        name: input.name,
-                      });
-                      resolve({ name: input.name });
-                    }, 2000);
-                  }),
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedUpdateItem(
+                    input.itemId,
+                    { name: input.name },
+                    { durationMs: 2000 },
+                  );
+                  return { name: input.name };
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -883,25 +904,25 @@ describe('list-query overlays', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item-name   | pending |
-      0     | Ada         | no      | [item-name, pending] ui-initialized
-      10ms  | Ada         | no      | 🔴 [users||1] >fetch-started
-      810ms | Ada         | no      | 🔴 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
-      2s    | Ada         | no      | [users||1] scheduled-fetch-triggered
-      2.01s | Ada         | no      | 🟠 [users||1] >fetch-started
-      2.81s | Ada         | no      | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
-      3.81s | Ada         | no      | -- queue an optimistic item edit while offline
-      .     | Ada pending | yes     | [item-name, pending] ui-changed
-      .     | Ada pending | yes     | offline:patchUserName queued
-      .     | Ada pending | yes     | -- reconnect — direct item refetch must not restore stale value
-      .     | Ada pending | yes     | [users||1] scheduled-fetch-triggered
-      .     | Ada pending | yes     | offline:patchUserName replay-started
-      3.82s | Ada pending | yes     | 🟡 [users||1] >fetch-started
-      4.62s | Ada pending | yes     | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
-      5.81s | Ada pending | yes     | -- replay settles — item shows replayed value
-      .     | Ada pending | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
-      .     | Ada pending | yes     | offline:patchUserName replay-finished
-      .     | Ada         | no      | [item-name, pending] ui-changed
+      time  | item-name    | pending |
+      0     | Ada          | no      | [item-name, pending] ui-initialized
+      10ms  | Ada          | no      | 🔴 [users||1] >fetch-started
+      810ms | Ada          | no      | 🔴 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
+      2s    | Ada          | no      | [users||1] scheduled-fetch-triggered
+      2.01s | Ada          | no      | 🟠 [users||1] >fetch-started
+      2.81s | Ada          | no      | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
+      3.81s | Ada          | no      | -- queue an optimistic item edit while offline
+      .     | Ada pending  | yes     | [item-name, pending] ui-changed
+      .     | Ada pending  | yes     | offline:patchUserName queued
+      .     | Ada pending  | yes     | -- reconnect — direct item refetch must not restore stale value
+      .     | Ada pending  | yes     | [users||1] scheduled-fetch-triggered
+      .     | Ada pending  | yes     | offline:patchUserName replay-started
+      3.82s | Ada pending  | yes     | 🟡 [users||1] >fetch-started
+      4.62s | Ada pending  | yes     | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
+      5.81s | Ada pending  | yes     | -- replay settles — item shows replayed value
+      .     | Ada pending  | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
+      .     | Ada pending  | yes     | offline:patchUserName replay-finished
+      .     | Ada replayed | no      | [item-name, pending] ui-changed
       "
     `);
 
@@ -952,17 +973,16 @@ describe('list-query overlays', () => {
                     finalData: result,
                   }),
                 },
-                execute: ({ input }) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      const id = nextUserId;
-                      nextUserId += 1;
-                      const itemId = `users||${id}`;
-                      const data = { id, name: input.name };
-                      env.serverTable.setItem(itemId, data);
-                      resolve(data);
-                    }, 2000);
-                  }),
+                execute: async ({ input }) => {
+                  const id = nextUserId;
+                  nextUserId += 1;
+                  const itemId = `users||${id}`;
+                  const data = { id, name: input.name };
+                  await env.serverTable.delayedSetItem(itemId, data, {
+                    durationMs: 2000,
+                  });
+                  return data;
+                },
               },
             },
           },
@@ -1198,13 +1218,14 @@ describe('list-query overlays', () => {
               deleteUser: {
                 inputSchema: deleteItemInputSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) =>
-                  new Promise((resolve) => {
-                    setTimeout(() => {
-                      env.serverTable.removeItem(input.itemId);
-                      resolve(undefined);
-                    }, 2000);
-                  }),
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedRemoveItem(input.itemId, {
+                    durationMs: 2000,
+                  });
+                },
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.deleteItemState(input.itemId);
+                },
               },
             },
           },
@@ -1291,7 +1312,6 @@ describe('list-query overlays', () => {
       5.01s |             | success      | -- replay settles — delete metadata clears, list stays empty
       .     |             | success      | [users||1] server-item-removed
       .     |             | success      | offline:deleteUser replay-finished
-      .     | Ada         | success      | [query-items] ui-changed
       "
     `);
 

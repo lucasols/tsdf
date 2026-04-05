@@ -424,6 +424,11 @@ describe('sync storage efficiency: maintenance', () => {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
                 execute: ({ input }) => input,
+                onSuccessExecute: ({ input }) => {
+                  protectedDocEnv.apiStore.updateState((draft) => {
+                    draft.value.value = input.value;
+                  });
+                },
               },
             },
           },

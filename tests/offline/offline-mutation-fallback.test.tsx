@@ -11,13 +11,18 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateUserOperations,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   type PatchUserOperations,
+  replayBatchCollectionCreateWithDelay,
+  replayCollectionCreateWithDelay,
+  replayCollectionRenameWithDelay,
+  replayDocumentValueWithDelay,
+  replayListQueryPatchWithDelay,
   type UpdateValueOperations,
   userPatchSchema,
   userRowSchema,
@@ -101,7 +106,15 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: async ({ input }) => {
+                const result = await replayDocumentValueWithDelay(env, input);
+                return result;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -144,7 +157,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -190,7 +212,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -245,7 +276,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -315,7 +355,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -386,7 +435,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -436,7 +494,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -502,7 +569,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -556,7 +632,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -607,8 +692,10 @@ describe('document', () => {
           }),
       )
       .mockResolvedValueOnce('ignore');
-    const createEnv = (id: string) =>
-      createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    const createEnv = (id: string) => {
+      const env: ReturnType<
+        typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+      > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
         id,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
@@ -631,12 +718,21 @@ describe('document', () => {
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
-                execute: ({ input }) => input,
+                execute: ({ input }) =>
+                  replayDocumentValueWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateState((draft) => {
+                    draft.value = input.value;
+                  });
+                },
               },
             },
           },
         },
       });
+
+      return env;
+    };
 
     const envA = createEnv(storeNameA);
     const envB = createEnv(storeNameB);
@@ -723,7 +819,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -757,7 +862,16 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute: ({ input }) => {
+                const replayResult = replayDocumentValueWithDelay(env, input);
+
+                return replayResult;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -810,7 +924,12 @@ describe('collection', () => {
     const directMutation = vi.fn(() =>
       Promise.resolve({ value: { name: 'Grace' } }),
     );
-    const env = createCollectionStoreTestEnv<
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        RenameCollectionItemOperations
+      >
+    > = createCollectionStoreTestEnv<
       { name: string },
       RenameCollectionItemOperations
     >(
@@ -832,7 +951,13 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => ({ value: { name: input.name } }),
+                execute: ({ input }) =>
+                  replayCollectionRenameWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.id, () => ({
+                    value: { name: input.name },
+                  }));
+                },
               },
             },
           },
@@ -916,6 +1041,11 @@ describe('collection', () => {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
                 execute: renameItemExecute,
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.id, () => ({
+                    value: { name: input.name },
+                  }));
+                },
               },
               createItems: {
                 inputSchema: batchCollectionCreateInputSchema,
@@ -1034,7 +1164,12 @@ describe('collection', () => {
     network.setOffline();
     const sessionKey = 'hybrid-collection-invalid-batch-temp-session';
     const storeName = 'hybrid-collection-invalid-batch-temp-store';
-    const env = createCollectionStoreTestEnv<
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        InvalidBatchTempCollectionOperations
+      >
+    > = createCollectionStoreTestEnv<
       { name: string },
       InvalidBatchTempCollectionOperations
     >(
@@ -1074,10 +1209,13 @@ describe('collection', () => {
                     })),
                 },
                 execute: ({ input }) =>
-                  input.map((item) => ({
-                    id: `users||${item.name.toLowerCase()}`,
-                    name: item.name,
-                  })),
+                  replayBatchCollectionCreateWithDelay(
+                    env,
+                    input.map((item) => ({
+                      id: `users||${item.name.toLowerCase()}`,
+                      name: item.name,
+                    })),
+                  ),
               },
             },
           },
@@ -1118,7 +1256,12 @@ describe('collection', () => {
     const directMutation = vi.fn(() =>
       Promise.resolve({ value: { name: 'Grace' } }),
     );
-    const env = createCollectionStoreTestEnv<
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        RenameCollectionItemOperations
+      >
+    > = createCollectionStoreTestEnv<
       { name: string },
       RenameCollectionItemOperations
     >(
@@ -1140,7 +1283,13 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => ({ value: { name: input.name } }),
+                execute: ({ input }) =>
+                  replayCollectionRenameWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.id, () => ({
+                    value: { name: input.name },
+                  }));
+                },
               },
             },
           },
@@ -1180,7 +1329,12 @@ describe('collection', () => {
     const directMutation = vi.fn(() =>
       Promise.reject(new Error('offline-fallback')),
     );
-    const env = createCollectionStoreTestEnv<
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        RenameCollectionItemOperations
+      >
+    > = createCollectionStoreTestEnv<
       { name: string },
       RenameCollectionItemOperations
     >(
@@ -1213,7 +1367,13 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => ({ value: { name: input.name } }),
+                execute: ({ input }) =>
+                  replayCollectionRenameWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.id, () => ({
+                    value: { name: input.name },
+                  }));
+                },
               },
             },
           },
@@ -1263,7 +1423,12 @@ describe('collection', () => {
     const directMutation = vi.fn(() =>
       Promise.reject(new Error('validation-error')),
     );
-    const env = createCollectionStoreTestEnv<
+    const env: ReturnType<
+      typeof createCollectionStoreTestEnv<
+        { name: string },
+        RenameCollectionItemOperations
+      >
+    > = createCollectionStoreTestEnv<
       { name: string },
       RenameCollectionItemOperations
     >(
@@ -1296,7 +1461,13 @@ describe('collection', () => {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
                 getEntityRefs: ({ input }) => [input.id],
-                execute: ({ input }) => ({ value: { name: input.name } }),
+                execute: ({ input }) =>
+                  replayCollectionRenameWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.id, () => ({
+                    value: { name: input.name },
+                  }));
+                },
               },
             },
           },
@@ -1330,7 +1501,14 @@ describe('list-query', () => {
     const sessionKey = 'hybrid-list-offline-session';
     const storeName = 'hybrid-list-offline-store';
     const directMutation = vi.fn(() => Promise.resolve({ name: 'Grace' }));
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -1355,7 +1533,14 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => ({ name: input.name }),
+                execute: ({ input }) =>
+                  replayListQueryPatchWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1392,7 +1577,14 @@ describe('list-query', () => {
     const sessionKey = 'hybrid-list-online-session';
     const storeName = 'hybrid-list-online-store';
     const directMutation = vi.fn(() => Promise.resolve({ name: 'Grace' }));
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -1417,7 +1609,14 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => ({ name: input.name }),
+                execute: ({ input }) =>
+                  replayListQueryPatchWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1452,7 +1651,14 @@ describe('list-query', () => {
 
   test('online direct mutations that return undefined still call onSuccess', async () => {
     const onSuccess = vi.fn();
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -1476,7 +1682,14 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => ({ name: input.name }),
+                execute: ({ input }) =>
+                  replayListQueryPatchWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1512,7 +1725,14 @@ describe('list-query', () => {
     const directMutation = vi.fn(() =>
       Promise.reject(new Error('offline-fallback')),
     );
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -1548,7 +1768,14 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => ({ name: input.name }),
+                execute: ({ input }) =>
+                  replayListQueryPatchWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1598,7 +1825,14 @@ describe('list-query', () => {
     const directMutation = vi.fn(() =>
       Promise.reject(new Error('validation-error')),
     );
-    const env = createListQueryStoreTestEnv<
+    const env: ReturnType<
+      typeof createListQueryStoreTestEnv<
+        { id: number; name: string },
+        false,
+        false,
+        PatchUserOperations
+      >
+    > = createListQueryStoreTestEnv<
       { id: number; name: string },
       false,
       false,
@@ -1634,7 +1868,14 @@ describe('list-query', () => {
               patchUserName: {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
-                execute: ({ input }) => ({ name: input.name }),
+                execute: ({ input }) =>
+                  replayListQueryPatchWithDelay(env, input),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1686,7 +1927,16 @@ test('fallback queueing does not reapply the optimistic update', async () => {
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
-            execute: ({ input }) => input,
+            execute: ({ input }) => {
+              const replayResult = replayDocumentValueWithDelay(env, input);
+
+              return replayResult;
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
           },
         },
       },
@@ -1752,10 +2002,12 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
   const directMutation = vi.fn(() =>
     Promise.reject(new Error('offline-fallback')),
   );
-  const execute = vi.fn(({ input }: { input: { name: string } }) => ({
-    id: 'users||ada',
-    name: input.name,
-  }));
+  const execute = vi.fn(({ input }: { input: { name: string } }) =>
+    replayCollectionCreateWithDelay(env, {
+      id: 'users||ada',
+      name: input.name,
+    }),
+  );
   const env = createCollectionStoreTestEnv<
     { name: string },
     CreateUserOperations
@@ -1847,6 +2099,7 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
     await advanceTime(1);
   });
   await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  await flushAllTimers();
 
   // After replay, the temp entity should be fully reconciled into the final
   // server entity and removed from offline bookkeeping.

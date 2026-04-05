@@ -1,7 +1,7 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { isObject } from '@ls-stack/utils/typeGuards';
+import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import { rc_parse } from 'runcheck';
 import { Result } from 't-result';
 
@@ -1485,6 +1485,22 @@ export function createOfflineStoreController<
     }
   }
 
+  function runSuccessfulExecuteSync(args: {
+    operation: AnyOfflineOperationDefinition;
+    entry: OfflineQueueEntry;
+    result: unknown;
+  }): Promise<void> | void {
+    if (!args.operation.onSuccessExecute) return;
+
+    return args.operation.onSuccessExecute({
+      input: args.entry.input,
+      enqueuedAt: args.entry.createdAt,
+      updatedAt: args.entry.updatedAt,
+      resolveEntityRef,
+      result: args.result,
+    });
+  }
+
   async function removeEntry(
     entryId: string,
     current?: ActiveSessionState,
@@ -1907,6 +1923,11 @@ export function createOfflineStoreController<
     if (storeType === 'document' && (tempEntity || tempEntities)) {
       throw new Error(
         `Document offline operation "${operationName}" does not support tempEntity or tempEntities`,
+      );
+    }
+    if ((tempEntity || tempEntities) && 'onSuccessExecute' in operation) {
+      throw new Error(
+        `Offline operation "${operationName}" cannot configure onSuccessExecute when tempEntity or tempEntities is present`,
       );
     }
 
@@ -2356,6 +2377,15 @@ export function createOfflineStoreController<
             result,
             entryIdToSkip: entryToUse.id,
           });
+        }
+
+        const successfulExecuteSync = runSuccessfulExecuteSync({
+          operation,
+          entry: entryToUse,
+          result,
+        });
+        if (isPromise(successfulExecuteSync)) {
+          await successfulExecuteSync;
         }
 
         await removeEntry(entryToUse.id, current);

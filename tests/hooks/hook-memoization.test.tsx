@@ -435,6 +435,11 @@ describe('collection hook memoization', () => {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, () => ({
+                    value: { name: input.name },
+                  }));
+                },
               },
             },
           },
@@ -1028,6 +1033,12 @@ describe('list-query hook memoization', () => {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1111,6 +1122,12 @@ describe('list-query hook memoization', () => {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },

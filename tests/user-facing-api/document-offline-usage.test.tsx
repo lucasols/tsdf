@@ -12,6 +12,7 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createServerMock } from '../mocks/serverMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -206,7 +207,7 @@ test('direct document store offline public api', async () => {
     },
   });
 
-  let documentState: DocState = { value: 1, label: 'server' };
+  const serverMock = createServerMock<DocState>({ value: 1, label: 'server' });
   const skipSyncReplayOrder: string[] = [];
   const conflictReplayOrder: string[] = [];
 
@@ -218,7 +219,7 @@ test('direct document store offline public api', async () => {
     getSessionKey: () => sessionKey,
     fetchFn: async () => {
       await delay(FETCH_DELAY_MS);
-      return { ...documentState };
+      return { ...serverMock.current };
     },
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
@@ -233,10 +234,16 @@ test('direct document store offline public api', async () => {
           setValue: {
             inputSchema: setValueInputSchema,
             execute: ({ input }) => {
-              documentState = {
+              serverMock.setData({
                 value: input.value,
                 label: `doc:${input.value}`,
-              };
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `doc:${input.value}`;
+              });
             },
           },
           patchDoc: {
@@ -248,21 +255,28 @@ test('direct document store offline public api', async () => {
               }),
             },
             execute: ({ input }) => {
-              documentState = {
-                value: input.value ?? documentState.value,
-                label: input.label ?? documentState.label,
-              };
+              serverMock.setData({
+                value: input.value ?? serverMock.current.value,
+                label: input.label ?? serverMock.current.label,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value ?? draft.value;
+                draft.label = input.label ?? draft.label;
+              });
             },
           },
           skipSyncValue: {
             inputSchema: setValueInputSchema,
             getServerSnapshot: () => {
               skipSyncReplayOrder.push('getServerSnapshot');
-              return { ...documentState };
+              return { ...serverMock.current };
             },
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.value}`);
             },
+            onSuccessExecute: null,
             shouldSkipSync: ({
               input,
               enqueuedAt,
@@ -273,7 +287,7 @@ test('direct document store offline public api', async () => {
               expect(input.value).toBe(5);
               expect(typeof input.value).toBe('number');
               expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
-              expect(serverSnapshot).toEqual(documentState);
+              expect(serverSnapshot).toEqual(serverMock.current);
               return true;
             },
           },
@@ -281,7 +295,7 @@ test('direct document store offline public api', async () => {
             inputSchema: setValueInputSchema,
             getServerSnapshot: () => {
               conflictReplayOrder.push('getServerSnapshot');
-              return { ...documentState };
+              return { ...serverMock.current };
             },
             conflictHandling: {
               schema: docConflictSchema,
@@ -293,17 +307,19 @@ test('direct document store offline public api', async () => {
               }) => {
                 conflictReplayOrder.push('detectConflict');
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
-                expect(serverSnapshot).toEqual(documentState);
+                expect(serverSnapshot).toEqual(serverMock.current);
                 if (input.value !== 6) return false;
 
                 return { reason: 'stale-server-value' };
               },
             },
             execute: ({ input }) => {
-              documentState = {
+              serverMock.setData({
                 value: input.value,
                 label: `resolved:${input.value}`,
-              };
+              });
+            },
+            onSuccessExecute: ({ input }) => {
               documentStore.updateState((draft) => {
                 draft.value = input.value;
                 draft.label = `resolved:${input.value}`;
