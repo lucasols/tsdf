@@ -1885,7 +1885,11 @@ test('session switches do not leave replayed queue entries in the old namespace'
                   });
                 };
               }),
-            onSuccessExecute: null,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
           },
         },
       },

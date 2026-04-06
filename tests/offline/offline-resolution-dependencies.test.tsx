@@ -194,7 +194,12 @@ test('nested descendants cascade into blocked resolutions and discard together',
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
-              onSuccessExecute: null,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
           },
         },
@@ -495,7 +500,12 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
-              onSuccessExecute: null,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
           },
         },
@@ -646,6 +656,13 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
   await waitForMicrotaskCondition(
     () => patchUserExecute.mock.calls.length === 1,
   );
+  await vi.waitFor(() => {
+    expect(env.apiStore.getItemState('users||4')).toMatchInlineSnapshot(`
+      id: 4
+      name: 'Child blocked edit'
+      parentId: 'users||3'
+    `);
+  });
 
   // The child create received the parent's final payload as parentId, proving
   // the dependency remap worked through the replay chain.
@@ -660,10 +677,10 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     `- { itemId: 'users||4', name: 'Child blocked edit' }`,
   );
 
-  // After the full cascade, temp entities are reconciled and the list shows
-  // final server-backed items.
+  // After the full cascade, temp entities are reconciled and the list keeps
+  // the replayed child edit visible through the normal success callback path.
   expect(hook.result.current.items).toMatchInlineSnapshot(
-    `['Ada', 'Grace', 'Parent offline', 'Child offline']`,
+    `['Ada', 'Grace', 'Parent offline', 'Child blocked edit']`,
   );
   expect(env.apiStore.getItemState('temp:Parent offline')).toBeNull();
   expect(env.apiStore.getItemState('temp:Child offline')).toBeNull();
@@ -697,7 +714,6 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-started
     7.61s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"name":"Child blocked edit"})
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-finished
-    .     | Ada, Grace, Parent offline, Child offline      | [query-items] ui-changed
     "
   `);
 
@@ -1003,7 +1019,12 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
               inputSchema: userPatchSchema,
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
-              onSuccessExecute: null,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
             },
           },
         },
@@ -1161,7 +1182,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
   await vi.waitFor(() => {
     expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
       id: 3
-      name: 'Linus offline'
+      name: 'Linus blocked edit'
     `);
   });
 
@@ -1173,7 +1194,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     ['users||3']
   `);
   expect(hook.result.current.items).toMatchInlineSnapshot(
-    `['Ada', 'Grace', 'Linus offline']`,
+    `['Ada', 'Grace', 'Linus blocked edit']`,
   );
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 
@@ -1200,6 +1221,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     .      | Ada, Grace, Linus offline      | offline:patchUserName replay-started
     16.41s | Ada, Grace, Linus offline      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
     .      | Ada, Grace, Linus offline      | offline:patchUserName replay-finished
+    .      | Ada, Grace, Linus blocked edit | [query-items] ui-changed
     "
   `);
 

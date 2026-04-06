@@ -219,7 +219,12 @@ test('direct collection store offline public api', async () => {
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.title}`);
             },
-            onSuccessExecute: null,
+            onSuccessExecute: ({ input }) => {
+              collectionStore.updateItemState(input.id, (item) => ({
+                ...item,
+                title: input.title,
+              }));
+            },
             shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
               expect(input).toMatchInlineSnapshot(`
                 id: '1'
@@ -356,7 +361,12 @@ test('direct collection store offline public api', async () => {
               });
               return { id: '3', title: input.title, completed: false };
             },
-            onSuccessExecute: () => undefined,
+            onSuccessExecute: ({ input }) => {
+              collectionStore.addItemToState('3', {
+                title: input.title,
+                completed: false,
+              });
+            },
           },
         },
       },

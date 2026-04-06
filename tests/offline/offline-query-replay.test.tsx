@@ -119,7 +119,12 @@ describe('list-query replay', () => {
                 inputSchema: userPatchSchema,
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute,
-                onSuccessExecute: null,
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },
@@ -1852,7 +1857,12 @@ describe('list-query replay', () => {
                     .delayedUpdateItem(input.itemId, { name: input.name })
                     .then(() => ({ name: input.name }));
                 },
-                onSuccessExecute: null,
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },

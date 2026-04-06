@@ -276,7 +276,11 @@ test('direct document store offline public api', async () => {
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.value}`);
             },
-            onSuccessExecute: null,
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
             shouldSkipSync: ({
               input,
               enqueuedAt,

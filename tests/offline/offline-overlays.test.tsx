@@ -255,7 +255,11 @@ describe('document overlays', () => {
               execute: () => {
                 throw new Error('Replay failed');
               },
-              onSuccessExecute: null,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
             },
           },
         },
@@ -605,7 +609,12 @@ describe('collection overlays', () => {
                 execute: () => {
                   throw new Error('Replay failed');
                 },
-                onSuccessExecute: null,
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState('users||1', (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
               },
             },
           },

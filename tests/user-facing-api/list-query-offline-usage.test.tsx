@@ -262,7 +262,12 @@ test('direct list-query store offline public api', async () => {
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.name}`);
             },
-            onSuccessExecute: null,
+            onSuccessExecute: ({ input }) => {
+              listQueryStore.updateItemState(
+                getUserItemPayload(input.id),
+                (item) => ({ ...item, name: input.name }),
+              );
+            },
             shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
               expect(input).toMatchInlineSnapshot(`
                 id: 1
@@ -397,7 +402,12 @@ test('direct list-query store offline public api', async () => {
               });
               return { id: 3, name: input.name };
             },
-            onSuccessExecute: () => undefined,
+            onSuccessExecute: ({ input }) => {
+              listQueryStore.addItemToState(getUserItemPayload(3), {
+                id: 3,
+                name: input.name,
+              });
+            },
           },
         },
       },

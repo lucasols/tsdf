@@ -2496,6 +2496,8 @@ export function createOfflineStoreController<
           });
         }
 
+        await removeEntry(entryToUse.id, current, true);
+
         const successfulExecuteSync = runSuccessfulExecuteSync({
           operation,
           entry: entryToUse,
@@ -2505,7 +2507,7 @@ export function createOfflineStoreController<
           await successfulExecuteSync;
         }
 
-        await removeEntry(entryToUse.id, current);
+        refreshDerivedState(current);
       } catch (error) {
         const lastError = { message: toMessage(error) };
         const classification = await current.session.classifyFailure(error, {
