@@ -1499,25 +1499,25 @@ test('reconnect replays queued mutations from multiple stores one at a time in g
   ).toMatchInlineSnapshot(`[]`);
   expect({ storeA: envA.timelineString, storeB: envB.timelineString })
     .toMatchInlineSnapshot(`
-    storeA: |
+      storeA: |
 
-      time  |
-      0     | -- queue the first store mutation while the session is offline
-      .     | offline:updateValue queued
-      50ms  | -- reconnect the session and let the earliest queued mutation start replaying
-      .     | offline:updateValue replay-started
-      1.25s | server-data-changed (value: 2)
-      .     | offline:updateValue replay-finished
-    storeB: |
+        time  |
+        0     | -- queue the first store mutation while the session is offline
+        .     | offline:updateValue queued
+        50ms  | -- reconnect the session and let the earliest queued mutation start replaying
+        .     | offline:updateValue replay-started
+        1.25s | server-data-changed (value: 2)
+        .     | offline:updateValue replay-finished
+      storeB: |
 
-      time  |
-      50ms  | -- queue the second store mutation behind the first one
-      .     | offline:updateValue queued
-      1.25s | -- reconnect the session and wait for the earlier queued mutation to finish first
-      .     | offline:updateValue replay-started
-      2.45s | server-data-changed (value: 3)
-      .     | offline:updateValue replay-finished
-  `);
+        time  |
+        50ms  | -- queue the second store mutation behind the first one
+        .     | offline:updateValue queued
+        1.25s | -- reconnect the session and wait for the earlier queued mutation to finish first
+        .     | offline:updateValue replay-started
+        2.45s | server-data-changed (value: 3)
+        .     | offline:updateValue replay-finished
+    `);
 });
 
 test('a store initialized while an earlier shared-session replay is already in flight waits for its turn', async () => {
@@ -1717,9 +1717,9 @@ test('a store initialized while an earlier shared-session replay is already in f
     storeA: |
 
       time  |
-      10ms  | -- the restarted session boots online and begins replaying the earliest queued store
-      .     | 🔴 >fetch-started
+      0     | -- the restarted session boots online and begins replaying the earliest queued store
       .     | offline:updateValue replay-started
+      10ms  | 🔴 >fetch-started
       810ms | 🔴 <fetch-finished (value: 1)
       5.2s  | server-data-changed (value: 2)
       .     | offline:updateValue replay-finished

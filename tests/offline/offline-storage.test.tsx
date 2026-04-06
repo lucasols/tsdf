@@ -5,7 +5,7 @@ import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-import { createOfflineSession } from '../../src/main';
+import { clearSessionStorage, createOfflineSession } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -34,6 +34,7 @@ import {
   collectionCreateInputSchema,
   docMutationInputSchema,
   docSchema,
+  getGlobalOfflineStatusSummary,
   listQueryQueryPayloadSchema,
 } from './offlineTestShared';
 
