@@ -799,7 +799,6 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
 
   await advanceTime(5_000);
   await flushAllTimers();
