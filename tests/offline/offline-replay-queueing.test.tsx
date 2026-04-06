@@ -3,10 +3,6 @@ import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-declare global {
-  var __SUPPRESS_ACT_ERROR__: boolean;
-}
-
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -59,7 +55,6 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
   localStorage.clear();
-  globalThis.__SUPPRESS_ACT_ERROR__ = false;
 });
 
 test('collection offline create rejects queueing the same temp id twice', async () => {
