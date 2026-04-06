@@ -34,22 +34,24 @@ declare global {
 globalThis.__SUPPRESS_ACT_ERROR__ = false;
 
 console.error = (...args) => {
+  let skipOriginal = false;
   if (args.length > 0 && typeof args[0] === 'string') {
     const errorMsg = args[0];
-    if (
-      errorMsg.includes('was not wrapped in act') &&
-      !globalThis.__SUPPRESS_ACT_ERROR__
-    ) {
-      throw new Error(
-        `${format(...args)} If the warning not comes from tests with missing act, use globalThis.__SUPPRESS_ACT_ERROR__ = true; to ignore it.`,
-      );
+    if (errorMsg.includes('was not wrapped in act')) {
+      if (!globalThis.__SUPPRESS_ACT_ERROR__) {
+        throw new Error(
+          `${format(...args)} If the warning not comes from tests with missing act, use globalThis.__SUPPRESS_ACT_ERROR__ = true; to ignore it.`,
+        );
+      } else {
+        skipOriginal = true;
+      }
     }
 
     if (errorMsg.includes('Maximum update depth exceeded')) {
       throw new Error(format(...args));
     }
   }
-  originalConsoleError(...args);
+  if (!skipOriginal) originalConsoleError(...args);
 };
 
 const defaultNavigatorLocks = {
