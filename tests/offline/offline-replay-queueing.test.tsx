@@ -7,6 +7,7 @@ import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -18,9 +19,11 @@ import {
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   getSortedQueueSummary,
+  type PatchUserOperations,
   type UpdateValueConflictOperations,
   type UpdateValueOperations,
   userPatchSchema,
+  userRowSchema,
 } from './offlineReplayTestShared';
 import {
   classifyMutationOutage,
@@ -29,6 +32,7 @@ import {
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
+  listQueryQueryPayloadSchema,
   quickRecoveryProbe,
   summarizeResolution,
   waitForMicrotaskCondition,
@@ -339,6 +343,402 @@ test('document offline accumulation keeps a single persisted queue entry and rep
   expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
     `[]`,
   );
+});
+
+test('collection offline accumulation keeps a single persisted queue entry and replays only the merged input', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-collection-session';
+  const storeName = 'offline-accumulation-collection';
+
+  type RenameCollectionAccumulationOperations = {
+    renameUser: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+
+  // Track the replayed payload so we can prove only the merged rename is sent.
+  const execute = vi
+    .fn<
+      ({
+        input,
+        enqueuedAt,
+      }: {
+        input: { itemId: string; name: string };
+        enqueuedAt: number;
+      }) => Promise<{ value: { name: string } }>
+    >()
+    .mockImplementation(async ({ input, enqueuedAt }) => {
+      expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+      await env.serverTable.delayedUpdateItem(input.itemId, {
+        name: input.name,
+      });
+      return { value: { name: input.name } };
+    });
+
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    RenameCollectionAccumulationOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {
+            renameUser: {
+              inputSchema: userPatchSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (draft) => {
+                  draft.value.name = input.name;
+                });
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Queue two offline renames for the same item. Accumulation should keep only
+  // the latest input in one durable queue entry.
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.value.name = 'Ada second';
+      });
+    },
+    mutation: async () => {
+      await env.serverTable.delayedUpdateItem('users||1', {
+        name: 'Ada second',
+      });
+      return { value: { name: 'Ada second' } };
+    },
+    offline: {
+      operation: 'renameUser',
+      input: { itemId: 'users||1', name: 'Ada second' },
+    },
+  });
+
+  await advanceTime(50);
+  await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.value.name = 'Ada third';
+      });
+    },
+    mutation: async () => {
+      await env.serverTable.delayedUpdateItem('users||1', {
+        name: 'Ada third',
+      });
+      return { value: { name: 'Ada third' } };
+    },
+    offline: {
+      operation: 'renameUser',
+      input: { itemId: 'users||1', name: 'Ada third' },
+    },
+  });
+
+  expect(pick(env.apiStore.getItemState('users||1'), ['data', 'status']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Ada third' }
+
+      status: 'success'
+    `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: '"users||1'
+      entityKind: 'item'
+      id: 'offline-accumulation-collection-session:offline-accumulation-collection:"users||1'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-accumulation-collection-session'
+      storeName: 'offline-accumulation-collection'
+      storeType: 'collection'
+      syncState: 'pending'
+      updatedAt: 1735689600050
+  `);
+  expect(
+    getOfflineQueueEntries(sessionKey, storeName).map((entry) => {
+      const data = getOfflineQueueEntryData(entry);
+
+      return {
+        timestamp: entry.timestamp,
+        version: entry.version,
+        data: {
+          attempts: data.attempts,
+          createdAt: data.createdAt,
+          entityRefs: data.entityRefs,
+          input: data.input,
+          lastAttemptAt: data.lastAttemptAt,
+          operation: data.operation,
+          sessionKey: data.sessionKey,
+          storeName: data.storeName,
+          storeType: data.storeType,
+          syncState: data.syncState,
+          updatedAt: data.updatedAt,
+        },
+      };
+    }),
+  ).toMatchInlineSnapshot(`
+    - data:
+        attempts: 0
+        createdAt: 1735689600000
+        entityRefs:
+          - entityKey: '"users||1'
+            entityKind: 'item'
+        input: { itemId: 'users||1', name: 'Ada third' }
+        lastAttemptAt: null
+        operation: 'renameUser'
+        sessionKey: 'offline-accumulation-collection-session'
+        storeName: 'offline-accumulation-collection'
+        storeType: 'collection'
+        syncState: 'pending'
+        updatedAt: 1735689600050
+  `);
+
+  // Going back online should replay only the merged rename.
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
+    - { itemId: 'users||1', name: 'Ada third' }
+  `);
+  expect(pick(env.apiStore.getItemState('users||1'), ['data', 'status']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Ada third' }
+
+      status: 'success'
+    `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+});
+
+test('list-query offline accumulation keeps a single persisted queue entry and replays only the merged input', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-accumulation-list-query-session';
+  const storeName = 'offline-accumulation-list-query';
+
+  // Track which payload is replayed so the test proves the queue merged.
+  const execute = vi
+    .fn<
+      ({
+        input,
+        enqueuedAt,
+      }: {
+        input: { itemId: string; name: string };
+        enqueuedAt: number;
+      }) => Promise<{ id: number; name: string }>
+    >()
+    .mockImplementation(async ({ input, enqueuedAt }) => {
+      expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+      await env.serverTable.delayedUpdateItem(input.itemId, {
+        id: 1,
+        name: input.name,
+      });
+      return { id: 1, name: input.name };
+    });
+
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    PatchUserOperations
+  >(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() =>
+    env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    ),
+  );
+  await Promise.resolve();
+
+  // Queue two offline edits for the same row. The second one should merge into
+  // the first queue entry rather than creating another persisted record.
+  await act(async () => {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          name: 'Ada second',
+        }));
+      },
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', {
+          id: 1,
+          name: 'Ada second',
+        });
+        return { id: 1, name: 'Ada second' };
+      },
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada second' },
+      },
+    });
+  });
+
+  await advanceTime(50);
+  await act(async () => {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          name: 'Ada third',
+        }));
+      },
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', {
+          id: 1,
+          name: 'Ada third',
+        });
+        return { id: 1, name: 'Ada third' };
+      },
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada third' },
+      },
+    });
+  });
+
+  expect(hook.result.current.items).toMatchInlineSnapshot(`
+    ['Ada third']
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
+      entityKey: '"users||1'
+      entityKind: 'item'
+      id: 'offline-accumulation-list-query-session:offline-accumulation-list-query:"users||1'
+      pendingMutations: 1
+      requiresResolution: '❌'
+      sessionKey: 'offline-accumulation-list-query-session'
+      storeName: 'offline-accumulation-list-query'
+      storeType: 'listQuery'
+      syncState: 'pending'
+      updatedAt: 1735689600050
+  `);
+  expect(
+    getOfflineQueueEntries(sessionKey, storeName).map((entry) => {
+      const data = getOfflineQueueEntryData(entry);
+
+      return {
+        timestamp: entry.timestamp,
+        version: entry.version,
+        data: {
+          attempts: data.attempts,
+          createdAt: data.createdAt,
+          entityRefs: data.entityRefs,
+          input: data.input,
+          lastAttemptAt: data.lastAttemptAt,
+          operation: data.operation,
+          sessionKey: data.sessionKey,
+          storeName: data.storeName,
+          storeType: data.storeType,
+          syncState: data.syncState,
+          updatedAt: data.updatedAt,
+        },
+      };
+    }),
+  ).toMatchInlineSnapshot(`
+    - data:
+        attempts: 0
+        createdAt: 1735689600000
+        entityRefs:
+          - entityKey: '"users||1'
+            entityKind: 'item'
+        input: { itemId: 'users||1', name: 'Ada third' }
+        lastAttemptAt: null
+        operation: 'patchUserName'
+        sessionKey: 'offline-accumulation-list-query-session'
+        storeName: 'offline-accumulation-list-query'
+        storeType: 'listQuery'
+        syncState: 'pending'
+        updatedAt: 1735689600050
+  `);
+
+  // Replay should run once with the merged payload and then fully clear queue state.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+
+  expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
+    - { itemId: 'users||1', name: 'Ada third' }
+  `);
+  expect(hook.result.current.items).toMatchInlineSnapshot(`
+    ['Ada third']
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  hook.unmount();
 });
 
 test('same-entity supersede keeps only the queued delete for a persisted collection item', async () => {
@@ -909,6 +1309,8 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
   });
   expect(mutationResult.ok).toBe(true);
 
+  await advanceTime(100);
+
   // The first online replay should settle into syncing before the retry
   // window has a chance to decide whether the queued mutation should continue.
   env.addTimelineComments('beforeNextAction', [
@@ -943,14 +1345,12 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
     .     | "value:2 sync:none pending:0"               | ui-changed
     .     | "value:2 sync:pending pending:1"            | ui-changed
     .     | "value:2 sync:pending pending:1"            | offline:updateValue queued
-    .     | "value:2 sync:pending pending:1"            | -- bring the session online and wait for the first replay attempt to settle into syncing
+    100ms | "value:2 sync:pending pending:1"            | -- bring the session online and wait for the first replay attempt to settle into syncing
     .     | "value:2 sync:syncing pending:1"            | ui-changed
     .     | "value:2 sync:syncing pending:1"            | offline:updateValue replay-started
     .     | "value:2 sync:syncing pending:1"            | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
     .     | "value:2 sync:needs-confirmation pending:1" | ui-changed
-    10ms  | "value:2 sync:needs-confirmation pending:1" | 🔴 >fetch-started
-    810ms | "value:2 sync:needs-confirmation pending:1" | 🔴 <fetch-finished (value: 1)
-    5s    | "value:2 sync:syncing pending:1"            | ui-changed
+    5.1s  | "value:2 sync:syncing pending:1"            | ui-changed
     .     | "value:2 sync:syncing pending:1"            | offline:updateValue replay-started
     .     | "value:2 sync:syncing pending:1"            | offline:updateValue replay-finished
     .     | "value:2 sync:none pending:0"               | ui-changed
