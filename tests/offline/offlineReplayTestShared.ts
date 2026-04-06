@@ -95,6 +95,34 @@ export function getOfflineQueueEntries(
     });
 }
 
+export function getSessionOfflineQueueEntries(
+  sessionKey: string,
+): Array<Record<string, unknown>> {
+  const sessionPrefix = `tsdf.${sessionKey}.`;
+
+  return getLocalStorageKeys()
+    .filter((key) => key.startsWith(sessionPrefix) && key.includes('.oq.'))
+    .map((key) => {
+      const storeNameStart = sessionPrefix.length;
+      const storeNameEnd = key.indexOf('.oq.', storeNameStart);
+      if (storeNameEnd <= storeNameStart) {
+        throw new Error(`Invalid offline queue key "${key}"`);
+      }
+
+      const storeName = key.slice(storeNameStart, storeNameEnd);
+      const persistedValue = localStorage.getItem(key);
+      if (!persistedValue) {
+        throw new Error(`Missing persisted queue entry for "${key}"`);
+      }
+
+      return {
+        ...parsePersistedObject(persistedValue),
+        __sessionKey: sessionKey,
+        __storeName: storeName,
+      };
+    });
+}
+
 export function getOfflineQueueEntryData(
   entry: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -213,6 +241,25 @@ export function getSortedQueueSummary(
   fields: string[] = ['input', 'operation'],
 ): Array<Record<string, unknown>> {
   return getOfflineQueueEntries(sessionKey, storeName)
+    .map((entry) => {
+      const data = getOfflineQueueEntryData(entry);
+      const result: Record<string, unknown> = {};
+
+      for (const field of [...fields, 'queueOrder']) {
+        result[field] = data[field];
+      }
+
+      return result;
+    })
+    .sort((left, right) => Number(left.queueOrder) - Number(right.queueOrder))
+    .map(({ queueOrder: _, ...rest }) => rest);
+}
+
+export function getSortedSessionQueueSummary(
+  sessionKey: string,
+  fields: string[] = ['storeName', 'storeType', 'input', 'operation'],
+): Array<Record<string, unknown>> {
+  return getSessionOfflineQueueEntries(sessionKey)
     .map((entry) => {
       const data = getOfflineQueueEntryData(entry);
       const result: Record<string, unknown> = {};

@@ -19,9 +19,11 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { withSuppressedActError } from '../utils/withSuppressedActError';
 import {
   type CreateListQueryUserOperations,
   getOfflineQueueEntries,
+  getSortedSessionQueueSummary,
   type PatchUserOperations,
   type UpdateValueExecuteContext,
   type UpdateValueOperations,
@@ -1117,4 +1119,496 @@ test('global and per-store offline entity selectors aggregate queued work across
   `);
   globalHook.unmount();
   storeHook.unmount();
+});
+
+test('queued mutations from multiple stores in one session share a single global replay order', async () => {
+  network.setOffline();
+  const sessionKey = 'shared-session-queue-order';
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
+
+  function createEnv(storeName: string) {
+    const env: ReturnType<
+      typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+    > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          session: offlineSession,
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: async ({ input }: UpdateValueExecuteContext) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return env;
+  }
+
+  const envA = createEnv('shared-session-queue-order-a');
+  const envB = createEnv('shared-session-queue-order-b');
+  await Promise.resolve();
+
+  // Both stores first observe the same offline transition before they queue
+  // durable work into the shared session.
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  // Queue the first store's mutation.
+  await envA.apiStore.performMutation({
+    optimisticUpdate: () => {
+      envA.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: async () => {
+      await envA.serverMock.delayedSetData(2);
+      return 2;
+    },
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  // Advance time so the second store gets a later replay position.
+  await advanceTime(50);
+
+  // Queue the second store's mutation afterwards.
+  await envB.apiStore.performMutation({
+    optimisticUpdate: () => {
+      envB.apiStore.updateState((draft) => {
+        draft.value = 3;
+      });
+    },
+    mutation: async () => {
+      await envB.serverMock.delayedSetData(3);
+      return 3;
+    },
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+
+  // The persisted session view should read like one queue ordered by enqueue
+  // time, even though each store still persists its own namespace entries.
+  expect(getSortedSessionQueueSummary(sessionKey)).toMatchInlineSnapshot(`
+    - input: { value: 2 }
+      operation: 'updateValue'
+      storeName: 'shared-session-queue-order-a'
+      storeType: 'document'
+    - input: { value: 3 }
+      operation: 'updateValue'
+      storeName: 'shared-session-queue-order-b'
+      storeType: 'document'
+  `);
+});
+
+test('reconnect replays queued mutations from multiple stores one at a time in global enqueue order', async () => {
+  network.setOffline();
+  const sessionKey = 'shared-session-replay-order';
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: { network: network.config },
+  });
+  const replayLog: string[] = [];
+  let releaseFirstReplay: (() => void) | null = null;
+
+  function createEnv(args: { storeName: string; shouldBlockReplay?: boolean }) {
+    const env: ReturnType<
+      typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+    > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: args.storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          session: offlineSession,
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: async ({ input }: UpdateValueExecuteContext) => {
+                replayLog.push(`${args.storeName}:start:${input.value}`);
+
+                if (args.shouldBlockReplay) {
+                  await new Promise<void>((resolve) => {
+                    releaseFirstReplay = resolve;
+                  });
+                }
+
+                await env.serverMock.delayedSetData(input.value);
+                replayLog.push(`${args.storeName}:finish:${input.value}`);
+                return input;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return env;
+  }
+
+  const envA = createEnv({
+    storeName: 'shared-session-replay-order-a',
+    shouldBlockReplay: true,
+  });
+  const envB = createEnv({ storeName: 'shared-session-replay-order-b' });
+  await Promise.resolve();
+
+  // Both stores must observe the same offline session before queueing work.
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  // Queue the earliest replay candidate in the first store.
+  envA.addTimelineComments('beforeNextAction', [
+    'queue the first store mutation while the session is offline',
+  ]);
+  await envA.apiStore.performMutation({
+    optimisticUpdate: () => {
+      envA.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: async () => {
+      await envA.serverMock.delayedSetData(2);
+      return 2;
+    },
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  // Give the second mutation a later queue position so the intended order is
+  // unambiguous in both the persisted queue and the replay log.
+  await advanceTime(50);
+
+  // Queue the second store's mutation behind the first one.
+  envB.addTimelineComments('beforeNextAction', [
+    'queue the second store mutation behind the first one',
+  ]);
+  await envB.apiStore.performMutation({
+    optimisticUpdate: () => {
+      envB.apiStore.updateState((draft) => {
+        draft.value = 3;
+      });
+    },
+    mutation: async () => {
+      await envB.serverMock.delayedSetData(3);
+      return 3;
+    },
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+
+  expect(getSortedSessionQueueSummary(sessionKey)).toMatchInlineSnapshot(`
+    - input: { value: 2 }
+      operation: 'updateValue'
+      storeName: 'shared-session-replay-order-a'
+      storeType: 'document'
+    - input: { value: 3 }
+      operation: 'updateValue'
+      storeName: 'shared-session-replay-order-b'
+      storeType: 'document'
+  `);
+
+  // Reconnect the shared session. The first replay may start, but the second
+  // store must stay queued until that earlier work fully completes.
+  envA.addTimelineComments('beforeNextAction', [
+    'reconnect the session and let the earliest queued mutation start replaying',
+  ]);
+  envB.addTimelineComments('beforeNextAction', [
+    'reconnect the session and wait for the earlier queued mutation to finish first',
+  ]);
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await waitForMicrotaskCondition(() => replayLog.length > 0);
+
+  // Before the first replay is released, only the earliest queued mutation
+  // should have started.
+  expect(replayLog).toMatchInlineSnapshot(`
+    ['shared-session-replay-order-a:start:2']
+  `);
+
+  // Once the first replay finishes, the second store can take the next turn.
+  await act(async () => {
+    releaseFirstReplay?.();
+    await flushAllTimers();
+  });
+  await waitForMicrotaskCondition(() => replayLog.length === 4);
+
+  // The replay log should now read like one shared queue drained in order.
+  expect(replayLog).toMatchInlineSnapshot(`
+    - 'shared-session-replay-order-a:start:2'
+    - 'shared-session-replay-order-a:finish:2'
+    - 'shared-session-replay-order-b:start:3'
+    - 'shared-session-replay-order-b:finish:3'
+  `);
+  expect(
+    getOfflineQueueEntries(sessionKey, 'shared-session-replay-order-a'),
+  ).toMatchInlineSnapshot(`[]`);
+  expect(
+    getOfflineQueueEntries(sessionKey, 'shared-session-replay-order-b'),
+  ).toMatchInlineSnapshot(`[]`);
+  expect({ storeA: envA.timelineString, storeB: envB.timelineString })
+    .toMatchInlineSnapshot(`
+    storeA: |
+
+      time  |
+      0     | -- queue the first store mutation while the session is offline
+      .     | offline:updateValue queued
+      50ms  | -- reconnect the session and let the earliest queued mutation start replaying
+      .     | offline:updateValue replay-started
+      1.25s | server-data-changed (value: 2)
+      .     | offline:updateValue replay-finished
+    storeB: |
+
+      time  |
+      50ms  | -- queue the second store mutation behind the first one
+      .     | offline:updateValue queued
+      1.25s | -- reconnect the session and wait for the earlier queued mutation to finish first
+      .     | offline:updateValue replay-started
+      2.45s | server-data-changed (value: 3)
+      .     | offline:updateValue replay-finished
+  `);
+});
+
+test('a store initialized while an earlier shared-session replay is already in flight waits for its turn', async () => {
+  network.setOffline();
+  const sessionKey = 'shared-session-mid-replay-init';
+  const replayLog: string[] = [];
+  let hasReleaseFirstReplay = false;
+  let releaseFirstReplay: () => void = () => {
+    throw new Error('Expected the first replay to be waiting for release');
+  };
+
+  function createEnv(args: {
+    storeName: string;
+    testScenario?: 'idle' | 'loaded';
+    onExecute?: (input: { value: number }) => Promise<void> | void;
+  }) {
+    const env: ReturnType<
+      typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+    > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: args.storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: args.testScenario ?? 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: async ({ input }: UpdateValueExecuteContext) => {
+                replayLog.push(`${args.storeName}:start:${input.value}`);
+                await args.onExecute?.(input);
+                await env.serverMock.delayedSetData(input.value);
+                replayLog.push(`${args.storeName}:finish:${input.value}`);
+                return input;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return env;
+  }
+
+  // Seed durable queue entries for both stores before the replaying session
+  // exists, matching a real restart with persisted offline work.
+  const seededEnvA = createEnv({
+    storeName: 'shared-session-mid-replay-init-a',
+    testScenario: 'loaded',
+  });
+  const seededEnvB = createEnv({
+    storeName: 'shared-session-mid-replay-init-b',
+    testScenario: 'loaded',
+  });
+  await Promise.resolve();
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  await seededEnvA.apiStore.performMutation({
+    optimisticUpdate: () => {
+      seededEnvA.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: async () => {
+      await seededEnvA.serverMock.delayedSetData(2);
+      return 2;
+    },
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  await advanceTime(50);
+
+  await seededEnvB.apiStore.performMutation({
+    optimisticUpdate: () => {
+      seededEnvB.apiStore.updateState((draft) => {
+        draft.value = 3;
+      });
+    },
+    mutation: async () => {
+      await seededEnvB.serverMock.delayedSetData(3);
+      return 3;
+    },
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+
+  expect(getSortedSessionQueueSummary(sessionKey)).toMatchInlineSnapshot(`
+    - input: { value: 2 }
+      operation: 'updateValue'
+      storeName: 'shared-session-mid-replay-init-a'
+      storeType: 'document'
+    - input: { value: 3 }
+      operation: 'updateValue'
+      storeName: 'shared-session-mid-replay-init-b'
+      storeType: 'document'
+  `);
+
+  // Reboot into a fresh browser session that starts online.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+  act(() => {
+    network.goOnline();
+  });
+
+  // Start only the earliest queued store first and block its execute so replay
+  // stays in-flight while the later store is initialized.
+  const restartedEnvA = createEnv({
+    storeName: 'shared-session-mid-replay-init-a',
+    testScenario: 'idle',
+    onExecute: async () => {
+      await new Promise<void>((resolve) => {
+        hasReleaseFirstReplay = true;
+        releaseFirstReplay = resolve;
+      });
+    },
+  });
+  const restartedHookA = renderHook(() =>
+    restartedEnvA.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+  restartedEnvA.addTimelineComments('beforeNextAction', [
+    'the restarted session boots online and begins replaying the earliest queued store',
+  ]);
+  await withSuppressedActError(async () => {
+    await flushAllTimers();
+    await waitForMicrotaskCondition(() => replayLog.length === 1);
+  });
+
+  expect(replayLog).toMatchInlineSnapshot(`
+    ['shared-session-mid-replay-init-a:start:2']
+  `);
+
+  // Initializing the later store mid-replay must not start its queued entry
+  // until the earlier replay has fully completed.
+  const restartedEnvB = createEnv({
+    storeName: 'shared-session-mid-replay-init-b',
+    testScenario: 'idle',
+  });
+  const restartedHookB = renderHook(() =>
+    restartedEnvB.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+  restartedEnvB.addTimelineComments('beforeNextAction', [
+    'the later store initializes while the first replay is still in flight',
+  ]);
+  await withSuppressedActError(async () => {
+    await flushAllTimers();
+    await Promise.resolve();
+  });
+
+  expect(replayLog).toMatchInlineSnapshot(`
+    ['shared-session-mid-replay-init-a:start:2']
+  `);
+
+  // Releasing the first execute is not enough on its own; the second store
+  // still has to wait for the first replay to finish writing its server result.
+  expect(hasReleaseFirstReplay).toBe(true);
+  releaseFirstReplay();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(replayLog).toMatchInlineSnapshot(`
+    ['shared-session-mid-replay-init-a:start:2']
+  `);
+
+  await withSuppressedActError(async () => {
+    await flushAllTimers();
+    await waitForMicrotaskCondition(() => replayLog.length === 4);
+  });
+
+  expect(replayLog).toMatchInlineSnapshot(`
+    - 'shared-session-mid-replay-init-a:start:2'
+    - 'shared-session-mid-replay-init-a:finish:2'
+    - 'shared-session-mid-replay-init-b:start:3'
+    - 'shared-session-mid-replay-init-b:finish:3'
+  `);
+  expect(
+    getOfflineQueueEntries(sessionKey, 'shared-session-mid-replay-init-a'),
+  ).toMatchInlineSnapshot(`[]`);
+  expect(
+    getOfflineQueueEntries(sessionKey, 'shared-session-mid-replay-init-b'),
+  ).toMatchInlineSnapshot(`[]`);
+  expect({
+    storeA: restartedEnvA.timelineString,
+    storeB: restartedEnvB.timelineString,
+  }).toMatchInlineSnapshot(`
+    storeA: |
+
+      time  |
+      10ms  | -- the restarted session boots online and begins replaying the earliest queued store
+      .     | 🔴 >fetch-started
+      .     | offline:updateValue replay-started
+      810ms | 🔴 <fetch-finished (value: 1)
+      5.2s  | server-data-changed (value: 2)
+      .     | offline:updateValue replay-finished
+    storeB: |
+
+      time  |
+      10ms  | -- the later store initializes while the first replay is still in flight
+      .     | 🔴 >fetch-started
+      810ms | 🔴 <fetch-finished (value: 1)
+      3.2s  | offline:updateValue replay-started
+      4.4s  | server-data-changed (value: 3)
+      .     | offline:updateValue replay-finished
+  `);
+
+  restartedHookA.unmount();
+  restartedHookB.unmount();
 });

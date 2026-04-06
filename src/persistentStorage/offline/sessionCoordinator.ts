@@ -58,10 +58,18 @@ type OfflineSessionMessage =
   | SessionSnapshotMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
+type SessionReplayHead = {
+  storeName: string;
+  entryId: string;
+  queueOrder: number;
+  createdAt: number;
+};
+
 type SessionStoreContribution = {
   entities: GlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   protectedKeys: string[];
+  replayHead: SessionReplayHead | null;
 };
 
 type SessionRegistration = {
@@ -238,6 +246,35 @@ function resolveOfflineSessionScope(
 function arraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
+}
+
+function replayHeadsEqual(
+  left: SessionReplayHead | null | undefined,
+  right: SessionReplayHead | null | undefined,
+): boolean {
+  return (
+    left?.storeName === right?.storeName &&
+    left?.entryId === right?.entryId &&
+    left?.queueOrder === right?.queueOrder &&
+    left?.createdAt === right?.createdAt
+  );
+}
+
+function compareReplayHeads(
+  left: SessionReplayHead,
+  right: SessionReplayHead,
+): number {
+  if (left.queueOrder !== right.queueOrder) {
+    return left.queueOrder - right.queueOrder;
+  }
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt - right.createdAt;
+  }
+  if (left.storeName !== right.storeName) {
+    return left.storeName.localeCompare(right.storeName);
+  }
+
+  return left.entryId.localeCompare(right.entryId);
 }
 
 function normalizeRecoveryProbe(
@@ -600,6 +637,7 @@ export class SessionOfflineCoordinator {
       this.#registrations.delete(registration.storeName);
       this.#storeContributions.delete(registration.storeName);
       this.#refreshAggregates();
+      this.#notifyGreenCycle();
       if (this.#registrations.size === 0) {
         this.#stopRecoveryProbe();
       }
@@ -611,8 +649,37 @@ export class SessionOfflineCoordinator {
     contribution: SessionStoreContribution,
   ): void {
     if (this.#disposed) return;
+    const previousContribution = this.#storeContributions.get(storeName);
+    const replayHeadChanged = !replayHeadsEqual(
+      previousContribution?.replayHead,
+      contribution.replayHead,
+    );
     this.#storeContributions.set(storeName, contribution);
     this.#refreshAggregates();
+    if (replayHeadChanged) {
+      this.#notifyGreenCycle();
+    }
+  }
+
+  canReplayEntry(args: {
+    storeName: string;
+    entryId: string;
+    queueOrder: number;
+    createdAt: number;
+  }): boolean {
+    const replayHeads = [...this.#storeContributions.values()]
+      .map((contribution) => contribution.replayHead)
+      .filter((head) => head !== null);
+    const nextReplayHead = replayHeads.sort(compareReplayHeads)[0];
+
+    if (!nextReplayHead) return true;
+
+    return (
+      nextReplayHead.storeName === args.storeName &&
+      nextReplayHead.entryId === args.entryId &&
+      nextReplayHead.queueOrder === args.queueOrder &&
+      nextReplayHead.createdAt === args.createdAt
+    );
   }
 
   getProtectedKeys(): string[] {

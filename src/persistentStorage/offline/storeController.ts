@@ -1297,11 +1297,21 @@ export function createOfflineStoreController<
         entityKind: entity.entityKind,
       })),
     );
+    const nextReplayEntry = getSortedEntries()[0] ?? null;
 
     sessionState.session.syncStoreData(storeName, {
       entities,
       resolutions: derivedResolutions,
       protectedKeys,
+      replayHead:
+        nextReplayEntry === null
+          ? null
+          : {
+              storeName,
+              entryId: nextReplayEntry.id,
+              queueOrder: getQueueOrder(nextReplayEntry),
+              createdAt: nextReplayEntry.createdAt,
+            },
     });
     storeAdapter.syncEntityOverlays?.({
       sessionKey: sessionState.sessionKey,
@@ -2771,6 +2781,16 @@ export function createOfflineStoreController<
 
       const nextEntry = getSortedEntries()[0];
       if (!nextEntry) return;
+      if (
+        !current.session.canReplayEntry({
+          storeName,
+          entryId: nextEntry.id,
+          queueOrder: getQueueOrder(nextEntry),
+          createdAt: nextEntry.createdAt,
+        })
+      ) {
+        return;
+      }
 
       const operation = operations[nextEntry.operation];
       if (!operation) {
