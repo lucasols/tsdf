@@ -13,7 +13,6 @@ import {
 } from 'vitest';
 
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { ignoreNotWrappedInActErrors } from '../mocks/ignoreNotWrappedInActErrors';
 import {
   createListQueryStoreTestEnv,
   type Tables,
@@ -25,14 +24,13 @@ import {
   pick,
   range,
 } from '../utils/genericTestUtils';
+import { withSuppressedActError } from '../utils/withSuppressedActError';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
   products: range(1, 50).map((id) => ({ id, name: `Product ${id}` })),
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
-
-const restoreConsoleError = ignoreNotWrappedInActErrors();
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -47,9 +45,20 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  restoreConsoleError();
   cleanup();
 });
+
+async function advanceTrackedTime(ms: number) {
+  await withSuppressedActError(async () => {
+    await advanceTime(ms);
+  });
+}
+
+async function flushTrackedTimers() {
+  await withSuppressedActError(async () => {
+    await flushAllTimers();
+  });
+}
 
 type Todo = { title: string; completed: boolean };
 
@@ -95,12 +104,12 @@ describe('collection hook payload debounce', () => {
     act(() => {
       rerender({ payload: '1' });
     });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     act(() => {
       rerender({ payload: '2' });
     });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     act(() => {
       rerender({ payload: '3' });
@@ -118,15 +127,15 @@ describe('collection hook payload debounce', () => {
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await advanceTime(99);
+    await advanceTrackedTime(99);
 
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await advanceTime(1);
-    await flushAllTimers();
-    await flushAllTimers();
+    await advanceTrackedTime(1);
+    await flushTrackedTimers();
+    await flushTrackedTimers();
 
     expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
       .toMatchInlineSnapshot(`
@@ -165,7 +174,7 @@ describe('collection hook payload debounce', () => {
     act(() => {
       rerender({ payload: '1' });
     });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     act(() => {
       rerender({ payload: '2' });
@@ -182,20 +191,20 @@ describe('collection hook payload debounce', () => {
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await advanceTime(99);
+    await advanceTrackedTime(99);
 
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await advanceTime(1);
+    await advanceTrackedTime(1);
 
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await flushAllTimers();
-    await flushAllTimers();
+    await flushTrackedTimers();
+    await flushTrackedTimers();
 
     expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
       .toMatchInlineSnapshot(`
@@ -241,12 +250,12 @@ describe('list query hook payload debounce', () => {
     act(() => {
       rerender({ payload: { tableId: 'users' } });
     });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     act(() => {
       rerender({ payload: { tableId: 'products' } });
     });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     act(() => {
       rerender({ payload: { tableId: 'orders' } });
@@ -264,14 +273,14 @@ describe('list query hook payload debounce', () => {
       env.serverTable.getRequestHistory('list', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await advanceTime(99);
+    await advanceTrackedTime(99);
 
     expect(
       env.serverTable.getRequestHistory('list', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await flushAllTimers();
-    await flushAllTimers();
+    await flushTrackedTimers();
+    await flushTrackedTimers();
 
     expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
       .toMatchInlineSnapshot(`
@@ -310,7 +319,7 @@ describe('list query hook payload debounce', () => {
     `);
 
     rerender({ payload: { tableId: 'users' } });
-    await advanceTime(200);
+    await advanceTrackedTime(200);
 
     expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "
@@ -320,7 +329,7 @@ describe('list query hook payload debounce', () => {
     `);
 
     rerender({ payload: { tableId: 'orders' } });
-    await advanceTime(299);
+    await advanceTrackedTime(299);
 
     expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "
@@ -331,12 +340,12 @@ describe('list query hook payload debounce', () => {
 
     expect(env.serverTable.numOfStartedFetches).toBe(1);
 
-    await advanceTime(1);
-    await advanceTime(11);
+    await advanceTrackedTime(1);
+    await advanceTrackedTime(11);
 
     expect(env.serverTable.numOfStartedFetches).toBe(1);
 
-    await flushAllTimers();
+    await flushTrackedTimers();
 
     expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "
@@ -369,10 +378,10 @@ describe('list query hook payload debounce', () => {
     renders.reset();
 
     rerender({ payload: 'users||1' });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     rerender({ payload: 'products||1' });
-    await advanceTime(50);
+    await advanceTrackedTime(50);
 
     rerender({ payload: 'orders||1' });
 
@@ -388,14 +397,14 @@ describe('list query hook payload debounce', () => {
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await advanceTime(99);
+    await advanceTrackedTime(99);
 
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
 
-    await flushAllTimers();
-    await flushAllTimers();
+    await flushTrackedTimers();
+    await flushTrackedTimers();
 
     expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
       .toMatchInlineSnapshot(`
@@ -427,7 +436,7 @@ describe('list query hook payload debounce', () => {
       { initialProps: { payload: 'users||100' } },
     );
 
-    await advanceTime(11);
+    await advanceTrackedTime(11);
 
     expect(env.serverTable.numOfStartedFetches).toBe(1);
 
@@ -440,12 +449,12 @@ describe('list query hook payload debounce', () => {
       "
     `);
 
-    await advanceTime(299);
-    await advanceTime(11);
+    await advanceTrackedTime(299);
+    await advanceTrackedTime(11);
 
     expect(env.serverTable.numOfStartedFetches).toBe(2);
 
-    await flushAllTimers();
+    await flushTrackedTimers();
 
     expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "

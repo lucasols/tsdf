@@ -14,6 +14,7 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { withSuppressedActError } from '../utils/withSuppressedActError';
 import {
   type CreateUserOperations,
   deleteItemInputSchema,
@@ -52,9 +53,6 @@ beforeEach(() => {
   network = createOfflineNetworkMock();
   network.install();
   localStorage.clear();
-  // Offline coordinator fires store updates on microtasks outside React's
-  // render cycle — suppress the act() warning for reactive hook tracking.
-  globalThis.__SUPPRESS_ACT_ERROR__ = true;
 });
 
 afterEach(() => {
@@ -777,17 +775,19 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
   });
 
   // Queue a mutation while offline.
-  await env.apiStore.performMutation({
-    optimisticUpdate: () => {
-      env.apiStore.updateState((draft) => {
-        draft.value = 2;
-      });
-    },
-    mutation: async () => {
-      await env.serverMock.delayedSetData(2);
-      return 2;
-    },
-    offline: { operation: 'updateValue', input: { value: 2 } },
+  await act(async () => {
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
   });
 
   // Go online — the first replay attempt fails, moving the entry to
@@ -796,12 +796,14 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
   env.addTimelineComments('beforeNextAction', [
     'go online — replay fails ambiguously, then shouldSkipSync confirms it was already applied',
   ]);
-  act(() => {
-    network.goOnline();
+  await withSuppressedActError(async () => {
+    act(() => {
+      network.goOnline();
+    });
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+    await advanceTime(5_000);
+    await flushAllTimers();
   });
-
-  await advanceTime(5_000);
-  await flushAllTimers();
 
   // Execute was only called once (the failed attempt); shouldSkipSync
   // confirmed the mutation was already applied, so no further retries.
@@ -895,17 +897,20 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
     env.trackUIChanges(formatReplayState(doc, entity));
   });
 
-  const mutationResult = await env.apiStore.performMutation({
-    optimisticUpdate: () => {
-      env.apiStore.updateState((draft) => {
-        draft.value = 2;
-      });
-    },
-    mutation: async () => {
-      await env.serverMock.delayedSetData(2);
-      return 2;
-    },
-    offline: { operation: 'updateValue', input: { value: 2 } },
+  let mutationResult!: Awaited<ReturnType<typeof env.apiStore.performMutation>>;
+  await act(async () => {
+    mutationResult = await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
   });
   expect(mutationResult.ok).toBe(true);
 
@@ -917,7 +922,9 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  });
 
   expect(execute).toHaveBeenCalledTimes(1);
   expect(shouldSkipSync).toHaveBeenCalledTimes(0);
@@ -996,12 +1003,14 @@ test('healthy replay failures are retried 3 times and then move into the resolut
     env.trackUIChanges(formatReplayState(doc, entity));
   });
 
-  await env.apiStore.performMutation({
-    mutation: async () => {
-      await env.serverMock.delayedSetData(2);
-      return 2;
-    },
-    offline: { operation: 'updateValue', input: { value: 2 } },
+  await act(async () => {
+    await env.apiStore.performMutation({
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
   });
 
   // Bring the browser back online so the first replay failure can start the
@@ -1012,7 +1021,9 @@ test('healthy replay failures are retried 3 times and then move into the resolut
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  });
 
   // Keep the session online long enough to spend the remaining retry budget.
   env.addTimelineComments('beforeNextAction', [
@@ -1020,9 +1031,11 @@ test('healthy replay failures are retried 3 times and then move into the resolut
   ]);
   for (const attempt of [2, 3]) {
     await advanceTime(5_000);
-    await waitForMicrotaskCondition(
-      () => execute.mock.calls.length === attempt,
-    );
+    await withSuppressedActError(async () => {
+      await waitForMicrotaskCondition(
+        () => execute.mock.calls.length === attempt,
+      );
+    });
   }
   await flushAllTimers();
 
@@ -1126,14 +1139,17 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     env.trackUIChanges(formatReplayState(doc, entity));
   });
 
-  const queueOfflineMutation = () =>
-    env.apiStore.performMutation({
-      mutation: async () => {
-        await env.serverMock.delayedSetData(2);
-        return 2;
-      },
-      offline: { operation: 'updateValue', input: { value: 2 } },
+  const queueOfflineMutation = async () => {
+    await act(async () => {
+      await env.apiStore.performMutation({
+        mutation: async () => {
+          await env.serverMock.delayedSetData(2);
+          return 2;
+        },
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      });
     });
+  };
 
   // --- Phase 1: Exhaust the retry budget to produce a resolution ---
   await queueOfflineMutation();
@@ -1145,12 +1161,16 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  });
   for (const attempt of [2, 3]) {
     await advanceTime(5_000);
-    await waitForMicrotaskCondition(
-      () => execute.mock.calls.length === attempt,
-    );
+    await withSuppressedActError(async () => {
+      await waitForMicrotaskCondition(
+        () => execute.mock.calls.length === attempt,
+      );
+    });
   }
   await flushAllTimers();
 
@@ -1191,13 +1211,17 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   env.addTimelineComments('beforeNextAction', [
     'user resolves with "retry" — entry re-enqueued, 4th execute call succeeds',
   ]);
-  await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
-    action: 'retry',
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
+      action: 'retry',
+    });
   });
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 
   // The 4th execute call succeeds, clearing the queue.
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 4);
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 4);
+  });
   await flushAllTimers();
 
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
@@ -1206,21 +1230,25 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   env.addTimelineComments('beforeNextAction', [
     'go offline, queue another mutation, come back online — exhaust retries again',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOffline();
+    await Promise.resolve();
   });
-  await Promise.resolve();
   await queueOfflineMutation();
   act(() => {
     network.goOnline();
   });
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 5);
+  });
   // All further execute calls fail — exhaust the retry budget again.
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 5);
   for (const attempt of [6, 7]) {
     await advanceTime(5_000);
-    await waitForMicrotaskCondition(
-      () => execute.mock.calls.length === attempt,
-    );
+    await withSuppressedActError(async () => {
+      await waitForMicrotaskCondition(
+        () => execute.mock.calls.length === attempt,
+      );
+    });
   }
   await flushAllTimers();
 
@@ -1259,11 +1287,13 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   env.addTimelineComments('beforeNextAction', [
     'user resolves with "discard" — entry permanently removed',
   ]);
-  await env.apiStore.resolveOfflineResolution(
-    discardResolution.id,
-    'updateValue',
-    { action: 'discard' },
-  );
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      discardResolution.id,
+      'updateValue',
+      { action: 'discard' },
+    );
+  });
 
   // Both resolutions and entities should be empty after discard.
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
@@ -1465,12 +1495,14 @@ test('going offline again resets the healthy replay failure budget', async () =>
     env.trackUIChanges(formatReplayState(doc, entity));
   });
 
-  await env.apiStore.performMutation({
-    mutation: async () => {
-      await env.serverMock.delayedSetData(2);
-      return 2;
-    },
-    offline: { operation: 'updateValue', input: { value: 2 } },
+  await act(async () => {
+    await env.apiStore.performMutation({
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
   });
 
   // Start replaying while online, but stop before the queued mutation has
@@ -1481,16 +1513,20 @@ test('going offline again resets the healthy replay failure budget', async () =>
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  });
 
   env.addTimelineComments('beforeNextAction', [
     'keep retrying until the mutation has spent only part of its healthy retry budget',
   ]);
   for (const attempt of [2]) {
     await advanceTime(5_000);
-    await waitForMicrotaskCondition(
-      () => execute.mock.calls.length === attempt,
-    );
+    await withSuppressedActError(async () => {
+      await waitForMicrotaskCondition(
+        () => execute.mock.calls.length === attempt,
+      );
+    });
   }
 
   // Going offline while the queued mutation is paused in needs-confirmation
@@ -1498,10 +1534,10 @@ test('going offline again resets the healthy replay failure budget', async () =>
   env.addTimelineComments('beforeNextAction', [
     'go offline again while the queued mutation is paused in needs-confirmation',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOffline();
+    await Promise.resolve();
   });
-  await Promise.resolve();
 
   env.addTimelineComments('beforeNextAction', [
     'come back online and verify the paused mutation gets a fresh healthy retry budget',
@@ -1509,16 +1545,20 @@ test('going offline again resets the healthy replay failure budget', async () =>
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 3);
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 3);
+  });
 
   env.addTimelineComments('beforeNextAction', [
     'spend the fresh retry budget; only after these new failures should the mutation require resolution',
   ]);
   for (const attempt of [4, 5]) {
     await advanceTime(5_000);
-    await waitForMicrotaskCondition(
-      () => execute.mock.calls.length === attempt,
-    );
+    await withSuppressedActError(async () => {
+      await waitForMicrotaskCondition(
+        () => execute.mock.calls.length === attempt,
+      );
+    });
   }
   await flushAllTimers();
 
@@ -1832,17 +1872,19 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
   });
 
   // Queue a mutation while offline.
-  await env.apiStore.performMutation({
-    optimisticUpdate: () => {
-      env.apiStore.updateState((draft) => {
-        draft.value = 2;
-      });
-    },
-    mutation: async () => {
-      await env.serverMock.delayedSetData(2);
-      return 2;
-    },
-    offline: { operation: 'updateValue', input: { value: 2 } },
+  await act(async () => {
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
   });
 
   // Go online — execute fails, entry moves to needs-confirmation.
@@ -1853,11 +1895,14 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
   act(() => {
     network.goOnline();
   });
-  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
-  await waitForMicrotaskCondition(
-    () =>
-      env.apiStore.getOfflineEntities()[0]?.syncState === 'needs-confirmation',
-  );
+  await withSuppressedActError(async () => {
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+    await waitForMicrotaskCondition(
+      () =>
+        env.apiStore.getOfflineEntities()[0]?.syncState ===
+        'needs-confirmation',
+    );
+  });
 
   expect(execute).toHaveBeenCalledTimes(1);
   expect(shouldSkipSync).toHaveBeenCalledTimes(0);

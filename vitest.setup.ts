@@ -40,11 +40,11 @@ console.error = (...args) => {
     if (errorMsg.includes('was not wrapped in act')) {
       if (!globalThis.__SUPPRESS_ACT_ERROR__) {
         throw new Error(
-          `${format(...args)} If the warning not comes from tests with missing act, use globalThis.__SUPPRESS_ACT_ERROR__ = true; to ignore it.`,
+          `${format(...args)} If this comes from intentional reactive test tracking rather than a missing act, wrap only the smallest needed section with await withSuppressedActError(async () => { ... }) from tests/utils/withSuppressedActError.ts.`,
         );
-      } else {
-        skipOriginal = true;
       }
+
+      skipOriginal = true;
     }
 
     if (errorMsg.includes('Maximum update depth exceeded')) {
