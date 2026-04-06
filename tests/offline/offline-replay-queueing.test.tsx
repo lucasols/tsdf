@@ -65,9 +65,8 @@ afterEach(() => {
 });
 
 test('collection offline creates keep durable temp-id metadata and clear after replay finishes', async () => {
-  // setOffline sets the flag silently (no event), so the store initializes in
-  // offline state. goOffline below dispatches the browser 'offline' event to
-  // trigger the session's offline transition.
+  // Start offline before the store initializes so the first mutation-side
+  // network refresh already sees offline mode without needing a browser event.
   network.setOffline();
   const resolveCreates: Array<(result: { id: string; name: string }) => void> =
     [];
@@ -124,12 +123,6 @@ test('collection offline creates keep durable temp-id metadata and clear after r
       },
     },
   );
-
-  await Promise.resolve();
-  act(() => {
-    network.goOffline();
-  });
-  await Promise.resolve();
 
   // Queue two create mutations for the same entity while offline. Both should
   // accumulate under one temp-entity entry since they share the same entity ref.
