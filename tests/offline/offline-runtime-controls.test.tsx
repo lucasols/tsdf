@@ -3,7 +3,7 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { createOfflineSession, getGlobalOfflineStatus } from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -21,6 +21,7 @@ import {
   collectionSchema,
   docMutationInputSchema,
   docSchema,
+  getGlobalOfflineStatusSummary,
   listQueryQueryPayloadSchema,
   parsePersistedObject,
   waitForMicrotaskCondition,
@@ -43,15 +44,6 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
 });
-
-function getGlobalOfflineStatusSummary(sessionKey: string) {
-  return pick(getGlobalOfflineStatus(sessionKey), [
-    'isOfflineMode',
-    'network',
-    'outage',
-    'sessionKey',
-  ]);
-}
 
 test('runtime mode enabled toggles are shared across stores in the same session', async () => {
   network.setOffline();

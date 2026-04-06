@@ -40,7 +40,7 @@ const offlineResolutionBaseFields = {
   entryId: rc_string,
   sessionKey: rc_string,
   storeName: rc_string,
-  storeType: rc_string,
+  storeType: rc_literals('document', 'collection', 'listQuery'),
   operation: rc_string,
   input: rc_unknown,
   enqueuedAt: rc_number,

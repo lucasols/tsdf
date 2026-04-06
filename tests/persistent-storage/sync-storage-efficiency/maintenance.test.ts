@@ -11,7 +11,7 @@ import {
 } from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
-import { advanceTime } from '../../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../../utils/networkMock';
 import {
   getParsedLocalStorageValue,
@@ -539,6 +539,107 @@ describe('sync storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`
       e:
         - { a: 1735689601810, o: '✅' }
+    `);
+  });
+
+  test('aggregate-only offline updates do not rewrite the shared status snapshot', async () => {
+    const sessionKey = 'offline-session-write-skip';
+    const offlineNetwork = createOfflineNetworkMock();
+
+    offlineNetwork.install();
+    offlineNetwork.setOffline();
+
+    const env = createDocumentStoreTestEnv<
+      { name: string; value: number },
+      ProtectedDocumentOfflineOperations
+    >(
+      { name: 'protected', value: 1 },
+      {
+        id: 'protected-doc',
+        getSessionKey: () => sessionKey,
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: wrappedDocumentSchema,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => sessionKey,
+              config: { network: offlineNetwork.config },
+            }),
+            operations: {
+              markProtected: {
+                inputSchema: rc_object({ value: rc_number }),
+                execute: ({ input }) => input,
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateState((draft) => {
+                    draft.value.value = input.value;
+                  });
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    await Promise.resolve();
+    offlineNetwork.goOffline();
+    await Promise.resolve();
+
+    // Drain the one-off startup cleanup so this capture only sees the offline mutation path.
+    await waitForScheduledCleanup();
+
+    // The first queued mutation establishes the shared offline status snapshot.
+    const firstMutationRandomSpy = vi
+      .spyOn(Math, 'random')
+      .mockReturnValue(0.123456789);
+    await env.apiStore.performMutation({
+      mutation: () => Promise.resolve({ name: 'protected', value: 1 }),
+      offline: { operation: 'markProtected', input: { value: 1 } },
+    });
+    firstMutationRandomSpy.mockRestore();
+    await flushAllTimers();
+
+    const statusKey = `tsdf.${sessionKey}._o_.s`;
+    expect(localStorage.getItem(statusKey)).not.toBeNull();
+
+    // A second queued mutation changes the aggregate state, but the persisted
+    // session status itself is unchanged, so `_o_.s` should not be rewritten.
+    const mutationCapture = startPersistentStorageOperationCapture();
+    const secondMutationRandomSpy = vi
+      .spyOn(Math, 'random')
+      .mockReturnValue(0.987654321);
+    await env.apiStore.performMutation({
+      mutation: () => Promise.resolve({ name: 'protected', value: 2 }),
+      offline: { operation: 'markProtected', input: { value: 2 } },
+    });
+    secondMutationRandomSpy.mockRestore();
+    await flushAllTimers();
+    const statusSnapshotOperations = mutationCapture.finish();
+
+    expect(
+      statusSnapshotOperations.operations.filter((operation) => {
+        return 'key' in operation && operation.key?.includes('._o_.s');
+      }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(statusSnapshotOperations.timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ #1 ❌->✅ tsdf.offline-session-write-skip.protected-doc.oq.protected-doc:1735689602100:zk00000y
+           |    └ (entry data, <protected-doc:1735689602100:zk00000y>) | ❌ -> 0.33 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
+           |    └ (namespace index) | 0.14 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
+           |    └ (namespace index) | 0.14 kb -> 0.26 kb
+      .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
+           |    └ (namespace index) | 0.08 kb
+      .    | ✍️ #4 ✅->✅ tsdf.offline-session-write-skip.protected-doc.oe.document
+           |    └ (entry data, <document>) | 0.14 kb -> 0.14 kb
+      .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
+           |    └ (namespace index) | 0.08 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
+           |    └ (namespace index) | 0.08 kb -> 0.08 kb ⚠️ UNCHANGED
+      "
     `);
   });
 });

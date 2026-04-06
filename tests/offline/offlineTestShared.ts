@@ -9,9 +9,11 @@ import {
 } from 'runcheck';
 
 import type { OfflineResolutionRecord } from '../../src/main';
+import { getGlobalOfflineStatus } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import type { FilterOperator } from '../mocks/serverTableMock';
+import { pick } from '../utils/genericTestUtils';
 
 export const docSchema: PersistentStorageSchema<{ value: number }> = rc_object({
   value: rc_number,
@@ -178,6 +180,15 @@ function extractReason(value: unknown): string {
   }
 
   return formatCompactValue(value);
+}
+
+export function getGlobalOfflineStatusSummary(sessionKey: string) {
+  return pick(getGlobalOfflineStatus(sessionKey), [
+    'isOfflineMode',
+    'network',
+    'outage',
+    'sessionKey',
+  ]);
 }
 
 function normalizeEntityKey(value: string) {

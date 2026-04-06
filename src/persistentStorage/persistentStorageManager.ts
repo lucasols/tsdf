@@ -1130,6 +1130,12 @@ export async function clearSessionStorage(
   }
 
   await adapter.clearSession(sessionKey);
+  await runLocalStorageMutation(() => {
+    const sessionOfflineStatusKey = getStorageKey(sessionKey, '_o_.s');
+    localPersistentStorage.clearManifest(
+      localPersistentStorage.getManifestKeyForSingle(sessionOfflineStatusKey),
+    );
+  });
 }
 
 /** Clears all persistent storage entries for a given session key across built-in adapters. */

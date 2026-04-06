@@ -959,3 +959,65 @@ test('the default OPFS offline persistence replays queued data when a new browse
 
   hook.unmount();
 }, 10_000);
+
+// Logging out via the public clearSessionStorage helper should clear both the
+// configured adapter data and the shared offline session snapshot.
+test('clearing an OPFS-backed session also clears the shared offline status snapshot', async () => {
+  const sessionKey = 'offline-opfs-clear-session';
+  const storeName = 'offline-opfs-clear-session-doc';
+
+  // Recreate the real async storage backend and enter offline mode before the
+  // store boots so the session persists its offline snapshot through the normal flow.
+  createOpfsPersistentStorageTestStore();
+  network.setOffline();
+
+  const env = createOfflineDocumentEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+  });
+
+  // Persist queued work so the session writes its compact offline status snapshot.
+  await resolveAfterAllTimers(
+    env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Sanity-check the persisted session state the app would see on the next boot.
+  expect(localStorage.getItem(`tsdf.${sessionKey}._o_.s`)).not.toBeNull();
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'offline-opfs-clear-session'
+  `);
+
+  // Clear the session exactly how an app would on logout.
+  await resolveAfterAllTimers(
+    clearSessionStorage(sessionKey, opfsPersistentStorage),
+  );
+
+  // Simulate a fresh app boot that only has persisted state to inspect.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  // After logout, the shared offline session should look fully reset as well.
+  expect(localStorage.getItem(`tsdf.${sessionKey}._o_.s`)).toBeNull();
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'offline-opfs-clear-session'
+  `);
+}, 10_000);

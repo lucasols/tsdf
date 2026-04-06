@@ -1121,6 +1121,131 @@ test('global and per-store offline entity selectors aggregate queued work across
   storeHook.unmount();
 });
 
+// Global entity aggregates are populated by stores as they load, so a startup
+// tray should stay empty until an offline-enabled store hydrates and
+// contributes its session data.
+test('global offline entities stay empty after restart until a store mounts', async () => {
+  network.setOffline();
+
+  const sessionKey = 'offline-global-entities-bootstrap';
+  const storeName = 'offline-global-entities-bootstrap-doc';
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await Promise.resolve();
+
+  // Persist queued work so a restarted app has something to show globally.
+  await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: async () => {
+      await env.serverMock.delayedSetData(2);
+      return 2;
+    },
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+  await flushAllTimers();
+
+  // Simulate a fresh app boot before any store mounts.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  // Before any store has re-registered, the global aggregate should still be empty.
+  expect(
+    getGlobalOfflineEntities(sessionKey).map((entity) =>
+      pick(entity, ['entityKey', 'pendingMutations', 'storeName', 'syncState']),
+    ),
+  ).toMatchInlineSnapshot(`[]`);
+
+  // A startup-level hook sees the same empty aggregate until a store hydrates.
+  const globalHook = renderHook(() => useGlobalOfflineEntities(sessionKey));
+
+  expect(
+    globalHook.result.current.map((entity) =>
+      pick(entity, ['entityKey', 'pendingMutations', 'storeName', 'syncState']),
+    ),
+  ).toMatchInlineSnapshot(`[]`);
+
+  // Once the store loads again, it republishes its offline state into the
+  // shared session aggregate and the global hook updates.
+  const restartedEnv = createDocumentStoreTestEnv<
+    number,
+    UpdateValueOperations
+  >(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario: 'idle',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await restartedEnv.serverMock.delayedSetData(input.value);
+              return input;
+            },
+            onSuccessExecute: ({ input }) => {
+              restartedEnv.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  expect(
+    globalHook.result.current.map((entity) =>
+      pick(entity, ['entityKey', 'pendingMutations', 'storeName', 'syncState']),
+    ),
+  ).toMatchInlineSnapshot(`
+    - entityKey: 'document'
+      pendingMutations: 1
+      storeName: 'offline-global-entities-bootstrap-doc'
+      syncState: 'pending'
+  `);
+
+  globalHook.unmount();
+});
+
 test('queued mutations from multiple stores in one session share a single global replay order', async () => {
   network.setOffline();
   const sessionKey = 'shared-session-queue-order';

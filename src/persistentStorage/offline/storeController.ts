@@ -1300,6 +1300,7 @@ export function createOfflineStoreController<
     const nextReplayEntry = getSortedEntries()[0] ?? null;
 
     sessionState.session.syncStoreData(storeName, {
+      adapter,
       entities,
       resolutions: derivedResolutions,
       protectedKeys,

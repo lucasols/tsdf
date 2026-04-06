@@ -66,6 +66,7 @@ type SessionReplayHead = {
 };
 
 type SessionStoreContribution = {
+  adapter: StorageAdapter;
   entities: GlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   protectedKeys: string[];
@@ -189,9 +190,11 @@ function normalizePersistedOfflineStatus(
   return null;
 }
 
-function readPersistedOfflineStatusSnapshot(
+type PersistedLocalSessionSnapshot = { status: GlobalOfflineStatus };
+
+function readPersistedLocalSessionSnapshot(
   sessionKey: string,
-): GlobalOfflineStatus | null {
+): PersistedLocalSessionSnapshot | null {
   if (!isWindowAvailable()) return null;
 
   try {
@@ -200,8 +203,7 @@ function readPersistedOfflineStatusSnapshot(
     );
     if (!entry) return null;
 
-    const rawStatus = entry.value.d ?? null;
-    return normalizePersistedOfflineStatus(sessionKey, rawStatus);
+    return normalizePersistedLocalSessionSnapshot(sessionKey, entry.value);
   } catch {
     // Ignore read failures so offline coordination continues to work
     // even when localStorage is unavailable.
@@ -215,7 +217,8 @@ function resolveDefaultStatus(
   options: { bootstrapStatusFromLocalStorage?: boolean } = {},
 ): GlobalOfflineStatus {
   if (options.bootstrapStatusFromLocalStorage) {
-    const bootstrapped = readPersistedOfflineStatusSnapshot(sessionKey);
+    const bootstrapped =
+      readPersistedLocalSessionSnapshot(sessionKey)?.status ?? null;
     if (bootstrapped !== null) {
       defaultStatusBySession.set(sessionKey, bootstrapped);
       return bootstrapped;
@@ -298,7 +301,6 @@ type SessionRecoveryTarget = {
 };
 
 type SessionCanonicalConfig = {
-  adapter: StorageAdapter | null;
   hasNetworkConfig: boolean;
   networkEnabledByDefault: boolean;
   networkListenToBrowserEvents: boolean;
@@ -318,11 +320,9 @@ type SessionCanonicalConfig = {
 };
 
 function toCanonicalConfig(
-  adapter: StorageAdapter | null,
   config: OfflineSessionConfig | undefined,
 ): SessionCanonicalConfig {
   return {
-    adapter,
     hasNetworkConfig: config?.network !== undefined,
     networkEnabledByDefault: config?.network?.enabled ?? false,
     networkListenToBrowserEvents:
@@ -371,12 +371,15 @@ function sameProbeConfig(
   );
 }
 
+const persistedLocalSessionSnapshotSchema = rc_object({
+  d: compactOfflineStatusSnapshotSchema,
+});
+
 function sameCanonicalConfig(
   left: SessionCanonicalConfig,
   right: SessionCanonicalConfig,
 ): boolean {
   return (
-    left.adapter === right.adapter &&
     left.hasNetworkConfig === right.hasNetworkConfig &&
     left.networkEnabledByDefault === right.networkEnabledByDefault &&
     left.networkListenToBrowserEvents === right.networkListenToBrowserEvents &&
@@ -396,14 +399,33 @@ function sameCanonicalConfig(
   );
 }
 
+function normalizePersistedLocalSessionSnapshot(
+  sessionKey: string,
+  rawSnapshot: unknown,
+): PersistedLocalSessionSnapshot | null {
+  const persistedSnapshot = rc_parse(
+    rawSnapshot,
+    persistedLocalSessionSnapshotSchema,
+  ).unwrapOrNull();
+  if (persistedSnapshot === null) return null;
+
+  const status = normalizePersistedOfflineStatus(
+    sessionKey,
+    persistedSnapshot.d,
+  );
+  if (status === null) return null;
+
+  return { status };
+}
+
 function createSessionPersistenceHandle(args: {
   sessionKey: string;
-  adapter: StorageAdapter | null;
+  enabled: boolean;
   onPersistentStorageError?: (error: unknown) => void;
-}): PersistentStorageHandle<GlobalOfflineStatus> {
-  if (args.adapter === null) return createNoopPersistentStorageHandle();
+}): PersistentStorageHandle<PersistedLocalSessionSnapshot> {
+  if (!args.enabled) return createNoopPersistentStorageHandle();
 
-  return createPersistentStorageHandle<GlobalOfflineStatus>(
+  return createPersistentStorageHandle<PersistedLocalSessionSnapshot>(
     {
       storeName: '_o_.s',
       adapter: 'local-sync',
@@ -412,23 +434,25 @@ function createSessionPersistenceHandle(args: {
     },
     {
       valueCodec: {
-        serialize(status) {
-          return { d: serializeOfflineStatusSnapshot(status) };
+        serialize(snapshot) {
+          return { d: serializeOfflineStatusSnapshot(snapshot.status) };
         },
         deserialize(raw) {
-          const compactStatus = rc_parse(
-            raw,
-            rc_object({ d: compactOfflineStatusSnapshotSchema }),
-          ).unwrapOrNull();
-          if (compactStatus === null) return null;
-
-          return normalizePersistedOfflineStatus(
-            args.sessionKey,
-            compactStatus.d,
-          );
+          return normalizePersistedLocalSessionSnapshot(args.sessionKey, raw);
         },
       },
     },
+  );
+}
+
+function dedupeById<T extends { id: string }>(values: readonly T[]): T[] {
+  const deduped = new Map<string, T>();
+  for (const value of values) {
+    deduped.set(value.id, value);
+  }
+
+  return [...deduped.values()].sort((left, right) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
   );
 }
 
@@ -445,10 +469,9 @@ export class SessionOfflineCoordinator {
 
   readonly #registrations = new Map<string, SessionRegistration>();
   readonly #storeContributions = new Map<string, SessionStoreContribution>();
-  #sessionHandle: PersistentStorageHandle<GlobalOfflineStatus>;
+  readonly #adapters = new Set<StorageAdapter>();
+  #sessionHandle: PersistentStorageHandle<PersistedLocalSessionSnapshot>;
   readonly #browserTabs;
-  #canonicalAdapter: StorageAdapter | null;
-  #localStorageAdapter: ReturnType<typeof getLocalStorageAdapter>;
   #onPersistentStorageError: ((error: unknown) => void) | undefined;
   #cleanupNetworkListeners: (() => void) | null = null;
   #canonicalConfig: SessionCanonicalConfig;
@@ -469,7 +492,11 @@ export class SessionOfflineCoordinator {
   #hydrated = false;
   #hydrationToken = 0;
   #protectedKeys: string[] = [];
+  #protectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+  #hasPersistedSessionSnapshot = false;
+  #lastPersistedStatus: GlobalOfflineStatus | null = null;
   #disposed = false;
+  readonly #bootstrapStatusFromLocalStorage: boolean;
 
   constructor({
     sessionKey,
@@ -478,27 +505,38 @@ export class SessionOfflineCoordinator {
     config,
     bootstrapStatusFromLocalStorage = false,
   }: SessionCoordinatorOptions) {
-    const resolvedAdapter = adapter ?? null;
     this.sessionKey = sessionKey;
-    this.#canonicalAdapter = resolvedAdapter;
-    this.#localStorageAdapter =
-      resolvedAdapter !== null ? getLocalStorageAdapter(resolvedAdapter) : null;
+    this.#bootstrapStatusFromLocalStorage = bootstrapStatusFromLocalStorage;
+    if (adapter !== undefined) {
+      this.#adapters.add(adapter);
+    }
     this.#onPersistentStorageError = onPersistentStorageError;
+    const shouldBootstrapFromStorage =
+      config !== undefined || bootstrapStatusFromLocalStorage;
+    const bootstrappedLocalSnapshot = shouldBootstrapFromStorage
+      ? readPersistedLocalSessionSnapshot(sessionKey)
+      : null;
     this.#sessionHandle = createSessionPersistenceHandle({
       sessionKey,
-      adapter: resolvedAdapter,
+      enabled: shouldBootstrapFromStorage,
       onPersistentStorageError,
     });
-    this.#canonicalConfig = toCanonicalConfig(resolvedAdapter, config);
+    this.#canonicalConfig = toCanonicalConfig(config);
     this.#hasCanonicalConfig = config !== undefined;
-    setSessionProtectedKeysSnapshot(this.sessionKey, []);
+    this.#hasPersistedSessionSnapshot = bootstrappedLocalSnapshot !== null;
+    this.#lastPersistedStatus = bootstrappedLocalSnapshot?.status ?? null;
+    setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
+    if (bootstrappedLocalSnapshot !== null) {
+      defaultStatusBySession.set(sessionKey, bootstrappedLocalSnapshot.status);
+    }
     this.store = new Store<SessionStoreState>({
       debugName: `tsdf-offline:${sessionKey}`,
       state: () => ({
-        status: resolveDefaultStatus(sessionKey, {
-          bootstrapStatusFromLocalStorage:
-            config !== undefined || bootstrapStatusFromLocalStorage,
-        }),
+        status:
+          bootstrappedLocalSnapshot?.status ??
+          resolveDefaultStatus(sessionKey, {
+            bootstrapStatusFromLocalStorage: shouldBootstrapFromStorage,
+          }),
         entities: [],
         resolutions: [],
       }),
@@ -525,7 +563,9 @@ export class SessionOfflineCoordinator {
       });
 
     this.#refreshLeadership();
-    void this.hydrate();
+    if (shouldBootstrapFromStorage) {
+      void this.hydrate();
+    }
     if (this.#hasCanonicalConfig) {
       this.#refreshNetworkConfig();
     }
@@ -536,20 +576,25 @@ export class SessionOfflineCoordinator {
     this.#hydrated = true;
     const hydrationToken = this.#hydrationToken;
 
-    const [persistedStatus, protectedKeys] = await Promise.all([
-      this.#sessionHandle.load({ touch: 'never' }),
-      this.#canonicalAdapter === null
-        ? Promise.resolve(new Set<string>())
-        : readProtectedStorageKeys(this.#canonicalAdapter, this.sessionKey),
-    ]);
+    let persistedLocalSnapshot: PersistedLocalSessionSnapshot | null = null;
+
+    try {
+      persistedLocalSnapshot = await this.#sessionHandle.load({
+        touch: 'never',
+      });
+    } catch (error) {
+      this.#onPersistentStorageError?.(error);
+    }
 
     if (hydrationToken !== this.#hydrationToken) return;
 
-    if (persistedStatus) {
-      const hydratedStatus = this.#restampHydratedStatus(persistedStatus, {
-        isLeader: this.isLeader(),
-        updatedAt: Date.now(),
-      });
+    if (persistedLocalSnapshot) {
+      this.#hasPersistedSessionSnapshot = true;
+      this.#lastPersistedStatus = persistedLocalSnapshot.status;
+      const hydratedStatus = this.#restampHydratedStatus(
+        persistedLocalSnapshot.status,
+        { isLeader: this.isLeader(), updatedAt: Date.now() },
+      );
 
       this.store.setPartialState(
         { status: hydratedStatus },
@@ -557,11 +602,30 @@ export class SessionOfflineCoordinator {
       );
       this.#syncClassifiedNetworkStateFromStatus(hydratedStatus);
       this.#syncRecoveryProbe();
-      void this.#sessionHandle.saveNow(hydratedStatus);
+    }
+
+    const protectedKeys = new Set<string>();
+    if (this.#adapters.size > 0) {
+      const protectedKeySetResults = await Promise.allSettled(
+        [...this.#adapters].map((adapter) =>
+          readProtectedStorageKeys(adapter, this.sessionKey),
+        ),
+      );
+      for (const result of protectedKeySetResults) {
+        if (result.status === 'rejected') {
+          this.#onPersistentStorageError?.(result.reason);
+          continue;
+        }
+
+        for (const key of result.value) {
+          protectedKeys.add(key);
+        }
+      }
     }
 
     this.#protectedKeys = [...protectedKeys].sort();
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
+    void this.#persistSessionSnapshot();
   }
 
   configure(options: {
@@ -569,22 +633,16 @@ export class SessionOfflineCoordinator {
     onPersistentStorageError?: (error: unknown) => void;
     config?: OfflineSessionConfig;
   }): void {
-    const nextAdapter = options.adapter ?? this.#canonicalAdapter;
-    const nextConfig = toCanonicalConfig(nextAdapter, options.config);
+    if (options.adapter !== undefined) {
+      this.#adapters.add(options.adapter);
+    }
+    if (options.onPersistentStorageError !== undefined) {
+      this.#onPersistentStorageError = options.onPersistentStorageError;
+    }
 
     if (!this.#hasCanonicalConfig && options.config) {
-      if (
-        nextAdapter !== this.#canonicalAdapter ||
-        options.adapter !== undefined ||
-        options.onPersistentStorageError !== undefined
-      ) {
-        this.#recreatePersistenceHandles({
-          adapter: nextAdapter,
-          onPersistentStorageError:
-            options.onPersistentStorageError ?? this.#onPersistentStorageError,
-        });
-      }
-      this.#canonicalConfig = nextConfig;
+      this.#recreatePersistenceHandles({ enabled: true });
+      this.#canonicalConfig = toCanonicalConfig(options.config);
       this.#hasCanonicalConfig = true;
       void this.hydrate();
       this.#refreshNetworkConfig();
@@ -592,6 +650,20 @@ export class SessionOfflineCoordinator {
     }
 
     if (!this.#hasCanonicalConfig) return;
+
+    if (options.onPersistentStorageError !== undefined) {
+      this.#sessionHandle.dispose();
+      this.#sessionHandle = createSessionPersistenceHandle({
+        sessionKey: this.sessionKey,
+        enabled: true,
+        onPersistentStorageError: this.#onPersistentStorageError,
+      });
+    }
+
+    const nextConfig =
+      options.config === undefined
+        ? this.#canonicalConfig
+        : toCanonicalConfig(options.config);
 
     if (
       import.meta.env.DEV &&
@@ -605,22 +677,24 @@ export class SessionOfflineCoordinator {
     this.#refreshNetworkConfig();
   }
 
-  #recreatePersistenceHandles(args: {
-    adapter: StorageAdapter | null;
-    onPersistentStorageError?: (error: unknown) => void;
-  }): void {
+  #recreatePersistenceHandles(
+    args: {
+      enabled?: boolean;
+      onPersistentStorageError?: (error: unknown) => void;
+    } = {},
+  ): void {
     this.#sessionHandle.dispose();
-    this.#canonicalAdapter = args.adapter;
-    this.#localStorageAdapter =
-      args.adapter !== null ? getLocalStorageAdapter(args.adapter) : null;
-    this.#onPersistentStorageError = args.onPersistentStorageError;
+    this.#onPersistentStorageError =
+      args.onPersistentStorageError ?? this.#onPersistentStorageError;
     this.#sessionHandle = createSessionPersistenceHandle({
       sessionKey: this.sessionKey,
-      adapter: args.adapter,
-      onPersistentStorageError: args.onPersistentStorageError,
+      enabled:
+        args.enabled ??
+        (this.#hasCanonicalConfig || this.#bootstrapStatusFromLocalStorage),
+      onPersistentStorageError: this.#onPersistentStorageError,
     });
-    this.#protectedKeys = [];
-    setSessionProtectedKeysSnapshot(this.sessionKey, []);
+    this.#hasPersistedSessionSnapshot = false;
+    this.#lastPersistedStatus = null;
     this.#hydrated = false;
     this.#hydrationToken += 1;
   }
@@ -1120,34 +1194,53 @@ export class SessionOfflineCoordinator {
   }
 
   #refreshAggregates(): void {
-    const entities = [...this.#storeContributions.values()]
-      .flatMap((entry) => entry.entities)
-      .sort((left, right) => left.id.localeCompare(right.id));
-    const resolutions = [...this.#storeContributions.values()].flatMap(
-      (entry) => entry.resolutions,
-    );
-    const nextProtectedKeys = [...this.#storeContributions.values()]
-      .flatMap((entry) => entry.protectedKeys)
-      .sort();
+    const allEntities: GlobalOfflineEntity[] = [];
+    const allResolutions: OfflineResolutionRecord[] = [];
+    const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    for (const contribution of this.#storeContributions.values()) {
+      allEntities.push(...contribution.entities);
+      allResolutions.push(...contribution.resolutions);
+      const existing =
+        nextProtectedKeysByAdapter.get(contribution.adapter) ?? [];
+      existing.push(...contribution.protectedKeys);
+      nextProtectedKeysByAdapter.set(contribution.adapter, existing);
+    }
+    const entities = dedupeById(allEntities);
+    const resolutions = dedupeById(allResolutions);
+    for (const [adapter, keys] of nextProtectedKeysByAdapter) {
+      nextProtectedKeysByAdapter.set(adapter, [...new Set(keys)].sort());
+    }
 
-    if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
-      const previousProtectedKeys = this.#protectedKeys;
-      this.#protectedKeys = nextProtectedKeys;
-      setSessionProtectedKeysSnapshot(this.sessionKey, nextProtectedKeys);
-      if (this.#localStorageAdapter !== null) {
-        this.#localStorageAdapter.syncSessionProtectedKeys(
+    const nextProtectedKeys = [
+      ...new Set([...nextProtectedKeysByAdapter.values()].flat()),
+    ].sort();
+    const adaptersToSync = new Set<StorageAdapter>([
+      ...this.#protectedKeysByAdapter.keys(),
+      ...nextProtectedKeysByAdapter.keys(),
+    ]);
+    for (const adapter of adaptersToSync) {
+      const previousProtectedKeys =
+        this.#protectedKeysByAdapter.get(adapter) ?? [];
+      const nextAdapterProtectedKeys =
+        nextProtectedKeysByAdapter.get(adapter) ?? [];
+      if (arraysEqual(previousProtectedKeys, nextAdapterProtectedKeys)) {
+        continue;
+      }
+
+      const localStorageAdapter = getLocalStorageAdapter(adapter);
+      if (localStorageAdapter !== null) {
+        localStorageAdapter.syncSessionProtectedKeys(
           this.sessionKey,
-          nextProtectedKeys,
+          nextAdapterProtectedKeys,
         );
-      } else if (
-        this.#canonicalAdapter !== null &&
-        this.#canonicalAdapter !== 'local-sync'
-      ) {
-        const asyncAdapter = this.#canonicalAdapter;
-        void asyncAdapter
+        continue;
+      }
+
+      if (adapter !== 'local-sync') {
+        void adapter
           .syncSessionProtectedKeys(
             this.sessionKey,
-            nextProtectedKeys,
+            nextAdapterProtectedKeys,
             previousProtectedKeys,
           )
           .catch((error: unknown) => {
@@ -1155,11 +1248,18 @@ export class SessionOfflineCoordinator {
           });
       }
     }
+    this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
+
+    if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
+      this.#protectedKeys = nextProtectedKeys;
+      setSessionProtectedKeysSnapshot(this.sessionKey, nextProtectedKeys);
+    }
 
     this.store.setPartialState(
       { entities, resolutions },
       { action: 'offline-session-aggregate' },
     );
+    void this.#persistSessionSnapshot();
     this.#publishSnapshot();
   }
 
@@ -1182,7 +1282,7 @@ export class SessionOfflineCoordinator {
       { status: derived },
       { action: 'offline-session-status' },
     );
-    void this.#sessionHandle.saveNow(derived);
+    void this.#persistSessionSnapshot();
     this.#publishSnapshot();
   }
 
@@ -1224,7 +1324,44 @@ export class SessionOfflineCoordinator {
       { action: 'offline-session-remote' },
     );
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    void this.#persistSessionSnapshot();
     this.#refreshLeadership();
+  }
+
+  #shouldPersistSessionSnapshot(): boolean {
+    return (
+      this.store.state.status.isOfflineMode ||
+      this.store.state.entities.length > 0 ||
+      this.store.state.resolutions.length > 0 ||
+      this.#protectedKeys.length > 0
+    );
+  }
+
+  async #persistSessionSnapshot(): Promise<void> {
+    if (!this.#hasCanonicalConfig && !this.#bootstrapStatusFromLocalStorage) {
+      return;
+    }
+
+    if (!this.#shouldPersistSessionSnapshot()) {
+      if (!this.#hasPersistedSessionSnapshot) return;
+
+      await this.#sessionHandle.clear();
+      this.#hasPersistedSessionSnapshot = false;
+      this.#lastPersistedStatus = null;
+      return;
+    }
+
+    if (
+      this.#hasPersistedSessionSnapshot &&
+      this.#lastPersistedStatus !== null &&
+      deepEqual(this.#lastPersistedStatus, this.store.state.status)
+    ) {
+      return;
+    }
+
+    await this.#sessionHandle.saveNow({ status: this.store.state.status });
+    this.#hasPersistedSessionSnapshot = true;
+    this.#lastPersistedStatus = this.store.state.status;
   }
 
   #refreshLeadership(): void {
