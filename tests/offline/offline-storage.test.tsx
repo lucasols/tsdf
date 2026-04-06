@@ -75,11 +75,13 @@ function createOfflineDocumentEnv({
   sessionKey,
   storeName,
   testScenario,
+  onExecute,
 }: {
   adapter: 'local-sync' | typeof opfsPersistentStorage;
   sessionKey: string;
   storeName: string;
   testScenario: 'idle' | 'loaded';
+  onExecute?: (input: { value: number }) => void;
 }) {
   const envRef: {
     current: ReturnType<
@@ -103,6 +105,7 @@ function createOfflineDocumentEnv({
           updateValue: {
             inputSchema: docMutationInputSchema,
             execute: async ({ input }) => {
+              onExecute?.(input);
               await envRef.current?.serverMock.delayedSetData(input.value);
               return input;
             },
@@ -421,6 +424,74 @@ test('local-sync offline persistence rehydrates queued data in a new browser ses
   });
   await flushAllTimers();
 
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '❌'
+    status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+
+  hook.unmount();
+});
+
+test('local-sync offline persistence replays queued data when a new browser session boots already online', async () => {
+  const sessionKey = 'offline-sync-online-restart-session';
+  const storeName = 'offline-sync-online-restart-doc';
+  const replayedInputs: { value: number }[] = [];
+
+  network.setOffline();
+
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+  });
+
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Simulate reopening the app after connectivity recovered elsewhere.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+  act(() => {
+    network.goOnline();
+  });
+
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    onExecute: (input) => {
+      replayedInputs.push(input);
+    },
+  });
+  const hook = renderHook(() =>
+    restartedEnv.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+
+  await flushAllTimers();
+
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
+  `);
   expect(hook.result.current).toMatchInlineSnapshot(`
     data: { value: 2 }
     error: null
@@ -806,6 +877,75 @@ test('the default OPFS offline persistence rehydrates queued data in a new brows
   });
   await flushAllTimers();
 
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '❌'
+    status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+
+  hook.unmount();
+}, 10_000);
+
+test('the default OPFS offline persistence replays queued data when a new browser session boots already online', async () => {
+  const sessionKey = 'offline-opfs-online-restart-session';
+  const storeName = 'offline-opfs-online-restart-doc';
+  const replayedInputs: { value: number }[] = [];
+
+  createOpfsPersistentStorageTestStore();
+  network.setOffline();
+
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+  });
+
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Simulate reopening the app after connectivity recovered elsewhere.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+  act(() => {
+    network.goOnline();
+  });
+
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    onExecute: (input) => {
+      replayedInputs.push(input);
+    },
+  });
+  const hook = renderHook(() =>
+    restartedEnv.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+
+  await flushAllTimers();
+
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
+  `);
   expect(hook.result.current).toMatchInlineSnapshot(`
     data: { value: 2 }
     error: null
