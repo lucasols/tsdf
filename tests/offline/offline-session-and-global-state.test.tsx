@@ -1497,27 +1497,28 @@ test('reconnect replays queued mutations from multiple stores one at a time in g
   expect(
     getOfflineQueueEntries(sessionKey, 'shared-session-replay-order-b'),
   ).toMatchInlineSnapshot(`[]`);
-  expect({ storeA: envA.timelineString, storeB: envB.timelineString })
-    .toMatchInlineSnapshot(`
-      storeA: |
-
-        time  |
-        0     | -- queue the first store mutation while the session is offline
-        .     | offline:updateValue queued
-        50ms  | -- reconnect the session and let the earliest queued mutation start replaying
-        .     | offline:updateValue replay-started
-        1.25s | server-data-changed (value: 2)
-        .     | offline:updateValue replay-finished
-      storeB: |
-
-        time  |
-        50ms  | -- queue the second store mutation behind the first one
-        .     | offline:updateValue queued
-        1.25s | -- reconnect the session and wait for the earlier queued mutation to finish first
-        .     | offline:updateValue replay-started
-        2.45s | server-data-changed (value: 3)
-        .     | offline:updateValue replay-finished
-    `);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | -- queue the first store mutation while the session is offline
+    .     | offline:updateValue queued
+    50ms  | -- reconnect the session and let the earliest queued mutation start replaying
+    .     | offline:updateValue replay-started
+    1.25s | server-data-changed (value: 2)
+    .     | offline:updateValue replay-finished
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    50ms  | -- queue the second store mutation behind the first one
+    .     | offline:updateValue queued
+    1.25s | -- reconnect the session and wait for the earlier queued mutation to finish first
+    .     | offline:updateValue replay-started
+    2.45s | server-data-changed (value: 3)
+    .     | offline:updateValue replay-finished
+    "
+  `);
 });
 
 test('a store initialized while an earlier shared-session replay is already in flight waits for its turn', async () => {
@@ -1710,28 +1711,28 @@ test('a store initialized while an earlier shared-session replay is already in f
   expect(
     getOfflineQueueEntries(sessionKey, 'shared-session-mid-replay-init-b'),
   ).toMatchInlineSnapshot(`[]`);
-  expect({
-    storeA: restartedEnvA.timelineString,
-    storeB: restartedEnvB.timelineString,
-  }).toMatchInlineSnapshot(`
-    storeA: |
+  expect(restartedEnvA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | -- the restarted session boots online and begins replaying the earliest queued store
+    .     | offline:updateValue replay-started
+    10ms  | 🔴 >fetch-started
+    810ms | 🔴 <fetch-finished (value: 1)
+    5.2s  | server-data-changed (value: 2)
+    .     | offline:updateValue replay-finished
+    "
+  `);
 
-      time  |
-      0     | -- the restarted session boots online and begins replaying the earliest queued store
-      .     | offline:updateValue replay-started
-      10ms  | 🔴 >fetch-started
-      810ms | 🔴 <fetch-finished (value: 1)
-      5.2s  | server-data-changed (value: 2)
-      .     | offline:updateValue replay-finished
-    storeB: |
-
-      time  |
-      10ms  | -- the later store initializes while the first replay is still in flight
-      .     | 🔴 >fetch-started
-      810ms | 🔴 <fetch-finished (value: 1)
-      3.2s  | offline:updateValue replay-started
-      4.4s  | server-data-changed (value: 3)
-      .     | offline:updateValue replay-finished
+  expect(restartedEnvB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    10ms  | -- the later store initializes while the first replay is still in flight
+    .     | 🔴 >fetch-started
+    810ms | 🔴 <fetch-finished (value: 1)
+    3.2s  | offline:updateValue replay-started
+    4.4s  | server-data-changed (value: 3)
+    .     | offline:updateValue replay-finished
+    "
   `);
 
   restartedHookA.unmount();
