@@ -1348,14 +1348,9 @@ export function createListQueryStore<
           syncEntityOverlays: ({ entities, sessionKey }) => {
             if (offlineOverlaySessionKey !== sessionKey)
               clearOfflineOverlays(sessionKey);
-
             const activeItemKeys = new Set(
               entities
-                .filter((entity) => {
-                  return (
-                    entity.entityKind === 'item' && !entity.requiresResolution
-                  );
-                })
+                .filter((entity) => entity.entityKind === 'item')
                 .map((entity) => entity.entityKey),
             );
 
@@ -1465,7 +1460,10 @@ export function createListQueryStore<
               store.state.itemQueries[nextItemKey]?.payload ??
               existingOverlay.itemPayload,
             queryMemberships: existingOverlay.queryMemberships,
+            keepVisibleWhileResolutionRequired: true,
           };
+        } else {
+          draft[nextItemKey].keepVisibleWhileResolutionRequired = true;
         }
 
         delete draft[previousItemKey];
@@ -1495,6 +1493,15 @@ export function createListQueryStore<
 
     offlineOverlayStore.produceState((draft) => {
       for (const itemKey of targetItemKeySet) {
+        const existingOverlay = draft[itemKey];
+        if (existingOverlay?.keepVisibleWhileResolutionRequired) {
+          draft[itemKey] = {
+            ...existingOverlay,
+            keepVisibleWhileResolutionRequired: false,
+          };
+          continue;
+        }
+
         const item = store.state.items[itemKey];
         const itemPayload = store.state.itemQueries[itemKey]?.payload;
 

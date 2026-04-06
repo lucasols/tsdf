@@ -45,6 +45,12 @@ export type ListQueryOfflineOverlay<
   item: ItemState | null;
   itemPayload?: ItemPayload;
   queryMemberships: Record<string, number>;
+  /**
+   * Temporary-id remaps can leave a child mutation in manual resolution while
+   * it already targets the real server item. Keep that overlay visible until
+   * the child resolution is cleared.
+   */
+  keepVisibleWhileResolutionRequired?: boolean;
 };
 
 export type FieldsInput = string[] | '*';

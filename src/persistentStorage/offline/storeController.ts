@@ -1393,6 +1393,10 @@ export function createOfflineStoreController<
         rewrittenResolution.id,
         rewrittenResolution,
       );
+      entityRefRewrites.push({
+        previousEntityRefs: resolution.entityRefs,
+        nextEntityRefs: rewrittenResolution.entityRefs,
+      });
     }
 
     if (entityRefRewrites.length > 0) {

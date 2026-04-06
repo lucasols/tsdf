@@ -31,6 +31,7 @@ import { setupDocumentPersistence } from './persistentStorage/documentStorePersi
 import {
   createOfflineEntityLookup,
   getIsPendingOfflineSync,
+  shouldApplyOfflineOverlay,
 } from './persistentStorage/offline/entityMetadata';
 import {
   isOfflineConnectivityError,
@@ -439,10 +440,7 @@ export function createDocumentStore<
 
               if (
                 !entities.some((entity) => {
-                  return (
-                    entity.entityKey === DOC_TARGET_KEY &&
-                    entity.requiresResolution === false
-                  );
+                  return entity.entityKey === DOC_TARGET_KEY;
                 })
               ) {
                 offlineOverlayStore.setState(null);
@@ -1090,8 +1088,7 @@ export function createDocumentStore<
         const { error } = state;
         const activeOfflineEntity = offlineEntitiesByKey.get(DOC_TARGET_KEY);
         const resolvedData =
-          activeOfflineEntity &&
-          !activeOfflineEntity.requiresResolution &&
+          shouldApplyOfflineOverlay(activeOfflineEntity, offlineOverlay) &&
           offlineOverlay !== null
             ? offlineOverlay.data
             : state.data;

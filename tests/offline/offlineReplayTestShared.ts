@@ -121,8 +121,6 @@ export function getSortedQueueSummary(
 
       return result;
     })
-    .sort(
-      (left, right) => Number(left.queueOrder) - Number(right.queueOrder),
-    )
+    .sort((left, right) => Number(left.queueOrder) - Number(right.queueOrder))
     .map(({ queueOrder: _, ...rest }) => rest);
 }

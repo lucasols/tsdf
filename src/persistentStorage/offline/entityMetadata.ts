@@ -18,6 +18,28 @@ export function getIsPendingOfflineSync(
   return !!entity && !entity.requiresResolution;
 }
 
+function getKeepsResolutionOverlayVisible(overlay: unknown): boolean {
+  return (
+    typeof overlay === 'object' &&
+    overlay !== null &&
+    'keepVisibleWhileResolutionRequired' in overlay &&
+    overlay.keepVisibleWhileResolutionRequired === true
+  );
+}
+
+export function shouldApplyOfflineOverlay(
+  entity: GlobalOfflineEntity | null | undefined,
+  overlay: unknown,
+): boolean {
+  return (
+    !!entity &&
+    (!entity.requiresResolution ||
+      entity.blockedResolutionCount > 0 ||
+      entity.childResolutionCount > 0 ||
+      getKeepsResolutionOverlayVisible(overlay))
+  );
+}
+
 /**
  * Batch-filters offline overlays to only include entries with a pending sync
  * (entity exists and does not require resolution). Use this instead of calling
@@ -31,7 +53,7 @@ export function filterActiveOfflineOverlays<Overlay>(
   const result: Record<string, Overlay> = {};
 
   for (const [entityKey, overlay] of Object.entries(overlays)) {
-    if (getIsPendingOfflineSync(entitiesByKey.get(entityKey))) {
+    if (shouldApplyOfflineOverlay(entitiesByKey.get(entityKey), overlay)) {
       result[entityKey] = overlay;
     }
   }

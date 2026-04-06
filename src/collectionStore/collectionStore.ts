@@ -390,6 +390,7 @@ export function createCollectionStore<
   type CollectionOfflineOverlay = {
     data: ItemState | null;
     payload?: ItemPayload;
+    keepVisibleWhileResolutionRequired?: boolean;
   };
   type ResolvedOfflineOperations = TOfflineOperations extends null
     ? Record<never, never>
@@ -505,7 +506,10 @@ export function createCollectionStore<
             data: existingOverlay.data ?? null,
             payload:
               store.state[nextItemKey]?.payload ?? existingOverlay.payload,
+            keepVisibleWhileResolutionRequired: true,
           };
+        } else {
+          draft[nextItemKey].keepVisibleWhileResolutionRequired = true;
         }
 
         delete draft[previousItemKey];
@@ -519,6 +523,15 @@ export function createCollectionStore<
 
     offlineOverlayStore.produceState((draft) => {
       for (const itemKey of targetItemKeys) {
+        const existingOverlay = draft[itemKey];
+        if (existingOverlay?.keepVisibleWhileResolutionRequired) {
+          draft[itemKey] = {
+            ...existingOverlay,
+            keepVisibleWhileResolutionRequired: false,
+          };
+          continue;
+        }
+
         const item = store.state[itemKey];
 
         draft[itemKey] = {
@@ -648,14 +661,9 @@ export function createCollectionStore<
             syncEntityOverlays: ({ entities, sessionKey }) => {
               if (offlineOverlaySessionKey !== sessionKey)
                 clearOfflineOverlays(sessionKey);
-
               const activeItemKeys = new Set(
                 entities
-                  .filter((entity) => {
-                    return (
-                      entity.entityKind === 'item' && !entity.requiresResolution
-                    );
-                  })
+                  .filter((entity) => entity.entityKind === 'item')
                   .map((entity) => entity.entityKey),
               );
 
