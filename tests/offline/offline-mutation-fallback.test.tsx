@@ -136,7 +136,7 @@ describe('document', () => {
     );
   });
 
-  test('queue immediately when the session is already offline', async () => {
+  test('when browser-offline network mode is already active, queue immediately without calling the direct mutation', async () => {
     network.setOffline();
     const sessionKey = 'hybrid-doc-offline-session';
     const storeName = 'hybrid-doc-offline-store';
@@ -322,6 +322,194 @@ describe('document', () => {
       outage: { active: '✅', enabled: '✅' }
       sessionKey: 'hybrid-doc-fallback-session'
       updatedAt: 1735689600000
+    `);
+  });
+
+  test('when error-classified network mode is already active, queue immediately without calling the direct mutation', async () => {
+    const sessionKey = 'hybrid-doc-network-active-session';
+    const storeName = 'hybrid-doc-network-active-store';
+    const directMutation = vi.fn(() =>
+      env.serverMock.delayedSetData(2).then(() => 2),
+    );
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              classifyFailure: () => 'network' as const,
+              network: {
+                ...network.config,
+                recoveryCheck: () => false,
+                recoveryProbe: {
+                  initialIntervalMs: 100,
+                  maxIntervalMs: 100,
+                  backoffMultiplier: 1,
+                  jitterRatio: 0,
+                },
+              },
+            },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Activate network offline mode through a fetch failure so the mutation
+    // under test proves the already-offline branch skips the direct callback.
+    env.serverMock.setNextFetchError('boom');
+    env.apiStore.scheduleFetch('highPriority');
+    await advanceTime(25);
+
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isLeader: '✅'
+      isOfflineMode: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: null
+      network: { active: '✅', enabled: '✅' }
+      outage: { active: '❌', enabled: '❌' }
+      sessionKey: 'hybrid-doc-network-active-session'
+      updatedAt: 1735689600010
+    `);
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
+    expect(directMutation).not.toHaveBeenCalled();
+    expect(getSingleQueuedMutationData(sessionKey, storeName))
+      .toMatchInlineSnapshot(`
+        input: { value: 2 }
+        operation: 'updateValue'
+      `);
+
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isLeader: '✅'
+      isOfflineMode: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: null
+      network: { active: '✅', enabled: '✅' }
+      outage: { active: '❌', enabled: '❌' }
+      sessionKey: 'hybrid-doc-network-active-session'
+      updatedAt: 1735689600010
+    `);
+  });
+
+  test('when outage mode is already active, queue immediately without calling the direct mutation', async () => {
+    const sessionKey = 'hybrid-doc-outage-active-session';
+    const storeName = 'hybrid-doc-outage-active-store';
+    const directMutation = vi.fn(() =>
+      env.serverMock.delayedSetData(2).then(() => 2),
+    );
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: {
+              classifyFailure: () => 'outage' as const,
+              outage: {
+                enabled: true,
+                recoveryCheck: () => false,
+                recoveryProbe: {
+                  initialIntervalMs: 100,
+                  maxIntervalMs: 100,
+                  backoffMultiplier: 1,
+                  jitterRatio: 0,
+                },
+              },
+            },
+          }),
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: async ({ input }) => {
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Activate outage mode through a fetch failure so the mutation under test
+    // proves the already-outage branch skips the direct callback.
+    env.serverMock.setNextFetchError('boom');
+    env.apiStore.scheduleFetch('highPriority');
+    await advanceTime(25);
+
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isLeader: '✅'
+      isOfflineMode: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: null
+      network: { active: '❌', enabled: '❌' }
+      outage: { active: '✅', enabled: '✅' }
+      sessionKey: 'hybrid-doc-outage-active-session'
+      updatedAt: 1735689600010
+    `);
+
+    const result = await env.apiStore.performMutation({
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect({ ok: result.ok, value: result.ok ? result.value : null })
+      .toMatchInlineSnapshot(`
+        ok: '✅'
+        value: { kind: 'queued' }
+      `);
+    expect(directMutation).not.toHaveBeenCalled();
+    expect(getSingleQueuedMutationData(sessionKey, storeName))
+      .toMatchInlineSnapshot(`
+        input: { value: 2 }
+        operation: 'updateValue'
+      `);
+
+    expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isLeader: '✅'
+      isOfflineMode: '✅'
+      lastFailureAt: 1735689600010
+      lastRecoveryCheckAt: null
+      network: { active: '❌', enabled: '❌' }
+      outage: { active: '✅', enabled: '✅' }
+      sessionKey: 'hybrid-doc-outage-active-session'
+      updatedAt: 1735689600010
     `);
   });
 

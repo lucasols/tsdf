@@ -181,6 +181,12 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
           sessionKey: 'offline-sync-format-session'
           updatedAt: 1735689600000
       `);
+    expect(getParsedLocalStorageValue('tsdf-os:offline-sync-format-session'))
+      .toMatchInlineSnapshot(`
+      d:
+        n: { a: 1, e: 1 }
+        u: 1735689600000
+    `);
     expect(
       getParsedLocalStorageValue(
         'tsdf.offline-sync-format-session.offline-sync-format-doc',
