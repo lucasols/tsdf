@@ -39,7 +39,15 @@ import {
 
 let network = createOfflineNetworkMock();
 
+const offlineStorageUsersQuery = { tableId: 'users' } as const;
 type OfflineStorageUserRow = { id: number; name: string };
+
+const offlineStorageUsersTable: { users: OfflineStorageUserRow[] } = {
+  users: [
+    { id: 1, name: 'Ada' },
+    { id: 2, name: 'Grace' },
+  ],
+};
 
 const partialResourcesConfig: PartialResourcesConfig<OfflineStorageUserRow> = {
   mergeItems: (prev, fetched) => {
@@ -110,6 +118,63 @@ function createOfflineDocumentEnv({
   });
 
   envRef.current = env;
+
+  return env;
+}
+
+function createOfflinePartialListQueryEnv({
+  sessionKey,
+  storeName,
+  testScenario = 'idle',
+  nextUserIdRef,
+}: {
+  sessionKey: string;
+  storeName: string;
+  testScenario?: 'idle' | { loaded: { queries: { tableId: string }[] } };
+  nextUserIdRef: { current: number };
+}) {
+  const env = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    true,
+    false,
+    CreateListQueryUserOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario,
+    partialResources: partialResourcesConfig,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: userRowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryQueryPayloadSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          createUser: {
+            inputSchema: collectionCreateInputSchema,
+            getEntityRefs: ({ input }) => [`temp:${input.name}`],
+            tempEntity: {
+              buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+              reconcileServerEntity: (result) => ({
+                finalPayload: `users||${result.id}`,
+                finalData: result,
+              }),
+            },
+            execute: async ({ input }) => {
+              const data = { id: nextUserIdRef.current, name: input.name };
+              nextUserIdRef.current += 1;
+              await env.serverTable.delayedSetItem(`users||${data.id}`, data);
+              return data;
+            },
+          },
+        },
+      },
+    },
+  });
 
   return env;
 }
@@ -373,64 +438,17 @@ test('local-sync offline persistence rehydrates queued data in a new browser ses
 test('local-sync restart keeps offline temp rows visible for partial-resource list queries', async () => {
   const sessionKey = 'offline-list-partial-temp-session';
   const storeName = 'offline-list-partial-temp-store';
-  const usersQuery = { tableId: 'users' } as const;
-  let nextUserId = 3;
+  const nextUserIdRef = { current: 3 };
+  const firstEnv = createOfflinePartialListQueryEnv({
+    sessionKey,
+    storeName,
+    nextUserIdRef,
+  });
 
-  const firstEnv = createListQueryStoreTestEnv<
-    OfflineStorageUserRow,
-    true,
-    false,
-    CreateListQueryUserOperations
-  >(
-    {
-      users: [
-        { id: 1, name: 'Ada' },
-        { id: 2, name: 'Grace' },
-      ],
-    },
-    {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      partialResources: partialResourcesConfig,
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: userRowSchema,
-        itemPayloadSchema: rc_string,
-        queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {
-            createUser: {
-              inputSchema: collectionCreateInputSchema,
-              getEntityRefs: ({ input }) => [`temp:${input.name}`],
-              tempEntity: {
-                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
-                reconcileServerEntity: (result) => ({
-                  finalPayload: `users||${result.id}`,
-                  finalData: result,
-                }),
-              },
-              execute: async ({ input }) => {
-                const data = { id: nextUserId, name: input.name };
-                nextUserId += 1;
-                await firstEnv.serverTable.delayedSetItem(
-                  `users||${data.id}`,
-                  data,
-                );
-                return data;
-              },
-            },
-          },
-        },
-      },
-    },
-  );
-
+  // Start from a real partial-resource query load so persistence stores the
+  // requested fields for the server rows before the offline temp row is added.
   const seedHook = renderHook(() =>
-    firstEnv.apiStore.useListQuery(usersQuery, {
+    firstEnv.apiStore.useListQuery(offlineStorageUsersQuery, {
       fields: ['id', 'name'],
       itemSelector: (item) => item.name,
       returnRefetchingStatus: true,
@@ -449,18 +467,30 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
   `);
   seedHook.unmount();
 
+  // Move offline before queueing the create so the temp row only exists in the
+  // persisted offline queue and fallback item/query snapshots.
   act(() => {
     network.goOffline();
   });
   await flushAllTimers();
 
+  // Queue a temp create while offline. The optimistic row has the requested
+  // fields on the item object, but it never records `loadedFields` metadata.
+  firstEnv.addTimelineComments('beforeNextAction', [
+    'go offline and queue a temp create; the optimistic row has data but no loadedFields metadata',
+  ]);
   await act(async () => {
     await firstEnv.apiStore.performMutation(null, {
       optimisticUpdate: () => {
         firstEnv.apiStore.addItemToState(
           'temp:Linus offline',
           { id: -1, name: 'Linus offline' },
-          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          {
+            addItemToQueries: {
+              queries: [offlineStorageUsersQuery],
+              appendTo: 'end',
+            },
+          },
         );
       },
       mutation: async () => {
@@ -473,77 +503,50 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
   });
   await flushAllTimers();
 
+  expect(firstEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    10ms  | 🔴 >list-fetch-started
+    810ms | 🔴 <list-fetch-finished (value: {"count":2})
+    2.91s | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
+    .     | offline:createUser queued
+    "
+  `);
+
   // Reboot the app while the temp row only exists through persisted fallback
   // state plus offline entity metadata.
   __resetSessionOfflineCoordinatorRegistryForTests();
 
-  const restartedEnv = createListQueryStoreTestEnv<
-    OfflineStorageUserRow,
-    true,
-    false,
-    CreateListQueryUserOperations
-  >(
-    {
-      users: [
-        { id: 1, name: 'Ada' },
-        { id: 2, name: 'Grace' },
-      ],
-    },
-    {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      testScenario: 'idle',
-      partialResources: partialResourcesConfig,
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: userRowSchema,
-        itemPayloadSchema: rc_string,
-        queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {
-            createUser: {
-              inputSchema: collectionCreateInputSchema,
-              getEntityRefs: ({ input }) => [`temp:${input.name}`],
-              tempEntity: {
-                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
-                reconcileServerEntity: (result) => ({
-                  finalPayload: `users||${result.id}`,
-                  finalData: result,
-                }),
-              },
-              execute: async ({ input }) => {
-                const data = { id: nextUserId, name: input.name };
-                nextUserId += 1;
-                await restartedEnv.serverTable.delayedSetItem(
-                  `users||${data.id}`,
-                  data,
-                );
-                return data;
-              },
-            },
-          },
-        },
-      },
-    },
-  );
+  const restartedEnv = createOfflinePartialListQueryEnv({
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    nextUserIdRef,
+  });
 
+  // Mount the restarted UI while still offline. The query and standalone item
+  // hooks should reuse the persisted temp row immediately.
+  restartedEnv.addTimelineComments('beforeNextAction', [
+    'restart the app offline; both hooks should reuse the persisted temp row immediately',
+  ]);
   const hook = renderHook(() => {
-    const query = restartedEnv.apiStore.useListQuery(usersQuery, {
+    const query = restartedEnv.apiStore.useListQuery(offlineStorageUsersQuery, {
       fields: ['id', 'name'],
       itemSelector: (item) => item.name,
       disableRefetchOnMount: true,
       returnRefetchingStatus: true,
     });
+    restartedEnv.trackItemUI('query-status', query.status);
+    restartedEnv.trackItemUI('query-items', query.items.join(', '));
+
     const tempItem = restartedEnv.apiStore.useItem('temp:Linus offline', {
       fields: ['id', 'name'],
       selector: (item) => item?.name ?? null,
       disableRefetchOnMount: true,
       returnRefetchingStatus: true,
     });
+    restartedEnv.trackItemUI('temp-item-status', tempItem.status);
+    restartedEnv.trackItemUI('temp-item-data', tempItem.data ?? 'null');
 
     return { query, tempItem };
   });
@@ -561,6 +564,26 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
     queryStatus: 'success'
     tempItemData: 'Linus offline'
     tempItemStatus: 'success'
+  `);
+  expect(
+    restartedEnv.apiStore
+      .getOfflineEntities()
+      .map((entity) => ({
+        entityKey: entity.entityKey,
+        pendingMutations: entity.pendingMutations,
+        syncState: entity.syncState,
+      })),
+  ).toMatchInlineSnapshot(`
+    - entityKey: '"temp:Linus offline'
+      pendingMutations: 1
+      syncState: 'pending'
+  `);
+  expect(restartedEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time | query-items               | query-status | temp-item-data | temp-item-status |
+    0    | -                         | -            | -              | -                | -- restart the app offline; both hooks should reuse the persisted temp row immediately
+    .    | Ada, Grace, Linus offline | success      | Linus offline  | success          | [query-status, query-items, temp-item-status, temp-item-data] ui-initialized
+    "
   `);
 
   hook.unmount();
