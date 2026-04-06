@@ -164,8 +164,8 @@ export async function executeItemBatchFetch<
               } else {
                 itemQuery.error = error;
                 itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
               }
-              delete draft.itemFieldInvalidationFields[itemKey];
               results.set(itemKey, false);
             }
           },
@@ -281,8 +281,8 @@ export async function executeItemBatchFetch<
               } else {
                 itemQuery.error = error;
                 itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
               }
-              delete draft.itemFieldInvalidationFields[itemKey];
             },
             {
               action: fetchResult.offline

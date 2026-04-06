@@ -202,6 +202,15 @@ export function useMultipleItems<
     () => filterActiveOfflineOverlays(offlineEntitiesByKey, offlineOverlays),
     [offlineEntitiesByKey, offlineOverlays],
   );
+  const getUnresolvedPendingInvalidationFields = useCallback(
+    (itemKey: string): string[] => {
+      const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+      return (itemPendingInvalidationFields.get(itemKey) ?? []).filter(
+        (field) => !loadedFields.includes(field),
+      );
+    },
+    [itemPendingInvalidationFields, store],
+  );
 
   const resultSelector = useCallback(
     (state: State) => {
@@ -685,47 +694,62 @@ export function useMultipleItems<
           itemState?.status === 'loading' || itemState?.status === 'refetching';
 
         // For partial resources, check if all requested fields are loaded
-        if (
-          partialResources &&
-          !shouldFetch &&
-          Array.isArray(fields) &&
-          fields.length > 0
-        ) {
+        if (partialResources && !shouldFetch) {
           const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-          const missingFields = fields.filter((f) => !loadedFields.includes(f));
-          const hasMissingFields = missingFields.length > 0;
-          const pendingInvalidationFields =
-            itemPendingInvalidationFields.get(itemKey);
           const unresolvedPendingInvalidationFields =
-            pendingInvalidationFields?.filter(
-              (field) => !loadedFields.includes(field),
-            ) ?? [];
-          const hasAffectedFieldInvalidation =
-            unresolvedPendingInvalidationFields.length > 0 &&
-            fields.some((field) =>
-              unresolvedPendingInvalidationFields.includes(field),
-            );
+            getUnresolvedPendingInvalidationFields(itemKey);
+          const invalidationPriority =
+            unresolvedPendingInvalidationFields.length > 0
+              ? itemFieldInvalidationPriorities.get(itemKey)
+              : undefined;
 
-          if (hasMissingFields && !itemFetchIsActive) {
+          if (Array.isArray(fields) && fields.length > 0) {
+            const missingFields = fields.filter(
+              (field) => !loadedFields.includes(field),
+            );
+            const hasMissingFields = missingFields.length > 0;
+            const hasAffectedFieldInvalidation =
+              unresolvedPendingInvalidationFields.length > 0 &&
+              fields.some((field) =>
+                unresolvedPendingInvalidationFields.includes(field),
+              );
+
+            if (hasMissingFields && !itemFetchIsActive) {
+              shouldFetch = true;
+              requiredFetch = true;
+              fieldsToFetch = missingFields;
+              // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+              // Keep stronger priorities intact; only lift low priority.
+              if (fetchType === 'lowPriority') {
+                fetchType = 'highPriority';
+              }
+            }
+
+            if (
+              hasAffectedFieldInvalidation &&
+              invalidationPriority &&
+              fetchTypePriority[invalidationPriority] >
+                fetchTypePriority[fetchType]
+            ) {
+              fetchType = invalidationPriority;
+            }
+          } else if (
+            fields === '*' &&
+            unresolvedPendingInvalidationFields.length > 0 &&
+            !itemFetchIsActive &&
+            !ignoreItemsInRefetchOnMount.has(itemKey)
+          ) {
             shouldFetch = true;
             requiredFetch = true;
-            fieldsToFetch = missingFields;
-            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-            // Keep stronger priorities intact; only lift low priority.
-            if (fetchType === 'lowPriority') {
-              fetchType = 'highPriority';
-            }
-          }
+            fieldsToFetch = unresolvedPendingInvalidationFields;
 
-          const invalidationPriority =
-            itemFieldInvalidationPriorities.get(itemKey);
-          if (
-            hasAffectedFieldInvalidation &&
-            invalidationPriority &&
-            fetchTypePriority[invalidationPriority] >
-              fetchTypePriority[fetchType]
-          ) {
-            fetchType = invalidationPriority;
+            if (
+              invalidationPriority &&
+              fetchTypePriority[invalidationPriority] >
+                fetchTypePriority[fetchType]
+            ) {
+              fetchType = invalidationPriority;
+            }
           }
         }
 
@@ -770,6 +794,7 @@ export function useMultipleItems<
     fetchItemFn,
     itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
+    getUnresolvedPendingInvalidationFields,
     partialResources,
     store,
   ]);

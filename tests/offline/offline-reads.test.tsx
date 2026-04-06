@@ -1,9 +1,12 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
+import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import { createOfflineSession } from '../../src/main';
+import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -21,6 +24,36 @@ import {
   docSchema,
   listQueryQueryPayloadSchema,
 } from './offlineTestShared';
+
+type PartialUserRow = { id: number; name: string; age?: number; city?: string };
+
+const partialUserRowSchema: PersistentStorageSchema<PartialUserRow> = rc_object(
+  {
+    id: rc_number,
+    name: rc_string,
+    age: rc_number.optionalKey(),
+    city: rc_string.optionalKey(),
+  },
+);
+
+const partialUserResourcesConfig: PartialResourcesConfig<PartialUserRow> = {
+  mergeItems: (prev, fetched) => {
+    if (!prev) return fetched;
+    return { ...prev, ...fetched };
+  },
+  selectFields: (fields, item) => {
+    const itemRecord = __LEGIT_CAST__<Record<string, unknown>, PartialUserRow>(
+      item,
+    );
+    const result: Record<string, unknown> = {};
+    for (const field of fields) {
+      if (field in itemRecord) {
+        result[field] = itemRecord[field];
+      }
+    }
+    return __LEGIT_CAST__<PartialUserRow, Record<string, unknown>>(result);
+  },
+};
 
 let network = createOfflineNetworkMock();
 
@@ -389,6 +422,125 @@ test('when a loaded list-query item refetches while offline, it keeps the last s
   ).toEqual(requestHistoryBeforeOfflineRefetch);
 
   hook.unmount();
+});
+
+test('partial-resource field invalidations should still refetch `fields: *` after reconnecting from an offline failure', async () => {
+  const sessionKey = 'offline-read-list-item-field-invalidation-retry';
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada', age: 30, city: 'London' }] },
+    {
+      getSessionKey: () => sessionKey,
+      partialResources: partialUserResourcesConfig,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: partialUserRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {},
+        },
+      },
+    },
+  );
+
+  const renderTrackedItem = () =>
+    renderHook(() => {
+      const item = env.apiStore.useItem('users||1', {
+        fields: '*',
+        selector: (row) => pick(row, ['age', 'id', 'name']),
+      });
+
+      env.trackItemUI('item-status', item.status);
+      env.trackItemUI('item-data', JSON.stringify(item.data));
+
+      return item;
+    });
+
+  // Start with a real `fields: *` item hook so the offline step is exercising
+  // a refetch of previously loaded data, not an initial load edge case.
+  const hook = renderTrackedItem();
+  await flushAllTimers();
+  expect(pick(hook.result.current, ['data', 'status'])).toMatchInlineSnapshot(`
+      data: { age: 30, id: 1, name: 'Ada' }
+      status: 'success'
+    `);
+
+  // Update the server copy so the later reconnect path has a real field-level
+  // change to recover.
+  env.serverTable.updateItem('users||1', { age: 31 });
+
+  // Focus the timeline on the offline invalidation and reconnect story.
+  env.clearTimeline();
+
+  // Invalidate only `age` while offline. The attempted refetch should fail
+  // offline, keep cached data visible, and preserve the pending field retry.
+  env.addTimelineComments('beforeNextAction', [
+    'invalidate only `age` while offline; the hook should stay on cached data',
+  ]);
+  act(() => {
+    network.goOffline();
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: 'users||1',
+      queryPayload: false,
+      fields: ['age'],
+    });
+  });
+  await flushAllTimers();
+  expect(pick(hook.result.current, ['data', 'status'])).toMatchInlineSnapshot(`
+      data: { age: 30, id: 1, name: 'Ada' }
+      status: 'success'
+    `);
+
+  // Unmount before reconnecting so the retry path must come from the next
+  // mount noticing the unresolved invalidated field.
+  hook.unmount();
+
+  act(() => {
+    network.goOnline();
+  });
+
+  // Remount the same wildcard hook. It should request just the invalidated
+  // field and then expose the refreshed item data.
+  env.addTimelineComments('beforeNextAction', [
+    'remount after reconnecting; the wildcard hook should refetch the pending `age` field',
+  ]);
+  const remountedHook = renderTrackedItem();
+  await flushAllTimers();
+
+  // The remounted hook should show the refreshed field rather than keeping the
+  // stale cached age indefinitely.
+  expect(pick(remountedHook.result.current, ['data', 'status']))
+    .toMatchInlineSnapshot(`
+        data: { age: 31, id: 1, name: 'Ada' }
+        status: 'success'
+      `);
+  expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['age']
+          itemId: 'users||1'
+        time: '2.83s -> 3.63s | duration: 800ms'
+    `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | item-data                      | item-status |
+      1.81s | {"age":30,"id":1,"name":"Ada"} | success     | -- timeline-cleared
+      2.83s | {"age":30,"id":1,"name":"Ada"} | success     | -- invalidate only \`age\` while offline; the hook should stay on cached data
+      .     | {"age":30,"id":1,"name":"Ada"} | success     | -- remount after reconnecting; the wildcard hook should refetch the pending \`age\` field
+      .     | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] >fetch-started
+      3.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"age":31})
+      .     | {"age":31,"id":1,"name":"Ada"} | success     | [item-data] ui-changed
+      "
+    `);
+
+  remountedHook.unmount();
 });
 
 test('when the app starts offline, startup cleanup keeps an expired list-query cache available for offline reads', async () => {
