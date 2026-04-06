@@ -8,7 +8,7 @@ import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { FetchError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
@@ -43,6 +43,10 @@ function formatReplayState(
   entity: { syncState: string; pendingMutations: number } | undefined,
 ) {
   return `value:${doc?.data?.value ?? 'null'} sync:${entity?.syncState ?? 'none'} pending:${entity?.pendingMutations ?? 0}`;
+}
+
+function createReplayFailure(message: string) {
+  return new FetchError(message, { path: '/document', method: 'PATCH' });
 }
 
 let network = createOfflineNetworkMock();
@@ -1117,7 +1121,7 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
     >()
     .mockImplementationOnce(({ input, enqueuedAt }) => {
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      throw new Error(`dispatch failed after send ${input.value}`);
+      throw createReplayFailure(`dispatch failed after send ${input.value}`);
     });
   // shouldSkipSync returns true — confirming the mutation was already applied
   // on the server, so the entry should be discarded without re-sending.
@@ -1240,9 +1244,12 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
     >()
     .mockImplementationOnce(({ input, enqueuedAt }) => {
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      throw new Error(`dispatch failed after send ${input.value}`);
+      throw createReplayFailure(`dispatch failed after send ${input.value}`);
     })
-    .mockResolvedValue({ value: 2 });
+    .mockImplementation(async ({ input }) => {
+      await env.serverMock.delayedSetData(input.value, { durationMs: 0 });
+      return { value: env.serverMock.current };
+    });
   const shouldSkipSync = vi
     .fn<
       ({
@@ -1340,20 +1347,21 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                          |
-    0     | "value:1 sync:none pending:0"               | ui-initialized
-    .     | "value:2 sync:none pending:0"               | ui-changed
-    .     | "value:2 sync:pending pending:1"            | ui-changed
-    .     | "value:2 sync:pending pending:1"            | offline:updateValue queued
-    100ms | "value:2 sync:pending pending:1"            | -- bring the session online and wait for the first replay attempt to settle into syncing
-    .     | "value:2 sync:syncing pending:1"            | ui-changed
-    .     | "value:2 sync:syncing pending:1"            | offline:updateValue replay-started
-    .     | "value:2 sync:syncing pending:1"            | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
-    .     | "value:2 sync:needs-confirmation pending:1" | ui-changed
-    5.1s  | "value:2 sync:syncing pending:1"            | ui-changed
-    .     | "value:2 sync:syncing pending:1"            | offline:updateValue replay-started
-    .     | "value:2 sync:syncing pending:1"            | offline:updateValue replay-finished
-    .     | "value:2 sync:none pending:0"               | ui-changed
+    time   | ui                                          |
+    0      | "value:1 sync:none pending:0"               | ui-initialized
+    .      | "value:2 sync:none pending:0"               | ui-changed
+    .      | "value:2 sync:pending pending:1"            | ui-changed
+    .      | "value:2 sync:pending pending:1"            | offline:updateValue queued
+    100ms  | "value:2 sync:pending pending:1"            | -- bring the session online and wait for the first replay attempt to settle into syncing
+    .      | "value:2 sync:syncing pending:1"            | ui-changed
+    .      | "value:2 sync:syncing pending:1"            | offline:updateValue replay-started
+    .      | "value:2 sync:syncing pending:1"            | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
+    .      | "value:2 sync:needs-confirmation pending:1" | ui-changed
+    5.1s   | "value:2 sync:syncing pending:1"            | ui-changed
+    .      | "value:2 sync:syncing pending:1"            | offline:updateValue replay-started
+    5.101s | "value:2 sync:syncing pending:1"            | server-data-changed (value: 2)
+    .      | "value:2 sync:syncing pending:1"            | offline:updateValue replay-finished
+    .      | "value:2 sync:none pending:0"               | ui-changed
     "
   `);
 });
@@ -1364,7 +1372,7 @@ test('healthy replay failures are retried 3 times and then move into the resolut
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
     >()
-    .mockRejectedValue(new Error('replay failed'));
+    .mockRejectedValue(createReplayFailure('replay failed'));
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-exhaustion-session',
@@ -1492,15 +1500,21 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   //   calls 1–3: fail (exhaust first retry budget → resolution)
   //   call 4: succeed (after user resolves with "retry")
   //   calls 5–7: fail (exhaust second retry budget → another resolution)
+  let replayAttempt = 0;
   const execute = vi
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
     >()
-    .mockRejectedValueOnce(new Error('replay failed'))
-    .mockRejectedValueOnce(new Error('replay failed'))
-    .mockRejectedValueOnce(new Error('replay failed'))
-    .mockResolvedValueOnce({ value: 2 })
-    .mockRejectedValue(new Error('replay failed'));
+    .mockImplementation(async ({ input }) => {
+      replayAttempt += 1;
+
+      if (replayAttempt === 4) {
+        await env.serverMock.delayedSetData(input.value, { durationMs: 0 });
+        return { value: env.serverMock.current };
+      }
+
+      throw createReplayFailure('replay failed');
+    });
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-resolution-actions-session',
@@ -1718,6 +1732,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     .     | "value:1 sync:pending pending:1"             | ui-changed
     .     | "value:1 sync:syncing pending:1"             | ui-changed
     .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .     | "value:1 sync:syncing pending:1"             | server-data-changed (value: 2)
     .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-finished
     .     | "value:2 sync:none pending:0"                | ui-changed
     11s   | "value:2 sync:none pending:0"                | -- go offline, queue another mutation, come back online — exhaust retries again
@@ -1748,9 +1763,16 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
     >()
-    .mockRejectedValueOnce(new Error('outage'))
-    .mockRejectedValueOnce(new Error('healthy failure'))
-    .mockResolvedValue({ value: 2 });
+    .mockImplementationOnce(() => {
+      throw createReplayFailure('outage');
+    })
+    .mockImplementationOnce(() => {
+      throw createReplayFailure('healthy failure');
+    })
+    .mockImplementation(async ({ input }) => {
+      await env.serverMock.delayedSetData(input.value, { durationMs: 0 });
+      return { value: env.serverMock.current };
+    });
   const recoveryCheck = vi
     .fn<({ sessionKey }: { sessionKey: string }) => boolean>()
     .mockReturnValue(true);
@@ -1855,7 +1877,7 @@ test('going offline again resets the healthy replay failure budget', async () =>
     >()
     .mockImplementation(() => {
       countedFailures += 1;
-      throw new Error(`healthy failure ${countedFailures}`);
+      throw createReplayFailure(`healthy failure ${countedFailures}`);
     });
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
@@ -2005,8 +2027,13 @@ test('new mutations queue separately instead of merging into entries that may ha
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
     >()
-    .mockRejectedValueOnce(new Error('dispatch failed after send'))
-    .mockResolvedValue({ value: 3 });
+    .mockImplementationOnce(() => {
+      throw createReplayFailure('dispatch failed after send');
+    })
+    .mockImplementation(async ({ input }) => {
+      await env.serverMock.delayedSetData(input.value, { durationMs: 0 });
+      return { value: env.serverMock.current };
+    });
 
   // Use accumulation so we can verify that new mutations do NOT merge into an
   // entry that may have already been applied on the server.
@@ -2100,8 +2127,13 @@ test('supersede does not discard entries that may have already been applied on t
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
     >()
-    .mockRejectedValueOnce(new Error('dispatch failed after send'))
-    .mockResolvedValue({ value: 3 });
+    .mockImplementationOnce(() => {
+      throw createReplayFailure('dispatch failed after send');
+    })
+    .mockImplementation(async ({ input }) => {
+      await env.serverMock.delayedSetData(input.value, { durationMs: 0 });
+      return { value: env.serverMock.current };
+    });
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
@@ -2215,7 +2247,7 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
     >()
     .mockImplementationOnce(({ input, enqueuedAt }) => {
       expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-      throw new Error(`dispatch failed after send ${input.value}`);
+      throw createReplayFailure(`dispatch failed after send ${input.value}`);
     });
   const shouldSkipSync = vi
     .fn<
@@ -2676,7 +2708,7 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
     .fn<
       ({ input }: { input: { value: number } }) => Promise<{ value: number }>
     >()
-    .mockRejectedValue(new Error('replay failed'));
+    .mockRejectedValue(createReplayFailure('replay failed'));
   // Low retry budget (maxFailures: 2, intervalMs: 1) so the test completes
   // quickly. recoveryCheck returns true so recovery probes don't block replay.
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
