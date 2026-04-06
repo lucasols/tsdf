@@ -150,6 +150,28 @@ type InvalidListQueryTempSuccessOperations = DefineListQueryOfflineOperations<
   { createUser: DefineOfflineOperation<CreateUserInput, unknown, User> }
 >;
 
+// @ts-expect-error - tempEntity operations cannot configure accumulation
+const invalidListQueryAccumulationTempEntity: NonNullable<
+  DirectListQueryOfflineOperations['createUser']
+> = {
+  inputSchema: createUserInputSchema,
+  getEntityRefs: ({ input }) => [`temp:${input.name}`],
+  accumulation: {
+    mergeInput: ({ incomingInput }: { incomingInput: CreateUserInput }) =>
+      incomingInput,
+  },
+  tempEntity: {
+    buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+    reconcileServerEntity: (result) => ({
+      finalPayload: getUserItemPayload(result.id),
+      finalData: { ...result },
+    }),
+  },
+  execute: ({ input }) => ({ id: 3, name: input.name }),
+};
+
+void invalidListQueryAccumulationTempEntity;
+
 // tests using the list-query store directly without test envs to verify the public API usage
 test('direct list-query store offline public api', async () => {
   const network = createOfflineNetworkMock();

@@ -1029,10 +1029,6 @@ export type OfflineOperationDefinition<
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
   /**
-   * Optional queue compaction for consecutive mutations with same refs.
-   */
-  accumulation?: OfflineAccumulationConfig<TInput>;
-  /**
    * Optional queue pruning for newer operations that supersede older queued work.
    *
    * This is mutually exclusive with `accumulation`.
@@ -1068,6 +1064,10 @@ export type OfflineOperationDefinition<
           TInput,
           TTempResult
         >;
+        /**
+         * Optional queue compaction for consecutive mutations with same refs.
+         */
+        accumulation?: OfflineAccumulationConfig<TInput>;
       } & NoTempEntityFields)
     | ({
         /**
@@ -1076,6 +1076,8 @@ export type OfflineOperationDefinition<
          * success sync callback.
          */
         onSuccessExecute?: undefined;
+        /** Temp-entity operations cannot compact multiple queued creates. */
+        accumulation?: never;
       } & ConfiguredTempEntityFields<
         TInput,
         TTempResult,

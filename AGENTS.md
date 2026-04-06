@@ -10,6 +10,13 @@ TSDF (TypeScript Data Fetching) is a data fetching library built on top of `t-st
 - **CollectionStore**: For collections of items keyed by payload
 - **ListQueryStore**: For paginated lists with item queries
 
+### Consumer assumptions
+
+- Treat TSDF as a library for TypeScript consumers with strongly typed application setups
+- Prefer expressing API constraints, invalid configuration combinations, and usage contracts in the type system when that keeps the API clearer
+- Do not add runtime validation solely to protect untyped JavaScript consumers unless the user explicitly asks for it or the runtime check protects persisted data / network data / other truly unsafe inputs
+- When a type-level contract is sufficient for intended consumers, prefer the simpler type-only enforcement over duplicating the same rule at runtime
+
 ## Development Commands
 
 ```bash

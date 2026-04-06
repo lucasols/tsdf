@@ -159,6 +159,10 @@ function serializePayload(value: ValidPayload): string {
   return JSON.stringify(value);
 }
 
+function formatPayloadForError(value: ValidPayload): string {
+  return typeof value === 'string' ? value : serializePayload(value);
+}
+
 function compareQueueEntries(
   left: OfflineQueueEntry,
   right: OfflineQueueEntry,
@@ -1111,6 +1115,46 @@ export function createOfflineStoreController<
       left?.entityKind === right?.entityKind &&
       left?.entityKey === right?.entityKey
     );
+  }
+
+  function findDuplicatePendingTempLifecycleTempId(args: {
+    entityRefs: OfflineEntityRef[];
+    tempIds?: readonly ValidPayload[];
+    entries?: Iterable<OfflineQueueEntry>;
+    resolutionEntries?: Iterable<PersistedOfflineResolutionRecord>;
+  }): string | null {
+    for (const [index, entityRef] of args.entityRefs.entries()) {
+      if (entityRef.entityKind !== 'item') continue;
+      const tempId = args.tempIds?.[index];
+      const formattedTempId =
+        tempId === undefined
+          ? entityRef.entityKey
+          : formatPayloadForError(tempId);
+
+      for (const entry of args.entries ?? queueEntries.values()) {
+        if (!entry.tempIds || entry.tempIds.length === 0) continue;
+        if (
+          entry.entityRefs.some((candidate) =>
+            isSameEntityRef(candidate, entityRef),
+          )
+        ) {
+          return formattedTempId;
+        }
+      }
+
+      for (const resolution of args.resolutionEntries ?? resolutions.values()) {
+        if (!resolution.tempIds || resolution.tempIds.length === 0) continue;
+        if (
+          resolution.entityRefs.some((candidate) =>
+            isSameEntityRef(candidate, entityRef),
+          )
+        ) {
+          return formattedTempId;
+        }
+      }
+    }
+
+    return null;
   }
 
   function matchesSupersededOperation(args: {
@@ -2118,6 +2162,21 @@ export function createOfflineStoreController<
       ) {
         throw new Error(
           `Temp entities operation "${operationName}" must preserve the resolved item refs`,
+        );
+      }
+    }
+
+    if (hasTempLifecycle) {
+      const duplicateTempEntityKey = findDuplicatePendingTempLifecycleTempId({
+        entityRefs,
+        tempIds,
+        entries: workingQueue.values(),
+        resolutionEntries: resolutions.values(),
+      });
+
+      if (duplicateTempEntityKey !== null) {
+        throw new Error(
+          `Offline operation "${operationName}" cannot queue temp entity "${duplicateTempEntityKey}" more than once while it is still pending`,
         );
       }
     }

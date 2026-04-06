@@ -133,6 +133,28 @@ type InvalidCollectionTempSuccessOperations = DefineCollectionOfflineOperations<
   }
 >;
 
+// @ts-expect-error - tempEntity operations cannot configure accumulation
+const invalidCollectionAccumulationTempEntity: NonNullable<
+  DirectCollectionOfflineOperations['createTodo']
+> = {
+  inputSchema: createTodoInputSchema,
+  getEntityRefs: ({ input }) => [`temp:${input.title}`],
+  accumulation: {
+    mergeInput: ({ incomingInput }: { incomingInput: CreateTodoInput }) =>
+      incomingInput,
+  },
+  tempEntity: {
+    buildPendingEntity: (input) => ({ title: input.title, completed: false }),
+    reconcileServerEntity: (result) => ({
+      finalPayload: result.id,
+      finalData: { title: result.title, completed: result.completed },
+    }),
+  },
+  execute: ({ input }) => ({ id: '3', title: input.title, completed: false }),
+};
+
+void invalidCollectionAccumulationTempEntity;
+
 // tests using the collection store directly without test envs to verify the public API usage
 test('direct collection store offline public api', async () => {
   const network = createOfflineNetworkMock();

@@ -64,7 +64,7 @@ afterEach(() => {
   globalThis.__SUPPRESS_ACT_ERROR__ = false;
 });
 
-test('collection offline creates keep durable temp-id metadata and clear after replay finishes', async () => {
+test('collection offline create rejects queueing the same temp id twice', async () => {
   // Start offline before the store initializes so the first mutation-side
   // network refresh already sees offline mode without needing a browser event.
   network.setOffline();
@@ -95,9 +95,6 @@ test('collection offline creates keep durable temp-id metadata and clear after r
             createUser: {
               inputSchema: collectionCreateInputSchema,
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
-              accumulation: {
-                mergeInput: ({ incomingInput }) => incomingInput,
-              },
               tempEntity: {
                 buildPendingEntity: (input) => ({
                   value: { name: input.name },
@@ -124,8 +121,8 @@ test('collection offline creates keep durable temp-id metadata and clear after r
     },
   );
 
-  // Queue two create mutations for the same entity while offline. Both should
-  // accumulate under one temp-entity entry since they share the same entity ref.
+  // Queue the first create while offline so the temp entity becomes the durable
+  // pending row that later replay will reconcile.
   const queued = await env.apiStore.performMutation(null, {
     mutation: async () => {
       const result = { id: 'users||ada', name: 'Ada' };
@@ -134,7 +131,11 @@ test('collection offline creates keep durable temp-id metadata and clear after r
     },
     offline: { operation: 'createUser', input: { name: 'Ada' } },
   });
-  await env.apiStore.performMutation(null, {
+
+  // A second create for the same temp id is ambiguous: replay would try to
+  // create the same optimistic entity twice. Reject it instead of stacking two
+  // creates under one temp row.
+  const duplicateQueued = await env.apiStore.performMutation(null, {
     mutation: async () => {
       const result = { id: 'users||ada-2', name: 'Ada' };
       await env.serverTable.delayedSetItem(result.id, { name: result.name });
@@ -144,8 +145,19 @@ test('collection offline creates keep durable temp-id metadata and clear after r
   });
 
   expect(queued.ok).toBe(true);
+  expect({
+    error: duplicateQueued.ok ? null : duplicateQueued.error,
+    ok: duplicateQueued.ok,
+  }).toMatchInlineSnapshot(`
+    error:
+      code: 500
+      id: 'fetch-error'
+      message: 'Offline operation "createUser" cannot queue temp entity "temp:Ada" more than once while it is still pending'
 
-  // Both creates should be grouped under a single temp-entity with 2 pending mutations.
+    ok: '❌'
+  `);
+
+  // The failed duplicate attempt must not create extra offline metadata.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
@@ -155,7 +167,7 @@ test('collection offline creates keep durable temp-id metadata and clear after r
       entityKey: '"temp:Ada'
       entityKind: 'item'
       id: 'offline-temp-id-session:collection-1:"temp:Ada'
-      pendingMutations: 2
+      pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-temp-id-session'
       storeName: 'collection-1'
@@ -165,23 +177,17 @@ test('collection offline creates keep durable temp-id metadata and clear after r
       updatedAt: 1735689600000
   `);
 
-  // Go online and replay creates one at a time. The first create resolves with
-  // a server-assigned ID, reconciling the temp entity into a real item.
+  // Go online and replay the original create. Once the server confirms the
+  // final id, the temp metadata should be cleaned up normally.
   act(() => {
     network.goOnline();
   });
   await waitForMicrotaskCondition(() => resolveCreates.length > 0);
   expect(resolveCreates).toHaveLength(1);
   resolveCreates[0]?.({ id: 'users||ada', name: 'Ada' });
-  await vi.runAllTimersAsync();
-  await Promise.resolve();
-
-  // The second queued create is replayed after the first finishes.
-  expect(resolveCreates).toHaveLength(2);
-  resolveCreates[1]?.({ id: 'users||ada-2', name: 'Ada' });
   await flushAllTimers();
 
-  // After both creates are confirmed, the temp-entity metadata is fully cleared.
+  // After the original create is confirmed, the temp-entity metadata is fully cleared.
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
 
