@@ -97,6 +97,13 @@ export function classifyMutationOutage(error: unknown, phase: string): boolean {
   );
 }
 
+export function classifyRetryableReplayFailure(
+  error: unknown,
+  phase: string,
+): boolean {
+  return phase === 'sync' && error instanceof Error;
+}
+
 export async function waitForMicrotaskCondition(
   condition: () => boolean,
   maxTurns = 20,

@@ -27,6 +27,7 @@ import {
 } from './offlineReplayTestShared';
 import {
   classifyMutationOutage,
+  classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   collectionSchema,
   docConflictSchema,
@@ -1275,7 +1276,11 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
       offline: {
         session: createOfflineSession({
           getSessionKey: () => 'needs-confirmation-no-outage-session',
-          config: { network: network.config },
+          config: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
         }),
         operations: {
           updateValue: {
@@ -1366,6 +1371,87 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
   `);
 });
 
+test('ambiguous replay failures require manual resolution by default instead of auto-retrying', async () => {
+  network.setOffline();
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValue(createReplayFailure('replay failed'));
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: 'retry-default-safe-store',
+    getSessionKey: () => 'retry-default-safe-session',
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => 'retry-default-safe-session',
+          config: { network: network.config, replayRetry: { intervalMs: 1 } },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute,
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await act(async () => {
+    await env.apiStore.performMutation({
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(1);
+  await flushAllTimers();
+
+  // The failed replay is not auto-sent again unless the session explicitly
+  // opts into replay retries for that failure shape.
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600001
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'retry-default-safe-session:retry-default-safe-store:document'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'retry-default-safe-session'
+      storeName: 'retry-default-safe-store'
+      storeType: 'document'
+      syncState: 'resolution-required'
+      updatedAt: 1735689600001
+  `);
+  expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+    .toMatchInlineSnapshot(`
+      - error: 'replay failed'
+        input: 'value: 2'
+        kind: 'retry-exhausted'
+        on: 'document:document'
+        op: 'updateValue'
+    `);
+});
+
 test('healthy replay failures are retried 3 times and then move into the resolution queue', async () => {
   network.setOffline();
   const execute = vi
@@ -1383,7 +1469,11 @@ test('healthy replay failures are retried 3 times and then move into the resolut
       offline: {
         session: createOfflineSession({
           getSessionKey: () => 'retry-exhaustion-session',
-          config: { network: network.config },
+          config: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
         }),
         operations: {
           updateValue: {
@@ -1525,7 +1615,11 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
       offline: {
         session: createOfflineSession({
           getSessionKey: () => 'retry-resolution-actions-session',
-          config: { network: network.config },
+          config: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
         }),
         operations: {
           updateValue: {
@@ -1796,6 +1890,8 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
               error.message === 'outage'
                 ? 'outage'
                 : 'ignore',
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
             outage: {
               enabled: true,
               recoveryCheck,
@@ -1889,7 +1985,11 @@ test('going offline again resets the healthy replay failure budget', async () =>
       offline: {
         session: createOfflineSession({
           getSessionKey: () => 'retry-budget-reset-session',
-          config: { network: network.config },
+          config: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
         }),
         operations: {
           updateValue: {
@@ -2726,6 +2826,8 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
               network: network.config,
               classifyFailure: (error, ctx) =>
                 classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
               outage: {
                 enabled: true,
                 recoveryCheck: () => true,

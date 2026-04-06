@@ -19,6 +19,7 @@ import {
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
+  classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   listQueryQueryPayloadSchema,
   waitForMicrotaskCondition,
@@ -158,7 +159,11 @@ test('nested descendants cascade into blocked resolutions and discard together',
         offline: {
           session: createOfflineSession({
             getSessionKey: () => 'offline-resolution-dependency-chain-session',
-            config: { network: network.config },
+            config: {
+              network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
+            },
           }),
           operations: {
             createUser: {
@@ -463,6 +468,8 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
             getSessionKey: () => 'offline-resolution-nested-retry-session',
             config: {
               network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
               replayRetry: { maxFailures: 1, intervalMs: 1 },
             },
           }),
@@ -762,7 +769,11 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
         offline: {
           session: createOfflineSession({
             getSessionKey: () => 'offline-resolution-remap-session',
-            config: { network: network.config },
+            config: {
+              network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
+            },
           }),
           operations: {
             createUser: {
@@ -1000,7 +1011,11 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
           session: createOfflineSession({
             getSessionKey: () =>
               'offline-resolution-dependency-self-scope-session',
-            config: { network: network.config },
+            config: {
+              network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
+            },
           }),
           operations: {
             createUser: {
@@ -1285,7 +1300,11 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
         offline: {
           session: createOfflineSession({
             getSessionKey: () => 'offline-resolution-explicit-dep-session',
-            config: { network: network.config },
+            config: {
+              network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
+            },
           }),
           operations: {
             createUser: {

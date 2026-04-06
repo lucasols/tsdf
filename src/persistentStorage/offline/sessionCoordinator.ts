@@ -356,6 +356,7 @@ type SessionCanonicalConfig = {
     outage: OfflineMutationQueueingPolicy;
   };
   classifyFailure?: OfflineSessionConfig['classifyFailure'];
+  classifyRetriableFailure?: OfflineSessionConfig['classifyRetryableFailure'];
   outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
   outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
@@ -383,6 +384,7 @@ function toCanonicalConfig(
       outage: config?.mutationQueueing?.outage ?? 'allow',
     },
     classifyFailure: config?.classifyFailure,
+    classifyRetriableFailure: config?.classifyRetryableFailure,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
       config?.outage?.recoveryProbe,
@@ -432,6 +434,7 @@ function sameCanonicalConfig(
     left.mutationQueueingByDefault.outage ===
       right.mutationQueueingByDefault.outage &&
     left.classifyFailure === right.classifyFailure &&
+    left.classifyRetriableFailure === right.classifyRetriableFailure &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
   );
@@ -474,6 +477,7 @@ export class SessionOfflineCoordinator {
   #canonicalConfig: SessionCanonicalConfig;
   #hasCanonicalConfig: boolean;
   #classificationToken = 0;
+  #retriableFailureToken = 0;
   #networkStateToken = 0;
   #lastRemoteSnapshotAt = 0;
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -686,6 +690,15 @@ export class SessionOfflineCoordinator {
 
   isCurrentClassificationToken(token: number): boolean {
     return token === this.#classificationToken;
+  }
+
+  getRetriableFailureToken(): number {
+    this.#retriableFailureToken += 1;
+    return this.#retriableFailureToken;
+  }
+
+  isCurrentRetriableFailureToken(token: number): boolean {
+    return token === this.#retriableFailureToken;
   }
 
   getStatus(): GlobalOfflineStatus {
@@ -1015,6 +1028,25 @@ export class SessionOfflineCoordinator {
     }
 
     return 'ignore';
+  }
+
+  async classifyRetriableFailure(
+    error: unknown,
+    ctx: OfflineFailureContext,
+  ): Promise<boolean> {
+    if (!this.#canonicalConfig.classifyRetriableFailure) return false;
+
+    const token = this.getRetriableFailureToken();
+    const result = await this.#canonicalConfig.classifyRetriableFailure(
+      error,
+      ctx,
+    );
+
+    if (!this.isCurrentRetriableFailureToken(token)) {
+      return false;
+    }
+
+    return result;
   }
 
   #notifyGreenCycle(): void {

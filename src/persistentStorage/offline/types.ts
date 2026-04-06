@@ -234,6 +234,20 @@ export type OfflineSessionConfig = {
     error: unknown,
     ctx: OfflineFailureContext,
   ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
+  /**
+   * Optional replay-only classifier for ambiguous sync failures that stayed
+   * online (`classifyFailure(...) === 'ignore'`).
+   *
+   * Return `true` only when automatically re-sending the replayed mutation is
+   * known to be safe. Return `false` to avoid auto-replay retries; in that
+   * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
+   * conflict checks can run before the mutation is promoted to manual
+   * resolution.
+   */
+  classifyRetryableFailure?: (
+    error: unknown,
+    ctx: OfflineFailureContext,
+  ) => Promise<boolean> | boolean;
   /** Network detection strategy and browser integration. */
   network?: OfflineNetworkModeConfig;
   /** Outage detection and recovery strategy for remote failures. */
@@ -560,6 +574,11 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   tempIds?: ValidPayload[];
   /** Last recorded sync error if replay failed. */
   lastError?: { message: string };
+  /**
+   * Whether a `needs-confirmation` entry may auto-resend during healthy replay
+   * retries after confirmation checks finish.
+   */
+  allowReplayRetry?: boolean;
   /** Pending conflict payload when confirmation or resolution is required. */
   pendingConflict?: TConflict;
 };

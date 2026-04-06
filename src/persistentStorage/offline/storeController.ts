@@ -2540,6 +2540,24 @@ export function createOfflineStoreController<
           continue;
         }
 
+        if (
+          shouldCheckSkipBeforeRetry &&
+          entryToUse.allowReplayRetry !== true
+        ) {
+          await persistManualResolutionChain({
+            current,
+            parentEntry: entryToUse,
+            parentResolution: buildRetryExhaustedResolutionRecord(
+              current,
+              entryToUse,
+              entryToUse.lastError ?? {
+                message: 'Replay retry is not allowed for this failure',
+              },
+            ),
+          });
+          continue;
+        }
+
         const result = await operation.execute(
           buildOperationBaseContext({
             input: entryToUse.input,
@@ -2579,6 +2597,16 @@ export function createOfflineStoreController<
           operationName: entryToUse.operation,
           sessionKey: current.sessionKey,
         });
+        const allowReplayRetry =
+          classification === 'ignore' &&
+          !current.session.getStatus().isOfflineMode
+            ? await current.session.classifyRetriableFailure(error, {
+                phase: 'sync',
+                storeType,
+                operationName: entryToUse.operation,
+                sessionKey: current.sessionKey,
+              })
+            : false;
 
         if (
           classification !== 'ignore' ||
@@ -2591,14 +2619,21 @@ export function createOfflineStoreController<
             lastAttemptAt: Date.now(),
             syncState: 'pending',
             lastError,
+            allowReplayRetry: undefined,
           };
           await persistEntry(entryToUse, current);
           return;
         }
 
-        const nextFailures =
-          (countedReplayFailures.get(entryToUse.id) ?? 0) + 1;
-        countedReplayFailures.set(entryToUse.id, nextFailures);
+        const nextFailures = allowReplayRetry
+          ? (countedReplayFailures.get(entryToUse.id) ?? 0) + 1
+          : 0;
+
+        if (allowReplayRetry) {
+          countedReplayFailures.set(entryToUse.id, nextFailures);
+        } else {
+          countedReplayFailures.delete(entryToUse.id);
+        }
 
         entryToUse = {
           ...entryToUse,
@@ -2607,9 +2642,10 @@ export function createOfflineStoreController<
           lastAttemptAt: Date.now(),
           syncState: 'needs-confirmation',
           lastError,
+          allowReplayRetry,
         };
 
-        if (nextFailures >= replayRetryMaxFailures) {
+        if (allowReplayRetry && nextFailures >= replayRetryMaxFailures) {
           await persistManualResolutionChain({
             current,
             parentEntry: entryToUse,

@@ -22,6 +22,7 @@ import {
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
+  classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   listQueryQueryPayloadSchema,
   summarizeResolution,
@@ -112,7 +113,11 @@ describe('list-query replay', () => {
           offline: {
             session: createOfflineSession({
               getSessionKey: () => sessionKey,
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               patchUserName: {
@@ -334,7 +339,11 @@ describe('list-query replay', () => {
           offline: {
             session: createOfflineSession({
               getSessionKey: () => sessionKey,
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUser: {
@@ -597,7 +606,11 @@ describe('list-query replay', () => {
           offline: {
             session: createOfflineSession({
               getSessionKey: () => sessionKey,
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUsers: {
@@ -897,7 +910,11 @@ describe('list-query replay', () => {
           offline: {
             session: createOfflineSession({
               getSessionKey: () => sessionKey,
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUser: {
@@ -1141,7 +1158,11 @@ describe('list-query replay', () => {
             session: createOfflineSession({
               getSessionKey: () =>
                 'offline-replay-nested-temp-create-chain-session',
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUser: {
@@ -1528,7 +1549,11 @@ describe('list-query replay', () => {
             session: createOfflineSession({
               getSessionKey: () =>
                 'offline-replay-temp-create-resolution-chain-session',
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUser: {
@@ -1834,7 +1859,11 @@ describe('list-query replay', () => {
           offline: {
             session: createOfflineSession({
               getSessionKey: () => 'offline-replay-temp-create-discard-session',
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUser: {
@@ -2017,7 +2046,11 @@ describe('list-query replay', () => {
           offline: {
             session: createOfflineSession({
               getSessionKey: () => 'offline-replay-temp-list-query-session',
-              config: { network: network.config },
+              config: {
+                network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
+              },
             }),
             operations: {
               createUser: {

@@ -26,6 +26,7 @@ import {
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
+  classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   collectionSchema,
   docMutationInputSchema,
@@ -246,6 +247,8 @@ describe('document overlays', () => {
             getSessionKey: () => 'offline-doc-overlay-resolution-session',
             config: {
               network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
               replayRetry: { maxFailures: 1, intervalMs: 1 },
             },
           }),
@@ -599,6 +602,8 @@ describe('collection overlays', () => {
                 'offline-collection-overlay-resolution-session',
               config: {
                 network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
                 replayRetry: { maxFailures: 1, intervalMs: 1 },
               },
             }),
@@ -1136,6 +1141,8 @@ describe('list-query overlays', () => {
               getSessionKey: () => 'offline-overlay-resolution-session',
               config: {
                 network: network.config,
+                classifyRetryableFailure: (error, ctx) =>
+                  classifyRetryableReplayFailure(error, ctx.phase),
                 replayRetry: { maxFailures: 1, intervalMs: 1 },
               },
             }),

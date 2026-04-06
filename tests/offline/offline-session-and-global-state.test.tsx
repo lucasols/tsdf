@@ -29,6 +29,7 @@ import {
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
+  classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   collectionSchema,
   docMutationInputSchema,
@@ -366,7 +367,11 @@ test('a global offline view sees the same blocked temp item as the store after r
         offline: {
           session: createOfflineSession({
             getSessionKey: () => sessionKey,
-            config: { network: network.config },
+            config: {
+              network: network.config,
+              classifyRetryableFailure: (error, ctx) =>
+                classifyRetryableReplayFailure(error, ctx.phase),
+            },
           }),
           operations: {
             createUser: {
