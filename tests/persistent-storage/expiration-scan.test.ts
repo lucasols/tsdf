@@ -195,6 +195,37 @@ describe('expiration scan', () => {
     `);
   });
 
+  test('stale compact offline status entries are removed once the session is no longer offline', async () => {
+    const staleTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const sessionKey = 'offline-status-session';
+    const statusKey = `tsdf.${sessionKey}._o_.s`;
+
+    localStorage.setItem(
+      statusKey,
+      JSON.stringify({ d: { n: { e: 1 }, u: staleTimestamp } }),
+    );
+    upsertManagedLocalStorageSingleEntry({
+      storageKey: statusKey,
+      lastAccessAt: staleTimestamp,
+    });
+
+    createTriggerEnv();
+    await waitForScheduledCleanup();
+
+    expect({
+      globalLastCleanupAt: readGlobalLastCleanupAt(),
+      statusEntryExists: localStorage.getItem(statusKey) !== null,
+      statusManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(statusKey),
+        ) !== null,
+    }).toMatchInlineSnapshot(`
+      globalLastCleanupAt: 1735689602000
+      statusEntryExists: '❌'
+      statusManifestExists: '❌'
+    `);
+  });
+
   test('global maintenance is throttled by the shared cleanup timestamp until the interval elapses', async () => {
     const cleanupIntervalMs = 24 * 60 * 60 * 1000;
     const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;

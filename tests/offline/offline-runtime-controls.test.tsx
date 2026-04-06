@@ -1592,7 +1592,7 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
   `);
 });
 
-test('disabling runtime network support preserves both bootstrap and raw persisted status for existing offline work', async () => {
+test('disabling runtime network support preserves the compact persisted status for existing offline work', async () => {
   network.setOffline();
   const sessionKey = 'runtime-disable-persistence-semantics';
   const offlineSession = createOfflineSession({
@@ -1628,33 +1628,22 @@ test('disabling runtime network support preserves both bootstrap and raw persist
 
   await Promise.resolve();
 
-  expect(parsePersistedObject(localStorage.getItem(`tsdf-os:${sessionKey}`)!))
-    .toMatchInlineSnapshot(`
-      d:
-        n: { a: 1, e: 1 }
-        u: 1735689600000
-    `);
-
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
-  await Promise.resolve();
-
-  expect(parsePersistedObject(localStorage.getItem(`tsdf-os:${sessionKey}`)!))
-    .toMatchInlineSnapshot(`
-      d:
-        n: { a: 1 }
-        u: 1735689600000
-    `);
   expect(
     parsePersistedObject(localStorage.getItem(`tsdf.${sessionKey}._o_.s`)!),
   ).toMatchInlineSnapshot(`
     d:
-      isLeader: '✅'
-      isOfflineMode: '✅'
-      lastFailureAt: null
-      lastRecoveryCheckAt: null
-      network: { active: '✅', enabled: '❌' }
-      outage: { active: '❌', enabled: '❌' }
-      sessionKey: 'runtime-disable-persistence-semantics'
-      updatedAt: 1735689600000
+      n: { a: 1, e: 1 }
+      u: 1735689600000
+  `);
+
+  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  await Promise.resolve();
+
+  expect(
+    parsePersistedObject(localStorage.getItem(`tsdf.${sessionKey}._o_.s`)!),
+  ).toMatchInlineSnapshot(`
+    d:
+      n: { a: 1 }
+      u: 1735689600000
   `);
 });

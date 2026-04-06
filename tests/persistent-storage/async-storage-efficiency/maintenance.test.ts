@@ -81,6 +81,7 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2s     | 📖 #1 ❌ tsdf._am.g (async global maintenance)
+      2.005s | 📖 #2 ❌ tsdf.sess1._o_.s (entry data)
       2.009s | ✍️ #1 ❌->✅ tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
       "
     `);
@@ -830,7 +831,9 @@ describe('async storage efficiency: maintenance', () => {
       "
       time  |
       130ms | 📖 #1 ✅ tsdf._am.g (async global maintenance) | 0.04 kb
-      142ms | ✍️ #1 ✅->✅ tsdf._am.g
+      135ms | 📖 #2 ❌ tsdf.sess-trigger._o_.s (entry data)
+      .     | 📖 #3 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
+      139ms | ✍️ #1 ✅->✅ tsdf._am.g
             |    └ (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
@@ -844,39 +847,33 @@ describe('async storage efficiency: maintenance', () => {
       132ms | 🗂️ list-dir-entries tsdf/sess-trigger/trigger-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       133ms | 🗂️ list-dir-values tsdf/user%40example.com
-            |    └ (session directory) entries=["dir:_o_.s","dir:invalid-stray","dir:protected-doc","dir:unprotected-doc"]
-      134ms | 🗂️ list-dir-entries tsdf/user%40example.com/_o_.s
-            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .     | 🗂️ list-dir-entries tsdf/user%40example.com/invalid-stray
+            |    └ (session directory) entries=["dir:invalid-stray","dir:protected-doc","dir:unprotected-doc"]
+      134ms | 🗂️ list-dir-entries tsdf/user%40example.com/invalid-stray
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/protected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:oe._i.r.json","file:oe.document.p.json","file:oq._i.r.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/unprotected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      135ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.p.json
-            |    └ (entry data) | 0.44 kb
-      138ms | 📖 #2 tsdf/sess-trigger/trigger-doc/d._i.r.json
+      135ms | 📖 #1 tsdf/sess-trigger/trigger-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
-      .     | 📖 #3 tsdf/user%40example.com/_o_.s/d._i.r.json
-            |    └ (namespace index) | 0.07 kb
-      .     | 📖 #4 tsdf/user%40example.com/invalid-stray/d._i.r.json
+      .     | 📖 #2 tsdf/user%40example.com/invalid-stray/d._i.r.json
             |    └ (namespace index) | 0.02 kb
-      .     | 📖 #5 tsdf/user%40example.com/protected-doc/d._i.r.json
+      .     | 📖 #3 tsdf/user%40example.com/protected-doc/d._i.r.json
             |    └ (namespace index) | 0.09 kb
-      .     | 📖 #6 tsdf/user%40example.com/protected-doc/oe._i.r.json
+      .     | 📖 #4 tsdf/user%40example.com/protected-doc/oe._i.r.json
             |    └ (namespace index) | 0.07 kb
-      .     | 📖 #7 tsdf/user%40example.com/protected-doc/oq._i.r.json
+      .     | 📖 #5 tsdf/user%40example.com/protected-doc/oq._i.r.json
             |    └ (namespace index) | 0.13 kb
-      .     | 📖 #8 tsdf/user%40example.com/unprotected-doc/d._i.r.json
+      .     | 📖 #6 tsdf/user%40example.com/unprotected-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
-      141ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray
+      138ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray
             |    └ (store directory)
-      142ms | end
+      139ms | end
       "
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1736985605684`);
+    ).toMatchInlineSnapshot(`lca: 1736985605681`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
     ).toMatchInlineSnapshot(`

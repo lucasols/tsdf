@@ -104,39 +104,28 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     await flushAllTimers();
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (3.06 kb)
+      "tsdf (1.42 kb)
       ├ _m (0.64 kb)
       │ ├ g (0.04 kb)
       │ └ r (0.59 kb)
       │   ├ n:offline-sync-format-session (0.35 kb)
       │   │ └ offline-sync-format-doc (0.29 kb)
-      │   │   ├ oe (0.09 kb)
-      │   │   │ └ m (0.08 kb)
-      │   │   └ oq (0.16 kb)
-      │   │     └ m (0.16 kb)
+      │   │   ├ oe.m (0.09 kb)
+      │   │   └ oq.m (0.16 kb)
       │   └ s:offline-sync-format-session (0.24 kb)
       │     ├ _o_ (0.06 kb)
-      │     │ └ s (0.06 kb)
-      │     │   └ m (0.05 kb)
+      │     │ └ s.m (0.06 kb)
       │     └ offline-sync-format-doc (0.12 kb)
       │       └ m (0.07 kb)
-      └ offline-sync-format-session (2.41 kb)
-        ├ _o_ (0.48 kb)
-        │ └ s (0.48 kb)
-        └ offline-sync-format-doc (1.88 kb)
-          ├ oe (0.90 kb)
-          │ └ document (0.90 kb)
-          └ oq (0.89 kb)
-            └ offline-sync-format-doc:1735689600000:4fzzzxjy (0.89 kb)
-      tsdf-os:offline-sync-format-session (0.15 kb)"
+      └ offline-sync-format-session (0.78 kb)
+        ├ _o_.s (0.09 kb)
+        └ offline-sync-format-doc (0.63 kb)
+          ├ oe (0.16 kb)
+          │ └ document (0.16 kb)
+          └ oq (0.39 kb)
+            └ offline-sync-format-doc:1735689600000:4fzzzxjy (0.38 kb)"
     `);
 
-    expect(getParsedLocalStorageValue('tsdf-os:offline-sync-format-session'))
-      .toMatchInlineSnapshot(`
-        d:
-          n: { a: 1, e: 1 }
-          u: 1735689600000
-      `);
     expect(
       getParsedLocalStorageValue(
         'tsdf._m.r.s:offline-sync-format-session._o_.s.m',
@@ -172,21 +161,9 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     expect(getParsedLocalStorageValue('tsdf.offline-sync-format-session._o_.s'))
       .toMatchInlineSnapshot(`
         d:
-          isLeader: '✅'
-          isOfflineMode: '✅'
-          lastFailureAt: null
-          lastRecoveryCheckAt: null
-          network: { active: '✅', enabled: '✅' }
-          outage: { active: '❌', enabled: '❌' }
-          sessionKey: 'offline-sync-format-session'
-          updatedAt: 1735689600000
+          n: { a: 1, e: 1 }
+          u: 1735689600000
       `);
-    expect(getParsedLocalStorageValue('tsdf-os:offline-sync-format-session'))
-      .toMatchInlineSnapshot(`
-      d:
-        n: { a: 1, e: 1 }
-        u: 1735689600000
-    `);
     expect(
       getParsedLocalStorageValue(
         'tsdf.offline-sync-format-session.offline-sync-format-doc',
@@ -199,43 +176,25 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
         'tsdf.offline-sync-format-session.offline-sync-format-doc.oe.document',
       ),
     ).toMatchInlineSnapshot(`
-      d:
-        blockedByResolutionIds: []
-        blockedResolutionCount: 0
-        childResolutionCount: 0
-        childResolutionIds: []
-        createdAt: 1735689600000
-        entityKey: 'document'
-        entityKind: 'document'
-        id: 'offline-sync-format-session:offline-sync-format-doc:document'
-        pendingMutations: 1
-        requiresResolution: '❌'
-        sessionKey: 'offline-sync-format-session'
-        storeName: 'offline-sync-format-doc'
-        storeType: 'document'
-        syncState: 'pending'
-        updatedAt: 1735689600000
+      a: 1735689600000
+      g: 'd'
+      k: 'document'
+      p: 1
+      s: 'p'
+      u: 1735689600000
     `);
     expect(
       getParsedLocalStorageValue(
         'tsdf.offline-sync-format-session.offline-sync-format-doc.oq.offline-sync-format-doc:1735689600000:4fzzzxjy',
       ),
     ).toMatchInlineSnapshot(`
-      d:
-        attempts: 0
-        createdAt: 1735689600000
-        entityRefs:
-          - { entityKey: 'document', entityKind: 'document' }
-        id: 'offline-sync-format-doc:1735689600000:4fzzzxjy'
-        input: { value: 2 }
-        lastAttemptAt: null
-        operation: 'updateValue'
-        queueOrder: 1735689600000
-        sessionKey: 'offline-sync-format-session'
-        storeName: 'offline-sync-format-doc'
-        storeType: 'document'
-        syncState: 'pending'
-        updatedAt: 1735689600000
+      a: 1735689600000
+      d: 'offline-sync-format-doc:1735689600000:4fzzzxjy'
+      e: ['d:document']
+      i: { value: 2 }
+      o: 'updateValue'
+      s: 'p'
+      u: 1735689600000
     `);
   } finally {
     randomSpy.mockRestore();
@@ -304,49 +263,35 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     await flushAllTimers();
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (3.01 kb)
-      ├ offline-opfs-format-session (2.94 kb)
-      │ ├ _o_.s (0.59 kb)
-      │ │ ├ d._i.r.json (0.10 kb)
-      │ │ └ d.e.p.json (0.48 kb)
-      │ └ offline-opfs-format-doc (2.29 kb)
+      "tsdf (1.20 kb)
+      ├ offline-opfs-format-session (1.13 kb)
+      │ └ offline-opfs-format-doc (1.07 kb)
       │   ├ d._i.r.json (0.11 kb)
       │   ├ d.e.p.json (0.05 kb)
       │   ├ oe._i.r.json (0.10 kb)
-      │   ├ oe.document.p.json (0.91 kb)
+      │   ├ oe.document.p.json (0.18 kb)
       │   ├ oq._i.r.json (0.17 kb)
-      │   └ oq.offline-opfs-format-doc%3A1735689600003%3A4fzzzxjy.p.json (0.91 kb)
+      │   └ oq.offline-opfs-format-doc%3A1735689600003%3A4fzzzxjy.p.json (0.41 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.33 kb)
+      ├ _am.g (0.05 kb)
+      ├ _m (0.13 kb)
+      │ └ r (0.12 kb)
+      │   └ s:offline-opfs-format-session (0.12 kb)
+      │     └ _o_ (0.06 kb)
+      │       └ s.m (0.06 kb)
+      └ offline-opfs-format-session (0.14 kb)
+        └ _o_.s (0.09 kb)"
+    `);
 
-    expect(getParsedLocalStorageValue('tsdf-os:offline-opfs-format-session'))
+    expect(getParsedLocalStorageValue('tsdf.offline-opfs-format-session._o_.s'))
       .toMatchInlineSnapshot(`
         d:
           n: { a: 1, e: 1 }
           u: 1735689600003
       `);
-    expect(
-      getParsedOpfsFileData(
-        'tsdf/offline-opfs-format-session/_o_.s/d._i.r.json',
-      ),
-    ).toMatchInlineSnapshot(`
-      e:
-        - a: 1735689600004
-    `);
-    expect(
-      getParsedOpfsFileData(
-        'tsdf/offline-opfs-format-session/_o_.s/d.e.p.json',
-      ),
-    ).toMatchInlineSnapshot(`
-      isLeader: '✅'
-      isOfflineMode: '✅'
-      lastFailureAt: null
-      lastRecoveryCheckAt: null
-      network: { active: '✅', enabled: '✅' }
-      outage: { active: '❌', enabled: '❌' }
-      sessionKey: 'offline-opfs-format-session'
-      updatedAt: 1735689600003
-    `);
     expect(
       getParsedOpfsFileData(
         'tsdf/offline-opfs-format-session/offline-opfs-format-doc/d._i.r.json',
@@ -368,28 +313,19 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       ),
     ).toMatchInlineSnapshot(`
       e:
-        document: { a: 1735689600097 }
+        document: { a: 1735689600098 }
     `);
     expect(
       getParsedOpfsFileData(
         'tsdf/offline-opfs-format-session/offline-opfs-format-doc/oe.document.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      blockedByResolutionIds: []
-      blockedResolutionCount: 0
-      childResolutionCount: 0
-      childResolutionIds: []
-      createdAt: 1735689600003
-      entityKey: 'document'
-      entityKind: 'document'
-      id: 'offline-opfs-format-session:offline-opfs-format-doc:document'
-      pendingMutations: 1
-      requiresResolution: '❌'
-      sessionKey: 'offline-opfs-format-session'
-      storeName: 'offline-opfs-format-doc'
-      storeType: 'document'
-      syncState: 'pending'
-      updatedAt: 1735689600003
+      a: 1735689600003
+      g: 'd'
+      k: 'document'
+      p: 1
+      s: 'p'
+      u: 1735689600003
     `);
     expect(
       getParsedOpfsFileData(
@@ -404,20 +340,13 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
         'tsdf/offline-opfs-format-session/offline-opfs-format-doc/oq.offline-opfs-format-doc%3A1735689600003%3A4fzzzxjy.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      attempts: 0
-      createdAt: 1735689600003
-      entityRefs:
-        - { entityKey: 'document', entityKind: 'document' }
-      id: 'offline-opfs-format-doc:1735689600003:4fzzzxjy'
-      input: { value: 2 }
-      lastAttemptAt: null
-      operation: 'updateValue'
-      queueOrder: 1735689600003
-      sessionKey: 'offline-opfs-format-session'
-      storeName: 'offline-opfs-format-doc'
-      storeType: 'document'
-      syncState: 'pending'
-      updatedAt: 1735689600003
+      a: 1735689600003
+      d: 'offline-opfs-format-doc:1735689600003:4fzzzxjy'
+      e: ['d:document']
+      i: { value: 2 }
+      o: 'updateValue'
+      s: 'p'
+      u: 1735689600003
     `);
   } finally {
     randomSpy.mockRestore();

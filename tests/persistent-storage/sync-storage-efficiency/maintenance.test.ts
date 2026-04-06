@@ -501,35 +501,34 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[3] #4 ✅ tsdf.user@example.com.unprotected-doc (entry data)
       .     | 🔑[4] #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
             |    └ (namespace index)
-      .     | 🔑[5] #6 ✅ tsdf-os:user@example.com
-      .     | 🔑[6] #7 ✅ tsdf.user@example.com._o_.s (entry data)
-      .     | 🔑[7] #8 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
-      .     | 🔑[8] #9 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
+      .     | 🔑[5] #6 ✅ tsdf.user@example.com._o_.s (entry data)
+      .     | 🔑[6] #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
+      .     | 🔑[7] #8 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
             |    └ (entry data, <protected-doc:1736380803620:4fzzzxjy>)
-      .     | 🔑[9] #10 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+      .     | 🔑[8] #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
             |    └ (namespace index)
-      .     | 🔑[10] #11 ✅ tsdf.user@example.com.protected-doc.oe.document
+      .     | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
             |    └ (entry data, <document>)
-      .     | 🔑[11] #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .     | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
             |    └ (namespace index)
-      .     | 🔑[12] #13 ✅ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 🔑[13] #14 ✅ tsdf.sess-trigger.trigger-doc (entry data)
-      .     | 🔑[14] #15 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+      .     | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
+      .     | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
+      .     | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index)
       .     | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
             |    └ (namespace index) | 0.07 kb
       .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
             |    └ (namespace index) | 0.05 kb
-      .     | 📖 #8 ✅ tsdf._m.r.s:user@example.com._o_.s.m
+      .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
             |    └ (namespace index) | 0.05 kb
-      .     | 📖 #10 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+      .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
             |    └ (namespace index) | 0.14 kb
-      .     | 📖 #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
             |    └ (namespace index) | 0.08 kb
-      .     | 📖 #15 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+      .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index) | 0.05 kb
-      .     | 🗑️ #13 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 📖 #7 ✅ tsdf.user@example.com._o_.s (entry data) | 0.46 kb
+      .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
+      .     | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);

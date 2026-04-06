@@ -1095,14 +1095,23 @@ describe('startPersistentStorageOperationCapture', () => {
     localStorage.setItem('tsdf.docs.item.a', 'x'.repeat(40));
     localStorage.setItem('tsdf.docs.item.b', 'x'.repeat(60));
     localStorage.setItem('tsdf.docs.meta', 'x'.repeat(20));
+    localStorage.setItem('tsdf.sess1._o_.s', 'x'.repeat(20));
+    localStorage.setItem('tsdf._m.r.n:sess1.docs.ci.m', 'x'.repeat(20));
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.27 kb)
-      └ docs (0.26 kb)
-        ├ item (0.21 kb)
-        │ ├ a (0.08 kb)
-        │ └ b (0.12 kb)
-        └ meta (0.05 kb)"
+      "tsdf (0.40 kb)
+      ├ _m (0.07 kb)
+      │ └ r (0.07 kb)
+      │   └ n:sess1 (0.07 kb)
+      │     └ docs (0.05 kb)
+      │       └ ci.m (0.04 kb)
+      ├ docs (0.26 kb)
+      │ ├ item (0.21 kb)
+      │ │ ├ a (0.08 kb)
+      │ │ └ b (0.12 kb)
+      │ └ meta (0.05 kb)
+      └ sess1 (0.06 kb)
+        └ _o_.s (0.05 kb)"
     `);
   });
 });

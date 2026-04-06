@@ -637,7 +637,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   network.setOffline();
   const sessionKey = 'offline-global-hook-session';
   const storeName = 'offline-global-hook-doc';
-  const offlineBootstrapKey = `tsdf-os:${sessionKey}`;
+  const offlineStatusKey = `tsdf.${sessionKey}._o_.s`;
   const globalStatusRenders = createLoggerStore();
 
   // Mount the global banner before any store has initialized offline support.
@@ -693,8 +693,8 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     // Let the store finish registering its offline session before the mutation.
     await Promise.resolve();
 
-    // Queue a durable offline mutation so the session writes the startup
-    // bootstrap snapshot that a future app boot would rely on.
+    // Queue a durable offline mutation so the session writes the canonical
+    // compact status snapshot that a future app boot would rely on.
     mutationOk = (
       await env.apiStore.performMutation({
         optimisticUpdate: () => {
@@ -713,7 +713,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
   });
 
   expect(mutationOk).toBe(true);
-  expect(parsePersistedObject(localStorage.getItem(offlineBootstrapKey)!))
+  expect(parsePersistedObject(localStorage.getItem(offlineStatusKey)!))
     .toMatchInlineSnapshot(`
       d:
         n: { a: 1, e: 1 }
@@ -736,16 +736,33 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     "
   `);
 
-  // Once the session is back online, the startup bootstrap snapshot should be
-  // cleared so future boots do not resurrect a stale offline state.
+  // Once the session is back online, the canonical status entry should remain
+  // present but switch to a compact non-offline snapshot that cleanup can age out.
   globalStatusRenders.addMark('Browser reconnects');
   await act(async () => {
     network.goOnline();
-    await waitForMicrotaskCondition(
-      () => localStorage.getItem(offlineBootstrapKey) === null,
-    );
+    await waitForMicrotaskCondition(() => {
+      const stored = localStorage.getItem(offlineStatusKey);
+      if (stored === null) return false;
+
+      const parsed = parsePersistedObject(stored);
+      const status = parsed.d;
+      return (
+        status !== null &&
+        typeof status === 'object' &&
+        'n' in status &&
+        typeof status.n === 'object' &&
+        status.n !== null &&
+        !('a' in status.n)
+      );
+    });
   });
-  expect(localStorage.getItem(offlineBootstrapKey)).toBeNull();
+  expect(parsePersistedObject(localStorage.getItem(offlineStatusKey)!))
+    .toMatchInlineSnapshot(`
+      d:
+        n: { e: 1 }
+        u: 1735689600000
+    `);
 
   expect(globalStatusRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
@@ -792,15 +809,15 @@ test('global offline hooks can mount before a localStorage-backed store', async 
 // localStorage immediately instead of waiting for store hydration to confirm it.
 test('app restart boots global offline status from the persisted localStorage snapshot', () => {
   const sessionKey = 'offline-startup-bootstrap';
-  const bootstrapKey = `tsdf-os:${sessionKey}`;
+  const statusKey = `tsdf.${sessionKey}._o_.s`;
 
-  // Simulate the bootstrap record left behind by a previous offline session.
+  // Simulate the compact canonical status record left behind by a previous offline session.
   localStorage.setItem(
-    bootstrapKey,
+    statusKey,
     JSON.stringify({ d: { n: { e: 1, a: 1 }, u: TEST_INITIAL_TIME } }),
   );
 
-  expect(parsePersistedObject(localStorage.getItem(bootstrapKey)!))
+  expect(parsePersistedObject(localStorage.getItem(statusKey)!))
     .toMatchInlineSnapshot(`
       d:
         n: { a: 1, e: 1 }
