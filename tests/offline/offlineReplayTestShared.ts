@@ -99,3 +99,30 @@ export function getOfflineQueueEntryData(
     'Expected persisted queue data to be an object',
   );
 }
+
+/**
+ * Returns the persisted offline queue entries sorted by queue order, with only
+ * the specified fields from the entry data. Removes `queueOrder` from the
+ * output since it's only used for sorting.
+ */
+export function getSortedQueueSummary(
+  sessionKey: string,
+  storeName: string,
+  fields: string[] = ['input', 'operation'],
+): Array<Record<string, unknown>> {
+  return getOfflineQueueEntries(sessionKey, storeName)
+    .map((entry) => {
+      const data = getOfflineQueueEntryData(entry);
+      const result: Record<string, unknown> = {};
+
+      for (const field of [...fields, 'queueOrder']) {
+        result[field] = data[field];
+      }
+
+      return result;
+    })
+    .sort(
+      (left, right) => Number(left.queueOrder) - Number(right.queueOrder),
+    )
+    .map(({ queueOrder: _, ...rest }) => rest);
+}

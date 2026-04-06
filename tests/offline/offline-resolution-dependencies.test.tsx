@@ -1161,6 +1161,9 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
         entityKind: 'item'
     input: { itemId: 'users||3', name: 'Linus blocked edit' }
   `);
+  expect(hook.result.current.items).toMatchInlineSnapshot(`
+    ['Ada', 'Grace', 'Linus blocked edit']
+  `);
 
   // Retry the remapped child separately to prove it now targets the final id
   // through the realistic delayed patch path.
@@ -1216,12 +1219,11 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     14.21s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-finished
-    .      | Ada, Grace, Linus offline      | [query-items] ui-changed
-    15.21s | Ada, Grace, Linus offline      | -- retry remapped child — should patch users||3 directly
-    .      | Ada, Grace, Linus offline      | offline:patchUserName replay-started
-    16.41s | Ada, Grace, Linus offline      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
-    .      | Ada, Grace, Linus offline      | offline:patchUserName replay-finished
-    .      | Ada, Grace, Linus blocked edit | [query-items] ui-changed
+    .      | Ada, Grace, Linus blocked edit | [query-items, query-items] ui-changed
+    15.21s | Ada, Grace, Linus blocked edit | -- retry remapped child — should patch users||3 directly
+    .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
+    16.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+    .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
     "
   `);
 
