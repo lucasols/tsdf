@@ -13,7 +13,7 @@ import { IsOffScreenContext } from '../isOffScreenContext';
 import {
   createOfflineEntityLookup,
   filterActiveOfflineOverlays,
-  getOfflineEntitiesMetadata,
+  hasPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
@@ -29,6 +29,10 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
+import {
+  excludeLoadedFields,
+  fallbackItemHasRequestedFields,
+} from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
@@ -40,30 +44,6 @@ import {
   type TSFDListQueryState,
   type TSFDUseListQueryReturn,
 } from './types';
-
-function fallbackItemHasRequestedFields<ItemState extends ValidStoreState>(
-  fallbackItemState:
-    | { item: ItemState | null | undefined; loadedFields: string[] | undefined }
-    | undefined,
-  requestedFields: readonly string[],
-): boolean {
-  const loadedFields = fallbackItemState?.loadedFields ?? [];
-
-  if (requestedFields.every((field) => loadedFields.includes(field))) {
-    return true;
-  }
-
-  const item = fallbackItemState?.item;
-  if (!item || typeof item !== 'object') return false;
-
-  const itemRecord =
-    // WORKAROUND: Fallback field checks need indexed property access, but ItemState is generic and does not expose a string index signature.
-    __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
-
-  return requestedFields.every(
-    (field) => field in itemRecord && itemRecord[field] !== undefined,
-  );
-}
 
 export type UseMultipleListQueriesOptions<
   ItemState extends ValidStoreState,
@@ -343,9 +323,9 @@ export function useMultipleListQueries<
       const itemLoadedFields = state
         ? state.itemLoadedFields
         : store.state.itemLoadedFields;
-      const loadedFields = itemLoadedFields[itemKey] ?? [];
-      return (itemPendingInvalidationFields.get(itemKey) ?? []).filter(
-        (field) => !loadedFields.includes(field),
+      return excludeLoadedFields(
+        itemLoadedFields[itemKey],
+        itemPendingInvalidationFields.get(itemKey),
       );
     },
     [itemPendingInvalidationFields, store],
@@ -387,7 +367,7 @@ export function useMultipleListQueries<
   );
 
   const getVisibleQueryItemKeys = useCallback(
-    (queryKey: string, itemKeys: readonly string[]): string[] => {
+    (queryKey: string, itemKeys: readonly string[]): readonly string[] => {
       const missingOverlayItems = overlayItemsByQueryKey.get(queryKey);
       const hasDeletions = deletedOverlayItemKeys.size > 0;
 
@@ -395,7 +375,7 @@ export function useMultipleListQueries<
         !hasDeletions &&
         (!missingOverlayItems || missingOverlayItems.length === 0)
       ) {
-        return [...itemKeys];
+        return itemKeys;
       }
 
       const visibleItemKeys = hasDeletions
@@ -593,10 +573,10 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
-            pendingSync: getOfflineEntitiesMetadata(
+            pendingSync: hasPendingOfflineSync(
               offlineEntitiesByKey,
               visibleItemKeys,
-            ).pendingSync,
+            ),
             queryMetadata: resultQueryMetadata,
           };
         },
@@ -636,30 +616,26 @@ export function useMultipleListQueries<
             const requestedFields = Array.isArray(queryConfig.fields)
               ? queryConfig.fields
               : undefined;
-            const fallbackItemStates = visibleItemKeys.map((itemKey) => ({
-              itemKey,
-              fallbackItemState: readFallbackItemState(itemKey),
-            }));
-            const canUseFallbackItems =
-              !partialResources ||
-              queryConfig.fields === undefined ||
-              queryConfig.fields === '*' ||
-              (requestedFields &&
-                fallbackItemStates.every(({ fallbackItemState }) => {
-                  return fallbackItemHasRequestedFields(
-                    fallbackItemState,
-                    requestedFields,
-                  );
-                }));
+            const fallbackItemStatesByKey = new Map<
+              string,
+              ReturnType<NonNullable<typeof readFallbackItemState>>
+            >();
 
-            if (!canUseFallbackItems) return result;
+            for (const itemKey of visibleItemKeys) {
+              const fallbackItemState = readFallbackItemState(itemKey);
+              fallbackItemStatesByKey.set(itemKey, fallbackItemState);
 
-            const fallbackItemStatesByKey = new Map(
-              fallbackItemStates.map(({ itemKey, fallbackItemState }) => [
-                itemKey,
-                fallbackItemState,
-              ]),
-            );
+              if (
+                requestedFields &&
+                partialResources &&
+                !fallbackItemHasRequestedFields(
+                  fallbackItemState,
+                  requestedFields,
+                )
+              ) {
+                return result;
+              }
+            }
             const fallbackItems = selectVisibleItems(
               visibleItemKeys,
               queryConfig.fields,
@@ -685,10 +661,10 @@ export function useMultipleListQueries<
               fields: queryConfig.fields,
               isLoading: false,
               isLoadingMore: false,
-              pendingSync: getOfflineEntitiesMetadata(
+              pendingSync: hasPendingOfflineSync(
                 offlineEntitiesByKey,
                 visibleItemKeys,
-              ).pendingSync,
+              ),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -736,9 +712,9 @@ export function useMultipleListQueries<
             Array.isArray(fields) && fields.length > 0
               ? query.items
                   .flatMap((itemKey) => {
-                    const loadedFields = state.itemLoadedFields[itemKey] ?? [];
-                    return fields.filter(
-                      (field) => !loadedFields.includes(field),
+                    return excludeLoadedFields(
+                      state.itemLoadedFields[itemKey],
+                      fields,
                     );
                   })
                   .filter(

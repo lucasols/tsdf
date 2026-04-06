@@ -28,6 +28,10 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
+import {
+  excludeLoadedFields,
+  fallbackItemHasRequestedFields,
+} from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
@@ -44,30 +48,6 @@ const cacheMissError = {
   id: 'cache-miss',
   message: 'Cache miss',
 } as const;
-
-function fallbackItemHasRequestedFields<ItemState extends ValidStoreState>(
-  fallbackItemState:
-    | { item: ItemState | null | undefined; loadedFields: string[] | undefined }
-    | undefined,
-  requestedFields: readonly string[],
-): boolean {
-  const loadedFields = fallbackItemState?.loadedFields ?? [];
-
-  if (requestedFields.every((field) => loadedFields.includes(field))) {
-    return true;
-  }
-
-  const item = fallbackItemState?.item;
-  if (!item || typeof item !== 'object') return false;
-
-  const itemRecord =
-    // WORKAROUND: Fallback field checks need indexed property access, but ItemState is generic and does not expose a string index signature.
-    __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
-
-  return requestedFields.every(
-    (field) => field in itemRecord && itemRecord[field] !== undefined,
-  );
-}
 
 export type UseMultipleItemsOptions<
   ItemState extends ValidStoreState,
@@ -228,9 +208,9 @@ export function useMultipleItems<
   );
   const getUnresolvedPendingInvalidationFields = useCallback(
     (itemKey: string): string[] => {
-      const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-      return (itemPendingInvalidationFields.get(itemKey) ?? []).filter(
-        (field) => !loadedFields.includes(field),
+      return excludeLoadedFields(
+        store.state.itemLoadedFields[itemKey],
+        itemPendingInvalidationFields.get(itemKey),
       );
     },
     [itemPendingInvalidationFields, store],
@@ -362,9 +342,7 @@ export function useMultipleItems<
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
-            const missingFields = fields.filter(
-              (f) => !loadedFields.includes(f),
-            );
+            const missingFields = excludeLoadedFields(loadedFields, fields);
             const hasMissingFields = missingFields.length > 0;
             let missingFieldsAreAvailableInState = false;
 
@@ -394,8 +372,9 @@ export function useMultipleItems<
 
           if (partialResources && showPartialAsRefetching) {
             if (Array.isArray(fields) && fields.length > 0) {
-              const pendingRequestedFields = fields.filter(
-                (field) => !loadedFields.includes(field),
+              const pendingRequestedFields = excludeLoadedFields(
+                loadedFields,
+                fields,
               );
 
               if (pendingRequestedFields.length > 0) {
@@ -467,7 +446,7 @@ export function useMultipleItems<
         const loadedFields = state.itemLoadedFields[itemKey] ?? [];
         const missingRequestedFields =
           partialResources && Array.isArray(fields) && fields.length > 0
-            ? fields.filter((field) => !loadedFields.includes(field)).sort()
+            ? excludeLoadedFields(loadedFields, fields).sort()
             : [];
 
         return {
@@ -727,9 +706,7 @@ export function useMultipleItems<
               : undefined;
 
           if (Array.isArray(fields) && fields.length > 0) {
-            const missingFields = fields.filter(
-              (field) => !loadedFields.includes(field),
-            );
+            const missingFields = excludeLoadedFields(loadedFields, fields);
             const hasMissingFields = missingFields.length > 0;
             const hasAffectedFieldInvalidation =
               unresolvedPendingInvalidationFields.length > 0 &&

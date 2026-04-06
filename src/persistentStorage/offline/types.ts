@@ -328,6 +328,12 @@ export type GlobalOfflineEntity = {
   tempId?: ValidPayload;
 };
 
+/** Reference to an entity participating in offline sync tracking. */
+export type OfflineEntityRef = {
+  entityKey: string;
+  entityKind: OfflineEntityKind;
+};
+
 /**
  * Persisted offline conflict payload.
  *
@@ -358,11 +364,8 @@ type OfflineConflictResolutionRecordBase<
   conflict: TConflict;
   /** Timestamp when the original queued mutation was enqueued. */
   enqueuedAt: number;
-  /** Entity references involved in the conflict, each shaped as `{ entityKey, entityKind }`. */
-  entityRefs: {
-    entityKey: string;
-    entityKind: 'document' | 'item' | 'query';
-  }[];
+  /** Entity references involved in the conflict. */
+  entityRefs: OfflineEntityRef[];
   /** Conflict creation timestamp. */
   createdAt: number;
   /** Conflict update timestamp. */
@@ -419,11 +422,8 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   input: TInput;
   /** Timestamp when the original queued mutation was enqueued. */
   enqueuedAt: number;
-  /** Entity references involved in the resolution, each shaped as `{ entityKey, entityKind }`. */
-  entityRefs: {
-    entityKey: string;
-    entityKind: 'document' | 'item' | 'query';
-  }[];
+  /** Entity references involved in the resolution. */
+  entityRefs: OfflineEntityRef[];
   /** Last replay error snapshot captured before exhaustion. */
   lastReplayError: { message: string };
   /** Resolution creation timestamp. */
@@ -558,11 +558,8 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   input: TInput;
   /** Stable ordering key used to replay queued operations deterministically. */
   queueOrder: number;
-  /** Entity references tied to this mutation, each shaped as `{ entityKey, entityKind }`. */
-  entityRefs: {
-    entityKey: string;
-    entityKind: 'document' | 'item' | 'query';
-  }[];
+  /** Entity references tied to this mutation. */
+  entityRefs: OfflineEntityRef[];
   /** Number of execution attempts so far. */
   attempts: number;
   /** Queue entry creation timestamp. */

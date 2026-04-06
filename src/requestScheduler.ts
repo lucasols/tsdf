@@ -330,11 +330,15 @@ export class RequestScheduler<T> {
 
     const fetchPromise = this.#waitForRequest(requestId);
 
+    let timeoutId: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), timeoutMs);
+      timeoutId = setTimeout(() => resolve('timeout'), timeoutMs);
     });
 
-    return Promise.race([fetchPromise, timeoutPromise]);
+    return Promise.race([fetchPromise, timeoutPromise]).then((result) => {
+      clearTimeout(timeoutId);
+      return result;
+    });
   }
 
   async #waitForRequest(requestId: string): Promise<boolean> {

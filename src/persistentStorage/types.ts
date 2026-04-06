@@ -303,17 +303,25 @@ type StoreOfflineConfig<
   operations?: TOperations;
 };
 
-/** Persistent storage config for DocumentStore. */
-export type DocumentPersistentStorageConfig<
-  State extends ValidStoreState,
-  StorageState = unknown,
-  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
-> = StorePersistentStorageBaseConfig<State, StorageState> & {
+type StoreOfflineConfigField<
+  TOfflineOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition
+  > | null,
+> = {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
     ? StoreOfflineConfig
     : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
 };
+
+/** Persistent storage config for DocumentStore. */
+export type DocumentPersistentStorageConfig<
+  State extends ValidStoreState,
+  StorageState = unknown,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
+> = StorePersistentStorageBaseConfig<State, StorageState> &
+  StoreOfflineConfigField<TOfflineOperations>;
 
 type ResolvedStorePersistentStorageBaseConfig<
   TFinal,
@@ -329,12 +337,8 @@ export type ResolvedDocumentPersistentStorageConfig<
   State extends ValidStoreState,
   StorageState = unknown,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
-> = ResolvedStorePersistentStorageBaseConfig<State, StorageState> & {
-  /** Optional offline sync/replay configuration for mutations. */
-  offline?: TOfflineOperations extends null
-    ? StoreOfflineConfig
-    : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
-};
+> = ResolvedStorePersistentStorageBaseConfig<State, StorageState> &
+  StoreOfflineConfigField<TOfflineOperations>;
 
 type InternalCollectionOfflineOperations<
   ItemState extends ValidStoreState,
@@ -357,20 +361,7 @@ type CollectionOfflineOperationsConfig<
   ItemPayload extends ValidPayload,
 > = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
 
-/** Persistent storage config for CollectionStore. */
-export type CollectionPersistentStorageConfig<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload = ValidPayload,
-  StorageState = unknown,
-  TOfflineOperations extends CollectionOfflineOperationsConfig<
-    ItemState,
-    ItemPayload
-  > = null,
-> = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
-  /** Optional offline sync/replay configuration for mutations. */
-  offline?: TOfflineOperations extends null
-    ? StoreOfflineConfig
-    : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
+type CollectionPersistentStorageFields<ItemPayload extends ValidPayload> = {
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
@@ -385,6 +376,19 @@ export type CollectionPersistentStorageConfig<
   ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
 };
 
+/** Persistent storage config for CollectionStore. */
+export type CollectionPersistentStorageConfig<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload = ValidPayload,
+  StorageState = unknown,
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  > = null,
+> = StorePersistentStorageBaseConfig<ItemState, StorageState> &
+  StoreOfflineConfigField<TOfflineOperations> &
+  CollectionPersistentStorageFields<ItemPayload>;
+
 export type ResolvedCollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
@@ -393,24 +397,9 @@ export type ResolvedCollectionPersistentStorageConfig<
     ItemState,
     ItemPayload
   > = null,
-> = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> & {
-  /** Optional offline sync/replay configuration for mutations. */
-  offline?: TOfflineOperations extends null
-    ? StoreOfflineConfig
-    : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
-  /** Schema used to validate cached item payloads on load. */
-  payloadSchema: PersistentStorageSchema<ItemPayload>;
-  /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
-  maxItems?: number;
-  /** Item payloads that should never be evicted from storage. */
-  pinnedItems?: ItemPayload[];
-  /**
-   * Item payloads that should never be persisted or restored.
-   * Accepts either an explicit payload list or a predicate function.
-   * Takes precedence over `pinnedItems`.
-   */
-  ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
-};
+> = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> &
+  StoreOfflineConfigField<TOfflineOperations> &
+  CollectionPersistentStorageFields<ItemPayload>;
 
 export type InternalListQueryOfflineOperations<
   ItemState extends ValidStoreState,
@@ -439,22 +428,10 @@ export type ListQueryOfflineOperationsConfig<
   ItemPayload
 > | null;
 
-/** Persistent storage config for ListQueryStore. */
-export type ListQueryPersistentStorageConfig<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload = ValidPayload,
-  ItemPayload extends ValidPayload = ValidPayload,
-  StorageState = unknown,
-  TOfflineOperations extends ListQueryOfflineOperationsConfig<
-    ItemState,
-    QueryPayload,
-    ItemPayload
-  > = null,
-> = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
-  /** Optional offline sync/replay configuration for mutations. */
-  offline?: TOfflineOperations extends null
-    ? StoreOfflineConfig
-    : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
+type ListQueryPersistentStorageFields<
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = {
   /** Schema used to validate cached item payloads on load. */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Schema used to validate cached query payloads on load. */
@@ -477,6 +454,21 @@ export type ListQueryPersistentStorageConfig<
   ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
 };
 
+/** Persistent storage config for ListQueryStore. */
+export type ListQueryPersistentStorageConfig<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload = ValidPayload,
+  ItemPayload extends ValidPayload = ValidPayload,
+  StorageState = unknown,
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = null,
+> = StorePersistentStorageBaseConfig<ItemState, StorageState> &
+  StoreOfflineConfigField<TOfflineOperations> &
+  ListQueryPersistentStorageFields<QueryPayload, ItemPayload>;
+
 export type ResolvedListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload = ValidPayload,
@@ -487,32 +479,9 @@ export type ResolvedListQueryPersistentStorageConfig<
     QueryPayload,
     ItemPayload
   > = null,
-> = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> & {
-  /** Optional offline sync/replay configuration for mutations. */
-  offline?: TOfflineOperations extends null
-    ? StoreOfflineConfig
-    : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
-  /** Schema used to validate cached item payloads on load. */
-  itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
-  /** Schema used to validate cached query payloads on load. */
-  queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
-  /** Maximum number of items to persist. Defaults to 500. */
-  maxItems?: number;
-  /** Maximum number of queries to persist. Defaults to 100. */
-  maxQueries?: number;
-  /** Maximum number of items per query to persist. Defaults to 100. */
-  maxQuerySize?: number;
-  /** Item payloads that should never be evicted from storage. */
-  pinnedItems?: ItemPayload[];
-  /** Query payloads that should never be evicted from storage. */
-  pinnedQueries?: QueryPayload[];
-  /**
-   * Item payloads that should never be persisted or restored.
-   * Accepts either an explicit payload list or a predicate function.
-   * Takes precedence over `pinnedItems`.
-   */
-  ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
-};
+> = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> &
+  StoreOfflineConfigField<TOfflineOperations> &
+  ListQueryPersistentStorageFields<QueryPayload, ItemPayload>;
 
 // --- Persisted Data Shapes ---
 

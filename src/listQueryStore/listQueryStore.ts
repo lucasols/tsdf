@@ -81,6 +81,7 @@ import {
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
+import { excludeLoadedFields } from './itemFieldUtils';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import {
   type FetchListFnReturn,
@@ -1384,8 +1385,9 @@ export function createListQueryStore<
     const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
     if (!invalidationFields) return;
 
-    const remainingFields = invalidationFields.filter(
-      (field) => !loadedFields.includes(field),
+    const remainingFields = excludeLoadedFields(
+      loadedFields,
+      invalidationFields,
     );
 
     if (remainingFields.length > 0) {
@@ -1397,9 +1399,9 @@ export function createListQueryStore<
 
   function pruneItemInvalidationTracking(): void {
     for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
-      const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-      const remainingFields = pendingFields.filter(
-        (field) => !loadedFields.includes(field),
+      const remainingFields = excludeLoadedFields(
+        store.state.itemLoadedFields[itemKey],
+        pendingFields,
       );
 
       if (remainingFields.length > 0) {

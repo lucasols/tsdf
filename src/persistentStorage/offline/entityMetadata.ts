@@ -18,13 +18,17 @@ export function getIsPendingOfflineSync(
   return !!entity && !entity.requiresResolution;
 }
 
-function getKeepsResolutionOverlayVisible(overlay: unknown): boolean {
-  return (
-    typeof overlay === 'object' &&
-    overlay !== null &&
-    'keepVisibleWhileResolutionRequired' in overlay &&
-    overlay.keepVisibleWhileResolutionRequired === true
-  );
+export function hasPendingOfflineSync(
+  entitiesByKey: ReadonlyMap<string, GlobalOfflineEntity>,
+  entityKeys: readonly string[],
+): boolean {
+  for (const entityKey of entityKeys) {
+    if (getIsPendingOfflineSync(entitiesByKey.get(entityKey))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function shouldApplyOfflineOverlay(
@@ -36,7 +40,10 @@ export function shouldApplyOfflineOverlay(
     (!entity.requiresResolution ||
       entity.blockedResolutionCount > 0 ||
       entity.childResolutionCount > 0 ||
-      getKeepsResolutionOverlayVisible(overlay))
+      (typeof overlay === 'object' &&
+        overlay !== null &&
+        'keepVisibleWhileResolutionRequired' in overlay &&
+        overlay.keepVisibleWhileResolutionRequired === true))
   );
 }
 

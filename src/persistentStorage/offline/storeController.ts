@@ -37,6 +37,7 @@ import {
   type OfflineQueueEntry,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecordForStore,
+  type OfflineEntityRef,
   type OfflineSession,
   type OfflineStoreType,
   type OperationConflict,
@@ -48,11 +49,6 @@ const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 3;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
-
-type OfflineEntityRef = {
-  entityKey: string;
-  entityKind: 'document' | 'item' | 'query';
-};
 
 type OfflineStoreAdapter = {
   getEntityRefs?: (args: {
@@ -336,6 +332,19 @@ function compareQueueEntries(
   }
   if (left.createdAt !== right.createdAt) {
     return left.createdAt - right.createdAt;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+function compareResolutionRecords(
+  left: PersistedOfflineResolutionRecord,
+  right: PersistedOfflineResolutionRecord,
+): number {
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt - right.createdAt;
+  }
+  if (left.enqueuedAt !== right.enqueuedAt) {
+    return left.enqueuedAt - right.enqueuedAt;
   }
   return left.id.localeCompare(right.id);
 }
@@ -1179,15 +1188,7 @@ export function createOfflineStoreController<
             childResolutionCount: childResolutionIds.length,
           };
         })
-        .sort((left, right) => {
-          if (left.createdAt !== right.createdAt) {
-            return left.createdAt - right.createdAt;
-          }
-          if (left.enqueuedAt !== right.enqueuedAt) {
-            return left.enqueuedAt - right.enqueuedAt;
-          }
-          return left.id.localeCompare(right.id);
-        }),
+        .sort(compareResolutionRecords),
     );
   }
 
@@ -1982,6 +1983,7 @@ export function createOfflineStoreController<
       string,
       PersistedOfflineResolutionRecord
     >();
+    const sortedEntries = getSortedEntries();
 
     while (pendingEntityKeys.length > 0) {
       const entityKey = pendingEntityKeys.shift();
@@ -1989,7 +1991,7 @@ export function createOfflineStoreController<
       const dependencySource = sourcesByEntityKey.get(entityKey);
       if (!dependencySource) continue;
 
-      for (const entry of getSortedEntries()) {
+      for (const entry of sortedEntries) {
         if (
           entry.id === args.parentEntryId ||
           descendantQueueEntries.has(entry.id)
@@ -2055,15 +2057,9 @@ export function createOfflineStoreController<
       queueEntries: [...descendantQueueEntries.values()].sort(
         compareQueueEntries,
       ),
-      resolutions: [...descendantResolutions.values()].sort((left, right) => {
-        if (left.createdAt !== right.createdAt) {
-          return left.createdAt - right.createdAt;
-        }
-        if (left.enqueuedAt !== right.enqueuedAt) {
-          return left.enqueuedAt - right.enqueuedAt;
-        }
-        return left.id.localeCompare(right.id);
-      }),
+      resolutions: [...descendantResolutions.values()].sort(
+        compareResolutionRecords,
+      ),
     };
   }
 
@@ -2221,15 +2217,7 @@ export function createOfflineStoreController<
 
     const orderedDescendants: PersistedOfflineResolutionRecord[] = [];
     const remainingDescendants = [...descendantResolutions.values()].sort(
-      (left, right) => {
-        if (left.createdAt !== right.createdAt) {
-          return left.createdAt - right.createdAt;
-        }
-        if (left.enqueuedAt !== right.enqueuedAt) {
-          return left.enqueuedAt - right.enqueuedAt;
-        }
-        return left.id.localeCompare(right.id);
-      },
+      compareResolutionRecords,
     );
     const orderedIds = new Set<string>();
 

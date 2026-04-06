@@ -356,12 +356,14 @@ export function createDocumentStore<
     unknown
   >(resolvedOfflineConfig?.operations ?? EMPTY_DOCUMENT_OFFLINE_OPERATIONS);
 
-  assertDocumentOfflineOperations(
-    // WORKAROUND: Persistent config stores offline operations behind the generic persistence surface, and the assertion helper expects the already-narrowed ValidStoreState variant.
-    __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
-      resolvedOfflineOperations,
-    ),
-  );
+  if (import.meta.env.DEV) {
+    assertDocumentOfflineOperations(
+      // WORKAROUND: Persistent config stores offline operations behind the generic persistence surface, and the assertion helper expects the already-narrowed ValidStoreState variant.
+      __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
+        resolvedOfflineOperations,
+      ),
+    );
+  }
 
   const offlineOperationsForRuntime =
     import.meta.env.TEST &&

@@ -256,12 +256,3 @@ export function parseFileNameInfo(fileName: string): ParsedOpfsFileName | null {
     isHashedPayload: false,
   };
 }
-
-export function parseFileName(
-  fileName: string,
-): { key: string; kind: AsyncStorageNamespaceScope['kind'] } | null {
-  const parsed = parseFileNameInfo(fileName);
-  if (parsed === null || parsed.key === null) return null;
-
-  return { kind: parsed.kind, key: parsed.key };
-}

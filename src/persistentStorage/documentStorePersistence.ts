@@ -108,16 +108,11 @@ export function setupDocumentPersistence<
     );
   }
 
-  function hydrateFromLocalStorage(): void {
-    if (!storeRef) return;
-    if (localStorageAdapter === null) return;
-
-    const initialState = storeRef.state;
-    if (initialState.status !== 'idle' || initialState.data !== null) return;
-    if (syncHydrationMissKnown) return;
+  function readSyncHydratedDocumentData(): State | null {
+    if (localStorageAdapter === null) return null;
 
     const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return;
+    if (sessionKey === false) return null;
 
     const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
@@ -131,20 +126,34 @@ export function setupDocumentPersistence<
       if (foundEntry) {
         scheduleIdleCleanup(() => void handle.clear());
       }
-      return;
+      return null;
     }
 
     const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
       syncHydrationMissKnown = true;
       scheduleIdleCleanup(() => void handle.clear());
-      return;
+      return null;
     }
 
     syncHydrationMissKnown = false;
     scheduleIdleCleanup(() =>
       refreshLocalStorageTimestamp(key, { metadata: 'single' }),
     );
+
+    return validated;
+  }
+
+  function hydrateFromLocalStorage(): void {
+    if (!storeRef) return;
+    if (localStorageAdapter === null) return;
+
+    const initialState = storeRef.state;
+    if (initialState.status !== 'idle' || initialState.data !== null) return;
+    if (syncHydrationMissKnown) return;
+
+    const validated = readSyncHydratedDocumentData();
+    if (validated === null) return;
 
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
@@ -164,36 +173,8 @@ export function setupDocumentPersistence<
     }
 
     if (localStorageAdapter === null) return baseState;
-
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return baseState;
-
-    const key = getStorageKeyForStore(sessionKey, config.storeName);
-    const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
-      key,
-      version,
-      isOfflineNetworkActive(),
-    );
-
-    if (!persisted) {
-      syncHydrationMissKnown = true;
-      if (foundEntry) {
-        scheduleIdleCleanup(() => void handle.clear());
-      }
-      return baseState;
-    }
-
-    const validated = parsePersistedStoreData(persisted.data, dataSchema);
-    if (validated === null) {
-      syncHydrationMissKnown = true;
-      scheduleIdleCleanup(() => void handle.clear());
-      return baseState;
-    }
-
-    syncHydrationMissKnown = false;
-    scheduleIdleCleanup(() =>
-      refreshLocalStorageTimestamp(key, { metadata: 'single' }),
-    );
+    const validated = readSyncHydratedDocumentData();
+    if (validated === null) return baseState;
 
     return {
       ...baseState,
