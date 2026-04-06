@@ -72,12 +72,8 @@ describe('sync storage efficiency: document', () => {
       "tsdf (0.30 kb)
       ├ _m (0.15 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.10 kb)
-      │   └ s:sess1 (0.10 kb)
-      │     └ doc-remount-flow (0.09 kb)
-      │       └ m (0.05 kb)
-      └ sess1 (0.14 kb)
-        └ doc-remount-flow (0.13 kb)"
+      │ └ r.s:sess1.doc-remount-flow.m (0.10 kb)
+      └ sess1.doc-remount-flow (0.14 kb)"
     `);
 
     expect(getParsedLocalStorageValue('tsdf.sess1.doc-remount-flow'))

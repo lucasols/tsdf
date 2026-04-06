@@ -96,14 +96,8 @@ describe('sync storage efficiency: collection', () => {
       "tsdf (0.46 kb)
       ├ _m (0.23 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.19 kb)
-      │   └ n:sess1 (0.18 kb)
-      │     └ collection-expiration (0.17 kb)
-      │       └ ci.m (0.13 kb)
-      └ sess1 (0.22 kb)
-        └ collection-expiration (0.21 kb)
-          └ ci (0.17 kb)
-            └ "fresh-user (0.16 kb)"
+      │ └ r.n:sess1.collection-expiration.ci.m (0.19 kb)
+      └ sess1.collection-expiration.ci."fresh-user (0.22 kb)"
     `);
 
     expect(
@@ -255,15 +249,10 @@ describe('sync storage efficiency: collection', () => {
       "tsdf (0.55 kb)
       ├ _m (0.27 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.23 kb)
-      │   └ n:sess1 (0.22 kb)
-      │     └ col-max-items-metadata (0.21 kb)
-      │       └ ci.m (0.17 kb)
-      └ sess1 (0.27 kb)
-        └ col-max-items-metadata (0.26 kb)
-          └ ci (0.22 kb)
-            ├ "b (0.11 kb)
-            └ "c (0.10 kb)"
+      │ └ r.n:sess1.col-max-items-metadata.ci.m (0.23 kb)
+      └ sess1.col-max-items-metadata.ci (0.27 kb)
+        ├ "b (0.11 kb)
+        └ "c (0.10 kb)"
     `);
   });
 

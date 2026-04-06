@@ -116,16 +116,10 @@ describe('sync storage efficiency: list-query', () => {
       "tsdf (0.64 kb)
       ├ _m (0.25 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.20 kb)
-      │   └ n:sess1 (0.20 kb)
-      │     └ list-query-expiration (0.19 kb)
-      │       └ li.m (0.14 kb)
-      └ sess1 (0.38 kb)
-        └ list-query-expiration (0.38 kb)
-          ├ li (0.14 kb)
-          │ └ "fresh-users||2 (0.14 kb)
-          └ lq (0.19 kb)
-            └ {tableId:"fresh-users"} (0.19 kb)"
+      │ └ r.n:sess1.list-query-expiration.li.m (0.20 kb)
+      └ sess1.list-query-expiration (0.38 kb)
+        ├ li."fresh-users||2 (0.14 kb)
+        └ lq.{tableId:"fresh-users"} (0.19 kb)"
     `);
 
     expect(

@@ -1100,18 +1100,13 @@ describe('startPersistentStorageOperationCapture', () => {
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
       "tsdf (0.40 kb)
-      ├ _m (0.07 kb)
-      │ └ r (0.07 kb)
-      │   └ n:sess1 (0.07 kb)
-      │     └ docs (0.05 kb)
-      │       └ ci.m (0.04 kb)
+      ├ _m.r.n:sess1.docs.ci.m (0.07 kb)
       ├ docs (0.26 kb)
       │ ├ item (0.21 kb)
       │ │ ├ a (0.08 kb)
       │ │ └ b (0.12 kb)
       │ └ meta (0.05 kb)
-      └ sess1 (0.06 kb)
-        └ _o_.s (0.05 kb)"
+      └ sess1._o_.s (0.06 kb)"
     `);
   });
 });
