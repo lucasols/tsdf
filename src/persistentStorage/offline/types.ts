@@ -1075,7 +1075,7 @@ export type OfflineOperationDefinition<
          * `tempEntity` / `tempEntities`, so they must not declare an extra
          * success sync callback.
          */
-        onSuccessExecute?: never;
+        onSuccessExecute?: undefined;
       } & ConfiguredTempEntityFields<
         TInput,
         TTempResult,
