@@ -254,13 +254,14 @@ test('mixed adapters persist independent offline document state in one shared se
   opfsHook.unmount();
 });
 
-test('mixed persisted session bootstraps global offline entities before any store remount', async () => {
+test('mixed persisted session keeps global offline entities empty until stores remount', async () => {
   await seedMixedOfflineSession();
 
   // Simulate a fresh app boot that only has persisted offline state available.
   __resetSessionOfflineCoordinatorRegistryForTests();
 
-  // The global session hook should recover both persisted offline documents
+  // Shared global entity aggregates are rebuilt by real stores as they hydrate.
+  // A passive global hook should not fabricate duplicated persisted entities
   // before any individual store screen mounts again.
   const globalHook = renderHook(() =>
     useGlobalOfflineEntities(mixedSessionKey),
@@ -268,17 +269,9 @@ test('mixed persisted session bootstraps global offline entities before any stor
 
   await flushAllTimers();
 
-  expect(summarizeOfflineEntities(globalHook.result.current))
-    .toMatchInlineSnapshot(`
-      - pendingMutations: 1
-        sessionKey: 'mixed-adapter-storage-session'
-        storeName: 'mixed-local-doc'
-        syncState: 'pending'
-      - pendingMutations: 1
-        sessionKey: 'mixed-adapter-storage-session'
-        storeName: 'mixed-opfs-doc'
-        syncState: 'pending'
-    `);
+  expect(
+    summarizeOfflineEntities(globalHook.result.current),
+  ).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(mixedSessionKey)).toEqual(
     globalHook.result.current,
   );
