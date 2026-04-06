@@ -465,9 +465,9 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
   const hook = renderTrackedItem();
   await flushAllTimers();
   expect(pick(hook.result.current, ['data', 'status'])).toMatchInlineSnapshot(`
-      data: { age: 30, id: 1, name: 'Ada' }
-      status: 'success'
-    `);
+    data: { age: 30, id: 1, name: 'Ada' }
+    status: 'success'
+  `);
 
   // Update the server copy so the later reconnect path has a real field-level
   // change to recover.
@@ -491,9 +491,9 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
   });
   await flushAllTimers();
   expect(pick(hook.result.current, ['data', 'status'])).toMatchInlineSnapshot(`
-      data: { age: 30, id: 1, name: 'Ada' }
-      status: 'success'
-    `);
+    data: { age: 30, id: 1, name: 'Ada' }
+    status: 'success'
+  `);
 
   // Unmount before reconnecting so the retry path must come from the next
   // mount noticing the unresolved invalidated field.
@@ -515,30 +515,30 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
   // stale cached age indefinitely.
   expect(pick(remountedHook.result.current, ['data', 'status']))
     .toMatchInlineSnapshot(`
-        data: { age: 31, id: 1, name: 'Ada' }
-        status: 'success'
-      `);
+      data: { age: 31, id: 1, name: 'Ada' }
+      status: 'success'
+    `);
   expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-      - _type: 'item'
-        payload: { itemId: 'users||1' }
-        time: '10ms -> 810ms | duration: 800ms'
-      - _type: 'item'
-        payload:
-          fields: ['age']
-          itemId: 'users||1'
-        time: '2.83s -> 3.63s | duration: 800ms'
-    `);
+    - _type: 'item'
+      payload: { itemId: 'users||1' }
+      time: '10ms -> 810ms | duration: 800ms'
+    - _type: 'item'
+      payload:
+        fields: ['age']
+        itemId: 'users||1'
+      time: '2.83s -> 3.63s | duration: 800ms'
+  `);
   expect(env.timelineString).toMatchInlineSnapshot(`
-      "
-      time  | item-data                      | item-status |
-      1.81s | {"age":30,"id":1,"name":"Ada"} | success     | -- timeline-cleared
-      2.83s | {"age":30,"id":1,"name":"Ada"} | success     | -- invalidate only \`age\` while offline; the hook should stay on cached data
-      .     | {"age":30,"id":1,"name":"Ada"} | success     | -- remount after reconnecting; the wildcard hook should refetch the pending \`age\` field
-      .     | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] >fetch-started
-      3.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"age":31})
-      .     | {"age":31,"id":1,"name":"Ada"} | success     | [item-data] ui-changed
-      "
-    `);
+    "
+    time  | item-data                      | item-status |
+    1.81s | {"age":30,"id":1,"name":"Ada"} | success     | -- timeline-cleared
+    2.83s | {"age":30,"id":1,"name":"Ada"} | success     | -- invalidate only \`age\` while offline; the hook should stay on cached data
+    .     | {"age":30,"id":1,"name":"Ada"} | success     | -- remount after reconnecting; the wildcard hook should refetch the pending \`age\` field
+    .     | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] >fetch-started
+    3.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"age":31})
+    .     | {"age":31,"id":1,"name":"Ada"} | success     | [item-data] ui-changed
+    "
+  `);
 
   remountedHook.unmount();
 });
