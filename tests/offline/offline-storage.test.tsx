@@ -1,14 +1,19 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
+import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import { createOfflineSession } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
+  advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
@@ -20,10 +25,42 @@ import {
   getParsedLocalStorageValue,
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
-import { type UpdateValueOperations } from './offlineReplayTestShared';
-import { docMutationInputSchema, docSchema } from './offlineTestShared';
+import {
+  type CreateListQueryUserOperations,
+  type UpdateValueOperations,
+  userRowSchema,
+} from './offlineReplayTestShared';
+import {
+  collectionCreateInputSchema,
+  docMutationInputSchema,
+  docSchema,
+  listQueryQueryPayloadSchema,
+} from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
+
+type OfflineStorageUserRow = { id: number; name: string };
+
+const partialResourcesConfig: PartialResourcesConfig<OfflineStorageUserRow> = {
+  mergeItems: (prev, fetched) => {
+    if (!prev) return fetched;
+    return { ...prev, ...fetched };
+  },
+  selectFields: (fields, item) => {
+    const result: Record<string, unknown> = {};
+
+    for (const field of fields) {
+      if (field in item) {
+        result[field] =
+          item[__LEGIT_CAST__<keyof OfflineStorageUserRow, string>(field)];
+      }
+    }
+
+    return __LEGIT_CAST__<OfflineStorageUserRow, Record<string, unknown>>(
+      result,
+    );
+  },
+};
 
 function createOfflineDocumentEnv({
   adapter,
@@ -329,6 +366,202 @@ test('local-sync offline persistence rehydrates queued data in a new browser ses
   expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
     `[]`,
   );
+
+  hook.unmount();
+});
+
+test('local-sync restart keeps offline temp rows visible for partial-resource list queries', async () => {
+  const sessionKey = 'offline-list-partial-temp-session';
+  const storeName = 'offline-list-partial-temp-store';
+  const usersQuery = { tableId: 'users' } as const;
+  let nextUserId = 3;
+
+  const firstEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    true,
+    false,
+    CreateListQueryUserOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      partialResources: partialResourcesConfig,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: async ({ input }) => {
+                const data = { id: nextUserId, name: input.name };
+                nextUserId += 1;
+                await firstEnv.serverTable.delayedSetItem(
+                  `users||${data.id}`,
+                  data,
+                );
+                return data;
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const seedHook = renderHook(() =>
+    firstEnv.apiStore.useListQuery(usersQuery, {
+      fields: ['id', 'name'],
+      itemSelector: (item) => item.name,
+      returnRefetchingStatus: true,
+    }),
+  );
+  await flushAllTimers();
+  await advanceTime(1100);
+  await flushAllTimers();
+
+  expect({
+    items: seedHook.result.current.items,
+    status: seedHook.result.current.status,
+  }).toMatchInlineSnapshot(`
+    items: ['Ada', 'Grace']
+    status: 'success'
+  `);
+  seedHook.unmount();
+
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  await act(async () => {
+    await firstEnv.apiStore.performMutation(null, {
+      optimisticUpdate: () => {
+        firstEnv.apiStore.addItemToState(
+          'temp:Linus offline',
+          { id: -1, name: 'Linus offline' },
+          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+        );
+      },
+      mutation: async () => {
+        const data = { id: 3, name: 'Linus offline' };
+        await firstEnv.serverTable.delayedSetItem('users||3', data);
+        return data;
+      },
+      offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+    });
+  });
+  await flushAllTimers();
+
+  // Reboot the app while the temp row only exists through persisted fallback
+  // state plus offline entity metadata.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  const restartedEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    true,
+    false,
+    CreateListQueryUserOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'idle',
+      partialResources: partialResourcesConfig,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          session: createOfflineSession({
+            getSessionKey: () => sessionKey,
+            config: { network: network.config },
+          }),
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: async ({ input }) => {
+                const data = { id: nextUserId, name: input.name };
+                nextUserId += 1;
+                await restartedEnv.serverTable.delayedSetItem(
+                  `users||${data.id}`,
+                  data,
+                );
+                return data;
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = restartedEnv.apiStore.useListQuery(usersQuery, {
+      fields: ['id', 'name'],
+      itemSelector: (item) => item.name,
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    });
+    const tempItem = restartedEnv.apiStore.useItem('temp:Linus offline', {
+      fields: ['id', 'name'],
+      selector: (item) => item?.name ?? null,
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    });
+
+    return { query, tempItem };
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect({
+    queryItems: hook.result.current.query.items,
+    queryStatus: hook.result.current.query.status,
+    tempItemData: hook.result.current.tempItem.data,
+    tempItemStatus: hook.result.current.tempItem.status,
+  }).toMatchInlineSnapshot(`
+    queryItems: ['Ada', 'Grace', 'Linus offline']
+    queryStatus: 'success'
+    tempItemData: 'Linus offline'
+    tempItemStatus: 'success'
+  `);
 
   hook.unmount();
 });

@@ -45,6 +45,30 @@ const cacheMissError = {
   message: 'Cache miss',
 } as const;
 
+function fallbackItemHasRequestedFields<ItemState extends ValidStoreState>(
+  fallbackItemState:
+    | { item: ItemState | null | undefined; loadedFields: string[] | undefined }
+    | undefined,
+  requestedFields: readonly string[],
+): boolean {
+  const loadedFields = fallbackItemState?.loadedFields ?? [];
+
+  if (requestedFields.every((field) => loadedFields.includes(field))) {
+    return true;
+  }
+
+  const item = fallbackItemState?.item;
+  if (!item || typeof item !== 'object') return false;
+
+  const itemRecord =
+    // WORKAROUND: Fallback field checks need indexed property access, but ItemState is generic and does not expose a string index signature.
+    __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
+
+  return requestedFields.every(
+    (field) => field in itemRecord && itemRecord[field] !== undefined,
+  );
+}
+
 export type UseMultipleItemsOptions<
   ItemState extends ValidStoreState,
   Selected,
@@ -480,12 +504,11 @@ export function useMultipleItems<
           const fallbackItemState = readFallbackItemState(query.itemKey);
           const overlay = activeOfflineOverlays[result.itemStateKey];
           const hasOverlay = overlay !== undefined;
-          const fallbackLoadedFields = fallbackItemState?.loadedFields ?? [];
           const hasAllRequestedFallbackFields =
             !partialResources ||
             query.fields === undefined ||
             query.fields === '*' ||
-            query.fields.every((field) => fallbackLoadedFields.includes(field));
+            fallbackItemHasRequestedFields(fallbackItemState, query.fields);
 
           if (!hasAllRequestedFallbackFields) return result;
 
