@@ -12,6 +12,7 @@ import {
   rc_tuple,
 } from 'runcheck';
 
+import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { isOfflineModeStatusValue } from './offline/types';
@@ -80,6 +81,20 @@ export function getProtectedKeysFromMetadata(
     }
   }
   return keys;
+}
+
+function isSessionOfflineInLocalStorage(sessionKey: string): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const statusEntry = parseCompactLocalStorageEntry(
+      localStorage.getItem(`tsdf.${sessionKey}._o_.s`),
+    );
+    const rawStatus = statusEntry?.value.d ?? null;
+    return isOfflineModeStatusValue(rawStatus);
+  } catch {
+    return false;
+  }
 }
 
 function setOfflineProtectionMetadata(
@@ -1554,25 +1569,16 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     >(driver);
     const discoveredScopes = await this.#listDiscoveredCleanupScopes(driver);
     const now = Date.now();
+    const uniqueSessionKeys = [
+      ...new Set(discoveredScopes.map(({ scope }) => scope.sessionKey)),
+    ];
     const offlineSessions = new Set(
-      (
-        await Promise.all(
-          discoveredScopes.map(async ({ scope }) => {
-            if (scope.storeName !== '_o_.s' || scope.kind !== 'document') {
-              return null;
-            }
-
-            const status = await driver.get(
-              scope,
-              getPayloadRecordKey('document'),
-            );
-            return isOfflineModeStatusValue(status) ? scope.sessionKey : null;
-          }),
-        )
-      ).filter((sessionKey) => sessionKey !== null),
+      uniqueSessionKeys.filter((sessionKey) =>
+        isSessionOfflineInLocalStorage(sessionKey),
+      ),
     );
     const protectedRefsBySession = new Map(
-      [...new Set(discoveredScopes.map(({ scope }) => scope.sessionKey))].map(
+      uniqueSessionKeys.map(
         (sessionKey) =>
           [sessionKey, getSessionProtectedKeysSnapshot(sessionKey)] as const,
       ),

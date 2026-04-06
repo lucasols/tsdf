@@ -1105,7 +1105,8 @@ function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
     const manifestLocation = parseManagedLocalStorageManifestKey(key);
     if (
       manifestLocation?.kind === 'single' &&
-      manifestLocation.payloadKey.includes('._o_.')
+      manifestLocation.payloadKey.includes('._o_.') &&
+      !manifestLocation.payloadKey.endsWith('._o_.s')
     ) {
       return false;
     }
@@ -1127,7 +1128,7 @@ function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
 }
 
 function isOfflinePayloadKey(payloadKey: string): boolean {
-  return payloadKey.includes('._o_.');
+  return payloadKey.includes('._o_.') && !payloadKey.endsWith('._o_.s');
 }
 
 function runGenericCleanupForManifest(

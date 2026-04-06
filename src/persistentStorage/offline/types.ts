@@ -1,7 +1,6 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_array,
-  rc_boolean,
   rc_discriminated_union,
   rc_literals,
   rc_number,
@@ -481,21 +480,19 @@ export type OfflineSession = {
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
 };
 
-const offlineStatusModeStateSchema = rc_object({
-  enabled: rc_boolean,
-  active: rc_boolean,
+export const COMPACT_OFFLINE_STATUS_FLAG = 1 as const;
+const compactOfflineStatusModeStateSchema = rc_object({
+  e: rc_literals(COMPACT_OFFLINE_STATUS_FLAG).optionalKey(),
+  a: rc_literals(COMPACT_OFFLINE_STATUS_FLAG).optionalKey(),
 });
 
-/** Runtime schema for persisted global offline status records. */
-export const globalOfflineStatusSchema = rc_object({
-  sessionKey: rc_string,
-  network: offlineStatusModeStateSchema,
-  outage: offlineStatusModeStateSchema,
-  isOfflineMode: rc_boolean,
-  isLeader: rc_boolean,
-  updatedAt: rc_number,
-  lastFailureAt: rc_number.orNull(),
-  lastRecoveryCheckAt: rc_number.orNull(),
+/** Runtime schema for compact persisted offline status snapshots. */
+export const compactOfflineStatusSnapshotSchema = rc_object({
+  n: compactOfflineStatusModeStateSchema.optionalKey(),
+  o: compactOfflineStatusModeStateSchema.optionalKey(),
+  u: rc_number.optionalKey(),
+  lf: rc_number.optionalKey(),
+  lr: rc_number.optionalKey(),
 });
 
 export function isModeEffectivelyActive(mode: {
@@ -513,10 +510,16 @@ export function getIsOfflineModeFromStatus(status: {
 }
 
 export function isOfflineModeStatusValue(value: unknown): boolean {
-  const status = rc_parse(value, globalOfflineStatusSchema).unwrapOrNull();
+  const status = rc_parse(
+    value,
+    compactOfflineStatusSnapshotSchema,
+  ).unwrapOrNull();
   if (status === null) return false;
 
-  return status.isOfflineMode;
+  return (
+    status.n?.a === COMPACT_OFFLINE_STATUS_FLAG ||
+    status.o?.a === COMPACT_OFFLINE_STATUS_FLAG
+  );
 }
 
 /**

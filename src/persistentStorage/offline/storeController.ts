@@ -2,7 +2,15 @@ import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
-import { rc_parse } from 'runcheck';
+import {
+  rc_array,
+  rc_literals,
+  rc_number,
+  rc_object,
+  rc_parse,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 import { Result } from 't-result';
 
 import type { ValidPayload } from '../../utils/storeShared';
@@ -118,6 +126,159 @@ type NamespacePersistenceHandle<T> = Pick<
   ReturnType<typeof createPersistentStorageNamespaceHandle<T>>,
   'load' | 'listKeys' | 'remove' | 'save'
 >;
+
+const compactOfflineEntitySchema = rc_object({
+  k: rc_string,
+  g: rc_literals('d', 'i', 'q'),
+  p: rc_number.optionalKey(),
+  s: rc_literals('p', 's', 'n', 'r'),
+  b: rc_array(rc_string).optionalKey(),
+  c: rc_array(rc_string).optionalKey(),
+  a: rc_number,
+  u: rc_number,
+  t: rc_unknown.optionalKey(),
+});
+const compactOfflineQueueEntrySchema = rc_object({
+  d: rc_string,
+  w: rc_literals('d', 'c', 'l'),
+  o: rc_string,
+  i: rc_unknown,
+  q: rc_number.optionalKey(),
+  e: rc_array(rc_string),
+  t: rc_number.optionalKey(),
+  a: rc_number,
+  u: rc_number,
+  l: rc_number.optionalKey(),
+  s: rc_literals('p', 's', 'n'),
+  x: rc_array(rc_unknown).optionalKey(),
+  m: rc_string.optionalKey(),
+  y: rc_literals(0, 1).optionalKey(),
+  f: rc_unknown.optionalKey(),
+});
+
+function toCompactOfflineEntityKind(
+  kind: GlobalOfflineEntity['entityKind'],
+): 'd' | 'i' | 'q' {
+  switch (kind) {
+    case 'document':
+      return 'd';
+    case 'item':
+      return 'i';
+    case 'query':
+      return 'q';
+  }
+}
+
+function fromCompactOfflineEntityKind(
+  kind: 'd' | 'i' | 'q',
+): GlobalOfflineEntity['entityKind'] {
+  switch (kind) {
+    case 'd':
+      return 'document';
+    case 'i':
+      return 'item';
+    case 'q':
+      return 'query';
+  }
+}
+
+function serializeCompactOfflineEntityRef(ref: OfflineEntityRef): string {
+  return `${toCompactOfflineEntityKind(ref.entityKind)}:${ref.entityKey}`;
+}
+
+function deserializeCompactOfflineEntityRef(
+  value: string,
+): OfflineEntityRef | null {
+  const separatorIndex = value.indexOf(':');
+  if (separatorIndex <= 0) return null;
+
+  const compactKind = value.slice(0, separatorIndex);
+  const entityKey = value.slice(separatorIndex + 1);
+  if (entityKey.length === 0) return null;
+  if (compactKind !== 'd' && compactKind !== 'i' && compactKind !== 'q') {
+    return null;
+  }
+
+  return { entityKey, entityKind: fromCompactOfflineEntityKind(compactKind) };
+}
+
+function toCompactOfflineEntitySyncState(
+  state: GlobalOfflineEntity['syncState'],
+): 'p' | 's' | 'n' | 'r' {
+  switch (state) {
+    case 'pending':
+      return 'p';
+    case 'syncing':
+      return 's';
+    case 'needs-confirmation':
+      return 'n';
+    case 'resolution-required':
+      return 'r';
+  }
+}
+
+function toCompactOfflineStoreType(type: OfflineStoreType): 'd' | 'c' | 'l' {
+  switch (type) {
+    case 'document':
+      return 'd';
+    case 'collection':
+      return 'c';
+    case 'listQuery':
+      return 'l';
+  }
+}
+
+function fromCompactOfflineStoreType(type: 'd' | 'c' | 'l'): OfflineStoreType {
+  switch (type) {
+    case 'd':
+      return 'document';
+    case 'c':
+      return 'collection';
+    case 'l':
+      return 'listQuery';
+  }
+}
+
+function fromCompactOfflineEntitySyncState(
+  state: 'p' | 's' | 'n' | 'r',
+): GlobalOfflineEntity['syncState'] {
+  switch (state) {
+    case 'p':
+      return 'pending';
+    case 's':
+      return 'syncing';
+    case 'n':
+      return 'needs-confirmation';
+    case 'r':
+      return 'resolution-required';
+  }
+}
+
+function toCompactOfflineQueueSyncState(
+  state: OfflineQueueEntry['syncState'],
+): 'p' | 's' | 'n' {
+  switch (state) {
+    case 'pending':
+      return 'p';
+    case 'syncing':
+      return 's';
+    case 'needs-confirmation':
+      return 'n';
+  }
+}
+
+function fromCompactOfflineQueueSyncState(
+  state: 'p' | 's' | 'n',
+): OfflineQueueEntry['syncState'] {
+  switch (state) {
+    case 'p':
+      return 'pending';
+    case 's':
+      return 'syncing';
+    case 'n':
+      return 'needs-confirmation';
+  }
+}
 
 function buildEntityId(
   sessionKey: string,
@@ -501,13 +662,91 @@ export function createOfflineStoreController<
     });
 
     const queueNamespace =
-      createPersistentStorageNamespaceHandle<OfflineQueueEntry>({
-        storeName,
-        adapter,
-        getSessionKey: () => targetSessionKey,
-        onPersistentStorageError,
-        entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
-      });
+      createPersistentStorageNamespaceHandle<OfflineQueueEntry>(
+        {
+          storeName,
+          adapter,
+          getSessionKey: () => targetSessionKey,
+          onPersistentStorageError,
+          entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+        },
+        {
+          valueCodec: {
+            serialize(entry) {
+              return {
+                d: entry.id,
+                w: toCompactOfflineStoreType(entry.storeType),
+                o: entry.operation,
+                i: entry.input,
+                ...(entry.queueOrder !== entry.createdAt
+                  ? { q: entry.queueOrder }
+                  : {}),
+                e: entry.entityRefs.map(serializeCompactOfflineEntityRef),
+                ...(entry.attempts !== 0 ? { t: entry.attempts } : {}),
+                a: entry.createdAt,
+                u: entry.updatedAt,
+                ...(entry.lastAttemptAt !== null
+                  ? { l: entry.lastAttemptAt }
+                  : {}),
+                s: toCompactOfflineQueueSyncState(entry.syncState),
+                ...(entry.tempIds !== undefined ? { x: entry.tempIds } : {}),
+                ...(entry.lastError ? { m: entry.lastError.message } : {}),
+                ...(entry.allowReplayRetry !== undefined
+                  ? { y: entry.allowReplayRetry ? 1 : 0 }
+                  : {}),
+                ...(entry.pendingConflict !== undefined
+                  ? { f: entry.pendingConflict }
+                  : {}),
+              };
+            },
+            deserialize(raw) {
+              const compactEntry = rc_parse(
+                raw,
+                compactOfflineQueueEntrySchema,
+              ).unwrapOrNull();
+              if (compactEntry === null) return null;
+
+              const entityRefs = compactEntry.e
+                .map(deserializeCompactOfflineEntityRef)
+                .filter((ref) => ref !== null);
+              if (entityRefs.length !== compactEntry.e.length) return null;
+
+              return {
+                id: compactEntry.d,
+                sessionKey: targetSessionKey,
+                storeName,
+                storeType: fromCompactOfflineStoreType(compactEntry.w),
+                operation: compactEntry.o,
+                input: compactEntry.i,
+                queueOrder: compactEntry.q ?? compactEntry.a,
+                entityRefs,
+                attempts: compactEntry.t ?? 0,
+                createdAt: compactEntry.a,
+                updatedAt: compactEntry.u,
+                lastAttemptAt: compactEntry.l ?? null,
+                syncState: fromCompactOfflineQueueSyncState(compactEntry.s),
+                ...(compactEntry.x !== undefined
+                  ? {
+                      // WORKAROUND: Compact queue payloads persist temp ids as unknown JSON values, and the controller rebinds that validated payload back to ValidPayload[] when hydrating.
+                      tempIds: __LEGIT_CAST__<ValidPayload[], unknown[]>(
+                        compactEntry.x,
+                      ),
+                    }
+                  : {}),
+                ...(compactEntry.m !== undefined
+                  ? { lastError: { message: compactEntry.m } }
+                  : {}),
+                ...(compactEntry.y !== undefined
+                  ? { allowReplayRetry: compactEntry.y === 1 }
+                  : {}),
+                ...(compactEntry.f !== undefined
+                  ? { pendingConflict: compactEntry.f }
+                  : {}),
+              };
+            },
+          },
+        },
+      );
     const resolutionNamespace =
       createPersistentStorageNamespaceHandle<PersistedOfflineResolutionRecord>({
         storeName,
@@ -517,13 +756,77 @@ export function createOfflineStoreController<
         entryPrefix: OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
       });
     const entityNamespace =
-      createPersistentStorageNamespaceHandle<GlobalOfflineEntity>({
-        storeName,
-        adapter,
-        getSessionKey: () => targetSessionKey,
-        onPersistentStorageError,
-        entryPrefix: OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
-      });
+      createPersistentStorageNamespaceHandle<GlobalOfflineEntity>(
+        {
+          storeName,
+          adapter,
+          getSessionKey: () => targetSessionKey,
+          onPersistentStorageError,
+          entryPrefix: OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+        },
+        {
+          valueCodec: {
+            serialize(entity) {
+              return {
+                k: entity.entityKey,
+                g: toCompactOfflineEntityKind(entity.entityKind),
+                ...(entity.pendingMutations !== 0
+                  ? { p: entity.pendingMutations }
+                  : {}),
+                s: toCompactOfflineEntitySyncState(entity.syncState),
+                ...(entity.blockedByResolutionIds.length > 0
+                  ? { b: entity.blockedByResolutionIds }
+                  : {}),
+                ...(entity.childResolutionIds.length > 0
+                  ? { c: entity.childResolutionIds }
+                  : {}),
+                a: entity.createdAt,
+                u: entity.updatedAt,
+                ...(entity.tempId !== undefined ? { t: entity.tempId } : {}),
+              };
+            },
+            deserialize(raw) {
+              const compactEntity = rc_parse(
+                raw,
+                compactOfflineEntitySchema,
+              ).unwrapOrNull();
+              if (compactEntity === null) return null;
+
+              const blockedByResolutionIds = compactEntity.b ?? [];
+              const childResolutionIds = compactEntity.c ?? [];
+              const syncState = fromCompactOfflineEntitySyncState(
+                compactEntity.s,
+              );
+
+              return {
+                id: buildEntityId(targetSessionKey, storeName, compactEntity.k),
+                sessionKey: targetSessionKey,
+                storeName,
+                storeType,
+                entityKey: compactEntity.k,
+                entityKind: fromCompactOfflineEntityKind(compactEntity.g),
+                pendingMutations: compactEntity.p ?? 0,
+                syncState,
+                requiresResolution: syncState === 'resolution-required',
+                blockedByResolutionIds,
+                childResolutionIds,
+                blockedResolutionCount: blockedByResolutionIds.length,
+                childResolutionCount: childResolutionIds.length,
+                createdAt: compactEntity.a,
+                updatedAt: compactEntity.u,
+                ...(compactEntity.t !== undefined
+                  ? {
+                      // WORKAROUND: Compact entity payloads persist temp ids as unknown JSON values, and the controller rebinds that validated payload back to ValidPayload when hydrating.
+                      tempId: __LEGIT_CAST__<ValidPayload, unknown>(
+                        compactEntity.t,
+                      ),
+                    }
+                  : {}),
+              };
+            },
+          },
+        },
+      );
 
     const unregister = session.registerStore({
       storeName,

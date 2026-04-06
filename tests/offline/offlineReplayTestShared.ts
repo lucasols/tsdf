@@ -87,17 +87,119 @@ export function getOfflineQueueEntries(
         throw new Error(`Missing persisted queue entry for "${key}"`);
       }
 
-      return parsePersistedObject(persistedValue);
+      return {
+        ...parsePersistedObject(persistedValue),
+        __sessionKey: sessionKey,
+        __storeName: storeName,
+      };
     });
 }
 
 export function getOfflineQueueEntryData(
   entry: Record<string, unknown>,
 ): Record<string, unknown> {
-  return toRecord(
-    'd' in entry ? entry.d : entry.data,
-    'Expected persisted queue data to be an object',
-  );
+  if ('d' in entry && typeof entry.d === 'object' && entry.d !== null) {
+    return toRecord(entry.d, 'Expected persisted queue data to be an object');
+  }
+
+  if (
+    'd' in entry &&
+    typeof entry.d === 'string' &&
+    'w' in entry &&
+    typeof entry.w === 'string' &&
+    'o' in entry &&
+    typeof entry.o === 'string' &&
+    'i' in entry &&
+    'e' in entry &&
+    Array.isArray(entry.e) &&
+    'a' in entry &&
+    typeof entry.a === 'number' &&
+    'u' in entry &&
+    typeof entry.u === 'number' &&
+    's' in entry &&
+    typeof entry.s === 'string'
+  ) {
+    const entityRefs = entry.e.map((ref) => {
+      if (typeof ref !== 'string') {
+        throw new Error('Expected compact queue entity ref to be a string');
+      }
+
+      const separatorIndex = ref.indexOf(':');
+      if (separatorIndex <= 0) {
+        throw new Error(`Invalid compact queue entity ref "${ref}"`);
+      }
+
+      const compactKind = ref.slice(0, separatorIndex);
+      const entityKey = ref.slice(separatorIndex + 1);
+
+      return {
+        entityKey,
+        entityKind:
+          compactKind === 'd'
+            ? 'document'
+            : compactKind === 'i'
+              ? 'item'
+              : compactKind === 'q'
+                ? 'query'
+                : (() => {
+                    throw new Error(
+                      `Invalid compact queue entity kind "${compactKind}"`,
+                    );
+                  })(),
+      };
+    });
+
+    const compactStoreType =
+      entry.w === 'd'
+        ? 'document'
+        : entry.w === 'c'
+          ? 'collection'
+          : entry.w === 'l'
+            ? 'listQuery'
+            : (() => {
+                throw new Error(
+                  `Invalid compact queue store type "${entry.w}"`,
+                );
+              })();
+    const compactSyncState =
+      entry.s === 'p'
+        ? 'pending'
+        : entry.s === 's'
+          ? 'syncing'
+          : entry.s === 'n'
+            ? 'needs-confirmation'
+            : (() => {
+                throw new Error(
+                  `Invalid compact queue sync state "${entry.s}"`,
+                );
+              })();
+
+    return {
+      attempts: typeof entry.t === 'number' ? entry.t : 0,
+      createdAt: entry.a,
+      entityRefs,
+      id: entry.d,
+      input: entry.i,
+      lastAttemptAt: typeof entry.l === 'number' ? entry.l : null,
+      operation: entry.o,
+      queueOrder: typeof entry.q === 'number' ? entry.q : entry.a,
+      sessionKey: entry.__sessionKey,
+      storeName: entry.__storeName,
+      storeType: compactStoreType,
+      syncState: compactSyncState,
+      updatedAt: entry.u,
+      ...(typeof entry.m === 'string'
+        ? { lastError: { message: entry.m } }
+        : {}),
+      ...(typeof entry.y === 'number'
+        ? { allowReplayRetry: entry.y === 1 }
+        : {}),
+      ...('x' in entry ? { tempIds: entry.x } : {}),
+      ...('f' in entry ? { pendingConflict: entry.f } : {}),
+    };
+  }
+
+  return toRecord(entry.data, 'Expected persisted queue data to be an object');
 }
 
 /**

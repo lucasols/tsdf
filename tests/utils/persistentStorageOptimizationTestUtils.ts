@@ -44,6 +44,14 @@ const HASHED_OPFS_SCOPE_KINDS = new Set<AsyncStorageNamespaceScope['kind']>([
   'listQuery.item',
   'listQuery.query',
 ]);
+const STORAGE_ENTRY_MARKERS = [
+  COLLECTION_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+] as const;
 
 function describePersistentStorageKey(key: string): string | null {
   const specialKeyDescription = MANAGED_PERSISTENT_SPECIAL_KEYS[key];
@@ -113,16 +121,7 @@ function formatScopedPersistentStorageEntryDescription(
 function matchPersistentStorageEntryKey(
   key: string,
 ): { prefix: string; userKey: string } | null {
-  const entryMarkers = [
-    COLLECTION_STORAGE_ENTRY_PREFIX,
-    LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
-    LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
-    OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
-    OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
-    OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
-  ] as const;
-
-  for (const prefix of entryMarkers) {
+  for (const prefix of STORAGE_ENTRY_MARKERS) {
     const marker = `.${prefix}.`;
     const markerIndex = key.indexOf(marker, 'tsdf.'.length);
     if (markerIndex === -1) continue;
@@ -821,16 +820,7 @@ function formatStorageEntryDescription(
 function getManagedStorageEntryLabelKind(
   identity: string,
 ): StorageEntryLabelKind | null {
-  const managedEntryMarkers = [
-    COLLECTION_STORAGE_ENTRY_PREFIX,
-    LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
-    LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
-    OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
-    OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
-    OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
-  ] as const;
-
-  for (const prefix of managedEntryMarkers) {
+  for (const prefix of STORAGE_ENTRY_MARKERS) {
     if (
       identity.includes(`.${prefix}.m`) ||
       identity.includes(`.${prefix}.manifest.`)
@@ -884,7 +874,10 @@ function addTreePathSegment(
   return addedByteSize;
 }
 
-function formatStorageTree(node: StorageTreeNode): string[] {
+function formatStorageTree(
+  node: StorageTreeNode,
+  options: { collapseSingleChildChains: boolean },
+): string[] {
   const entries = [...node.children.entries()].sort(([leftName], [rightName]) =>
     leftName.localeCompare(rightName),
   );
@@ -895,9 +888,28 @@ function formatStorageTree(node: StorageTreeNode): string[] {
       isLast: index === entries.length - 1,
       isRootLevel: true,
       name,
+      options,
       prefix: '',
     }),
   );
+}
+
+function collapseStorageTreeChain(args: {
+  child: StorageTreeNode;
+  name: string;
+}): { name: string; terminalChild: StorageTreeNode } {
+  let currentName = args.name;
+  let currentChild = args.child;
+
+  while (currentChild.children.size === 1) {
+    const [nextName, nextChild] = [...currentChild.children.entries()][0] ?? [];
+    if (nextName === undefined || nextChild === undefined) break;
+
+    currentName = `${currentName}.${nextName}`;
+    currentChild = nextChild;
+  }
+
+  return { name: currentName, terminalChild: currentChild };
 }
 
 function formatStorageTreeNode(args: {
@@ -905,18 +917,22 @@ function formatStorageTreeNode(args: {
   isLast: boolean;
   isRootLevel: boolean;
   name: string;
+  options: { collapseSingleChildChains: boolean };
   prefix: string;
 }): string[] {
+  const collapsed = args.options.collapseSingleChildChains
+    ? collapseStorageTreeChain({ child: args.child, name: args.name })
+    : { name: args.name, terminalChild: args.child };
   const line = args.isRootLevel
-    ? `${args.name} (${formatByteSize(args.child.totalByteSize)})`
-    : `${args.prefix}${args.isLast ? '└' : '├'} ${args.name} (${formatByteSize(
+    ? `${collapsed.name} (${formatByteSize(args.child.totalByteSize)})`
+    : `${args.prefix}${args.isLast ? '└' : '├'} ${collapsed.name} (${formatByteSize(
         args.child.totalByteSize,
       )})`;
 
   const childPrefix = args.isRootLevel
     ? ''
     : `${args.prefix}${args.isLast ? '  ' : '│ '}`;
-  const childEntries = [...args.child.children.entries()].sort(
+  const childEntries = [...collapsed.terminalChild.children.entries()].sort(
     ([leftName], [rightName]) => leftName.localeCompare(rightName),
   );
 
@@ -928,14 +944,18 @@ function formatStorageTreeNode(args: {
         isLast: index === childEntries.length - 1,
         isRootLevel: false,
         name,
+        options: args.options,
         prefix: childPrefix,
       }),
     ),
   ];
 }
 
-function getStorageTreeString(root: StorageTreeNode): string {
-  const lines = formatStorageTree(root);
+function getStorageTreeString(
+  root: StorageTreeNode,
+  options: { collapseSingleChildChains: boolean },
+): string {
+  const lines = formatStorageTree(root, options);
   return lines.length === 0 ? 'empty' : lines.join('\n');
 }
 
@@ -993,7 +1013,7 @@ export function getLocalStorageTree(): string {
     addTreePath(root, key.split('.'), getStringByteSize(value));
   }
 
-  return getStorageTreeString(root);
+  return getStorageTreeString(root, { collapseSingleChildChains: true });
 }
 
 export function getOpfsDirTree(
@@ -1025,7 +1045,7 @@ export function getOpfsDirTree(
     );
   }
 
-  return getStorageTreeString(root);
+  return getStorageTreeString(root, { collapseSingleChildChains: false });
 }
 
 function sortTimedEntries<T extends { endTime: number; time: number }>(

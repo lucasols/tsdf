@@ -213,6 +213,56 @@ describe('async storage efficiency: maintenance', () => {
     `);
   });
 
+  test('startup cleanup still runs when reading offline status from localStorage throws', async () => {
+    const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const expiredDoc = mockAdapter.scope('expired-doc', 'sess1');
+    const freshDoc = mockAdapter.scope('fresh-doc', 'sess1');
+    const expiredKey = expiredDoc.document.storageKey();
+    const freshKey = freshDoc.document.storageKey();
+    const offlineStatusKey = 'tsdf.sess1._o_.s';
+
+    // Seed one expired store and one healthy sibling so the cleanup pass has to
+    // keep sweeping even if the offline-status lookup is unavailable.
+    expiredDoc.document.seed(
+      { value: { name: 'old', value: 1 } },
+      { timestamp: staleTimestamp },
+    );
+    freshDoc.document.seed({ value: { name: 'fresh', value: 2 } });
+    createDocumentEnv({ storeName: 'fresh-doc', sessionKey: 'sess1' });
+
+    const originalGetItem = localStorage.getItem.bind(localStorage);
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation((key: string) => {
+        if (key === offlineStatusKey) {
+          throw new Error('localStorage blocked');
+        }
+
+        return originalGetItem(key);
+      });
+
+    try {
+      const readCapture =
+        startOpfsPersistentStorageOperationCapture(mockAdapter);
+      await waitForScheduledCleanup();
+      const operationsBreakdown = readCapture.finish().timelineString;
+
+      expect({
+        expiredEntryExists: mockAdapter.has(expiredKey),
+        freshEntryExists: mockAdapter.has(freshKey),
+      }).toMatchInlineSnapshot(`
+        expiredEntryExists: '❌'
+        freshEntryExists: '✅'
+      `);
+      expect(operationsBreakdown).toContain(
+        '🧹 del-dir recursive ✅ tsdf/sess1/expired-doc',
+      );
+    } finally {
+      getItemSpy.mockRestore();
+    }
+  });
+
   test('startup cleanup removes malformed namespace indexes together with their entry data files', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');

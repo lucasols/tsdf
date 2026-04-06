@@ -1,3 +1,5 @@
+import { renderHook } from '@testing-library/react';
+import { act } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { createOfflineSession } from '../../src/main';
@@ -22,6 +24,58 @@ import { type UpdateValueOperations } from './offlineReplayTestShared';
 import { docMutationInputSchema, docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
+
+function createOfflineDocumentEnv({
+  adapter,
+  sessionKey,
+  storeName,
+  testScenario,
+}: {
+  adapter: 'local-sync' | typeof opfsPersistentStorage;
+  sessionKey: string;
+  storeName: string;
+  testScenario: 'idle' | 'loaded';
+}) {
+  const envRef: {
+    current: ReturnType<
+      typeof createDocumentStoreTestEnv<number, UpdateValueOperations>
+    > | null;
+  } = { current: null };
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario,
+    persistentStorage: {
+      adapter,
+      schema: docSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: async ({ input }) => {
+              await envRef.current?.serverMock.delayedSetData(input.value);
+              return input;
+            },
+            onSuccessExecute: ({ input }) => {
+              envRef.current?.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  envRef.current = env;
+
+  return env;
+}
 
 beforeEach(() => {
   __resetSessionOfflineCoordinatorRegistryForTests();
@@ -197,6 +251,88 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
   }
 });
 
+test('local-sync offline persistence rehydrates queued data in a new browser session and replays it once the browser is back online', async () => {
+  const sessionKey = 'offline-sync-restart-session';
+  const storeName = 'offline-sync-restart-doc';
+
+  network.setOffline();
+
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+  });
+
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Simulate a fresh browser session booting with only persisted storage.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+  });
+  const hook = renderHook(() =>
+    restartedEnv.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+
+  await flushAllTimers();
+
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '✅'
+    status: 'success'
+  `);
+  expect(
+    restartedEnv.apiStore
+      .getOfflineEntities()
+      .map((entity) => ({
+        entityKey: entity.entityKey,
+        pendingMutations: entity.pendingMutations,
+        syncState: entity.syncState,
+      })),
+  ).toMatchInlineSnapshot(`
+    - { entityKey: 'document', pendingMutations: 1, syncState: 'pending' }
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '❌'
+    status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+
+  hook.unmount();
+});
+
 test('the default OPFS offline persistence keeps the raw file paths and JSON payloads transparent', async () => {
   const sessionKey = 'offline-opfs-format-session';
   const storeName = 'offline-opfs-format-doc';
@@ -343,4 +479,87 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
   } finally {
     randomSpy.mockRestore();
   }
+}, 10_000);
+
+test('the default OPFS offline persistence rehydrates queued data in a new browser session and replays it once the browser is back online', async () => {
+  const sessionKey = 'offline-opfs-restart-session';
+  const storeName = 'offline-opfs-restart-doc';
+
+  createOpfsPersistentStorageTestStore();
+  network.setOffline();
+
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+  });
+
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Simulate a fresh browser session booting with only persisted storage.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+  });
+  const hook = renderHook(() =>
+    restartedEnv.apiStore.useDocument({ returnRefetchingStatus: true }),
+  );
+
+  await flushAllTimers();
+
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '✅'
+    status: 'success'
+  `);
+  expect(
+    restartedEnv.apiStore
+      .getOfflineEntities()
+      .map((entity) => ({
+        entityKey: entity.entityKey,
+        pendingMutations: entity.pendingMutations,
+        syncState: entity.syncState,
+      })),
+  ).toMatchInlineSnapshot(`
+    - { entityKey: 'document', pendingMutations: 1, syncState: 'pending' }
+  `);
+
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    data: { value: 2 }
+    error: null
+    isLoading: '❌'
+    pendingSync: '❌'
+    status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+
+  hook.unmount();
 }, 10_000);

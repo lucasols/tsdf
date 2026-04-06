@@ -1,6 +1,6 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { useCallback, useMemo } from 'react';
-import { rc_literals, rc_number, rc_object, rc_parse } from 'runcheck';
+import { rc_object, rc_parse } from 'runcheck';
 import { Store } from 't-state';
 
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
@@ -8,10 +8,7 @@ import {
   createBrowserTabsCoordinatorWithPriority,
   type BrowserTabsMessageMeta,
 } from '../../utils/browserTabsSync';
-import {
-  createCompactLocalStorageEntry,
-  parseCompactLocalStorageEntry,
-} from '../compactLocalStorageEntry';
+import { parseCompactLocalStorageEntry } from '../compactLocalStorageEntry';
 import {
   createPersistentStorageHandle,
   getLocalStorageAdapter,
@@ -38,7 +35,11 @@ import type {
   OfflineSession,
   OfflineSessionConfig,
 } from './types';
-import { getIsOfflineModeFromStatus, globalOfflineStatusSchema } from './types';
+import {
+  COMPACT_OFFLINE_STATUS_FLAG,
+  compactOfflineStatusSnapshotSchema,
+  getIsOfflineModeFromStatus,
+} from './types';
 
 type SessionStoreState = {
   status: GlobalOfflineStatus;
@@ -93,21 +94,6 @@ const defaultGetIsOffline = () => !navigator.onLine;
 
 const defaultStatusBySession = new Map<string, GlobalOfflineStatus>();
 const registry = new Map<string, SessionOfflineCoordinator>();
-const OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX = 'tsdf-os:';
-const LEGACY_OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX =
-  'tsdf-offline-status:';
-const COMPACT_FLAG = 1 as const;
-const compactOfflineStatusModeStateSchema = rc_object({
-  e: rc_literals(COMPACT_FLAG).optionalKey(),
-  a: rc_literals(COMPACT_FLAG).optionalKey(),
-});
-const compactOfflineStatusSnapshotSchema = rc_object({
-  n: compactOfflineStatusModeStateSchema.optionalKey(),
-  o: compactOfflineStatusModeStateSchema.optionalKey(),
-  u: rc_number.optionalKey(),
-  lf: rc_number.optionalKey(),
-  lr: rc_number.optionalKey(),
-});
 
 function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
@@ -122,11 +108,8 @@ function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   };
 }
 
-function getOfflineStatusBootstrapStorageKey(
-  sessionKey: string,
-  prefix = OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX,
-): string {
-  return `${prefix}${sessionKey}`;
+function getOfflineStatusStorageKey(sessionKey: string): string {
+  return `tsdf.${sessionKey}._o_.s`;
 }
 
 function normalizeCompactModeState(value: { e?: 1; a?: 1 } | undefined): {
@@ -134,8 +117,8 @@ function normalizeCompactModeState(value: { e?: 1; a?: 1 } | undefined): {
   active: boolean;
 } {
   return {
-    enabled: value?.e === COMPACT_FLAG,
-    active: value?.a === COMPACT_FLAG,
+    enabled: value?.e === COMPACT_OFFLINE_STATUS_FLAG,
+    active: value?.a === COMPACT_OFFLINE_STATUS_FLAG,
   };
 }
 
@@ -144,15 +127,21 @@ function serializeOfflineStatusSnapshot(status: GlobalOfflineStatus) {
     n:
       status.network.enabled || status.network.active
         ? {
-            ...(status.network.enabled ? { e: COMPACT_FLAG } : {}),
-            ...(status.network.active ? { a: COMPACT_FLAG } : {}),
+            ...(status.network.enabled
+              ? { e: COMPACT_OFFLINE_STATUS_FLAG }
+              : {}),
+            ...(status.network.active
+              ? { a: COMPACT_OFFLINE_STATUS_FLAG }
+              : {}),
           }
         : undefined,
     o:
       status.outage.enabled || status.outage.active
         ? {
-            ...(status.outage.enabled ? { e: COMPACT_FLAG } : {}),
-            ...(status.outage.active ? { a: COMPACT_FLAG } : {}),
+            ...(status.outage.enabled
+              ? { e: COMPACT_OFFLINE_STATUS_FLAG }
+              : {}),
+            ...(status.outage.active ? { a: COMPACT_OFFLINE_STATUS_FLAG } : {}),
           }
         : undefined,
     u: status.updatedAt,
@@ -189,26 +178,7 @@ function normalizePersistedOfflineStatus(
     };
   }
 
-  const persistedStatus = rc_parse(
-    rawStatus,
-    globalOfflineStatusSchema,
-  ).unwrapOrNull();
-  if (persistedStatus === null || persistedStatus.sessionKey !== sessionKey) {
-    return null;
-  }
-
-  const isOfflineMode = getIsOfflineModeFromStatus(persistedStatus);
-
-  return {
-    sessionKey,
-    network: persistedStatus.network,
-    outage: persistedStatus.outage,
-    isOfflineMode,
-    isLeader: true,
-    updatedAt: persistedStatus.updatedAt,
-    lastFailureAt: persistedStatus.lastFailureAt,
-    lastRecoveryCheckAt: persistedStatus.lastRecoveryCheckAt,
-  };
+  return null;
 }
 
 function readPersistedOfflineStatusSnapshot(
@@ -217,70 +187,19 @@ function readPersistedOfflineStatusSnapshot(
   if (!isWindowAvailable()) return null;
 
   try {
-    const keys = [
-      getOfflineStatusBootstrapStorageKey(sessionKey),
-      getOfflineStatusBootstrapStorageKey(
-        sessionKey,
-        LEGACY_OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX,
-      ),
-      `tsdf.${sessionKey}._o_.s`,
-    ];
+    const entry = parseCompactLocalStorageEntry(
+      localStorage.getItem(getOfflineStatusStorageKey(sessionKey)),
+    );
+    if (!entry) return null;
 
-    for (const key of keys) {
-      const entry = parseCompactLocalStorageEntry(localStorage.getItem(key));
-      if (!entry) continue;
-
-      const rawStatus = entry.value.d ?? null;
-      const normalized = normalizePersistedOfflineStatus(sessionKey, rawStatus);
-      if (normalized !== null) return normalized;
-    }
+    const rawStatus = entry.value.d ?? null;
+    return normalizePersistedOfflineStatus(sessionKey, rawStatus);
   } catch {
     // Ignore read failures so offline coordination continues to work
     // even when localStorage is unavailable.
   }
 
   return null;
-}
-
-function clearPersistedOfflineStatusSnapshot(sessionKey: string): void {
-  if (!isWindowAvailable()) return;
-
-  try {
-    localStorage.removeItem(getOfflineStatusBootstrapStorageKey(sessionKey));
-    localStorage.removeItem(
-      getOfflineStatusBootstrapStorageKey(
-        sessionKey,
-        LEGACY_OFFLINE_STATUS_BOOTSTRAP_STORAGE_KEY_PREFIX,
-      ),
-    );
-  } catch {
-    // Ignore bootstrap snapshot clear failures so offline coordination
-    // continues to work even when localStorage is unavailable or full.
-  }
-}
-
-function syncPersistedOfflineStatusSnapshot(status: GlobalOfflineStatus): void {
-  if (!status.isOfflineMode) {
-    clearPersistedOfflineStatusSnapshot(status.sessionKey);
-    return;
-  }
-
-  if (!isWindowAvailable()) return;
-
-  try {
-    localStorage.setItem(
-      getOfflineStatusBootstrapStorageKey(status.sessionKey),
-      JSON.stringify(
-        createCompactLocalStorageEntry(
-          { d: serializeOfflineStatusSnapshot(status) },
-          undefined,
-        ),
-      ),
-    );
-  } catch {
-    // Ignore bootstrap snapshot write failures so offline coordination
-    // continues to work even when localStorage is unavailable or full.
-  }
 }
 
 function resolveDefaultStatus(
@@ -447,12 +366,33 @@ function createSessionPersistenceHandle(args: {
 }): PersistentStorageHandle<GlobalOfflineStatus> {
   if (args.adapter === null) return createNoopPersistentStorageHandle();
 
-  return createPersistentStorageHandle<GlobalOfflineStatus>({
-    storeName: '_o_.s',
-    adapter: args.adapter,
-    getSessionKey: () => args.sessionKey,
-    onPersistentStorageError: args.onPersistentStorageError,
-  });
+  return createPersistentStorageHandle<GlobalOfflineStatus>(
+    {
+      storeName: '_o_.s',
+      adapter: 'local-sync',
+      getSessionKey: () => args.sessionKey,
+      onPersistentStorageError: args.onPersistentStorageError,
+    },
+    {
+      valueCodec: {
+        serialize(status) {
+          return { d: serializeOfflineStatusSnapshot(status) };
+        },
+        deserialize(raw) {
+          const compactStatus = rc_parse(
+            raw,
+            rc_object({ d: compactOfflineStatusSnapshotSchema }),
+          ).unwrapOrNull();
+          if (compactStatus === null) return null;
+
+          return normalizePersistedOfflineStatus(
+            args.sessionKey,
+            compactStatus.d,
+          );
+        },
+      },
+    },
+  );
 }
 
 /**
@@ -580,7 +520,7 @@ export class SessionOfflineCoordinator {
       );
       this.#syncClassifiedNetworkStateFromStatus(hydratedStatus);
       this.#syncRecoveryProbe();
-      syncPersistedOfflineStatusSnapshot(hydratedStatus);
+      void this.#sessionHandle.saveNow(hydratedStatus);
     }
 
     this.#protectedKeys = [...protectedKeys].sort();
@@ -1175,7 +1115,6 @@ export class SessionOfflineCoordinator {
       { status: derived },
       { action: 'offline-session-status' },
     );
-    syncPersistedOfflineStatusSnapshot(derived);
     void this.#sessionHandle.saveNow(derived);
     this.#publishSnapshot();
   }
