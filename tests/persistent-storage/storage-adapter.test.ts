@@ -13,8 +13,14 @@ import {
 } from 'vitest';
 
 import { clearSessionStorage } from '../../src/main';
+import { createAsyncStorageAdapter } from '../../src/persistentStorage/asyncStorageAdapter';
 import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';
-import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import type {
+  AsyncStorageDiscoveredScope,
+  AsyncStorageDriver,
+  AsyncStorageNamespaceScope,
+  PersistentStorageSchema,
+} from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -40,6 +46,95 @@ const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<ListRow>, unknown>(
 );
 const listQueryParamsSchema = rc_object({ tableId: rc_string });
 const persistentStore = createLocalStoragePersistentTestStore();
+
+function createInMemoryAsyncStorageDriver(): AsyncStorageDriver & {
+  setManyCallCount: () => number;
+} {
+  const storage = new Map<
+    string,
+    { bucket: Map<string, unknown>; scope: AsyncStorageNamespaceScope }
+  >();
+  let setManyCalls = 0;
+
+  function getScopeId(scope: AsyncStorageNamespaceScope): string {
+    return JSON.stringify(scope);
+  }
+
+  function getScopeBucket(
+    scope: AsyncStorageNamespaceScope,
+  ): Map<string, unknown> {
+    const scopeId = getScopeId(scope);
+    const existing = storage.get(scopeId);
+    if (existing) return existing.bucket;
+
+    const created = new Map<string, unknown>();
+    storage.set(scopeId, { bucket: created, scope });
+    return created;
+  }
+
+  function listDiscoveredScopes(): AsyncStorageDiscoveredScope[] {
+    return [...storage.values()].map(({ bucket, scope }) => {
+      return { scope, knownRecordKeys: [...bucket.keys()] };
+    });
+  }
+
+  return {
+    clear: (scope) => {
+      storage.delete(getScopeId(scope));
+      return Promise.resolve();
+    },
+    get: (scope, key) => {
+      return Promise.resolve(getScopeBucket(scope).get(key));
+    },
+    getMany: (scope, keys) => {
+      const bucket = getScopeBucket(scope);
+      return Promise.resolve(keys.map((key) => bucket.get(key)));
+    },
+    listKeys: (scope) => {
+      return Promise.resolve([...getScopeBucket(scope).keys()]);
+    },
+    listScopes: (sessionKey) => {
+      return Promise.resolve(
+        listDiscoveredScopes()
+          .map(({ scope }) => scope)
+          .filter((scope) => {
+            return sessionKey === undefined || scope.sessionKey === sessionKey;
+          }),
+      );
+    },
+    listScopesWithKnownRecordKeys: (sessionKey) => {
+      return Promise.resolve(
+        listDiscoveredScopes().filter(({ scope }) => {
+          return sessionKey === undefined || scope.sessionKey === sessionKey;
+        }),
+      );
+    },
+    remove: (scope, key) => {
+      getScopeBucket(scope).delete(key);
+      return Promise.resolve();
+    },
+    removeMany: (scope, keys) => {
+      const bucket = getScopeBucket(scope);
+      for (const key of keys) {
+        bucket.delete(key);
+      }
+      return Promise.resolve();
+    },
+    set: (scope, key, value) => {
+      getScopeBucket(scope).set(key, value);
+      return Promise.resolve();
+    },
+    setMany: (scope, entries) => {
+      setManyCalls++;
+      const bucket = getScopeBucket(scope);
+      for (const entry of entries) {
+        bucket.set(entry.key, entry.value);
+      }
+      return Promise.resolve();
+    },
+    setManyCallCount: () => setManyCalls,
+  };
+}
 
 function createDocumentEnv(options: {
   storeName: string;
@@ -107,6 +202,57 @@ afterEach(() => {
 });
 
 describe('persistent storage integration', () => {
+  test('async adapter does not flush a pending touch when reading a different key in the same namespace', async () => {
+    const driver = createInMemoryAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driver);
+    const namespace = adapter.openNamespace<{ value: string }>({
+      sessionKey: 'sess1',
+      storeName: 'async-driver-read-path',
+      kind: 'collection.item',
+    });
+
+    const seedPromise = namespace.commit({
+      upserts: [
+        { key: 'a', value: { value: 'A' }, version: 1 },
+        { key: 'b', value: { value: 'B' }, version: 1 },
+      ],
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    const setManyCallsAfterSeed = driver.setManyCallCount();
+    vi.setSystemTime(TEST_INITIAL_TIME + 7 * 60 * 60 * 1000);
+
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'A' }
+    `);
+    expect(driver.setManyCallCount()).toBe(setManyCallsAfterSeed);
+
+    expect(await namespace.get('b')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'b'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:b'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'B' }
+    `);
+    expect(driver.setManyCallCount()).toBe(setManyCallsAfterSeed);
+
+    await flushAllTimers();
+    expect(driver.setManyCallCount()).toBe(setManyCallsAfterSeed + 1);
+  });
+
   test('document persistence still hydrates and refetches when navigator.locks is unavailable', async () => {
     const storeName = 'doc-without-locks';
     const sessionKey = 'sess1';

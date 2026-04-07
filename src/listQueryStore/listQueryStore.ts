@@ -26,6 +26,10 @@ import type {
 } from '../internal/testTimelineTypes';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import {
+  captureOfflineOverlayEntries,
+  rebindOfflineOverlayEntries,
+} from '../persistentStorage/offline/overlayStoreLifecycle';
+import {
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from '../persistentStorage/offline/sessionCoordinator';
@@ -1446,30 +1450,17 @@ export function createListQueryStore<
       nextItemKey: string;
     }[],
   ): void {
-    if (itemKeyRewrites.length === 0) return;
-
-    offlineOverlayStore.produceState((draft) => {
-      for (const { previousItemKey, nextItemKey } of itemKeyRewrites) {
-        if (previousItemKey === nextItemKey) continue;
-
-        const existingOverlay = draft[previousItemKey];
-        if (existingOverlay === undefined) continue;
-
-        if (draft[nextItemKey] === undefined) {
-          draft[nextItemKey] = {
-            item: existingOverlay.item ?? null,
-            itemPayload:
-              store.state.itemQueries[nextItemKey]?.payload ??
-              existingOverlay.itemPayload,
-            queryMemberships: existingOverlay.queryMemberships,
-            keepVisibleWhileResolutionRequired: true,
-          };
-        } else {
-          draft[nextItemKey].keepVisibleWhileResolutionRequired = true;
-        }
-
-        delete draft[previousItemKey];
-      }
+    rebindOfflineOverlayEntries({
+      itemKeyRewrites,
+      overlayStore: offlineOverlayStore,
+      createReboundOverlay: ({ existingOverlay, nextItemKey }) => ({
+        item: existingOverlay.item ?? null,
+        itemPayload:
+          store.state.itemQueries[nextItemKey]?.payload ??
+          existingOverlay.itemPayload,
+        queryMemberships: existingOverlay.queryMemberships,
+        keepVisibleWhileResolutionRequired: true,
+      }),
     });
   }
 
@@ -1493,27 +1484,20 @@ export function createListQueryStore<
       }
     }
 
-    offlineOverlayStore.produceState((draft) => {
-      for (const itemKey of targetItemKeySet) {
-        const existingOverlay = draft[itemKey];
-        if (existingOverlay?.keepVisibleWhileResolutionRequired) {
-          draft[itemKey] = {
-            ...existingOverlay,
-            keepVisibleWhileResolutionRequired: false,
-          };
-          continue;
-        }
-
+    captureOfflineOverlayEntries({
+      itemKeys: [...targetItemKeySet],
+      overlayStore: offlineOverlayStore,
+      createOverlay: (itemKey) => {
         const item = store.state.items[itemKey];
         const itemPayload = store.state.itemQueries[itemKey]?.payload;
 
-        draft[itemKey] = {
+        return {
           item: item == null ? null : klona(item),
           itemPayload:
             itemPayload === undefined ? undefined : klona(itemPayload),
           queryMemberships: queryMembershipsByItemKey.get(itemKey) ?? {},
         };
-      }
+      },
     });
   }
 

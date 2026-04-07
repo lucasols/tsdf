@@ -474,7 +474,7 @@ class ManagedAsyncStorageNamespaceHandle<
     key: string,
     options: AsyncStorageReadOptions = {},
   ): Promise<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null> {
-    await this.adapter.flushPendingNamespaceCommit(this.scope);
+    await this.adapter.flushPendingNamespaceCommit(this.scope, [key]);
     const entries = await this.adapter.readManagedEntries<
       TValue,
       TCustomMetadata
@@ -509,8 +509,8 @@ class ManagedAsyncStorageNamespaceHandle<
   > {
     if (keys.length === 0) return [];
 
-    await this.adapter.flushPendingNamespaceCommit(this.scope);
     const uniqueKeys = [...new Set(keys)];
+    await this.adapter.flushPendingNamespaceCommit(this.scope, uniqueKeys);
     const entries = await this.adapter.readManagedEntries<
       TValue,
       TCustomMetadata
@@ -698,6 +698,7 @@ export function unregisterAsyncStartupStoreCleanup(
 
 type PendingNamespaceCommit = {
   cancelFlush: (() => void) | null;
+  inFlightBarrierKeys: Set<string> | null;
   flushPromise: Promise<void> | null;
   hasStaticPolicyUpdate: boolean;
   removes: Set<string>;
@@ -920,6 +921,19 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
   }
 
+  #hasPendingBarrierForKeys(
+    pending: PendingNamespaceCommit,
+    keys: readonly string[],
+  ): boolean {
+    return keys.some((key) => {
+      return (
+        pending.upserts.has(key) ||
+        pending.removes.has(key) ||
+        pending.inFlightBarrierKeys?.has(key) === true
+      );
+    });
+  }
+
   async queueCommitToNamespace<
     TValue,
     TCustomMetadata extends Record<string, unknown>,
@@ -966,10 +980,18 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async flushPendingNamespaceCommit(
     scope: AsyncStorageNamespaceScope,
+    keys?: readonly string[],
   ): Promise<void> {
     const namespaceKey = getNamespaceId(scope);
     const pending = this.#pendingNamespaceCommits.get(namespaceKey);
     if (!pending) return;
+    if (
+      keys !== undefined &&
+      keys.length > 0 &&
+      !this.#hasPendingBarrierForKeys(pending, keys)
+    ) {
+      return;
+    }
     if (pending.flushPromise) {
       await pending.flushPromise;
       return;
@@ -985,6 +1007,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const touches = [...pending.touches.entries()].map(
       ([key, lastAccessAt]) => ({ key, lastAccessAt }),
     );
+    const inFlightBarrierKeys = new Set([
+      ...pending.upserts.keys(),
+      ...pending.removes,
+    ]);
     const waiters = [...pending.waiters];
     pending.hasStaticPolicyUpdate = false;
     pending.upserts = new Map();
@@ -992,6 +1018,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     pending.staticPolicy = null;
     pending.touches = new Map();
     pending.waiters = [];
+    pending.inFlightBarrierKeys =
+      inFlightBarrierKeys.size > 0 ? inFlightBarrierKeys : null;
 
     if (
       upserts.length === 0 &&
@@ -1038,6 +1066,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         throw error;
       })
       .finally(() => {
+        pending.inFlightBarrierKeys = null;
         pending.flushPromise = null;
         if (pending.waiters.length === 0) {
           this.#pendingNamespaceCommits.delete(namespaceKey);
@@ -1486,6 +1515,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const created: PendingNamespaceCommit = {
       scope,
       cancelFlush: null,
+      inFlightBarrierKeys: null,
       flushPromise: null,
       hasStaticPolicyUpdate: false,
       removes: new Set(),
