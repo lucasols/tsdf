@@ -2,6 +2,7 @@ import type { Store } from 't-state';
 
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
+import type { AnyOfflineOperationDefinition } from './offline/types';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -9,30 +10,49 @@ import {
   parsePersistedStoreData,
 } from './parsePersistedData';
 import {
+  assertValidPersistentStoreName,
   createPersistentStorageHandle,
+  getLocalStorageAdapter,
+  isOfflineNetworkModeActiveSync,
   getStorageKeyForStore,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
-  DocumentPersistentStorageConfig,
   PersistedDocumentData,
-  StorageAdapter,
+  ResolvedDocumentPersistentStorageConfig,
 } from './types';
 
-/**
- * Synchronously reads a persisted document from localStorage.
- * Returns the raw persisted data (not yet validated by user schema).
- */
+type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
+  | (Record<string, AnyOfflineOperationDefinition> &
+      ([State] extends [never] ? never : unknown))
+  | null;
+
+const documentStorageValueCodec = {
+  serialize: (data: PersistedDocumentData<unknown>) => ({ d: data.data }),
+  deserialize: (value: unknown) =>
+    typeof value === 'object' && value !== null && 'd' in value
+      ? parsePersistedDocumentData({ data: value.d })
+      : null,
+};
+
 function readDocumentFromLocalStorageSync(
   key: string,
-  version: number,
-): PersistedDocumentData<unknown> | null {
-  const entry = readStorageEntryFromLocalStorageSync(key, version);
-  if (!entry) return null;
+  version: number | undefined,
+  allowExpiredRead: boolean,
+): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
+  const entry = readStorageEntryFromLocalStorageSync<
+    PersistedDocumentData<unknown>
+  >(
+    key,
+    version,
+    { allowExpiredRead, metadata: 'single' },
+    documentStorageValueCodec,
+  );
+  if (!entry) return { persisted: null, foundEntry: false };
 
-  return parsePersistedDocumentData(entry.data);
+  return { persisted: entry.data, foundEntry: true };
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
@@ -49,52 +69,91 @@ export type DocumentPersistenceSetup<State extends ValidStoreState> = {
 
 export function setupDocumentPersistence<
   State extends ValidStoreState,
+  TOfflineOperations extends DocumentPersistenceOfflineOperations<State> = null,
   StorageState = unknown,
 >(
-  config: DocumentPersistentStorageConfig<State, StorageState> & {
-    getSessionKey: () => string | false;
-  },
-  options: { adapter?: StorageAdapter } = {},
+  config: ResolvedDocumentPersistentStorageConfig<
+    State,
+    StorageState,
+    TOfflineOperations
+  >,
 ): DocumentPersistenceSetup<State> {
-  const version = config.version ?? 1;
-  const backend = config.backend ?? 'opfs';
+  assertValidPersistentStoreName(config.storeName);
+
+  const version = config.version;
+  const storageAdapter = config.adapter;
+  const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
   const handle = createPersistentStorageHandle<
     PersistedDocumentData<State | StorageState>
-  >(config, { adapter: options.adapter });
+  >(config, {
+    valueCodec: {
+      serialize: (data) => ({ d: data.data }),
+      deserialize: (value) =>
+        typeof value === 'object' && value !== null && 'd' in value
+          ? parsePersistedDocumentData({ data: value.d }, dataSchema)
+          : null,
+    },
+  });
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
   let generation = 0;
   let preloadPromise: Promise<void> | null = null;
+  let syncHydrationMissKnown = false;
 
-  function hydrateFromLocalStorage(): void {
-    if (!storeRef) return;
+  function isOfflineNetworkActive(): boolean {
+    return isOfflineNetworkModeActiveSync(
+      config.offline?.session.getConfig().network,
+    );
+  }
 
-    const currentState = storeRef.state;
-    if (currentState.status !== 'idle' || currentState.data !== null) return;
+  function readSyncHydratedDocumentData(): State | null {
+    if (localStorageAdapter === null) return null;
 
     const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return;
+    if (sessionKey === false) return null;
 
     const key = getStorageKeyForStore(sessionKey, config.storeName);
-    const hasEntry = localStorage.getItem(key) !== null;
-    const persisted = readDocumentFromLocalStorageSync(key, version);
+    const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
+      key,
+      version,
+      isOfflineNetworkActive(),
+    );
 
     if (!persisted) {
-      if (hasEntry) {
-        scheduleIdleCleanup(() => localStorage.removeItem(key));
+      syncHydrationMissKnown = true;
+      if (foundEntry) {
+        scheduleIdleCleanup(() => void handle.clear());
       }
-      return;
+      return null;
     }
 
     const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
-      return;
+      syncHydrationMissKnown = true;
+      scheduleIdleCleanup(() => void handle.clear());
+      return null;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    syncHydrationMissKnown = false;
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+    );
+
+    return validated;
+  }
+
+  function hydrateFromLocalStorage(): void {
+    if (!storeRef) return;
+    if (localStorageAdapter === null) return;
+
+    const initialState = storeRef.state;
+    if (initialState.status !== 'idle' || initialState.data !== null) return;
+    if (syncHydrationMissKnown) return;
+
+    const validated = readSyncHydratedDocumentData();
+    if (validated === null) return;
 
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
@@ -113,29 +172,9 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    if (backend !== 'localStorage') return baseState;
-
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return baseState;
-
-    const key = getStorageKeyForStore(sessionKey, config.storeName);
-    const hasEntry = localStorage.getItem(key) !== null;
-    const persisted = readDocumentFromLocalStorageSync(key, version);
-
-    if (!persisted) {
-      if (hasEntry) {
-        scheduleIdleCleanup(() => localStorage.removeItem(key));
-      }
-      return baseState;
-    }
-
-    const validated = parsePersistedStoreData(persisted.data, dataSchema);
-    if (validated === null) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
-      return baseState;
-    }
-
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    if (localStorageAdapter === null) return baseState;
+    const validated = readSyncHydratedDocumentData();
+    if (validated === null) return baseState;
 
     return {
       ...baseState,
@@ -146,16 +185,19 @@ export function setupDocumentPersistence<
   }
 
   async function preloadPersistentStorage(): Promise<void> {
-    if (backend !== 'opfs' || !storeRef) return;
+    if (localStorageAdapter !== null || !storeRef) return;
     if (preloadPromise) return preloadPromise;
+
+    const currentState = storeRef.state;
+    if (currentState.status !== 'idle' || currentState.data !== null) return;
 
     const currentGeneration = generation;
     preloadPromise = handle
-      .load()
+      .load({ touch: 'coarse' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 
-        const persisted = parsePersistedDocumentData(cached);
+        const persisted = parsePersistedDocumentData(cached, dataSchema);
         if (!persisted) {
           scheduleIdleCleanup(() => void handle.clear());
           return;
@@ -163,12 +205,12 @@ export function setupDocumentPersistence<
 
         const validated = parsePersistedStoreData(persisted.data, dataSchema);
         if (validated === null) {
-          scheduleIdleCleanup(() => void handle.clear());
+          void handle.clear().catch(() => {});
           return;
         }
 
-        const currentState = storeRef.state;
-        if (currentState.status !== 'idle' || currentState.data !== null) {
+        const liveState = storeRef.state;
+        if (liveState.status !== 'idle' || liveState.data !== null) {
           return;
         }
 
@@ -187,7 +229,7 @@ export function setupDocumentPersistence<
   }
 
   async function maybeHydrateFromStorage(): Promise<void> {
-    if (backend === 'localStorage') {
+    if (localStorageAdapter !== null) {
       hydrateFromLocalStorage();
       return;
     }
@@ -223,6 +265,7 @@ export function setupDocumentPersistence<
   function dispose(): void {
     generation++;
     preloadPromise = null;
+    syncHydrationMissKnown = false;
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
@@ -238,7 +281,7 @@ export function setupDocumentPersistence<
     attach,
     maybeHydrateFromStorage,
     preloadPersistentStorage,
-    hasAsyncPreload: backend === 'opfs',
+    hasAsyncPreload: localStorageAdapter === null,
     dispose,
     clear,
   };

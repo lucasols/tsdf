@@ -83,11 +83,11 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: 'local-sync',
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
-    };
+    } as const;
 
     const tabA = createListQueryStoreTestEnv(freshServerData, {
       id: storeName,
@@ -179,11 +179,11 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: 'local-sync',
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
-    };
+    } as const;
 
     const tabA = createListQueryStoreTestEnv(serverData, {
       id: storeName,
@@ -322,8 +322,7 @@ describe('persistence + browser tabs sync integration', () => {
       usesRealTimeUpdates: true,
       dynamicRealtimeThrottleMs: () => 300,
       persistentStorage: {
-        storeName,
-        backend: 'localStorage',
+        adapter: 'local-sync',
         schema: rowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryParamsSchema,
@@ -396,9 +395,9 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: 'local-sync',
       schema: docSchema,
-    };
+    } as const;
 
     const tabA = createDocumentStoreTestEnv(2, {
       id: storeName,
@@ -474,10 +473,10 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: 'local-sync',
       schema: colSchema,
       payloadSchema: rc_string,
-    };
+    } as const;
 
     const tabA = createCollectionStoreTestEnv(
       { item1: { name: 'Fresh' } },

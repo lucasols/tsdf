@@ -1,6 +1,7 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { Store } from 't-state';
 
+import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import {
   BatchRequest,
   FetchContext,
@@ -12,8 +13,12 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  AbortedStoreError,
+  DEFAULT_BATCH_KEY,
+  NotFoundStoreError,
   StoreError,
   StoreFetchError,
+  TimeoutStoreError,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -24,6 +29,7 @@ import {
   type OffsetPaginationConfig,
   type PartialResourcesConfig,
   type QueryFetchPayload,
+  type TSDFItemQuery,
   type TSFDListQuery,
   type TSFDListQueryState,
 } from './types';
@@ -97,10 +103,28 @@ export type CreateFetchApiOptions<
   normalizeFieldsOption: (
     fields: FieldsInput | undefined,
   ) => string[] | undefined;
+  syncHydrationEnabled?: boolean;
   preloadQueries?: (queryKeys: string[]) => Promise<boolean[]>;
   preloadItems?: (itemKeys: string[]) => Promise<boolean[]>;
+  persistence?: {
+    getHydratedItemKeys(this: void): string[];
+    getHydratedQueryKeys(this: void): string[];
+    readHydratedItem(
+      this: void,
+      itemKey: string,
+    ):
+      | {
+          item: ItemState;
+          itemQuery: TSDFItemQuery<ItemPayload>;
+          loadedFields: string[];
+        }
+      | undefined;
+    readHydratedQuery(
+      this: void,
+      queryKey: string,
+    ): TSFDListQuery<QueryPayload> | undefined;
+  } | null;
   testInitialLastFetchStartTime?: number;
-  noFetchItemFnError: string;
   onQueryFetchStart?: (
     requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
     startedAt: number,
@@ -121,6 +145,7 @@ export type CreateFetchApiOptions<
     startedAt: number;
     duration: number;
   }) => void;
+  offlineController?: OfflineAwareFetchController | null;
 };
 
 export function createFetchApi<
@@ -147,16 +172,20 @@ export function createFetchApi<
   getQueryKey,
   getItemKey,
   normalizeFieldsOption,
+  syncHydrationEnabled = false,
   preloadQueries: preloadQueries_,
   preloadItems: preloadItems_,
+  persistence,
   testInitialLastFetchStartTime,
-  noFetchItemFnError,
   onQueryFetchStart,
   onQueryFetchSettled,
   onItemFetchStart,
   onItemFetchSettled,
+  offlineController,
 }: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type Query = TSFDListQuery<QueryPayload>;
+
+  const noFetchItemFnError = 'No fetchItemFn was provided';
 
   const querySchedulers = new Map<
     string,
@@ -216,7 +245,9 @@ export function createFetchApi<
     )) {
       const payload = itemQuery?.payload;
       const currentBatchKey =
-        payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
+        payload && getItemsBatchKey
+          ? getItemsBatchKey(payload)
+          : DEFAULT_BATCH_KEY;
 
       if (currentBatchKey !== batchKey) continue;
 
@@ -232,7 +263,9 @@ export function createFetchApi<
         itemKeyToPayload.get(itemKey) ??
         store.state.itemQueries[itemKey]?.payload;
       const batchKey =
-        payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
+        payload && getItemsBatchKey
+          ? getItemsBatchKey(payload)
+          : DEFAULT_BATCH_KEY;
 
       if (batchKey !== false) {
         const scheduler = batchKeySchedulers.get(batchKey);
@@ -292,6 +325,7 @@ export function createFetchApi<
             updateItemSchedulerTiming,
             partialResources,
             offsetPagination,
+            offlineController,
           );
           onQueryFetchSettled?.({
             requests,
@@ -396,6 +430,7 @@ export function createFetchApi<
             errorNormalizer,
             partialResources,
             batchKey,
+            offlineController,
           );
           onItemFetchSettled?.({
             requests,
@@ -446,7 +481,7 @@ export function createFetchApi<
         }
         // batchKey === false → fall through to per-item scheduler
       } else {
-        return getOrCreateBatchKeyScheduler('__default__');
+        return getOrCreateBatchKeyScheduler(DEFAULT_BATCH_KEY);
       }
     }
 
@@ -476,6 +511,8 @@ export function createFetchApi<
             undefined,
             errorNormalizer,
             partialResources,
+            undefined,
+            offlineController,
           );
           onItemFetchSettled?.({
             requests,
@@ -506,7 +543,7 @@ export function createFetchApi<
 
   function getBatchKeyForPayload(payload: ItemPayload): string | false {
     if (!useBatchSchedulers) return false;
-    if (!getItemsBatchKey) return '__default__';
+    if (!getItemsBatchKey) return DEFAULT_BATCH_KEY;
     return getItemsBatchKey(payload);
   }
 
@@ -604,9 +641,72 @@ export function createFetchApi<
     }
   }
 
+  function getQueryStateByKey(queryKey: string): Query | undefined {
+    const query = store.state.queries[queryKey];
+    if (query !== undefined) return query;
+
+    const hydratedQuery = persistence?.readHydratedQuery(queryKey);
+    if (!hydratedQuery) return undefined;
+
+    if (syncHydrationEnabled && preloadQueries_) {
+      void preloadQueries_([queryKey]);
+      return store.state.queries[queryKey] ?? hydratedQuery;
+    }
+
+    return hydratedQuery;
+  }
+
   function getQueryState(params: QueryPayload): Query | undefined {
-    const queryKey = getQueryKey(params);
-    return store.state.queries[queryKey];
+    return getQueryStateByKey(getQueryKey(params));
+  }
+
+  function readMaterializedItemState(
+    itemKey: string,
+  ):
+    | {
+        item: ItemState | null | undefined;
+        itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+        loadedFields: string[] | undefined;
+      }
+    | undefined {
+    const hasItem = Object.hasOwn(store.state.items, itemKey);
+    const hasItemQuery = Object.hasOwn(store.state.itemQueries, itemKey);
+    const hasLoadedFields = Object.hasOwn(
+      store.state.itemLoadedFields,
+      itemKey,
+    );
+    if (!hasItem && !hasItemQuery && !hasLoadedFields) return undefined;
+
+    return {
+      item: hasItem ? store.state.items[itemKey] : undefined,
+      itemQuery: hasItemQuery ? store.state.itemQueries[itemKey] : undefined,
+      loadedFields: hasLoadedFields
+        ? store.state.itemLoadedFields[itemKey]
+        : undefined,
+    };
+  }
+
+  function readItemState(
+    itemKey: string,
+  ):
+    | {
+        item: ItemState | null | undefined;
+        itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+        loadedFields: string[] | undefined;
+      }
+    | undefined {
+    const materializedItemState = readMaterializedItemState(itemKey);
+    if (materializedItemState) return materializedItemState;
+
+    const hydratedItem = persistence?.readHydratedItem(itemKey);
+    if (!hydratedItem) return undefined;
+
+    if (syncHydrationEnabled && preloadItems_) {
+      void preloadItems_([itemKey]);
+      return readMaterializedItemState(itemKey) ?? hydratedItem;
+    }
+
+    return hydratedItem;
   }
 
   function getQueriesKeyArray(
@@ -618,26 +718,43 @@ export function createFetchApi<
         payload,
       }));
     } else if (typeof payloads === 'function') {
-      return filterAndMap(
-        Object.entries(store.state.queries),
-        ([queryKey, query]) => {
-          return payloads(query.payload, query, queryKey)
-            ? { key: queryKey, payload: query.payload }
-            : false;
-        },
-      );
-    } else {
-      return [{ key: getQueryKey(payloads), payload: payloads }];
+      const queryKeys = new Set([
+        ...Object.keys(store.state.queries),
+        ...(persistence?.getHydratedQueryKeys() ?? []),
+      ]);
+
+      return filterAndMap([...queryKeys], (queryKey) => {
+        const query = getQueryStateByKey(queryKey);
+        return query && payloads(query.payload, query, queryKey)
+          ? { key: queryKey, payload: query.payload }
+          : false;
+      });
     }
+
+    return [{ key: getQueryKey(payloads), payload: payloads }];
   }
 
   function getQueriesState(
     params: QueryPayload[] | FilterQueryFn<QueryPayload>,
   ): { query: Query; key: string }[] {
+    if (typeof params === 'function') {
+      const queryKeys = new Set([
+        ...Object.keys(store.state.queries),
+        ...(persistence?.getHydratedQueryKeys() ?? []),
+      ]);
+
+      return filterAndMap([...queryKeys], (queryKey) => {
+        const query = getQueryStateByKey(queryKey);
+        return query && params(query.payload, query, queryKey)
+          ? { query, key: queryKey }
+          : false;
+      });
+    }
+
     const queryKeys = getQueriesKeyArray(params);
 
     return filterAndMap(queryKeys, ({ key }) => {
-      const query = store.state.queries[key];
+      const query = getQueryStateByKey(key);
       return query ? { query, key } : false;
     });
   }
@@ -647,9 +764,8 @@ export function createFetchApi<
   ): { query: Query; key: string }[] {
     const itemKey = getItemKey(itemPayload);
 
-    return getQueriesState((queryPayload) => {
-      const queryState = store.state.queries[getQueryKey(queryPayload)];
-      return !!queryState?.items.includes(itemKey);
+    return getQueriesState((_queryPayload, query) => {
+      return query.items.includes(itemKey);
     });
   }
 
@@ -667,16 +783,20 @@ export function createFetchApi<
     }
 
     if (typeof itemsPayload === 'function') {
-      return filterAndMap(
-        Object.entries(store.state.items),
-        ([itemKey, item]) => {
-          const payload = store.state.itemQueries[itemKey]?.payload;
+      const itemKeys = new Set([
+        ...Object.keys(store.state.items),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
 
-          if (item === null || !payload) return false;
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const itemState = readItemState(itemKey);
+        const item = itemState?.item;
+        const payload = itemState?.itemQuery?.payload;
 
-          return itemsPayload(payload, item) ? { itemKey, payload } : false;
-        },
-      );
+        if (item == null || payload === undefined) return false;
+
+        return itemsPayload(payload, item) ? { itemKey, payload } : false;
+      });
     }
 
     return [{ payload: itemsPayload, itemKey: getItemKey(itemsPayload) }];
@@ -697,13 +817,19 @@ export function createFetchApi<
     | undefined
     | { payload: ItemPayload; data: ItemState }[] {
     if (typeof itemPayload === 'function') {
-      const itemsId = getItemsKeyArray(itemPayload);
+      const itemKeys = new Set([
+        ...Object.keys(store.state.items),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
 
-      return filterAndMap(itemsId, ({ itemKey }) => {
-        const item = store.state.items[itemKey];
-        const payload = store.state.itemQueries[itemKey]?.payload;
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const itemState = readItemState(itemKey);
+        const item = itemState?.item;
+        const payload = itemState?.itemQuery?.payload;
 
-        return !item || !payload ? false : { payload, data: item };
+        if (item == null || payload === undefined) return false;
+
+        return itemPayload(payload, item) ? { payload, data: item } : false;
       });
     }
 
@@ -711,13 +837,15 @@ export function createFetchApi<
       const itemsId = getItemsKeyArray(itemPayload);
 
       return filterAndMap(itemsId, ({ itemKey, payload }) => {
-        const item = store.state.items[itemKey];
-        return !item ? false : { payload, data: item };
+        const item = readItemState(itemKey)?.item;
+        return item == null ? false : { payload, data: item };
       });
     }
 
     const itemKey = getItemKey(itemPayload);
-    return store.state.items[itemKey];
+    const itemState = readItemState(itemKey);
+    if (itemState?.itemQuery === null) return null;
+    return itemState?.item;
   }
 
   function scheduleListQueryFetch(
@@ -850,6 +978,14 @@ export function createFetchApi<
     const size = options.size ?? defaultQuerySize;
     const fields = normalizeFieldsOption(options.fields);
 
+    if (
+      !syncHydrationEnabled &&
+      preloadQueries_ &&
+      store.state.queries[queryKey] === undefined
+    ) {
+      await preloadQueries_([queryKey]);
+    }
+
     const result = await getOrCreateQueryScheduler(queryKey).awaitFetch(
       queryKey,
       { type: 'load', payload: params, offset: 0, limit: size, fields },
@@ -857,28 +993,37 @@ export function createFetchApi<
     );
 
     if (result === 'timeout') {
-      return {
-        items: [],
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-        hasMore: false,
-      };
+      return { items: [], error: new TimeoutStoreError(), hasMore: false };
     }
 
     if (result === true) {
-      return {
-        items: [],
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-        hasMore: false,
-      };
+      return { items: [], error: new AbortedStoreError(), hasMore: false };
     }
 
-    const query = store.state.queries[queryKey];
+    let query = getQueryStateByKey(queryKey);
+
+    if (query?.error?.id === 'offline') {
+      const hydratedQuery = persistence?.readHydratedQuery(queryKey);
+
+      if (hydratedQuery) {
+        query = hydratedQuery;
+        store.produceState(
+          (draft) => {
+            draft.queries[queryKey] = hydratedQuery;
+
+            for (const itemKey of hydratedQuery.items) {
+              const hydratedItem = persistence?.readHydratedItem(itemKey);
+              if (!hydratedItem) continue;
+
+              draft.items[itemKey] = hydratedItem.item;
+              draft.itemQueries[itemKey] = hydratedItem.itemQuery;
+              draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+            }
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
 
     if (query?.error) {
       return {
@@ -889,14 +1034,7 @@ export function createFetchApi<
     }
 
     if (!query) {
-      return {
-        items: [],
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-        hasMore: false,
-      };
+      return { items: [], error: new NotFoundStoreError(), hasMore: false };
     }
 
     return {
@@ -964,6 +1102,14 @@ export function createFetchApi<
     const itemKey = getItemKey(itemPayload);
     const fields = normalizeFieldsOption(options.fields);
 
+    if (
+      !syncHydrationEnabled &&
+      preloadItems_ &&
+      readMaterializedItemState(itemKey) === undefined
+    ) {
+      await preloadItems_([itemKey]);
+    }
+
     const result = await getOrCreateItemScheduler(
       itemKey,
       itemPayload,
@@ -974,27 +1120,33 @@ export function createFetchApi<
     );
 
     if (result === 'timeout') {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-      };
+      return { data: null, error: new TimeoutStoreError() };
     }
 
     if (result === true) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-      };
+      return { data: null, error: new AbortedStoreError() };
     }
 
-    const item = store.state.items[itemKey];
-    const itemQuery = store.state.itemQueries[itemKey];
+    let itemState = readItemState(itemKey);
+
+    if (itemState?.itemQuery?.error?.id === 'offline') {
+      const hydratedItem = persistence?.readHydratedItem(itemKey);
+
+      if (hydratedItem) {
+        itemState = hydratedItem;
+        store.produceState(
+          (draft) => {
+            draft.items[itemKey] = hydratedItem.item;
+            draft.itemQueries[itemKey] = hydratedItem.itemQuery;
+            draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
+
+    const item = itemState?.item;
+    const itemQuery = itemState?.itemQuery;
 
     if (itemQuery?.error) {
       return {
@@ -1004,13 +1156,7 @@ export function createFetchApi<
     }
 
     if (!itemQuery || !item) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-      };
+      return { data: null, error: new NotFoundStoreError() };
     }
 
     return { data: item, error: null };

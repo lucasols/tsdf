@@ -3,9 +3,15 @@ import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
 
+import {
+  offlineConnectivityError,
+  runOfflineAwareFetch,
+  type OfflineAwareFetchController,
+} from '../persistentStorage/offline/fetchRuntime';
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
+  DEFAULT_BATCH_KEY,
   StoreError,
   ValidPayload,
   ValidStoreState,
@@ -39,6 +45,7 @@ export async function executeItemBatchFetch<
   errorNormalizer: (exception: Error) => StoreError,
   partialResources?: PartialResourcesConfig<ItemState>,
   batchKey?: string,
+  offlineController?: OfflineAwareFetchController | null,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
@@ -132,10 +139,46 @@ export async function executeItemBatchFetch<
         payload: r.payload.payload,
         fields: r.payload.fields,
       }));
-      const batchResults = await batchFetchItemFn(batchRequests, {
-        signal: fetchCtx.signal,
-        batchKey: batchKey ?? '__default__',
+      const fetchResult = await runOfflineAwareFetch({
+        controller: offlineController,
+        fetcher: () =>
+          batchFetchItemFn(batchRequests, {
+            signal: fetchCtx.signal,
+            batchKey: batchKey ?? DEFAULT_BATCH_KEY,
+          }),
       });
+      if (!fetchResult.ok) {
+        const error = fetchResult.offline
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(fetchResult.error));
+
+        store.produceState(
+          (draft) => {
+            for (const { requestId: itemKey } of requests) {
+              const itemQuery = draft.itemQueries[itemKey];
+              if (!itemQuery) continue;
+
+              if (fetchResult.offline && itemQuery.wasLoaded) {
+                itemQuery.error = null;
+                itemQuery.status = 'success';
+              } else {
+                itemQuery.error = error;
+                itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
+              }
+              results.set(itemKey, false);
+            }
+          },
+          {
+            action: fetchResult.offline
+              ? 'item-batch-fetch-offline'
+              : 'item-batch-fetch-error',
+          },
+        );
+
+        return results;
+      }
+      const batchResults = fetchResult.data;
 
       if (fetchCtx.shouldAbort()) {
         for (const { requestId } of requests) {
@@ -209,10 +252,49 @@ export async function executeItemBatchFetch<
   const fetchPromises = requests.map(
     async ({ requestId: itemKey, payload: requestData }) => {
       try {
-        const data = await fetchItemFn(klona(requestData.payload), {
-          signal: fetchCtx.signal,
-          fields: requestData.fields,
+        const fetchResult = await runOfflineAwareFetch({
+          controller: offlineController,
+          fetcher: () =>
+            fetchItemFn(klona(requestData.payload), {
+              signal: fetchCtx.signal,
+              fields: requestData.fields,
+            }),
         });
+        if (!fetchResult.ok) {
+          if (fetchCtx.shouldAbort()) {
+            results.set(itemKey, false);
+            return;
+          }
+
+          const error = fetchResult.offline
+            ? offlineConnectivityError
+            : errorNormalizer(unknownToError(fetchResult.error));
+
+          store.produceState(
+            (draft) => {
+              const itemQuery = draft.itemQueries[itemKey];
+              if (!itemQuery) return;
+
+              if (fetchResult.offline && itemQuery.wasLoaded) {
+                itemQuery.error = null;
+                itemQuery.status = 'success';
+              } else {
+                itemQuery.error = error;
+                itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
+              }
+            },
+            {
+              action: fetchResult.offline
+                ? 'item-fetch-error-offline'
+                : 'item-fetch-error',
+            },
+          );
+
+          results.set(itemKey, false);
+          return;
+        }
+        const data = fetchResult.data;
 
         if (fetchCtx.shouldAbort()) {
           results.set(itemKey, false);

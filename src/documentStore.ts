@@ -10,19 +10,58 @@ import {
 } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
-import { useCallback, useContext, useEffect } from 'react';
-import { unknownToError, type Result } from 't-result';
+import { klona } from 'klona/json';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
+import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
+import {
+  wrapGetSessionKeyForTest,
+  wrapOfflineOperationsForTimeline,
+} from './internal/offlineTestInstrumentation';
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from './internal/testTimelineTypes';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
-import type {
-  DocumentPersistentStorageConfig,
-  StorageAdapter,
-} from './persistentStorage/types';
+import {
+  createOfflineEntityLookup,
+  getIsPendingOfflineSync,
+  shouldApplyOfflineOverlay,
+} from './persistentStorage/offline/entityMetadata';
+import {
+  isOfflineConnectivityError,
+  offlineConnectivityError,
+  runOfflineAwareFetch,
+} from './persistentStorage/offline/fetchRuntime';
+import {
+  runHybridOfflineMutation,
+  type OfflineAwareMutationController,
+  type OfflineMutationResult,
+} from './persistentStorage/offline/mutationRuntime';
+import {
+  useOfflineStoreEntities,
+  useOfflineStoreResolutions,
+} from './persistentStorage/offline/sessionCoordinator';
+import {
+  createOfflineStoreController,
+  initializeOfflineStoreController,
+  offlineSessionUnavailableError,
+} from './persistentStorage/offline/storeController';
+import {
+  OfflineResolutionConflictParseError,
+  type AnyOfflineOperationDefinition,
+  type OfflineMutationInput,
+  type OfflineResolutionActionForOperation,
+  type OfflineResolutionRecordForOperation,
+  type ParsedOfflineResolutionConflictResultForOperation,
+} from './persistentStorage/offline/types';
+import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
+import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -55,8 +94,11 @@ import {
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
+  AbortedStoreError,
   fetchTypePriority,
+  NotFoundStoreError,
   StoreFetchError,
+  TimeoutStoreError,
   TSDFStatus,
   ValidStoreState,
   type StoreError,
@@ -70,6 +112,8 @@ export type TSDFUseDocumentReturn<Selected> = {
   data: Selected;
   error: StoreError | null;
   isLoading: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
 };
 
 export type DocumentStoreState<State extends ValidStoreState> = {
@@ -80,6 +124,10 @@ export type DocumentStoreState<State extends ValidStoreState> = {
 };
 
 type DocumentStoreEvents = { invalidateData: FetchType };
+
+type DocumentOfflineOverlay<State extends ValidStoreState> = {
+  data: State | null;
+} | null;
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
 
@@ -116,8 +164,37 @@ type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
   { kind: 'document-snapshot' }
 >;
 
+const EMPTY_DOCUMENT_OFFLINE_OPERATIONS = {};
+
+type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
+  string,
+  AnyOfflineOperationDefinition
+> &
+  ([State] extends [never] ? never : unknown);
+
+type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
+  InternalDocumentOfflineOperations<State> | null;
+
+function assertDocumentOfflineOperations(
+  operations: DocumentOfflineOperationsConfig<ValidStoreState>,
+): void {
+  if (!operations) return;
+
+  for (const [operationName, operation] of Object.entries(operations)) {
+    if (
+      operation.tempEntity !== undefined ||
+      operation.tempEntities !== undefined
+    ) {
+      throw new Error(
+        `Document offline operation "${operationName}" does not support tempEntity or tempEntities`,
+      );
+    }
+  }
+}
+
 export type DocumentStoreOptions<
   State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -155,8 +232,13 @@ export type DocumentStoreOptions<
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: DocumentPersistentStorageConfig<State, StorageState>;
+   * Session scoping always reuses this store's `getSessionKey`, and the
+   * persisted namespace always reuses this store's `id`. */
+  persistentStorage?: DocumentPersistentStorageConfig<
+    State,
+    StorageState,
+    TOfflineOperations
+  >;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -171,13 +253,15 @@ export type DocumentStoreOptions<
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     onReceiveRemoteMsg?: (message: DocumentBrowserTabsMessage<State>) => void;
-    storageAdapter?: StorageAdapter;
+    onSessionKeyChanged?: (event: TestSessionKeyChangedEvent) => void;
+    onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
   };
 };
 
-export type DocumentStore<State extends ValidStoreState> = ReturnType<
-  typeof createDocumentStore<State>
->;
+export type DocumentStore<
+  State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
+> = ReturnType<typeof createDocumentStore<State, TOfflineOperations>>;
 
 // Constant requestId for document store (single-item mode)
 const DOC_REQUEST_ID = '_doc';
@@ -185,6 +269,7 @@ const DOC_TARGET_KEY = 'document' as const;
 
 export function createDocumentStore<
   State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
 >({
   debugName,
@@ -204,17 +289,43 @@ export function createDocumentStore<
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: DocumentStoreOptions<State, StorageState>) {
+}: DocumentStoreOptions<State, TOfflineOperations, StorageState>) {
   let invalidationWasTriggered = false;
+  type ResolvedOfflineOperations = TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
+  const offlineOverlayStore = new Store<DocumentOfflineOverlay<State>>({
+    debugName: `${id}:document-offline-overlay`,
+    state: () => null,
+  });
+  offlineOverlayStore.initializeStore();
+  let offlineOverlaySessionKey: string | null = null;
+
+  function clearOfflineOverlay(nextSessionKey: string | null = null): void {
+    offlineOverlaySessionKey = nextSessionKey;
+    offlineOverlayStore.setState(null);
+  }
 
   let initialData: State | null = null;
   let initialRefetchOnMount: FetchType | false = false;
   let initialStatus: DocumentStatus = 'idle';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const getSessionKeyForRuntime =
+    import.meta.env.TEST && testOptions
+      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
+      : getSessionKey;
+
+  const resolvedPersistentStorageConfig = persistentStorageConfig
+    ? {
+        ...persistentStorageConfig,
+        getSessionKey: getSessionKeyForRuntime,
+        storeName: id,
+      }
+    : null;
 
   if (import.meta.env.TEST && testOptions) {
     if (testOptions.initialData) {
@@ -235,12 +346,111 @@ export function createDocumentStore<
   }
 
   // Persistent storage setup
-  const persistence = persistentStorageConfig
-    ? setupDocumentPersistence(
-        { ...persistentStorageConfig, getSessionKey },
-        { adapter: testOptions?.storageAdapter },
-      )
+  const persistence = resolvedPersistentStorageConfig
+    ? setupDocumentPersistence(resolvedPersistentStorageConfig)
     : null;
+  const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
+  // WORKAROUND: Session-only offline config omits operations, so document stores normalize that case to an empty registry before passing it through the generic offline controller surface.
+  const resolvedOfflineOperations = __LEGIT_CAST__<
+    ResolvedOfflineOperations,
+    unknown
+  >(resolvedOfflineConfig?.operations ?? EMPTY_DOCUMENT_OFFLINE_OPERATIONS);
+
+  if (import.meta.env.DEV) {
+    assertDocumentOfflineOperations(
+      // WORKAROUND: Persistent config stores offline operations behind the generic persistence surface, and the assertion helper expects the already-narrowed ValidStoreState variant.
+      __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
+        resolvedOfflineOperations,
+      ),
+    );
+  }
+
+  const offlineOperationsForRuntime =
+    import.meta.env.TEST &&
+    testOptions?.onOfflineTimelineEvent &&
+    resolvedOfflineConfig
+      ? wrapOfflineOperationsForTimeline(
+          resolvedOfflineOperations,
+          testOptions.onOfflineTimelineEvent,
+        )
+      : resolvedOfflineOperations;
+
+  const offlineController =
+    resolvedPersistentStorageConfig && resolvedOfflineConfig
+      ? createOfflineStoreController<ResolvedOfflineOperations>({
+          storeName: id,
+          storeType: 'document',
+          getSessionKey: getSessionKeyForRuntime,
+          onPersistentStorageError:
+            resolvedPersistentStorageConfig.onPersistentStorageError,
+          adapter: resolvedPersistentStorageConfig.adapter,
+          offlineSession: resolvedOfflineConfig.session,
+          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
+          operations: __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
+            offlineOperationsForRuntime,
+          ),
+          storeAdapter: {
+            getEntityRefs: () => [
+              { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
+            ],
+            normalizeEntityRefs: () => [
+              { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
+            ],
+            getProtectedCacheKeys: () => {
+              const sessionKey = getSessionKeyForRuntime();
+              if (sessionKey === false) return [];
+              return [
+                createProtectedStorageKey({
+                  backend:
+                    resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                      ? 'opfs'
+                      : 'localStorage',
+                  sessionKey,
+                  storeName: id,
+                  kind: 'document',
+                  key: 'document',
+                }),
+              ];
+            },
+            applyPendingEntity: ({ pendingEntity }) => {
+              if (!pendingEntity || typeof pendingEntity !== 'object') return;
+              updateState((draft) => Object.assign(draft, pendingEntity));
+            },
+            reconcileTempEntity: ({ reconciliation }) => {
+              if (
+                !reconciliation.finalData ||
+                typeof reconciliation.finalData !== 'object'
+              ) {
+                return;
+              }
+
+              updateState((draft) =>
+                Object.assign(draft, reconciliation.finalData),
+              );
+            },
+            captureQueuedMutationOverlays: ({ sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey) {
+                clearOfflineOverlay(sessionKey);
+              }
+
+              offlineOverlayStore.setState({ data: klona(store.state.data) });
+            },
+            syncEntityOverlays: ({ entities, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey) {
+                clearOfflineOverlay(sessionKey);
+              }
+
+              if (
+                !entities.some((entity) => {
+                  return entity.entityKey === DOC_TARGET_KEY;
+                })
+              ) {
+                offlineOverlayStore.setState(null);
+              }
+            },
+          },
+        })
+      : null;
 
   const store = new Store<DocumentStoreState<State>>({
     debugName,
@@ -405,10 +615,11 @@ export function createDocumentStore<
       {
         storeType: 'document',
         storeKey: id,
-        getSessionKey,
+        getSessionKey: getSessionKeyForRuntime,
         onMessage: handleRemoteMessage,
         onSessionChange() {
           lastDocumentSyncVersion = undefined;
+          clearOfflineOverlay();
         },
         transportFactory: testOptions?.browserTabsTransportFactory,
         getWindowIsFocused,
@@ -421,6 +632,7 @@ export function createDocumentStore<
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
+    const wasLoadedBeforeFetch = currentStatus === 'success';
 
     store.setPartialState(
       {
@@ -437,7 +649,25 @@ export function createDocumentStore<
     );
 
     try {
-      const data = await fetchFn(fetchCtx.signal);
+      const result = await runOfflineAwareFetch({
+        controller: offlineController,
+        fetcher: () => fetchFn(fetchCtx.signal),
+      });
+
+      if (!result.ok) {
+        if (result.offline) {
+          store.setPartialState(
+            wasLoadedBeforeFetch
+              ? { error: null, status: 'success' }
+              : { error: offlineConnectivityError, status: 'error' },
+            { action: 'fetch-error-offline' },
+          );
+          return false;
+        }
+
+        throw result.error;
+      }
+      const data = result.data;
 
       if (fetchCtx.shouldAbort()) return false;
 
@@ -549,6 +779,7 @@ export function createDocumentStore<
 
   // Attach persistent storage after store creation
   persistence?.attach(store);
+  initializeOfflineStoreController(offlineController);
 
   function scheduleFetch(
     fetchType: FetchType,
@@ -562,26 +793,18 @@ export function createDocumentStore<
   ): Promise<
     { data: State; error: null } | { data: null; error: StoreFetchError }
   > {
+    if (persistence?.hasAsyncPreload && store.state.data === null) {
+      await persistence.preloadPersistentStorage();
+    }
+
     const result = await scheduler.awaitFetch(DOC_REQUEST_ID, null, options);
 
     if (result === 'timeout') {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-      };
+      return { data: null, error: new TimeoutStoreError() };
     }
 
     if (result === true) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-      };
+      return { data: null, error: new AbortedStoreError() };
     }
 
     if (store.state.error) {
@@ -592,13 +815,7 @@ export function createDocumentStore<
     }
 
     if (!store.state.data) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-      };
+      return { data: null, error: new NotFoundStoreError() };
     }
 
     return { data: store.state.data, error: null };
@@ -672,6 +889,7 @@ export function createDocumentStore<
   function reset(): void {
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
+    clearOfflineOverlay();
     browserTabsPriority.reset();
 
     persistence?.dispose();
@@ -691,24 +909,77 @@ export function createDocumentStore<
     return scheduler.startMutation(DOC_REQUEST_ID);
   }
 
+  type DocumentMutationArgs<T> = {
+    optimisticUpdate?: (currentState: State | null) => void | boolean;
+    mutation: (ctx: {
+      updateState: typeof updateState;
+      currentState: State | null;
+    }) => Promise<T>;
+    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+    dontShowErrorToast?: boolean;
+    revalidateOnSuccess?: boolean;
+  };
+
+  type DocumentOnlineMutationArgs<T> = DocumentMutationArgs<T> & {
+    offline?: undefined;
+  };
+
+  type DocumentOfflineMutationArgs<T> = DocumentMutationArgs<T> & {
+    /**
+     * When provided, the mutation tries the direct request while the session is
+     * online, but degrades into durable offline queueing when the session is
+     * already offline or the failure is classified as offline/outage. Callers
+     * must not assume a successful result always includes the server payload.
+     */
+    offline: TOfflineOperations extends null
+      ? never
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  };
+
+  /**
+   * Runs a document mutation with optional optimistic updates and revalidation.
+   *
+   * Returns the direct server result when offline replay is not configured for
+   * this call.
+   */
+  async function performMutation<T>(
+    args: DocumentOnlineMutationArgs<T>,
+  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  /**
+   * Runs a document mutation that may fall back to durable offline queueing.
+   *
+   * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
+   * the server payload. Use this overload when you want the mutation to keep
+   * working while offline or during classified outages.
+   */
+  async function performMutation<T>(
+    args: DocumentOfflineMutationArgs<T>,
+  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  async function performMutation<T>(
+    args: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  >;
   async function performMutation<T>({
     optimisticUpdate,
     mutation,
     debounce,
     dontShowErrorToast,
     revalidateOnSuccess,
-  }: {
-    optimisticUpdate?: (currentState: State | null) => void | boolean;
-    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-    dontShowErrorToast?: boolean;
-    mutation: (ctx: {
-      updateState: typeof updateState;
-      currentState: State | null;
-    }) => Promise<T>;
-    revalidateOnSuccess?: boolean;
-  }): Promise<Result<Awaited<T>, StoreError | true>> {
+    offline,
+  }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  > {
+    if (offline && offlineController && !offlineController.canQueueMutation()) {
+      return Result.err(offlineSessionUnavailableError);
+    }
+
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
+
+    const directMutation = () =>
+      mutation({ updateState, currentState: store.state.data });
+
     const result = await performMutationWithLifecycle({
       startMutation,
       optimisticUpdate: optimisticUpdate
@@ -719,9 +990,25 @@ export function createDocumentStore<
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () => mutation({ updateState, currentState: store.state.data }),
-      onSuccess: () => {
-        if (revalidateOnSuccess) {
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
+              controller: __LEGIT_CAST__<
+                OfflineAwareMutationController<
+                  Exclude<TOfflineOperations, null>
+                > | null,
+                unknown
+              >(offlineController),
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
+      onSuccess: (result) => {
+        if (revalidateOnSuccess && result.kind === 'online') {
           invalidateData();
         }
       },
@@ -732,11 +1019,29 @@ export function createDocumentStore<
 
         invalidateData();
 
-        return errorNormalizer(unknownToError(exception));
+        return isOfflineConnectivityError(exception)
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(exception));
       },
     });
 
     storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
+
+    if (
+      import.meta.env.TEST &&
+      offline &&
+      result.ok &&
+      result.value.kind === 'queued'
+    ) {
+      testOptions?.onOfflineTimelineEvent?.({
+        operation: offline.operation,
+        phase: 'queued',
+      });
+    }
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
 
     return result;
   }
@@ -761,18 +1066,39 @@ export function createDocumentStore<
     ensureIsLoaded?: boolean;
     returnRefetchingStatus?: boolean;
   } = {}) {
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKeyForRuntime(),
+      inactiveScope: id,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
+    });
+    const offlineEntitiesByKey = useMemo(
+      () => createOfflineEntityLookup(offlineEntities),
+      [offlineEntities],
+    );
+    const offlineOverlaySelector = useCallback(
+      (state: DocumentOfflineOverlay<State>) => state,
+      [],
+    );
+    const offlineOverlay = offlineOverlayStore.useSelectorRC(
+      offlineOverlaySelector,
+    );
     const isOffScreenFromContext = useContext(IsOffScreenContext);
     const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
     const returnIdleStatus = returnIdleStatusProp ?? !!disabled;
     const storeStateSelector = useCallback(
       (state: DocumentStoreState<State>): TSDFUseDocumentReturn<Selected> => {
         const { error } = state;
+        const activeOfflineEntity = offlineEntitiesByKey.get(DOC_TARGET_KEY);
+        const resolvedData =
+          shouldApplyOfflineOverlay(activeOfflineEntity, offlineOverlay) &&
+          offlineOverlay !== null
+            ? offlineOverlay.data
+            : state.data;
 
         const data = selector
-          ? selector(state.data)
+          ? selector(resolvedData)
           : // WORKAROUND: Runtime selector presence does not narrow Selected, so the default branch must forward the raw document state through the generic.
-            __LEGIT_CAST__<Selected, State | null>(state.data);
-
+            __LEGIT_CAST__<Selected, State | null>(resolvedData);
         let status = state.status;
 
         if (!returnIdleStatus && status === 'idle') {
@@ -783,9 +1109,21 @@ export function createDocumentStore<
           status = 'success';
         }
 
-        return { data, error, status, isLoading: status === 'loading' };
+        return {
+          data,
+          error,
+          status,
+          isLoading: status === 'loading',
+          pendingSync: getIsPendingOfflineSync(activeOfflineEntity),
+        };
       },
-      [selector, returnIdleStatus, returnRefetchingStatus],
+      [
+        offlineEntitiesByKey,
+        offlineOverlay,
+        selector,
+        returnIdleStatus,
+        returnRefetchingStatus,
+      ],
     );
 
     const storeState = store.useSelectorRC(storeStateSelector, {
@@ -999,6 +1337,56 @@ export function createDocumentStore<
     updateState,
     reset,
     startMutation,
+    getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
+    useOfflineEntities: () => {
+      return useOfflineStoreEntities({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+    },
+    useOfflineResolutions: () => {
+      return useOfflineStoreResolutions({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+    },
+    getOfflineResolutions: () =>
+      offlineController?.getOfflineResolutions() ?? [],
+    parseOfflineResolutionConflict: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolution: OfflineResolutionRecordForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ): ParsedOfflineResolutionConflictResultForOperation<
+      ResolvedOfflineOperations,
+      TName
+    > =>
+      offlineController?.parseOfflineResolutionConflict(resolution) ??
+      Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'offline-not-configured',
+          operation: resolution.operation,
+        }),
+      ),
+    resolveOfflineResolution: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolutionId: string,
+      operationName: TName,
+      resolution: OfflineResolutionActionForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ) =>
+      offlineController?.resolveOfflineResolution(
+        resolutionId,
+        operationName,
+        resolution,
+      ),
     useDocument,
     useListItemIsLoading,
     useListItemIsDeleted,

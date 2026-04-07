@@ -1,30 +1,22 @@
-import { useCallback, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   clearSessionStorage,
   createCollectionStore,
   createDocumentStore,
   createListQueryStore,
-  type StorageBackend,
+  localPersistentStorage,
+  opfsPersistentStorage,
   type StoreError,
 } from '@src/main';
+import { useCallback, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 
-type ListQueryPayload = {
-  tableId: 'users';
-};
+type ListQueryPayload = { tableId: 'users' };
 
-type UserRow = {
-  id: number;
-  name: string;
-};
+type UserRow = { id: number; name: string };
 
 function normalizeError(error: Error): StoreError {
-  return {
-    code: 500,
-    id: 'fixture-error',
-    message: error.message,
-  };
+  return { code: 500, id: 'fixture-error', message: error.message };
 }
 
 async function requestJson<T>(
@@ -39,10 +31,7 @@ async function requestJson<T>(
     headers.set('content-type', 'application/json');
   }
 
-  const response = await fetch(path, {
-    ...init,
-    headers,
-  });
+  const response = await fetch(path, { ...init, headers });
 
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
@@ -64,7 +53,7 @@ function getQueryParams(): {
   scenario: ScenarioName;
   storeId: string | null;
   sessionKey: string | null;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -73,15 +62,17 @@ function getQueryParams(): {
   const scenario = (searchParams.get('scenario') ?? 'document') as ScenarioName;
   const storeId = searchParams.get('storeId');
   const sessionKey = searchParams.get('sessionKey');
-  const backend = (searchParams.get('backend') ?? 'opfs') as StorageBackend;
+  const adapterKey = (searchParams.get('adapter') ?? 'opfs') as
+    | 'localStorage'
+    | 'opfs';
 
-  return {
-    pageId,
-    scenario,
-    storeId,
-    sessionKey,
-    backend,
-  };
+  return { pageId, scenario, storeId, sessionKey, adapterKey };
+}
+
+function getPersistentStorageAdapter(adapterKey: 'localStorage' | 'opfs') {
+  return adapterKey === 'localStorage'
+    ? localPersistentStorage
+    : opfsPersistentStorage;
 }
 
 function FocusControls({
@@ -127,16 +118,10 @@ function useLogicalFocus(initialValue = true) {
     window.dispatchEvent(new Event(value ? 'focus' : 'blur'));
   }, []);
 
-  return {
-    logicalFocus,
-    focusRef,
-    setLogicalFocus,
-  };
+  return { logicalFocus, focusRef, setLogicalFocus };
 }
 
-type DocumentState = {
-  value: number;
-};
+type DocumentState = { value: number };
 
 function DocumentScenario({
   pageId,
@@ -163,15 +148,11 @@ function DocumentScenario({
       dynamicRealtimeThrottleMs: () => 100,
       usesRealTimeUpdates: true,
       blockWindowClose: null,
-      '~test': {
-        getWindowIsFocused: () => focusRef.current,
-      },
+      '~test': { getWindowIsFocused: () => focusRef.current },
     }),
   );
 
-  const document = store.useDocument({
-    returnRefetchingStatus: true,
-  });
+  const document = store.useDocument({ returnRefetchingStatus: true });
 
   const currentValue = document.data?.value ?? 0;
 
@@ -223,10 +204,7 @@ function DocumentScenario({
               return requestJson<DocumentState>(
                 pageId,
                 '/api/document/mutate',
-                {
-                  method: 'POST',
-                  body: JSON.stringify({ value: nextValue }),
-                },
+                { method: 'POST', body: JSON.stringify({ value: nextValue }) },
               );
             },
           });
@@ -253,9 +231,7 @@ function DocumentScenario({
   );
 }
 
-type CollectionItem = {
-  name: string;
-};
+type CollectionItem = { name: string };
 
 function CollectionScenario({
   pageId,
@@ -282,15 +258,11 @@ function CollectionScenario({
       backgroundCoalescingWindowMultiplier: 3,
       usesRealTimeUpdates: true,
       blockWindowClose: null,
-      '~test': {
-        getWindowIsFocused: () => focusRef.current,
-      },
+      '~test': { getWindowIsFocused: () => focusRef.current },
     }),
   );
 
-  const item1 = store.useItem('item1', {
-    returnRefetchingStatus: true,
-  });
+  const item1 = store.useItem('item1', { returnRefetchingStatus: true });
 
   return (
     <section>
@@ -317,10 +289,7 @@ function CollectionScenario({
               return requestJson<CollectionItem>(
                 pageId,
                 '/api/collection/item1/mutate',
-                {
-                  method: 'POST',
-                  body: JSON.stringify({ name: 'Updated' }),
-                },
+                { method: 'POST', body: JSON.stringify({ name: 'Updated' }) },
               );
             },
           });
@@ -335,10 +304,7 @@ function CollectionScenario({
           void requestJson<CollectionItem>(
             pageId,
             '/api/collection/item1/mutate',
-            {
-              method: 'POST',
-              body: JSON.stringify({ name: 'Updated' }),
-            },
+            { method: 'POST', body: JSON.stringify({ name: 'Updated' }) },
           ).then(() => {
             store.invalidateItem('item1', 'realtimeUpdate');
           });
@@ -403,16 +369,11 @@ function ListScenario({
       optimisticListUpdates: [
         {
           queries: { tableId: 'users' },
-          sort: {
-            sortBy: (item) => item.name,
-            order: 'asc',
-          },
+          sort: { sortBy: (item) => item.name, order: 'asc' },
         },
       ],
       blockWindowClose: null,
-      '~test': {
-        getWindowIsFocused: () => focusRef.current,
-      },
+      '~test': { getWindowIsFocused: () => focusRef.current },
     }),
   );
 
@@ -423,12 +384,8 @@ function ListScenario({
       returnRefetchingStatus: true,
     },
   );
-  const user1 = store.useItem('users||1', {
-    returnRefetchingStatus: true,
-  });
-  const user2 = store.useItem('users||2', {
-    returnRefetchingStatus: true,
-  });
+  const user1 = store.useItem('users||1', { returnRefetchingStatus: true });
+  const user2 = store.useItem('users||2', { returnRefetchingStatus: true });
 
   return (
     <section>
@@ -454,9 +411,7 @@ function ListScenario({
             mutation: async () => {
               return requestJson<UserRow>(pageId, '/api/item/users/1/mutate', {
                 method: 'POST',
-                body: JSON.stringify({
-                  patch: { name: 'Zoe' },
-                }),
+                body: JSON.stringify({ patch: { name: 'Zoe' } }),
               });
             },
             getRelatedQueries: (payload) => payload.tableId === 'users',
@@ -471,9 +426,7 @@ function ListScenario({
         onClick={() => {
           void requestJson<UserRow>(pageId, '/api/item/users/1/mutate', {
             method: 'POST',
-            body: JSON.stringify({
-              patch: { name: 'Zoe' },
-            }),
+            body: JSON.stringify({ patch: { name: 'Zoe' } }),
           }).then(() => {
             store.invalidateQueryAndItems({
               queryPayload: { tableId: 'users' },
@@ -496,13 +449,14 @@ function PersistDocumentScenario({
   pageId,
   storeId,
   sessionKey,
-  backend,
+  adapterKey,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 }) {
+  const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
@@ -511,17 +465,11 @@ function PersistDocumentScenario({
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
-      persistentStorage: {
-        storeName: `persist-doc-${storeId}`,
-        backend,
-        schema: documentSchema,
-      },
+      persistentStorage: { adapter, schema: documentSchema },
     }),
   );
 
-  const document = store.useDocument({
-    returnRefetchingStatus: true,
-  });
+  const document = store.useDocument({ returnRefetchingStatus: true });
 
   return (
     <section>
@@ -545,10 +493,7 @@ function PersistDocumentScenario({
               return requestJson<DocumentState>(
                 pageId,
                 '/api/document/mutate',
-                {
-                  method: 'POST',
-                  body: JSON.stringify({ value: nextValue }),
-                },
+                { method: 'POST', body: JSON.stringify({ value: nextValue }) },
               );
             },
           });
@@ -561,7 +506,7 @@ function PersistDocumentScenario({
         data-testid="persist-doc-clear-storage"
         onClick={() => {
           if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, backend);
+            void clearSessionStorage(sessionKey, adapter);
           }
         }}
         type="button"
@@ -579,13 +524,14 @@ function PersistCollectionScenario({
   pageId,
   storeId,
   sessionKey,
-  backend,
+  adapterKey,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 }) {
+  const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
@@ -596,17 +542,11 @@ function PersistCollectionScenario({
         }),
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
-      persistentStorage: {
-        storeName: `persist-col-${storeId}`,
-        backend,
-        schema: collectionItemSchema,
-      },
+      persistentStorage: { adapter, schema: collectionItemSchema },
     }),
   );
 
-  const item1 = store.useItem('item1', {
-    returnRefetchingStatus: true,
-  });
+  const item1 = store.useItem('item1', { returnRefetchingStatus: true });
 
   return (
     <section>
@@ -628,10 +568,7 @@ function PersistCollectionScenario({
               return requestJson<CollectionItem>(
                 pageId,
                 '/api/collection/item1/mutate',
-                {
-                  method: 'POST',
-                  body: JSON.stringify({ name: 'Persisted' }),
-                },
+                { method: 'POST', body: JSON.stringify({ name: 'Persisted' }) },
               );
             },
           });
@@ -644,7 +581,7 @@ function PersistCollectionScenario({
         data-testid="persist-col-clear-storage"
         onClick={() => {
           if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, backend);
+            void clearSessionStorage(sessionKey, adapter);
           }
         }}
         type="button"
@@ -659,13 +596,14 @@ function PersistListScenario({
   pageId,
   storeId,
   sessionKey,
-  backend,
+  adapterKey,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 }) {
+  const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
@@ -691,11 +629,7 @@ function PersistListScenario({
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
       defaultQuerySize: 10,
-      persistentStorage: {
-        storeName: `persist-list-${storeId}`,
-        backend,
-        schema: listItemSchema,
-      },
+      persistentStorage: { adapter, schema: listItemSchema },
     }),
   );
 
@@ -723,9 +657,7 @@ function PersistListScenario({
             mutation: async () => {
               return requestJson<UserRow>(pageId, '/api/item/users/1/mutate', {
                 method: 'POST',
-                body: JSON.stringify({
-                  patch: { name: 'Persisted' },
-                }),
+                body: JSON.stringify({ patch: { name: 'Persisted' } }),
               });
             },
             getRelatedQueries: (payload) => payload.tableId === 'users',
@@ -739,7 +671,7 @@ function PersistListScenario({
         data-testid="persist-list-clear-storage"
         onClick={() => {
           if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, backend);
+            void clearSessionStorage(sessionKey, adapter);
           }
         }}
         type="button"
@@ -751,7 +683,8 @@ function PersistListScenario({
 }
 
 function App() {
-  const { pageId, scenario, storeId, sessionKey, backend } = getQueryParams();
+  const { pageId, scenario, storeId, sessionKey, adapterKey } =
+    getQueryParams();
   const resolvedStoreId =
     storeId ?? `playwright-${scenario === 'list' ? 'list' : scenario}-sync`;
   const resolvedSessionKey =
@@ -791,7 +724,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
-          backend={backend}
+          adapterKey={adapterKey}
         />
       ) : null}
       {scenario === 'persist-collection' ? (
@@ -799,7 +732,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
-          backend={backend}
+          adapterKey={adapterKey}
         />
       ) : null}
       {scenario === 'persist-list' ? (
@@ -807,7 +740,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
-          backend={backend}
+          adapterKey={adapterKey}
         />
       ) : null}
     </main>

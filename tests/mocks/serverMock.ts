@@ -124,6 +124,13 @@ export function createServerMock<Data>(
   return {
     mutateData,
     wsEvents,
+    async delayedSetData(
+      value: Data,
+      options: { durationMs?: number } = {},
+    ): Promise<void> {
+      await sleep(options.durationMs ?? DEFAULT_MUTATION_DURATION_MS);
+      this.setData(value);
+    },
     setData(value: Data) {
       addAction?.('server-data-changed', { actionValue: value });
       serverDataHistory.push(value);

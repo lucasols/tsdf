@@ -4,6 +4,11 @@ import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
 
+import {
+  offlineConnectivityError,
+  runOfflineAwareFetch,
+  type OfflineAwareFetchController,
+} from '../persistentStorage/offline/fetchRuntime';
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
@@ -128,6 +133,7 @@ export async function executeQueryFetch<
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
   partialResources?: PartialResourcesConfig<ItemState>,
   offsetPagination?: OffsetPaginationConfig,
+  offlineController?: OfflineAwareFetchController | null,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -207,9 +213,20 @@ export async function executeQueryFetch<
 
           const chunkResultPromises = chunks.map((chunk) =>
             queue.resultifyAdd(() =>
-              normalizedFetchListFn(payload, chunk.offset, chunk.limit, {
-                signal: fetchCtx.signal,
-                fields,
+              runOfflineAwareFetch({
+                controller: offlineController,
+                fetcher: () =>
+                  normalizedFetchListFn(payload, chunk.offset, chunk.limit, {
+                    signal: fetchCtx.signal,
+                    fields,
+                  }),
+              }).then((result) => {
+                if (!result.ok) {
+                  throw result.offline
+                    ? offlineConnectivityError
+                    : result.error;
+                }
+                return result.data;
               }),
             ),
           );
@@ -221,10 +238,20 @@ export async function executeQueryFetch<
           const lastChunk = successResults[successResults.length - 1];
           hasMore = lastChunk ? lastChunk.hasMore : false;
         } else {
-          const result = await normalizedFetchListFn(payload, offset, limit, {
-            signal: fetchCtx.signal,
-            fields,
+          const fetchResult = await runOfflineAwareFetch({
+            controller: offlineController,
+            fetcher: () =>
+              normalizedFetchListFn(payload, offset, limit, {
+                signal: fetchCtx.signal,
+                fields,
+              }),
           });
+          if (!fetchResult.ok) {
+            throw fetchResult.offline
+              ? offlineConnectivityError
+              : fetchResult.error;
+          }
+          const result = fetchResult.data;
 
           allItems = result.items;
           hasMore = result.hasMore;
@@ -271,15 +298,25 @@ export async function executeQueryFetch<
           return;
         }
 
-        const error = errorNormalizer(unknownToError(exception));
-
+        const error =
+          exception &&
+          typeof exception === 'object' &&
+          'id' in exception &&
+          exception.id === 'offline'
+            ? offlineConnectivityError
+            : errorNormalizer(unknownToError(exception));
         store.produceState(
           (draft) => {
             const query = draft.queries[queryKey];
             if (!query) return;
 
-            query.status = 'error';
-            query.error = error;
+            if (error === offlineConnectivityError && query.wasLoaded) {
+              query.status = 'success';
+              query.error = null;
+            } else {
+              query.status = 'error';
+              query.error = error;
+            }
           },
           { action: 'query-fetch-error' },
         );

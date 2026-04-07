@@ -1,3 +1,4 @@
+import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 
 import {
@@ -7,20 +8,29 @@ import {
   type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
 import type {
+  AnyOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
+} from '../../src/persistentStorage/offline/types';
+import type {
   CollectionPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
+import { seedCollectionScenarioPersistentStorage } from './seedScenarioPersistentStorage';
 import {
   createServerTableMock,
   type ServerTableSharedState,
 } from './serverTableMock';
 import {
   createActionTracker,
+  createOfflineTimelineTestLogger,
   createEmojiCyclers,
   createPerItemUITracker,
   createUITracker,
@@ -30,8 +40,6 @@ import {
   normalizeError,
   TEST_INITIAL_TIME,
 } from './testEnvUtils';
-
-export type CollectionTestItem<D> = { value: D };
 
 export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** App just opened, no data fetched yet. */
@@ -44,15 +52,34 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: Record<string, D> };
 
+export type CollectionTestItem<D> = { value: D };
+
+type TestCollectionOfflineOperationsRegistry<
+  D extends Record<string, unknown>,
+> = Record<
+  string,
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => CollectionOfflineEntityRef<string>[];
+  }
+> &
+  ([D] extends [never] ? never : unknown);
+
+type TestCollectionOfflineOperationsConfig<D extends Record<string, unknown>> =
+  TestCollectionOfflineOperationsRegistry<D> | null;
+
 export type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,
+  TOfflineOperations extends TestCollectionOfflineOperationsConfig<D> = null,
   StorageState = unknown,
 > = {
   id?: string;
   getSessionKey?: () => string | false;
   sharedServerTableState?: ServerTableSharedState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
-  browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+  testBrowserTabId?: string;
+  browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
   /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
   bindFocusController?: {
     getWindowIsFocused: () => boolean;
@@ -85,7 +112,8 @@ export type CollectionStoreTestEnvOptions<
   persistentStorage?: CollectionPersistentStorageConfig<
     CollectionTestItem<D>,
     string,
-    StorageState
+    StorageState,
+    TOfflineOperations
   >;
   storageAdapter?: StorageAdapter;
   __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
@@ -93,6 +121,7 @@ export type CollectionStoreTestEnvOptions<
 
 export function createCollectionStoreTestEnv<
   D extends Record<string, unknown>,
+  TOfflineOperations extends TestCollectionOfflineOperationsConfig<D> = null,
   StorageState = unknown,
 >(
   serverInitialData: Record<string, D>,
@@ -101,6 +130,7 @@ export function createCollectionStoreTestEnv<
     getSessionKey = () => 'test-session',
     sharedServerTableState,
     browserTabsTransportFactory,
+    testBrowserTabId,
     browserTabsLeadershipTimings,
     bindFocusController,
     dynamicRealtimeThrottleMs,
@@ -120,7 +150,7 @@ export function createCollectionStoreTestEnv<
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: CollectionStoreTestEnvOptions<D, StorageState> = {},
+  }: CollectionStoreTestEnvOptions<D, TOfflineOperations, StorageState> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -140,6 +170,10 @@ export function createCollectionStoreTestEnv<
   } = createActionTracker();
 
   const { getMutationEmoji } = createEmojiCyclers();
+  const offlineTimelineLogger = createOfflineTimelineTestLogger({
+    addAction,
+    getSessionKey,
+  });
 
   const serverTable = createServerTableMock<D>(
     serverInitialData,
@@ -192,68 +226,123 @@ export function createCollectionStoreTestEnv<
   };
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
+  const resolvedPersistentStorage =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
 
-  const collectionStore = createCollectionStore<
-    CollectionTestItem<D>,
-    string,
-    StorageState
-  >({
-    id,
-    getSessionKey,
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs,
-    baseCoalescingWindowMs,
-    maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
-    maxItems,
-    onStateCleanup,
-    getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
-    fetchFn: async (payload, signal) => {
-      const value = await serverTable.fetch(payload, signal);
-      return { value };
-    },
-    batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
-    usesRealTimeUpdates,
-    dynamicRealtimeThrottleMs,
-    revalidateOnWindowFocus,
-    transportReconnectCooldownMs,
-    mediumPriorityDelayMs,
-    blockWindowClose: blockWindowClose ?? null,
-    persistentStorage,
-    '~test': {
-      ...testOptions,
-      storageAdapter,
-      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
-      onWindowFocus: bindFocusController
-        ? (handler: () => void) => {
-            return bindFocusController.onWindowFocus(handler);
-          }
-        : undefined,
-      onWindowFocusChange: bindFocusController
-        ? (handler: () => void) => {
-            const cleanupFocus = bindFocusController.onWindowFocus(handler);
-            const cleanupBlur = bindFocusController.onWindowBlur(handler);
-            return () => {
-              cleanupFocus();
-              cleanupBlur();
-            };
-          }
-        : undefined,
-      browserTabsTransportFactory,
-      browserTabsLeadershipTimings,
-      onReceiveRemoteMsg: (
-        message: CollectionBrowserTabsMessage<CollectionTestItem<D>, string>,
-      ) => {
-        if (message.kind === 'collection-item-snapshot') {
-          addAction(`<${message.consistency}-snapshot-received`, {
-            actionValue: message.item?.data?.value,
-            itemId: message.item?.payload,
-          });
-        }
+  const unregisterMockStoreInstance =
+    testBrowserTabId === undefined
+      ? () => {}
+      : registerMockStoreInstance({
+          storeId: id,
+          storeType: 'collection',
+          testBrowserTabId,
+        });
+
+  let collectionStore: ReturnType<
+    typeof createCollectionStore<
+      CollectionTestItem<D>,
+      string,
+      TOfflineOperations,
+      StorageState
+    >
+  >;
+
+  try {
+    collectionStore = createCollectionStore<
+      CollectionTestItem<D>,
+      string,
+      TOfflineOperations,
+      StorageState
+    >({
+      id,
+      getSessionKey,
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs,
+      baseCoalescingWindowMs,
+      maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
+      maxItems,
+      onStateCleanup,
+      getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
+      fetchFn: async (payload, signal) => {
+        const value = await serverTable.fetch(payload, signal);
+        return { value };
       },
-    },
-    onSchedulerEvent: (event, data) => {
-      logSchedulerEvent(event, addAction, data);
-    },
+      batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
+      usesRealTimeUpdates,
+      dynamicRealtimeThrottleMs,
+      revalidateOnWindowFocus,
+      transportReconnectCooldownMs,
+      mediumPriorityDelayMs,
+      blockWindowClose: blockWindowClose ?? null,
+      persistentStorage: resolvedPersistentStorage,
+      '~test': {
+        ...testOptions,
+        getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+        onWindowFocus: bindFocusController
+          ? (handler: () => void) => {
+              return bindFocusController.onWindowFocus(handler);
+            }
+          : undefined,
+        onWindowFocusChange: bindFocusController
+          ? (handler: () => void) => {
+              const cleanupFocus = bindFocusController.onWindowFocus(handler);
+              const cleanupBlur = bindFocusController.onWindowBlur(handler);
+              return () => {
+                cleanupFocus();
+                cleanupBlur();
+              };
+            }
+          : undefined,
+        browserTabsTransportFactory,
+        browserTabsLeadershipTimings,
+        onReceiveRemoteMsg: (
+          message: CollectionBrowserTabsMessage<CollectionTestItem<D>, string>,
+        ) => {
+          if (message.kind === 'collection-item-snapshot') {
+            addAction(`<${message.consistency}-snapshot-received`, {
+              actionValue: message.item?.data?.value,
+              itemId: message.item?.payload,
+            });
+          }
+        },
+        onSessionKeyChanged: (event) => {
+          offlineTimelineLogger.onSessionKeyChanged(event);
+          if (resolvedPersistentStorage?.offline) {
+            offlineTimelineLogger.handleSessionKeyChangedForResolutionObserver({
+              event,
+              getOfflineResolutions: () =>
+                collectionStore
+                  .getOfflineResolutions()
+                  .map(({ id: resolutionId, operation }) => ({
+                    id: resolutionId,
+                    operation,
+                  })),
+              adapter: resolvedPersistentStorage.adapter,
+              config: resolvedPersistentStorage.offline.session.getConfig(),
+            });
+          }
+        },
+        onOfflineTimelineEvent: (event) => {
+          offlineTimelineLogger.onOfflineTimelineEvent(event);
+        },
+      },
+      onSchedulerEvent: (event, data) => {
+        logSchedulerEvent(event, addAction, data);
+      },
+    });
+  } catch (error) {
+    unregisterMockStoreInstance();
+    throw error;
+  }
+
+  seedCollectionScenarioPersistentStorage({
+    storeName: id,
+    sessionKey: getSessionKey(),
+    persistentStorage: resolvedPersistentStorage ?? null,
+    initialData: testOptions?.initialData,
+    timestamp: testOptions?.initialLastFetchStartTime,
   });
 
   if (usesRealTimeUpdates) {
@@ -267,6 +356,20 @@ export function createCollectionStoreTestEnv<
     serverTable.wsEvents.on('list_changed', () => {
       addAction('received-ws-data-change-event');
       collectionStore.invalidateItem(() => true, 'realtimeUpdate');
+    });
+  }
+
+  if (resolvedPersistentStorage?.offline) {
+    offlineTimelineLogger.attachResolutionObserver({
+      getOfflineResolutions: () =>
+        collectionStore
+          .getOfflineResolutions()
+          .map(({ id: resolutionId, operation }) => ({
+            id: resolutionId,
+            operation,
+          })),
+      adapter: resolvedPersistentStorage.adapter,
+      config: resolvedPersistentStorage.offline.session.getConfig(),
     });
   }
 

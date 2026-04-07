@@ -32,7 +32,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
 
   const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
-  const { rerender } = renderHook(
+  const { rerender, result } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
       const result = env.apiStore.useItem('1', {
         isOffScreen,
@@ -47,9 +47,23 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
         isLoading: result.isLoading,
         payload: result.payload,
       });
+
+      return result;
     },
     { initialProps: { isOffScreen: false } },
   );
+
+  expect(result.current).toMatchInlineSnapshot(`
+    data:
+      value: { completed: '❌', title: 'todo' }
+
+    error: null
+    isLoading: '❌'
+    itemStateKey: '"1'
+    payload: '1'
+    pendingSync: '❌'
+    status: 'success'
+  `);
 
   await flushAllTimers();
 

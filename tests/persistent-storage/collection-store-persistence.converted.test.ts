@@ -12,11 +12,8 @@ import {
   vi,
 } from 'vitest';
 
-import type {
-  CollectionPersistentStorageConfig,
-  PersistedCollectionItemData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
+import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -44,8 +41,7 @@ function createConvertedSchemaConfig(
   } = {},
 ): CollectionPersistentStorageConfig<ItemState, string, StoredItemState> {
   return {
-    storeName: 'unused',
-    backend: 'localStorage',
+    adapter: 'local-sync',
     schema: {
       storeSchema: itemSchema,
       storageSchema,
@@ -74,10 +70,10 @@ function createEnv(options: {
   const schemaConfig = options.schemaConfig ?? createConvertedSchemaConfig();
 
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       ...schemaConfig,
-      storeName: options.storeName,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -153,11 +149,19 @@ describe('localStorage: converted collection store persistence', () => {
     // Keep data-shape and payload-shape failures together here because both are envelope-validation failures.
     const invalidPayloadKey =
       invalidPayloadStore.collection.itemStorageKey('true');
-    invalidPayloadStore.setValue(invalidPayloadKey, {
-      data: { data: { itemId: '1', label: 'Cached' }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    } satisfies StorageCacheEntry<PersistedCollectionItemData<unknown>>);
+    invalidPayloadStore.collection.seedItem('true', {
+      itemId: '1',
+      label: 'Cached',
+    });
+    const invalidPayloadEntry =
+      invalidPayloadStore.collection.readItemEntry<unknown>('true');
+    invalidPayloadStore.setValue(
+      invalidPayloadKey,
+      createCompactLocalStorageEntry(
+        { d: invalidPayloadEntry.data.data, p: true },
+        invalidPayloadEntry.version,
+      ),
+    );
 
     const invalidDataEnv = createEnv({
       storeName: 'col-converted-invalid-data',
@@ -205,7 +209,6 @@ describe('localStorage: converted collection store persistence', () => {
             throw new Error('boom');
           },
         }),
-        storeName: 'placeholder',
       },
     });
     const invalidFinalEnv = createEnv({
@@ -215,7 +218,6 @@ describe('localStorage: converted collection store persistence', () => {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidItemState,
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -254,7 +256,6 @@ describe('localStorage: converted collection store persistence', () => {
             throw new Error('cannot-save');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 

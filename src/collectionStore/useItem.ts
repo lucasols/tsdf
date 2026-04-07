@@ -109,6 +109,7 @@ export function useItem<
             status: 'error',
             itemStateKey: '',
             isLoading: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }
         : {
@@ -121,36 +122,33 @@ export function useItem<
             status: 'idle',
             itemStateKey: '',
             isLoading: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }),
     [isInvalidPayload, item, selector],
   );
 
   const fetchQuery = hasPayload ? query[0] : undefined;
-  const isPayloadReadyForFetch = hasPayload;
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
     ensureIsLoaded,
-    hasPayload && isPayloadReadyForFetch,
+    hasPayload,
     () => {
-      if (fetchQuery && isPayloadReadyForFetch) {
+      if (fetchQuery) {
         scheduleFetch('highPriority', fetchQuery.payload);
       }
     },
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (
-      !ensureIsLoaded ||
-      !hasPayload ||
-      !isPayloadReadyForFetch ||
-      !result.itemStateKey
-    ) {
+    if (!ensureIsLoaded || !hasPayload || !result.itemStateKey) {
       return;
     }
 
     observe
-      .ifSelector((state) => state[result.itemStateKey]?.status)
+      .ifSelector((state) => {
+        return state[result.itemStateKey]?.status;
+      })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
           emitIsLoadedEvt();

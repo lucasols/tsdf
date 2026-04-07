@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import { rc_number, rc_object, rc_parse_json, rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -12,22 +12,21 @@ import {
   vi,
 } from 'vitest';
 
-import type {
-  PersistedCollectionItemData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import {
+  createCompactLocalStorageEntry,
+  parseCompactLocalStorageEntry,
+} from '../../src/persistentStorage/compactLocalStorageEntry';
+import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
 });
-const cachedCollectionItemEntrySchema = rc_object({
-  data: rc_object({ data: wrappedItemSchema, payload: rc_string }),
-  timestamp: rc_number,
-  version: rc_number,
-});
+const persistentStore = createLocalStoragePersistentTestStore();
 
 function itemKey(payload: string): string {
   return getCompositeKey(payload);
@@ -38,7 +37,11 @@ function itemStorageKey(
   sessionKey: string,
   payload: string,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+  return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
+}
+
+function itemStoragePrefix(storeName: string, sessionKey: string): string {
+  return `tsdf.${sessionKey}.${storeName}.ci.`;
 }
 
 type ItemState = { id: string; name: string };
@@ -50,20 +53,16 @@ function setCachedCollectionItem(
   sessionKey: string,
   payload: string,
   data: PersistedItemState,
-  version = 1,
+  version: number | undefined = undefined,
+  timestamp = Date.now(),
 ): string {
-  const key = itemStorageKey(storeName, sessionKey, payload);
-  const entry: StorageCacheEntry<
-    PersistedCollectionItemData<PersistedItemState>
-  > = { data: { data, payload }, timestamp: Date.now(), version };
-
-  localStorage.setItem(key, JSON.stringify(entry));
-
-  return key;
+  return persistentStore
+    .scope(storeName, sessionKey)
+    .collection.seedItem(payload, data, { version, timestamp });
 }
 
 function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const keys: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -80,7 +79,7 @@ function listStoredItemPayloads(
   storeName: string,
   sessionKey: string,
 ): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const payloads: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -90,27 +89,26 @@ function listStoredItemPayloads(
     const rawEntry = localStorage.getItem(key);
     if (!rawEntry) continue;
 
-    const parsed = rc_parse_json(rawEntry, cachedCollectionItemEntrySchema);
-    if (!parsed.ok) continue;
+    const parsed = parseCompactLocalStorageEntry(rawEntry);
+    if (parsed === null || typeof parsed.value.p !== 'string') continue;
 
-    payloads.push(parsed.value.data.payload);
+    payloads.push(parsed.value.p);
   }
 
   return payloads;
 }
 
 function getStoredCollectionItemTimestamp(key: string): number {
-  const rawEntry = localStorage.getItem(key);
-  if (rawEntry === null) {
-    throw new Error(`Missing localStorage entry for ${key}`);
+  const [_, sessionKey = '', storeName = ''] = key.split('.');
+  const entry = readManagedLocalStorageNamespaceEntryByPayload(
+    key,
+    itemStoragePrefix(storeName, sessionKey),
+  );
+  if (entry === null) {
+    throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
 
-  const parsed = rc_parse_json(rawEntry, cachedCollectionItemEntrySchema);
-  if (!parsed.ok) {
-    throw new Error(`Invalid localStorage entry for ${key}`);
-  }
-
-  return parsed.value.timestamp;
+  return entry.lastAccessAt;
 }
 
 function createEnv(options: {
@@ -124,10 +122,10 @@ function createEnv(options: {
   onPersistentStorageError?: (error: unknown) => void;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
-      storeName: options.storeName,
-      backend: 'localStorage',
+      adapter: 'local-sync',
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       version: options.version,
@@ -153,6 +151,14 @@ afterEach(() => {
 });
 
 describe('localStorage: collection store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createEnv({ storeName: 'collection.with-dot', sessionKey: 'sess1' }),
+    ).toThrowError(
+      '[tsdf] store id "collection.with-dot" must not contain "." when persistentStorage is enabled.',
+    );
+  });
+
   test('direct key reads lazily hydrate only the requested cached items', () => {
     setCachedCollectionItem('col-local', 'sess1', '1', {
       value: { id: '1', name: 'Alice' },
@@ -189,6 +195,35 @@ describe('localStorage: collection store persistence', () => {
 
     expect(env.apiStore.getItemState('2')?.data).toMatchInlineSnapshot(`
       value: { id: '2', name: 'Bob' }
+    `);
+  });
+
+  test('direct cold key reads materialize state and stop consulting localStorage', () => {
+    const storeName = 'col-external-overwrite';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached v1' },
+    });
+
+    const env = createEnv({ storeName, sessionKey });
+
+    // First cold read hydrates from the persisted entry.
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+    expect(env.store.state[itemKey('1')]?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+
+    // Once the cached entry is read through into state, later storage changes
+    // should not silently replace the in-memory source of truth.
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached v2' },
+    });
+
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
     `);
   });
 
@@ -241,10 +276,15 @@ describe('localStorage: collection store persistence', () => {
   });
 
   test('disableRefetchOnMount keeps cached data without refetching', async () => {
-    const key = setCachedCollectionItem('col-hook-no-refetch', 'sess1', '1', {
-      value: { id: '1', name: 'Cached' },
-    });
-    const originalTimestamp = getStoredCollectionItemTimestamp(key);
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    const key = setCachedCollectionItem(
+      'col-hook-no-refetch',
+      'sess1',
+      '1',
+      { value: { id: '1', name: 'Cached' } },
+      undefined,
+      originalTimestamp,
+    );
 
     const env = createEnv({
       storeName: 'col-hook-no-refetch',
@@ -290,6 +330,99 @@ describe('localStorage: collection store persistence', () => {
     expect(
       listStoredItemKeys('col-entries', 'sess1').sort(),
     ).toMatchInlineSnapshot(`['"a', '"b']`);
+  });
+
+  test('failed item hook fetch does not create a persisted cache entry', async () => {
+    const storeName = 'col-fetch-error-no-persist';
+    const sessionKey = 'sess1';
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Server value' } },
+    });
+    const renders = createLoggerStore();
+
+    // Fail the first hook-triggered item fetch.
+    env.serverTable.setNextFetchError('1', 'Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useItem('1');
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+
+    // Wait past the debounced persistence window to catch accidental writes from the error state.
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: null
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore.storage.readEntry(
+        itemStorageKey(storeName, sessionKey, '1'),
+      ),
+    ).toBeNull();
+  });
+
+  test('failed refetch keeps the previous persisted item snapshot', async () => {
+    const storeName = 'col-refetch-error-keeps-cache';
+    const sessionKey = 'sess1';
+
+    // Hydrate from a previously successful cache entry, then fail the background refetch.
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Fresh' } },
+    });
+    const renders = createLoggerStore();
+
+    env.serverTable.setNextFetchError('1', 'Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached} ⋅ error: null
+      -> status: refetching ⋅ data: {id:1, name:Cached} ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: {id:1, name:Cached}
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .collection.readItemEntry<PersistedItemState>('1').data,
+    ).toMatchInlineSnapshot(`
+      data:
+        value: { id: '1', name: 'Cached' }
+
+      payload: '1'
+    `);
   });
 
   test('ignoreItems predicate skips matching payloads and removes stale cached entries on flush', async () => {
@@ -406,8 +539,11 @@ describe('localStorage: collection store persistence', () => {
     ).toMatchInlineSnapshot(`['"a', '"c']`);
   });
 
-  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+  test('preload hydrates cached local items without reporting an error', async () => {
     const onPersistentStorageError = vi.fn();
+    setCachedCollectionItem('col-preload-local', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
     const env = createEnv({
       storeName: 'col-preload-local',
       sessionKey: 'sess1',
@@ -416,13 +552,20 @@ describe('localStorage: collection store persistence', () => {
 
     await expect(env.apiStore.preloadItemFromStorage('1')).resolves
       .toMatchInlineSnapshot(`
-      - { payload: '1', preloaded: '❌' }
+      - { payload: '1', preloaded: '✅' }
     `);
 
-    expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(
-      pick(onPersistentStorageError.mock.calls[0]?.[0], ['message']),
-    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
+    expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
+      data:
+        value: { id: '1', name: 'Cached' }
+
+      error: null
+      payload: '1'
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(onPersistentStorageError).not.toHaveBeenCalled();
   });
 
   test('invalid cached entries are cleaned up only after the item is read', async () => {
@@ -446,6 +589,27 @@ describe('localStorage: collection store persistence', () => {
     await advanceTime(2100);
 
     expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('scheduled maintenance does not clean invalid cached entries before they are read', async () => {
+    const key = setCachedCollectionItem(
+      'col-invalid-maintenance',
+      'sess1',
+      'bad',
+      { value: { id: 'bad', name: 'Old' } },
+      1,
+    );
+
+    createEnv({
+      storeName: 'col-invalid-maintenance',
+      sessionKey: 'sess1',
+      version: 2,
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(key)).not.toBeNull();
   });
 
   test('invalid cached entries are also cleaned up after a hook read', async () => {
@@ -480,14 +644,21 @@ describe('localStorage: collection store persistence', () => {
 
   test('invalid cached payloads are cleaned up only after the item is read', async () => {
     const key = itemStorageKey('col-invalid-payload', 'sess1', 'bad');
-    const entry: StorageCacheEntry<
-      PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
-    > = {
-      data: { data: { value: { id: 'bad', name: 'Old' } }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    };
-    localStorage.setItem(key, JSON.stringify(entry));
+    setCachedCollectionItem('col-invalid-payload', 'sess1', 'bad', {
+      value: { id: 'bad', name: 'Old' },
+    });
+    const entry = persistentStore
+      .scope('col-invalid-payload', 'sess1')
+      .collection.readItemEntry<PersistedItemState>('bad');
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry(
+          { d: entry.data.data, p: true },
+          entry.version,
+        ),
+      ),
+    );
 
     const env = createEnv({
       storeName: 'col-invalid-payload',

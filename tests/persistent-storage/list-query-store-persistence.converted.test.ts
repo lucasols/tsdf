@@ -12,11 +12,10 @@ import {
   vi,
 } from 'vitest';
 
+import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import type {
   ListQueryPersistentStorageConfig,
-  PersistedListQueryItemData,
   PersistentStorageSchema,
-  StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import {
   createListQueryStoreTestEnv,
@@ -49,8 +48,7 @@ function createConvertedSchemaConfig(
   } = {},
 ): ListQueryPersistentStorageConfig<Row, ListQueryParams, string, StoredRow> {
   return {
-    storeName: 'unused',
-    backend: 'localStorage',
+    adapter: 'local-sync',
     schema: {
       storeSchema: rowSchema,
       storageSchema,
@@ -85,7 +83,6 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       ...schemaConfig,
-      storeName: options.storeName,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -191,11 +188,25 @@ describe('localStorage: converted list query store persistence', () => {
       'users',
       1,
     );
-    invalidPayloadStore.setValue(invalidPayloadKey, {
-      data: { data: { rowId: 1, label: 'Cached' }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    } satisfies StorageCacheEntry<PersistedListQueryItemData<unknown>>);
+    invalidPayloadStore.listQuery.seedItem('users', 1, {
+      rowId: 1,
+      label: 'Cached',
+    });
+    const invalidPayloadEntry =
+      invalidPayloadStore.listQuery.readItemEntry<unknown>('users', 1);
+    invalidPayloadStore.setValue(
+      invalidPayloadKey,
+      createCompactLocalStorageEntry(
+        {
+          d: invalidPayloadEntry.data.data,
+          p: true,
+          ...(invalidPayloadEntry.data.loadedFields
+            ? { lf: invalidPayloadEntry.data.loadedFields }
+            : {}),
+        },
+        invalidPayloadEntry.version,
+      ),
+    );
 
     const invalidStorageEnv = createEnv({
       storeName: 'lq-converted-invalid-storage',
@@ -264,7 +275,6 @@ describe('localStorage: converted list query store persistence', () => {
             throw new Error('boom');
           },
         }),
-        storeName: 'placeholder',
       },
     });
     const invalidFinalEnv = createEnv({
@@ -274,7 +284,6 @@ describe('localStorage: converted list query store persistence', () => {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidRow,
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -323,7 +332,6 @@ describe('localStorage: converted list query store persistence', () => {
             throw new Error('cannot-save');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 

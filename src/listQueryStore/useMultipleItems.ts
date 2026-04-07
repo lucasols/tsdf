@@ -9,6 +9,12 @@ import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
+import {
+  createOfflineEntityLookup,
+  filterActiveOfflineOverlays,
+  getIsPendingOfflineSync,
+} from '../persistentStorage/offline/entityMetadata';
+import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import {
@@ -21,11 +27,18 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
+import {
+  excludeLoadedFields,
+  fallbackItemHasRequestedFields,
+} from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
+  type ListQueryOfflineOverlay,
   type ListQueryUseMultipleItemsQuery,
   type PartialResourcesConfig,
+  type TSDFItemQuery,
   type TSFDListQueryState,
   type TSFDUseListItemReturn,
 } from './types';
@@ -91,12 +104,28 @@ export function useMultipleItems<
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
+  preloadItemsBeforePaint: boolean,
+  readFallbackItemState:
+    | ((
+        itemKey: string,
+      ) =>
+        | {
+            item: ItemState | null | undefined;
+            itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+            loadedFields: string[] | undefined;
+          }
+        | undefined)
+    | undefined,
   itemInvalidationWasTriggered: Set<string>,
   itemFieldInvalidationPriorities: Map<string, FetchType>,
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
-  partialResources?: PartialResourcesConfig<ItemState>,
+  partialResources: PartialResourcesConfig<ItemState> | undefined,
+  offlineEntities: readonly GlobalOfflineEntity[],
+  offlineOverlays: Readonly<
+    Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
+  >,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   const isOffScreenFromContext = useContext(IsOffScreenContext);
 
@@ -169,6 +198,23 @@ export function useMultipleItems<
   const fetchQueriesWithId = shouldDebounceFetchQueries
     ? debouncedFetchQueriesWithId
     : queriesWithId;
+  const offlineEntitiesByKey = useMemo(
+    () => createOfflineEntityLookup(offlineEntities),
+    [offlineEntities],
+  );
+  const activeOfflineOverlays = useMemo(
+    () => filterActiveOfflineOverlays(offlineEntitiesByKey, offlineOverlays),
+    [offlineEntitiesByKey, offlineOverlays],
+  );
+  const getUnresolvedPendingInvalidationFields = useCallback(
+    (itemKey: string): string[] => {
+      return excludeLoadedFields(
+        store.state.itemLoadedFields[itemKey],
+        itemPendingInvalidationFields.get(itemKey),
+      );
+    },
+    [itemPendingInvalidationFields, store],
+  );
 
   const resultSelector = useCallback(
     (state: State) => {
@@ -182,10 +228,13 @@ export function useMultipleItems<
           showPartialAsRefetching,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
+          const overlay = activeOfflineOverlays[itemKey];
+          const hasOverlay = overlay !== undefined;
           const itemQuery = state.itemQueries[itemKey];
-          const rawItemState = state.items[itemKey];
-          const hasCachedDataInState =
-            rawItemState !== null && rawItemState !== undefined;
+          const rawItemState = hasOverlay ? overlay.item : state.items[itemKey];
+          const resolvedItemPayload =
+            overlay?.itemPayload ?? itemQuery?.payload ?? payload;
+          const hasCachedDataInState = rawItemState != null;
           const loadedFields = state.itemLoadedFields[itemKey] ?? [];
           let itemState = rawItemState;
           let loadingFields: string[] | undefined;
@@ -201,7 +250,7 @@ export function useMultipleItems<
           }
 
           const data = selector
-            ? selector(itemState ?? null, itemQuery?.payload ?? null)
+            ? selector(itemState ?? null, resolvedItemPayload)
             : // WORKAROUND: Runtime selector presence does not narrow Selected, so the unselected path must forward the raw item state through the generic.
               __LEGIT_CAST__<Selected, ItemState | null>(itemState ?? null);
           const resultQueryMetadata =
@@ -210,27 +259,48 @@ export function useMultipleItems<
               queryMetadata,
             );
 
-          if (itemQuery === null) {
+          if (hasOverlay ? overlay.item === null : itemQuery === null) {
             return {
               itemStateKey: itemKey,
               status: 'deleted',
               error: null,
               isLoading: false,
-              payload,
+              payload: resolvedItemPayload,
               data,
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(itemKey),
+              ),
               queryMetadata: resultQueryMetadata,
             };
           }
 
           if (!itemQuery) {
+            if (hasOverlay && overlay.item !== null) {
+              return {
+                itemStateKey: itemKey,
+                status: 'success',
+                error: null,
+                isLoading: false,
+                payload: resolvedItemPayload,
+                data,
+                pendingSync: getIsPendingOfflineSync(
+                  offlineEntitiesByKey.get(itemKey),
+                ),
+                queryMetadata: resultQueryMetadata,
+              };
+            }
+
             if (loadFromStateOnly) {
               return {
                 itemStateKey: itemKey,
                 status: 'error',
                 error: cacheMissError,
                 isLoading: false,
-                payload,
+                payload: resolvedItemPayload,
                 data,
+                pendingSync: getIsPendingOfflineSync(
+                  offlineEntitiesByKey.get(itemKey),
+                ),
                 queryMetadata: resultQueryMetadata,
               };
             }
@@ -252,8 +322,11 @@ export function useMultipleItems<
               ...(pendingLoadingFields
                 ? { loadingFields: pendingLoadingFields }
                 : {}),
-              payload,
+              payload: resolvedItemPayload,
               data,
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(itemKey),
+              ),
               queryMetadata: resultQueryMetadata,
             };
           }
@@ -269,9 +342,7 @@ export function useMultipleItems<
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
-            const missingFields = fields.filter(
-              (f) => !loadedFields.includes(f),
-            );
+            const missingFields = excludeLoadedFields(loadedFields, fields);
             const hasMissingFields = missingFields.length > 0;
             let missingFieldsAreAvailableInState = false;
 
@@ -301,8 +372,9 @@ export function useMultipleItems<
 
           if (partialResources && showPartialAsRefetching) {
             if (Array.isArray(fields) && fields.length > 0) {
-              const pendingRequestedFields = fields.filter(
-                (field) => !loadedFields.includes(field),
+              const pendingRequestedFields = excludeLoadedFields(
+                loadedFields,
+                fields,
               );
 
               if (pendingRequestedFields.length > 0) {
@@ -344,17 +416,27 @@ export function useMultipleItems<
             ...(loadingFields ? { loadingFields } : {}),
             data: shouldHideDataWhileLoading
               ? selector
-                ? selector(null, itemQuery.payload)
+                ? selector(null, resolvedItemPayload)
                 : // WORKAROUND: Runtime selector presence does not narrow Selected, so the loading fallback has to re-express the null result.
                   __LEGIT_CAST__<Selected, null>(null)
               : data,
-            payload,
+            payload: resolvedItemPayload,
+            pendingSync: getIsPendingOfflineSync(
+              offlineEntitiesByKey.get(itemKey),
+            ),
             queryMetadata: resultQueryMetadata,
           };
         },
       );
     },
-    [loadFromStateOnly, queriesWithId, selector, partialResources],
+    [
+      activeOfflineOverlays,
+      loadFromStateOnly,
+      offlineEntitiesByKey,
+      partialResources,
+      queriesWithId,
+      selector,
+    ],
   );
 
   const autoFetchSignalSelector = useCallback(
@@ -364,7 +446,7 @@ export function useMultipleItems<
         const loadedFields = state.itemLoadedFields[itemKey] ?? [];
         const missingRequestedFields =
           partialResources && Array.isArray(fields) && fields.length > 0
-            ? fields.filter((field) => !loadedFields.includes(field)).sort()
+            ? excludeLoadedFields(loadedFields, fields).sort()
             : [];
 
         return {
@@ -380,6 +462,121 @@ export function useMultipleItems<
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
+  const visibleStoreState = useMemo(() => {
+    return storeState.map(
+      (
+        result,
+        index,
+      ): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
+        const query = queriesWithId[index];
+        if (
+          result.status !== 'loading' &&
+          result.status !== 'idle' &&
+          !(result.status === 'error' && result.error?.id === cacheMissError.id)
+        ) {
+          return result;
+        }
+
+        if (loadFromStateOnly) return result;
+
+        if (query && readFallbackItemState) {
+          const fallbackItemState = readFallbackItemState(query.itemKey);
+          const overlay = activeOfflineOverlays[result.itemStateKey];
+          const hasOverlay = overlay !== undefined;
+          const hasAllRequestedFallbackFields =
+            !partialResources ||
+            query.fields === undefined ||
+            query.fields === '*' ||
+            fallbackItemHasRequestedFields(fallbackItemState, query.fields);
+
+          if (!hasAllRequestedFallbackFields) return result;
+
+          const fallbackItemQuery =
+            hasOverlay &&
+            overlay.item !== null &&
+            fallbackItemState?.itemQuery == null
+              ? {
+                  status: 'success' as const,
+                  wasLoaded: true,
+                  refetchOnMount: false,
+                  error: null,
+                  payload: overlay.itemPayload ?? query.payload,
+                }
+              : fallbackItemState?.itemQuery;
+          const fallbackItemPayload =
+            overlay?.itemPayload ?? fallbackItemQuery?.payload ?? query.payload;
+
+          if (hasOverlay ? overlay.item === null : fallbackItemQuery === null) {
+            return {
+              itemStateKey: result.itemStateKey,
+              status: 'deleted',
+              error: null,
+              isLoading: false,
+              payload: fallbackItemPayload,
+              data: selector
+                ? selector(null, null)
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so the deleted fallback still has to express null through the caller's generic.
+                  __LEGIT_CAST__<Selected, null>(null),
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(result.itemStateKey),
+              ),
+              queryMetadata: result.queryMetadata,
+            };
+          }
+
+          const fallbackItem = hasOverlay
+            ? overlay.item
+            : (fallbackItemState?.item ?? undefined);
+
+          if (
+            fallbackItemQuery &&
+            fallbackItem !== undefined &&
+            fallbackItem !== null
+          ) {
+            let itemState = fallbackItem;
+
+            if (
+              partialResources &&
+              Array.isArray(query.fields) &&
+              query.fields.length > 0
+            ) {
+              itemState = partialResources.selectFields(
+                query.fields,
+                itemState,
+              );
+            }
+
+            return {
+              itemStateKey: result.itemStateKey,
+              status: 'success',
+              error: null,
+              isLoading: false,
+              payload: fallbackItemPayload,
+              data: selector
+                ? selector(itemState, fallbackItemPayload)
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so fallback item data still has to flow through the caller's generic unchanged.
+                  __LEGIT_CAST__<Selected, ItemState>(itemState),
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(result.itemStateKey),
+              ),
+              queryMetadata: result.queryMetadata,
+            };
+          }
+        }
+
+        return result;
+      },
+    );
+  }, [
+    loadFromStateOnly,
+    activeOfflineOverlays,
+    offlineEntitiesByKey,
+    partialResources,
+    queriesWithId,
+    readFallbackItemState,
+    selector,
+    storeState,
+  ]);
   const autoFetchSignals = store.useSelectorRC(autoFetchSignalSelector, {
     equalityFn: deepEqual,
   });
@@ -435,16 +632,40 @@ export function useMultipleItems<
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
+  useIsomorphicLayoutEffect(() => {
+    if (
+      loadFromStateOnly ||
+      !preloadItemsBeforePaint ||
+      !preloadItems ||
+      fetchQueriesWithId.length < 1
+    ) {
+      return;
+    }
+
+    void preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
+  }, [
+    fetchQueriesWithId,
+    loadFromStateOnly,
+    preloadItems,
+    preloadItemsBeforePaint,
+  ]);
+
   useEffect(() => {
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadItems && fetchQueriesWithId.length > 0) {
+      if (loadFromStateOnly) return;
+
+      if (
+        !preloadItemsBeforePaint &&
+        preloadItems &&
+        fetchQueriesWithId.length > 0
+      ) {
         await preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
 
-      if (loadFromStateOnly || !fetchItemFn) return;
+      if (!fetchItemFn) return;
 
       const removedItems = new Set(ignoreItemsInRefetchOnMount);
 
@@ -475,47 +696,60 @@ export function useMultipleItems<
           itemState?.status === 'loading' || itemState?.status === 'refetching';
 
         // For partial resources, check if all requested fields are loaded
-        if (
-          partialResources &&
-          !shouldFetch &&
-          Array.isArray(fields) &&
-          fields.length > 0
-        ) {
+        if (partialResources && !shouldFetch) {
           const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-          const missingFields = fields.filter((f) => !loadedFields.includes(f));
-          const hasMissingFields = missingFields.length > 0;
-          const pendingInvalidationFields =
-            itemPendingInvalidationFields.get(itemKey);
           const unresolvedPendingInvalidationFields =
-            pendingInvalidationFields?.filter(
-              (field) => !loadedFields.includes(field),
-            ) ?? [];
-          const hasAffectedFieldInvalidation =
-            unresolvedPendingInvalidationFields.length > 0 &&
-            fields.some((field) =>
-              unresolvedPendingInvalidationFields.includes(field),
-            );
+            getUnresolvedPendingInvalidationFields(itemKey);
+          const invalidationPriority =
+            unresolvedPendingInvalidationFields.length > 0
+              ? itemFieldInvalidationPriorities.get(itemKey)
+              : undefined;
 
-          if (hasMissingFields && !itemFetchIsActive) {
+          if (Array.isArray(fields) && fields.length > 0) {
+            const missingFields = excludeLoadedFields(loadedFields, fields);
+            const hasMissingFields = missingFields.length > 0;
+            const hasAffectedFieldInvalidation =
+              unresolvedPendingInvalidationFields.length > 0 &&
+              fields.some((field) =>
+                unresolvedPendingInvalidationFields.includes(field),
+              );
+
+            if (hasMissingFields && !itemFetchIsActive) {
+              shouldFetch = true;
+              requiredFetch = true;
+              fieldsToFetch = missingFields;
+              // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+              // Keep stronger priorities intact; only lift low priority.
+              if (fetchType === 'lowPriority') {
+                fetchType = 'highPriority';
+              }
+            }
+
+            if (
+              hasAffectedFieldInvalidation &&
+              invalidationPriority &&
+              fetchTypePriority[invalidationPriority] >
+                fetchTypePriority[fetchType]
+            ) {
+              fetchType = invalidationPriority;
+            }
+          } else if (
+            fields === '*' &&
+            unresolvedPendingInvalidationFields.length > 0 &&
+            !itemFetchIsActive &&
+            !ignoreItemsInRefetchOnMount.has(itemKey)
+          ) {
             shouldFetch = true;
             requiredFetch = true;
-            fieldsToFetch = missingFields;
-            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-            // Keep stronger priorities intact; only lift low priority.
-            if (fetchType === 'lowPriority') {
-              fetchType = 'highPriority';
-            }
-          }
+            fieldsToFetch = unresolvedPendingInvalidationFields;
 
-          const invalidationPriority =
-            itemFieldInvalidationPriorities.get(itemKey);
-          if (
-            hasAffectedFieldInvalidation &&
-            invalidationPriority &&
-            fetchTypePriority[invalidationPriority] >
-              fetchTypePriority[fetchType]
-          ) {
-            fetchType = invalidationPriority;
+            if (
+              invalidationPriority &&
+              fetchTypePriority[invalidationPriority] >
+                fetchTypePriority[fetchType]
+            ) {
+              fetchType = invalidationPriority;
+            }
           }
         }
 
@@ -546,7 +780,6 @@ export function useMultipleItems<
         ignoreItemsInRefetchOnMount.delete(itemKey);
       }
     })();
-
     return () => {
       effectState.cancelled = true;
     };
@@ -554,15 +787,17 @@ export function useMultipleItems<
     ignoreItemsInRefetchOnMount,
     loadFromStateOnly,
     preloadItems,
+    preloadItemsBeforePaint,
     fetchQueriesWithId,
     scheduleAutomaticItemFetch,
     autoFetchSignals,
     fetchItemFn,
     itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
+    getUnresolvedPendingInvalidationFields,
     partialResources,
     store,
   ]);
 
-  return storeState;
+  return visibleStoreState;
 }

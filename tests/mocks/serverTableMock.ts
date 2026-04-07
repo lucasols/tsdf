@@ -831,6 +831,29 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     getAll,
     getByPrefix,
     entries,
+    async delayedSetItem(
+      itemId: string,
+      data: ItemData,
+      options: { durationMs?: number } = {},
+    ): Promise<void> {
+      await sleep(options.durationMs ?? DEFAULT_MUTATION_DURATION_MS);
+      this.setItem(itemId, data);
+    },
+    async delayedUpdateItem(
+      itemId: string,
+      data: Partial<ItemData>,
+      options: { durationMs?: number } = {},
+    ): Promise<void> {
+      await sleep(options.durationMs ?? DEFAULT_MUTATION_DURATION_MS);
+      this.updateItem(itemId, data);
+    },
+    async delayedRemoveItem(
+      itemId: string,
+      options: { durationMs?: number } = {},
+    ): Promise<void> {
+      await sleep(options.durationMs ?? DEFAULT_MUTATION_DURATION_MS);
+      this.removeItem(itemId);
+    },
     setItem,
     removeItem,
     updateItem,

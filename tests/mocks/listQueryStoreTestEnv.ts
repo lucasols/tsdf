@@ -1,7 +1,14 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from '../../src/internal/testTimelineTypes';
 import {
   createListQueryStore,
   type ListQueryBrowserTabsMessage,
@@ -12,6 +19,10 @@ import type {
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type {
+  AnyOfflineOperationDefinition,
+  ListQueryOfflineEntityRef,
+} from '../../src/persistentStorage/offline/types';
+import type {
   ListQueryPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
@@ -20,10 +31,14 @@ import type {
   RequestSchedulerEventData,
   RequestSchedulerEvents,
 } from '../../src/requestScheduler';
-import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
+import { seedListQueryScenarioPersistentStorage } from './seedScenarioPersistentStorage';
 import {
   createServerTableMock,
   createSharedServerTableState,
@@ -32,6 +47,7 @@ import {
 } from './serverTableMock';
 import {
   createActionTracker,
+  createOfflineTimelineTestLogger,
   createEmojiCyclers,
   createPerItemUITracker,
   getDefaultLowPriorityThrottleMs,
@@ -42,6 +58,27 @@ import {
 } from './testEnvUtils';
 
 type ListQueryItemPayload = string;
+
+export type Row = {
+  id: number;
+  name: string;
+  age?: number;
+  city?: string;
+  [key: string]: unknown;
+};
+
+type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
+  string,
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => ListQueryOfflineEntityRef<ListQueryItemPayload>[];
+  }
+> &
+  ([TRow] extends [never] ? never : unknown);
+
+type TestListQueryOfflineOperationsConfig<TRow extends Row> =
+  TestListQueryOfflineOperationsRegistry<TRow> | null;
 
 export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
 
@@ -70,14 +107,6 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
-export type Row = {
-  id: number;
-  name: string;
-  age?: number;
-  city?: string;
-  [key: string]: unknown;
-};
-
 export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
 
 function flattenTables<TRow extends Row>(
@@ -102,6 +131,7 @@ export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  TOfflineOperations extends TestListQueryOfflineOperationsConfig<TRow> = null,
   StorageState = unknown,
 >(
   serverInitialData: Tables<TRow>,
@@ -110,6 +140,7 @@ export function createListQueryStoreTestEnv<
     getSessionKey = () => 'test-session',
     sharedServerTableState,
     browserTabsTransportFactory,
+    testBrowserTabId,
     browserTabsLeadershipTimings,
     bindFocusController,
     dynamicRealtimeThrottleMs,
@@ -140,7 +171,8 @@ export function createListQueryStoreTestEnv<
     getSessionKey?: () => string | false;
     sharedServerTableState?: ServerTableSharedState<TRow>;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
-    browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+    testBrowserTabId?: string;
+    browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
     bindFocusController?: {
       getWindowIsFocused: () => boolean;
@@ -185,7 +217,8 @@ export function createListQueryStoreTestEnv<
       TRow,
       ListQueryParams,
       ListQueryItemPayload,
-      StorageState
+      StorageState,
+      TOfflineOperations
     >;
     storageAdapter?: StorageAdapter;
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
@@ -208,6 +241,10 @@ export function createListQueryStoreTestEnv<
     clearTimeline: clearActionTimeline,
   } = createActionTracker();
   const { getMutationEmoji } = createEmojiCyclers();
+  const offlineTimelineLogger = createOfflineTimelineTestLogger({
+    addAction,
+    getSessionKey,
+  });
 
   const serverTable = createServerTableMock<TRow>(
     flattenTables(serverInitialData),
@@ -263,6 +300,10 @@ export function createListQueryStoreTestEnv<
   };
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
+  const resolvedPersistentStorage =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
 
   async function fetchFromServer(
     { tableId, filters }: ListQueryParams,
@@ -310,12 +351,11 @@ export function createListQueryStoreTestEnv<
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,
-    persistentStorage,
+    persistentStorage: resolvedPersistentStorage,
     optimisticListUpdates,
     partialResources,
     '~test': {
       ...testOptions,
-      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {
@@ -352,6 +392,26 @@ export function createListQueryStoreTestEnv<
             },
           });
         }
+      },
+      onSessionKeyChanged: (event: TestSessionKeyChangedEvent) => {
+        offlineTimelineLogger.onSessionKeyChanged(event);
+        if (resolvedPersistentStorage?.offline) {
+          offlineTimelineLogger.handleSessionKeyChangedForResolutionObserver({
+            event,
+            getOfflineResolutions: () =>
+              listQueryStore
+                .getOfflineResolutions()
+                .map(({ id: resolutionId, operation }) => ({
+                  id: resolutionId,
+                  operation,
+                })),
+            adapter: resolvedPersistentStorage.adapter,
+            config: resolvedPersistentStorage.offline.session.getConfig(),
+          });
+        }
+      },
+      onOfflineTimelineEvent: (event: TestOfflineTimelineEvent) => {
+        offlineTimelineLogger.onOfflineTimelineEvent(event);
       },
     },
     onSchedulerEvent: (
@@ -391,26 +451,54 @@ export function createListQueryStoreTestEnv<
         ) => fetchFromServer(payload, undefined, size, signal, fields),
       };
 
-  const listQueryStore = createListQueryStore<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload,
-    TPartialResources,
-    TOffsetPagination,
-    StorageState
-  >(
-    __LEGIT_CAST__<
-      ListQueryStoreOptions<
-        TRow,
-        ListQueryParams,
-        ListQueryItemPayload,
-        TPartialResources,
-        TOffsetPagination,
-        StorageState
-      >,
-      unknown
-    >(storeOptions),
-  );
+  const unregisterMockStoreInstance =
+    testBrowserTabId === undefined
+      ? () => {}
+      : registerMockStoreInstance({
+          storeId: id,
+          storeType: 'listQuery',
+          testBrowserTabId,
+        });
+
+  let listQueryStore: ReturnType<
+    typeof createListQueryStore<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination,
+      TOfflineOperations,
+      StorageState
+    >
+  >;
+
+  try {
+    listQueryStore = createListQueryStore<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination,
+      TOfflineOperations,
+      StorageState
+    >(
+      __LEGIT_CAST__<
+        ListQueryStoreOptions<
+          TRow,
+          ListQueryParams,
+          ListQueryItemPayload,
+          TPartialResources,
+          TOffsetPagination,
+          TOfflineOperations,
+          StorageState
+        >,
+        unknown
+      >(storeOptions),
+    );
+  } catch (error) {
+    unregisterMockStoreInstance();
+    throw error;
+  }
 
   // Simplified method references for internal test helpers.
   // The store methods have deferred conditional rest params (from boolean generics)
@@ -474,6 +562,20 @@ export function createListQueryStoreTestEnv<
 
     serverTable.wsEvents.on('list_changed', () => {
       addAction('received-ws-list-change-event');
+    });
+  }
+
+  if (resolvedPersistentStorage?.offline) {
+    offlineTimelineLogger.attachResolutionObserver({
+      getOfflineResolutions: () =>
+        listQueryStore
+          .getOfflineResolutions()
+          .map(({ id: resolutionId, operation }) => ({
+            id: resolutionId,
+            operation,
+          })),
+      adapter: resolvedPersistentStorage.adapter,
+      config: resolvedPersistentStorage.offline.session.getConfig(),
     });
   }
 
@@ -630,6 +732,14 @@ export function createListQueryStoreTestEnv<
 
   bindFocusController?.onWindowBlur(() => {
     addAction('🔕 window-blurred');
+  });
+
+  seedListQueryScenarioPersistentStorage({
+    storeName: id,
+    sessionKey: getSessionKey(),
+    persistentStorage: resolvedPersistentStorage ?? null,
+    initialData: testOptions?.initialData,
+    timestamp: testOptions?.initialLastFetchStartTime,
   });
 
   return env;

@@ -261,8 +261,8 @@ describe('maxItemBatchSize behavior', () => {
       "
       time  |
       0     | [table1||1] scheduled-fetch-triggered
-      .     | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
       .     | [table1||3, table1||4] scheduled-fetch-scheduled
+      .     | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
       800ms | 🔴 <list-fetch-finished (value: {"count":2})
       900ms | 🟠 >list-fetch-started (value: {"itemIds":["table1||3","table1||4"]})
       1.7s  | 🟠 <list-fetch-finished (value: {"count":2})

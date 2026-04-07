@@ -135,6 +135,7 @@ export function useListQuery<
             queryKey: '',
             items: [],
             isLoadingMore: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }
         : {
@@ -147,6 +148,7 @@ export function useListQuery<
             queryKey: '',
             items: [],
             isLoadingMore: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }),
     [fields, isInvalidPayload, queryResult],
@@ -154,13 +156,12 @@ export function useListQuery<
 
   const queryKey = hasPayload ? getQueryKey(payload) : '';
   const fetchQuery = hasPayload ? query[0] : undefined;
-  const isPayloadReadyForFetch = hasPayload;
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
     ensureIsLoaded,
-    hasPayload && isPayloadReadyForFetch,
+    hasPayload,
     () => {
-      if (fetchQuery && isPayloadReadyForFetch) {
+      if (fetchQuery && hasPayload) {
         scheduleListQueryFetch(
           'highPriority',
           fetchQuery.payload,
@@ -172,17 +173,14 @@ export function useListQuery<
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (
-      !ensureIsLoaded ||
-      !hasPayload ||
-      !isPayloadReadyForFetch ||
-      !queryKey
-    ) {
+    if (!ensureIsLoaded || !hasPayload || !queryKey) {
       return;
     }
 
     observe
-      .ifSelector((state) => state.queries[queryKey]?.status)
+      .ifSelector((state) => {
+        return state.queries[queryKey]?.status;
+      })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
           emitIsLoadedEvt();

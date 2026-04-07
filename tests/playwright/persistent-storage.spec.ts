@@ -2,20 +2,22 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 const SAVE_DEBOUNCE_MS = 1000;
 
-type StorageBackend = 'localStorage' | 'opfs';
-
 async function openScenario(
   context: BrowserContext,
   scenario: 'persist-document' | 'persist-collection' | 'persist-list',
   pageId: string,
-  options: { storeId: string; backend: StorageBackend; sessionKey?: string },
+  options: {
+    storeId: string;
+    adapterKey: AdapterCase['adapterKey'];
+    sessionKey?: string;
+  },
 ) {
   const page = await context.newPage();
   const searchParams = new URLSearchParams({
     scenario,
     pageId,
     storeId: options.storeId,
-    backend: options.backend,
+    adapter: options.adapterKey,
   });
 
   if (options.sessionKey) {
@@ -30,8 +32,16 @@ async function waitForDebounce(page: Page): Promise<void> {
   await page.waitForTimeout(SAVE_DEBOUNCE_MS + 200);
 }
 
-for (const backend of ['localStorage', 'opfs'] as const) {
-  test.describe(`persistent storage — ${backend}`, () => {
+type AdapterCase = {
+  adapterKey: 'localStorage' | 'opfs';
+  label: 'localStorage' | 'opfs';
+};
+
+for (const adapterCase of [
+  { adapterKey: 'localStorage', label: 'localStorage' },
+  { adapterKey: 'opfs', label: 'opfs' },
+] as const satisfies readonly AdapterCase[]) {
+  test.describe(`persistent storage — ${adapterCase.label}`, () => {
     test.beforeEach(async ({ request }) => {
       await request.post('/api/test/reset');
     });
@@ -41,8 +51,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-document', 'page-a', {
-        storeId: `doc-${backend}-basic`,
-        backend,
+        storeId: `doc-${adapterCase.label}-basic`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-doc-status')).toHaveText(
@@ -69,8 +79,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-document', 'page-a', {
-        storeId: `doc-${backend}-mutate`,
-        backend,
+        storeId: `doc-${adapterCase.label}-mutate`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-doc-status')).toHaveText(
@@ -100,8 +110,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-document', 'page-a', {
-        storeId: `doc-${backend}-clear`,
-        backend,
+        storeId: `doc-${adapterCase.label}-clear`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-doc-status')).toHaveText(
@@ -127,8 +137,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-collection', 'page-a', {
-        storeId: `col-${backend}-basic`,
-        backend,
+        storeId: `col-${adapterCase.label}-basic`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
@@ -157,8 +167,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-collection', 'page-a', {
-        storeId: `col-${backend}-mutate`,
-        backend,
+        storeId: `col-${adapterCase.label}-mutate`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
@@ -189,8 +199,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-collection', 'page-a', {
-        storeId: `col-${backend}-clear`,
-        backend,
+        storeId: `col-${adapterCase.label}-clear`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
@@ -215,8 +225,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-list', 'page-a', {
-        storeId: `list-${backend}-basic`,
-        backend,
+        storeId: `list-${adapterCase.label}-basic`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-list-status')).toHaveText(
@@ -244,8 +254,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-list', 'page-a', {
-        storeId: `list-${backend}-mutate`,
-        backend,
+        storeId: `list-${adapterCase.label}-mutate`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-list-status')).toHaveText(
@@ -275,8 +285,8 @@ for (const backend of ['localStorage', 'opfs'] as const) {
     }) => {
       const context = await browser.newContext();
       const page = await openScenario(context, 'persist-list', 'page-a', {
-        storeId: `list-${backend}-clear`,
-        backend,
+        storeId: `list-${adapterCase.label}-clear`,
+        adapterKey: adapterCase.adapterKey,
       });
 
       await expect(page.getByTestId('persist-list-status')).toHaveText(

@@ -4,22 +4,66 @@ import {
 } from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { unknownToError, type Result } from 't-result';
+import { useCallback } from 'react';
+import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
-import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
+import {
+  CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
+  createIdleThrottledScheduler,
+} from '../cacheLimits/scheduleIdleThrottled';
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
+import {
+  wrapGetSessionKeyForTest,
+  wrapOfflineOperationsForTimeline,
+} from '../internal/offlineTestInstrumentation';
+import type {
+  TestOfflineTimelineEvent,
+  TestSessionKeyChangedEvent,
+} from '../internal/testTimelineTypes';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
+import {
+  isOfflineConnectivityError,
+  offlineConnectivityError,
+} from '../persistentStorage/offline/fetchRuntime';
+import {
+  type OfflineAwareMutationController,
+  type OfflineMutationResult,
+  runHybridOfflineMutation,
+} from '../persistentStorage/offline/mutationRuntime';
+import {
+  captureOfflineOverlayEntries,
+  rebindOfflineOverlayEntries,
+} from '../persistentStorage/offline/overlayStoreLifecycle';
+import {
+  useOfflineStoreEntities,
+  useOfflineStoreResolutions,
+} from '../persistentStorage/offline/sessionCoordinator';
+import {
+  createOfflineStoreController,
+  initializeOfflineStoreController,
+  offlineSessionUnavailableError,
+} from '../persistentStorage/offline/storeController';
+import {
+  offlineItemEntityRefSchema,
+  OfflineResolutionConflictParseError,
+  type AnyOfflineOperationDefinition,
+  type CollectionOfflineEntityRef,
+  type OfflineMutationInput,
+  type ParsedOfflineResolutionConflictResultForOperation,
+  type OfflineResolutionRecordForOperation,
+  type OfflineResolutionActionForOperation,
+} from '../persistentStorage/offline/types';
+import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
-  StorageAdapter,
 } from '../persistentStorage/types';
 import {
   BatchRequest,
@@ -51,8 +95,12 @@ import {
 } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
+  AbortedStoreError,
+  DEFAULT_BATCH_KEY,
   fetchTypePriority,
+  NotFoundStoreError,
   StoreFetchError,
+  TimeoutStoreError,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
@@ -96,6 +144,8 @@ export type TSFDUseCollectionItemReturn<
   error: StoreError | null;
   itemStateKey: string;
   isLoading: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
   queryMetadata: QueryMetadata;
 };
 
@@ -133,6 +183,8 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationStart: { mutationId: number; items: ItemPayload[] };
   /** Emitted when a mutation completes or fails */
   mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
+  /** Emitted when an offline temp item is reconciled to its final payload. */
+  tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
 export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
@@ -174,9 +226,33 @@ type CollectionItemSnapshotMessage<
   { kind: 'collection-item-snapshot' }
 >;
 
+type InternalCollectionOfflineOperations<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = Record<
+  string,
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => CollectionOfflineEntityRef<ItemPayload>[];
+  }
+> &
+  ([ItemState | ItemPayload] extends [never] ? never : unknown);
+
+type CollectionOfflineOperationsConfig<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
+
+const EMPTY_COLLECTION_OFFLINE_OPERATIONS = {};
+
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  > = null,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -230,11 +306,13 @@ export type CollectionStoreOptions<
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`. */
+   * Session scoping always reuses this store's `getSessionKey`, and the
+   * persisted namespace always reuses this store's `id`. */
   persistentStorage?: CollectionPersistentStorageConfig<
     ItemState,
     ItemPayload,
-    StorageState
+    StorageState,
+    TOfflineOperations
   >;
   /** @internal */
   '~test'?: {
@@ -252,24 +330,33 @@ export type CollectionStoreOptions<
     onReceiveRemoteMsg?: (
       message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
     ) => void;
-    storageAdapter?: StorageAdapter;
+    onSessionKeyChanged?: (event: TestSessionKeyChangedEvent) => void;
+    onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
   };
 };
 
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-> = ReturnType<typeof createCollectionStore<ItemState, ItemPayload>>;
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  > = null,
+> = ReturnType<
+  typeof createCollectionStore<ItemState, ItemPayload, TOfflineOperations>
+>;
 
-type CollectionStoreEvents = {
+export type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };
 };
-
-const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  > = null,
   StorageState = unknown,
 >({
   debugName,
@@ -296,13 +383,31 @@ export function createCollectionStore<
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: CollectionStoreOptions<ItemState, ItemPayload, StorageState>) {
+}: CollectionStoreOptions<
+  ItemState,
+  ItemPayload,
+  TOfflineOperations,
+  StorageState
+>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
+  type CollectionOfflineOverlay = {
+    data: ItemState | null;
+    payload?: ItemPayload;
+    keepVisibleWhileResolutionRequired?: boolean;
+  };
+  type ResolvedOfflineOperations = TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
 
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastCollectionSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  const offlineOverlayStore = new Store<
+    Record<string, CollectionOfflineOverlay>
+  >({ debugName: `${id}:collection-offline-overlays`, state: () => ({}) });
+  offlineOverlayStore.initializeStore();
+  let offlineOverlaySessionKey: string | null = null;
   const itemCacheRuntime = createLruCacheRuntime();
 
   let initialData:
@@ -312,6 +417,18 @@ export function createCollectionStore<
   let initialStatus: CollectionItemStatus = 'success';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const getSessionKeyForRuntime =
+    import.meta.env.TEST && testOptions
+      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
+      : getSessionKey;
+
+  const resolvedPersistentStorageConfig = persistentStorageConfig
+    ? {
+        ...persistentStorageConfig,
+        getSessionKey: getSessionKeyForRuntime,
+        storeName: id,
+      }
+    : null;
 
   if (import.meta.env.TEST && testOptions) {
     if (testOptions.initialData) {
@@ -332,11 +449,10 @@ export function createCollectionStore<
   }
 
   // Persistent storage setup
-  const persistence = persistentStorageConfig
-    ? setupCollectionPersistence(
-        { ...persistentStorageConfig, getSessionKey },
-        { adapter: testOptions?.storageAdapter, getItemKey },
-      )
+  const persistence = resolvedPersistentStorageConfig
+    ? setupCollectionPersistence(resolvedPersistentStorageConfig, {
+        getItemKey,
+      })
     : null;
 
   const store = new Store<CollectionState>({
@@ -369,10 +485,191 @@ export function createCollectionStore<
     );
   }
 
+  function clearOfflineOverlays(nextSessionKey: string | null = null): void {
+    offlineOverlaySessionKey = nextSessionKey;
+    offlineOverlayStore.setState({});
+  }
+
+  function rebindOfflineOverlays(
+    itemKeyRewrites: readonly {
+      previousItemKey: string;
+      nextItemKey: string;
+    }[],
+  ): void {
+    rebindOfflineOverlayEntries({
+      itemKeyRewrites,
+      overlayStore: offlineOverlayStore,
+      createReboundOverlay: ({ existingOverlay, nextItemKey }) => ({
+        data: existingOverlay.data ?? null,
+        payload: store.state[nextItemKey]?.payload ?? existingOverlay.payload,
+        keepVisibleWhileResolutionRequired: true,
+      }),
+    });
+  }
+
+  function captureOfflineOverlays(itemKeys: readonly string[]): void {
+    captureOfflineOverlayEntries({
+      itemKeys,
+      overlayStore: offlineOverlayStore,
+      createOverlay: (itemKey) => {
+        const item = store.state[itemKey];
+
+        return {
+          data: item ? klona(item.data) : null,
+          payload: item ? klona(item.payload) : undefined,
+        };
+      },
+    });
+  }
+  const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
+  // WORKAROUND: Session-only offline config omits operations, so collection stores normalize that case to an empty registry before passing it through the generic offline controller surface.
+  const resolvedOfflineOperations = __LEGIT_CAST__<
+    ResolvedOfflineOperations,
+    unknown
+  >(resolvedOfflineConfig?.operations ?? EMPTY_COLLECTION_OFFLINE_OPERATIONS);
+
+  const offlineOperationsForRuntime =
+    import.meta.env.TEST &&
+    testOptions?.onOfflineTimelineEvent &&
+    resolvedOfflineConfig
+      ? wrapOfflineOperationsForTimeline(
+          resolvedOfflineOperations,
+          testOptions.onOfflineTimelineEvent,
+        )
+      : resolvedOfflineOperations;
+
+  const offlineController =
+    resolvedPersistentStorageConfig && resolvedOfflineConfig
+      ? createOfflineStoreController<ResolvedOfflineOperations>({
+          storeName: id,
+          storeType: 'collection',
+          getSessionKey: getSessionKeyForRuntime,
+          onPersistentStorageError:
+            resolvedPersistentStorageConfig.onPersistentStorageError,
+          adapter: resolvedPersistentStorageConfig.adapter,
+          offlineSession: resolvedOfflineConfig.session,
+          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
+          operations: __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
+            offlineOperationsForRuntime,
+          ),
+          storeAdapter: {
+            normalizeEntityRefs: (entityRefs) =>
+              entityRefs.map((ref) => {
+                // Temp entities are queued internally as normalized refs.
+                const normalizedRef = offlineItemEntityRefSchema
+                  .parse(ref)
+                  .unwrapOrNull();
+                if (normalizedRef !== null) return normalizedRef;
+
+                return {
+                  entityKey: getItemKey(
+                    // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
+                    __LEGIT_CAST__<ItemPayload, unknown>(ref),
+                  ),
+                  entityKind: 'item' as const,
+                };
+              }),
+            getProtectedCacheKeys: (entityRefs) => {
+              const sessionKey = getSessionKeyForRuntime();
+              if (sessionKey === false) return [];
+              return entityRefs.map((ref) =>
+                createProtectedStorageKey({
+                  backend:
+                    resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                      ? 'opfs'
+                      : 'localStorage',
+                  sessionKey,
+                  storeName: id,
+                  kind: 'collection.item',
+                  key: ref.entityKey,
+                }),
+              );
+            },
+            applyPendingEntity: ({ tempId, pendingEntity }) => {
+              if (!pendingEntity || typeof pendingEntity !== 'object') return;
+              addItemToState(
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when applying queued entities.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+                // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
+                __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+              );
+            },
+            rollbackPendingEntity: ({ tempId }) => {
+              deleteItemState(
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when removing queued temp entities.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+              );
+            },
+            reconcileTempEntity: ({ tempId, reconciliation }) => {
+              const tempPayload =
+                // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
+              const currentItem = getItemState(tempPayload);
+              const finalData =
+                reconciliation.finalData !== undefined
+                  ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the collection store.
+                    __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
+                  : (currentItem?.data ?? undefined);
+              if (finalData === undefined) return;
+              deleteItemState(tempPayload);
+              const finalPayload =
+                // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
+                __LEGIT_CAST__<ItemPayload, ValidPayload>(
+                  reconciliation.finalPayload,
+                );
+              addItemToState(finalPayload, finalData);
+              storeEvents.emit('tempEntityReconciled', {
+                tempId: tempPayload,
+                finalPayload,
+              });
+            },
+            captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey)
+                clearOfflineOverlays(sessionKey);
+              captureOfflineOverlays(
+                entityRefs.flatMap((ref) => {
+                  return ref.entityKind === 'item' ? [ref.entityKey] : [];
+                }),
+              );
+            },
+            rebindQueuedMutationOverlays: ({ itemKeyRewrites, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey)
+                clearOfflineOverlays(sessionKey);
+
+              rebindOfflineOverlays(itemKeyRewrites);
+            },
+            syncEntityOverlays: ({ entities, sessionKey }) => {
+              if (offlineOverlaySessionKey !== sessionKey)
+                clearOfflineOverlays(sessionKey);
+              const activeItemKeys = new Set(
+                entities
+                  .filter((entity) => entity.entityKind === 'item')
+                  .map((entity) => entity.entityKey),
+              );
+
+              offlineOverlayStore.produceState((draft) => {
+                for (const itemKey of Object.keys(draft)) {
+                  if (!activeItemKeys.has(itemKey)) {
+                    delete draft[itemKey];
+                  }
+                }
+              });
+            },
+          },
+        })
+      : null;
+
   function touchItems(itemKeys: string[]): void {
     itemCacheRuntime.touch(itemKeys, (itemKey) => {
       return store.state[itemKey] !== undefined;
     });
+  }
+
+  function touchItemsAndMaybeEnforceLimits(itemKeys: string[]): void {
+    touchItems(itemKeys);
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
+    }
   }
 
   function registerActiveItems(itemKeys: string[]): () => void {
@@ -449,7 +746,7 @@ export function createCollectionStore<
 
   function getBatchKey(payload: ItemPayload): string | false {
     if (!useBatchSchedulers) return false;
-    if (!getItemsBatchKey) return '__default__';
+    if (!getItemsBatchKey) return DEFAULT_BATCH_KEY;
     return getItemsBatchKey(payload);
   }
 
@@ -554,7 +851,7 @@ export function createCollectionStore<
     return scheduler;
   }
 
-  // Per-item schedulers for backward compatibility (when batchFetchFn is NOT provided)
+  // Per-item schedulers used when batch scheduling is disabled for a request.
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
 
   function getOrCreateItemScheduler(
@@ -621,7 +918,7 @@ export function createCollectionStore<
         }
         // batchKey === false → fall through to per-item scheduler
       } else {
-        return getOrCreateBatchKeyScheduler('__default__');
+        return getOrCreateBatchKeyScheduler(DEFAULT_BATCH_KEY);
       }
     }
     return getOrCreateItemScheduler(itemKey);
@@ -712,10 +1009,7 @@ export function createCollectionStore<
 
       lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
       if (snapshotItem !== null) {
-        touchItems([message.itemKey]);
-        if (shouldScheduleCacheLimitEnforcement()) {
-          scheduleCacheLimitEnforcement();
-        }
+        touchItemsAndMaybeEnforceLimits([message.itemKey]);
       }
       return;
     }
@@ -744,10 +1038,7 @@ export function createCollectionStore<
     if (message.item === null && schedulerPayload) {
       cleanupItemResources(message.itemKey, schedulerPayload);
     } else if (message.item !== null) {
-      touchItems([message.itemKey]);
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits([message.itemKey]);
     }
 
     lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
@@ -818,10 +1109,11 @@ export function createCollectionStore<
     >({
       storeType: 'collection',
       storeKey: id,
-      getSessionKey,
+      getSessionKey: getSessionKeyForRuntime,
       onMessage: handleRemoteMessage,
       onSessionChange() {
         lastCollectionSyncVersions.clear();
+        clearOfflineOverlays();
       },
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
@@ -844,16 +1136,16 @@ export function createCollectionStore<
       batchFetchFn,
       errorNormalizer,
       batchKey,
+      offlineController,
     );
 
     const successfulRequests = requests.filter(
       ({ requestId }) => results.get(requestId) === true,
     );
     if (successfulRequests.length > 0) {
-      touchItems(successfulRequests.map(({ requestId }) => requestId));
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits(
+        successfulRequests.map(({ requestId }) => requestId),
+      );
       for (const { requestId } of successfulRequests) {
         publishItemSnapshot(requestId, 'confirmed');
       }
@@ -966,56 +1258,88 @@ export function createCollectionStore<
     const itemId = getItemKey(params);
     const scheduler = getScheduler(itemId, params);
 
+    if (persistence?.hasAsyncPreload && !Object.hasOwn(store.state, itemId)) {
+      await persistence.preloadItems([itemId]);
+    }
+
     const result = await scheduler.awaitFetch(itemId, params, options);
 
     if (result === 'timeout') {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-      };
+      return { data: null, error: new TimeoutStoreError() };
     }
 
     if (result === true) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-      };
+      return { data: null, error: new AbortedStoreError() };
     }
 
-    const item = store.state[itemId];
+    let item = getItemFromStateOrPersistence(itemId, {
+      materializeSyncState: true,
+    });
+
+    if (item?.error?.id === 'offline') {
+      const hydratedItem = persistence?.readHydratedItem(itemId);
+
+      if (hydratedItem?.data) {
+        item = hydratedItem;
+        store.produceState(
+          (draft) => {
+            draft[itemId] = hydratedItem;
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
 
     if (item?.error) {
       return { data: null, error: new StoreFetchError(item.error, 'fetch') };
     }
 
     if (!item?.data) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-      };
+      return { data: null, error: new NotFoundStoreError() };
     }
 
     return { data: item.data, error: null };
   }
 
+  function getItemFromStateOrPersistence(
+    itemKey: string,
+    options: { materializeSyncState?: boolean } = {},
+  ): CollectionItem | null | undefined {
+    const item = store.state[itemKey];
+    if (Object.hasOwn(store.state, itemKey)) return item;
+    const hydratedItem = persistence?.readHydratedItem(itemKey);
+
+    if (
+      hydratedItem &&
+      options.materializeSyncState &&
+      persistence &&
+      !persistence.hasAsyncPreload
+    ) {
+      void persistence.preloadItems([itemKey]);
+
+      if (Object.hasOwn(store.state, itemKey)) {
+        return store.state[itemKey];
+      }
+    }
+
+    return hydratedItem;
+  }
+
   function getItemsKeyArray(
     params: ItemPayload[] | FilterItemsFn | ItemPayload,
   ): { itemKey: string; payload: ItemPayload }[] {
-    const items = store.state;
-
     if (Array.isArray(params)) {
       return params.map((p) => ({ itemKey: getItemKey(p), payload: p }));
     } else if (typeof params === 'function') {
-      return filterAndMap(Object.entries(items), ([itemKey, item]) => {
+      const itemKeys = new Set([
+        ...Object.keys(store.state),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
+
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const item = getItemFromStateOrPersistence(itemKey, {
+          materializeSyncState: true,
+        });
         return item && params(item.payload, item.data)
           ? { itemKey, payload: item.payload }
           : false;
@@ -1081,23 +1405,26 @@ export function createCollectionStore<
       const itemsId = getItemsKeyArray(params);
 
       return filterAndMap(itemsId, ({ itemKey }) => {
-        return store.state[itemKey] || false;
+        return getItemFromStateOrPersistence(itemKey) || false;
       });
     }
 
     if (Array.isArray(params)) {
-      const itemKeys = params.map((payload) => ({
-        itemKey: getItemKey(payload),
-        payload,
-      }));
+      const itemKeys = getItemsKeyArray(params);
 
       return filterAndMap(itemKeys, ({ itemKey }) => {
-        return store.state[itemKey] || false;
+        return (
+          getItemFromStateOrPersistence(itemKey, {
+            materializeSyncState: true,
+          }) || false
+        );
       });
     }
 
     const itemKey = getItemKey(params);
-    return store.state[itemKey];
+    return getItemFromStateOrPersistence(itemKey, {
+      materializeSyncState: true,
+    });
   }
 
   /**
@@ -1109,9 +1436,9 @@ export function createCollectionStore<
   ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
     const payloads = Array.isArray(params) ? params : [params];
 
-    if (!persistence?.hasAsyncPreload) {
+    if (!persistence) {
       persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
+        new Error('Persistent storage preload is not available'),
       );
       return payloads.map((payload) => ({ payload, preloaded: false }));
     }
@@ -1123,10 +1450,7 @@ export function createCollectionStore<
       results[index] ? [getItemKey(payload)] : [],
     );
     if (preloadedItemKeys.length > 0) {
-      touchItems(preloadedItemKeys);
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits(preloadedItemKeys);
     }
     return payloads.map((payload, index) => ({
       payload,
@@ -1141,6 +1465,21 @@ export function createCollectionStore<
     items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ) {
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKeyForRuntime(),
+      inactiveScope: id,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
+    });
+    const offlineOverlaysSelector = useCallback(
+      (state: Record<string, CollectionOfflineOverlay>) => {
+        return state;
+      },
+      [],
+    );
+    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+      offlineOverlaysSelector,
+    );
+
     return useMultipleItemsBase<
       ItemState,
       ItemPayload,
@@ -1153,6 +1492,7 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
+      persistence?.readHydratedItem,
       registerActiveItems,
       touchItems,
       persistence
@@ -1161,9 +1501,12 @@ export function createCollectionStore<
               payloads.map((payload) => getItemKey(payload)),
             )
         : undefined,
+      !!persistence && !persistence.hasAsyncPreload,
       scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
+      offlineEntities,
+      offlineOverlays,
     );
   }
 
@@ -1222,10 +1565,7 @@ export function createCollectionStore<
       itemKey,
       0,
     );
-    touchItems([itemKey]);
-    if (shouldScheduleCacheLimitEnforcement()) {
-      scheduleCacheLimitEnforcement();
-    }
+    touchItemsAndMaybeEnforceLimits([itemKey]);
     publishItemSnapshot(itemKey);
   }
 
@@ -1292,10 +1632,7 @@ export function createCollectionStore<
     });
 
     if (updatedItemKeys.size > 0) {
-      touchItems([...updatedItemKeys]);
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits([...updatedItemKeys]);
       for (const itemKey of updatedItemKeys) {
         const payload = store.state[itemKey]?.payload;
         if (payload) {
@@ -1311,8 +1648,75 @@ export function createCollectionStore<
     return someItemWasUpdated;
   }
 
+  type CollectionMutationPayload =
+    | ItemPayload
+    | ItemPayload[]
+    | false
+    | undefined
+    | null;
+  type CollectionMutationPayloadToUse = ItemPayload | ItemPayload[];
+
+  type CollectionMutationArgs<T> = {
+    optimisticUpdate?: (
+      payload: CollectionMutationPayloadToUse,
+    ) => void | boolean;
+    mutation: (payload: CollectionMutationPayloadToUse) => Promise<T>;
+    onSuccess?: (
+      response: Awaited<T>,
+      payload: CollectionMutationPayloadToUse,
+    ) => void;
+    revalidateOnSuccess?: boolean;
+    silentErrors?: boolean;
+    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+  };
+
+  type CollectionOnlineMutationArgs<T> = CollectionMutationArgs<T> & {
+    offline?: undefined;
+  };
+
+  type CollectionOfflineMutationArgs<T> = CollectionMutationArgs<T> & {
+    /**
+     * When provided, the mutation tries the direct request while the session is
+     * online, but degrades into durable offline queueing when the session is
+     * already offline or the failure is classified as offline/outage. Callers
+     * must not assume a successful result always includes the server payload.
+     */
+    offline: TOfflineOperations extends null
+      ? never
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  };
+
+  /**
+   * Runs a collection mutation for one or more existing item payloads, or for a
+   * mutation with no current item target.
+   *
+   * Pass `null` for create mutations that do not have a pre-generated item id
+   * yet. Returns the direct server result when offline replay is not
+   * configured for this call.
+   */
   async function performMutation<T>(
-    payload: ItemPayload | ItemPayload[] | false | null | undefined,
+    payload: CollectionMutationPayload,
+    args: CollectionOnlineMutationArgs<T>,
+  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  /**
+   * Runs a collection mutation that may fall back to durable offline queueing.
+   *
+   * Pass `null` for create mutations that do not have a pre-generated item id
+   * yet. When the mutation is queued, the result is `{ kind: 'queued' }`
+   * instead of the server payload.
+   */
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
+    args: CollectionOfflineMutationArgs<T>,
+  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
+    args: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  >;
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
     {
       optimisticUpdate,
       mutation,
@@ -1320,28 +1724,25 @@ export function createCollectionStore<
       revalidateOnSuccess,
       onSuccess,
       debounce: _debounce,
-    }: {
-      optimisticUpdate?: (
-        payload: ItemPayload | ItemPayload[],
-      ) => void | boolean;
-      mutation: (payload: ItemPayload | ItemPayload[]) => Promise<T>;
-      onSuccess?: (
-        response: Awaited<T>,
-        payload: ItemPayload | ItemPayload[],
-      ) => void;
-      revalidateOnSuccess?: boolean;
-      silentErrors?: boolean;
-      debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-    },
-  ): Promise<Result<Awaited<T>, StoreError | true>> {
-    const payloadToUse: ItemPayload | ItemPayload[] =
+      offline,
+    }: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  > {
+    const payloadToUse: CollectionMutationPayloadToUse =
       payload === false || payload == null ? [] : payload;
     const affectedItems = Array.isArray(payloadToUse)
       ? payloadToUse
       : [payloadToUse];
 
+    if (offline && offlineController && !offlineController.canQueueMutation()) {
+      return Result.err(offlineSessionUnavailableError);
+    }
+
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
+
+    const directMutation = () => mutation(payloadToUse);
 
     const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payloadToUse),
@@ -1353,18 +1754,36 @@ export function createCollectionStore<
         : undefined,
       debounce: _debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () => mutation(payloadToUse),
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
+              controller: __LEGIT_CAST__<
+                OfflineAwareMutationController<
+                  Exclude<TOfflineOperations, null>
+                > | null,
+                unknown
+              >(offlineController),
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
       onSuccess: (result) => {
         if (revalidateOnSuccess && affectedItems.length > 0) {
           invalidateItem(payloadToUse);
         }
 
-        if (onSuccess) {
-          onSuccess(result, payloadToUse);
+        if (onSuccess && result.kind === 'online') {
+          onSuccess(result.data, payloadToUse);
         }
       },
       onError: (exception) => {
-        const error = errorNormalizer(unknownToError(exception));
+        const error = isOfflineConnectivityError(exception)
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(exception));
 
         if (!silentErrors && onMutationError) {
           onMutationError(exception, { silentErrors });
@@ -1383,6 +1802,22 @@ export function createCollectionStore<
       items: affectedItems,
       success: result.ok,
     });
+
+    if (
+      import.meta.env.TEST &&
+      offline &&
+      result.ok &&
+      result.value.kind === 'queued'
+    ) {
+      testOptions?.onOfflineTimelineEvent?.({
+        operation: offline.operation,
+        phase: 'queued',
+      });
+    }
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
 
     return result;
   }
@@ -1421,11 +1856,9 @@ export function createCollectionStore<
   }
 
   persistence?.attach(store);
+  initializeOfflineStoreController(offlineController);
   if (store.isInitialized) {
-    touchItems(Object.keys(store.state));
-    if (shouldScheduleCacheLimitEnforcement()) {
-      scheduleCacheLimitEnforcement();
-    }
+    touchItemsAndMaybeEnforceLimits(Object.keys(store.state));
   }
 
   /**
@@ -1458,6 +1891,7 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
     browserTabsPriority.reset();
@@ -1596,7 +2030,6 @@ export function createCollectionStore<
     store,
     events,
     storeEvents,
-    scheduler: null,
     get invalidationWasTriggered() {
       return invalidationWasTriggered;
     },
@@ -1611,6 +2044,56 @@ export function createCollectionStore<
     preloadItemFromStorage,
     getItemKey,
     getItemState,
+    getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
+    useOfflineEntities: () => {
+      return useOfflineStoreEntities({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+    },
+    useOfflineResolutions: () => {
+      return useOfflineStoreResolutions({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+    },
+    getOfflineResolutions: () =>
+      offlineController?.getOfflineResolutions() ?? [],
+    parseOfflineResolutionConflict: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolution: OfflineResolutionRecordForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ): ParsedOfflineResolutionConflictResultForOperation<
+      ResolvedOfflineOperations,
+      TName
+    > =>
+      offlineController?.parseOfflineResolutionConflict(resolution) ??
+      Result.err(
+        new OfflineResolutionConflictParseError({
+          code: 'offline-not-configured',
+          operation: resolution.operation,
+        }),
+      ),
+    resolveOfflineResolution: <
+      TName extends keyof ResolvedOfflineOperations & string,
+    >(
+      resolutionId: string,
+      operationName: TName,
+      resolution: OfflineResolutionActionForOperation<
+        ResolvedOfflineOperations,
+        TName
+      >,
+    ) =>
+      offlineController?.resolveOfflineResolution(
+        resolutionId,
+        operationName,
+        resolution,
+      ),
     startMutation,
     invalidateItem,
     updateItemState,

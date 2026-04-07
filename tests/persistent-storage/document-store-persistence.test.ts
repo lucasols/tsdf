@@ -1,14 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, renderHook } from '@testing-library/react';
-import {
-  rc_number,
-  rc_object,
-  rc_parse_json,
-  rc_string,
-  rc_to_standard,
-  rc_unknown,
-} from 'runcheck';
+import { rc_number, rc_object, rc_string, rc_to_standard } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -20,6 +13,15 @@ import {
 } from 'vitest';
 
 import { createDocumentStore } from '../../src/documentStore';
+import {
+  createCompactLocalStorageEntry,
+  parseCompactLocalStorageEntry,
+} from '../../src/persistentStorage/compactLocalStorageEntry';
+import {
+  readManagedLocalStorageSingleEntryByPayload,
+  upsertManagedLocalStorageSingleEntry,
+} from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
@@ -27,46 +29,49 @@ import type {
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
-
-const cacheEntryTimestampSchema = rc_object({
-  data: rc_unknown,
-  timestamp: rc_number,
-  version: rc_number,
-});
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const testDataSchema = rc_object({ name: rc_string, value: rc_number });
 const wrappedSchema = rc_object({ value: testDataSchema });
+const persistentStore = createLocalStoragePersistentTestStore();
 
 type TestData = { name: string; value: number };
 const defaultServerData: TestData = { name: 'test', value: 42 };
+
+function documentStorageKey(storeName: string, sessionKey: string): string {
+  return `tsdf.${sessionKey}.${storeName}`;
+}
+
+function registerManagedDocumentKey(
+  storeName: string,
+  sessionKey: string,
+  lastAccessAt = Date.now(),
+): string {
+  const key = documentStorageKey(storeName, sessionKey);
+  upsertManagedLocalStorageSingleEntry({ storageKey: key, lastAccessAt });
+
+  return key;
+}
 
 function setCachedDocumentData(
   storeName: string,
   sessionKey: string,
   data: TestData,
-  version = 1,
+  version: number | undefined = undefined,
+  timestamp = Date.now(),
 ) {
-  const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> = {
-    data: { data: { value: data } },
-    timestamp: Date.now(),
-    version,
-  };
-  localStorage.setItem(key, JSON.stringify(entry));
+  persistentStore
+    .scope(storeName, sessionKey)
+    .document.seed({ value: data }, { version, timestamp });
 }
 
 function getStoredEntryTimestamp(key: string): number {
-  const raw = localStorage.getItem(key);
-  if (raw === null) {
-    throw new Error(`Missing localStorage entry for ${key}`);
+  const entry = readManagedLocalStorageSingleEntryByPayload(key);
+  if (entry === null) {
+    throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
 
-  const parsed = rc_parse_json(raw, cacheEntryTimestampSchema);
-  if (!parsed.ok) {
-    throw new Error(`Invalid localStorage entry for ${key}`);
-  }
-
-  return parsed.value.timestamp;
+  return entry.lastAccessAt;
 }
 
 function createDocPersistenceEnv(options: {
@@ -81,10 +86,10 @@ function createDocPersistenceEnv(options: {
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
+    id: options.storeName,
     getSessionKey,
     persistentStorage: {
-      storeName: options.storeName,
-      backend: 'localStorage',
+      adapter: 'local-sync',
       schema: wrappedSchema,
       version: options.version,
       onPersistentStorageError: options.onPersistentStorageError,
@@ -106,6 +111,17 @@ afterEach(() => {
 });
 
 describe('localStorage: document store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createDocPersistenceEnv({
+        storeName: 'doc.with-dot',
+        sessionKey: 'sess1',
+      }),
+    ).toThrowError(
+      '[tsdf] store id "doc.with-dot" must not contain "." when persistentStorage is enabled.',
+    );
+  });
+
   test('data is available on first render from cached localStorage', () => {
     setCachedDocumentData('doc1', 'sess1', { name: 'cached', value: 1 });
 
@@ -210,13 +226,19 @@ describe('localStorage: document store persistence', () => {
 
   test('schema validation failure causes cached data to be discarded', () => {
     // Store invalid data (doesn't match wrapped schema { value: { name, value } })
-    const key = 'tsdf.sess1.doc4';
+    const key = documentStorageKey('doc4', 'sess1');
     const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
       data: { data: { invalid: true } },
       timestamp: Date.now(),
       version: 1,
     };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
+    registerManagedDocumentKey('doc4', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
       storeName: 'doc4',
@@ -243,13 +265,92 @@ describe('localStorage: document store persistence', () => {
     const cached = localStorage.getItem('tsdf.sess1.doc5');
     expect(cached).not.toBeNull();
 
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    expect(parsed.data.data).toMatchInlineSnapshot(
+    const parsed = parseCompactLocalStorageEntry(cached);
+    expect(parsed?.value.d).toMatchInlineSnapshot(
       `value: { name: 'test', value: 42 }`,
     );
+  });
+
+  test('failed hook fetch does not create a persisted cache entry', async () => {
+    const storeName = 'doc-fetch-error-no-persist';
+    const sessionKey = 'sess1';
+    const env = createDocPersistenceEnv({ storeName, sessionKey });
+    const renders = createLoggerStore();
+
+    // Fail the first hook-triggered fetch through the normal request path.
+    env.errorInNextFetch('Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useDocument();
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+
+    // Wait past the save debounce window in case the error path accidentally schedules persistence.
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: null
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore.storage.readEntry(
+        documentStorageKey(storeName, sessionKey),
+      ),
+    ).toBeNull();
+  });
+
+  test('failed refetch keeps the previous persisted success snapshot', async () => {
+    const storeName = 'doc-refetch-error-keeps-cache';
+    const sessionKey = 'sess1';
+
+    // Seed a realistic persisted success snapshot that the hook will hydrate first.
+    setCachedDocumentData(storeName, sessionKey, { name: 'cached', value: 1 });
+
+    const env = createDocPersistenceEnv({ storeName, sessionKey });
+    const renders = createLoggerStore();
+
+    // The refetch after hydration should fail, but the previous cached value should remain the persisted snapshot.
+    env.errorInNextFetch('Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:cached, value:1} ⋅ error: null
+      -> status: refetching ⋅ data: {name:cached, value:1} ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: {name:cached, value:1}
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.readEntry<TestData>().data,
+    ).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'cached', value: 1 }
+    `);
   });
 
   test('preload reports unavailable async preload through persistent storage error handler', async () => {
@@ -304,11 +405,12 @@ describe('localStorage: document store persistence', () => {
 
     // Saved data should be the final state
     const cached = localStorage.getItem('tsdf.sess1.doc6');
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    expect(parsed.data.data.value).toMatchInlineSnapshot(`
+    const parsed = parseCompactLocalStorageEntry(cached);
+    expect(
+      __LEGIT_CAST__<PersistedDocumentData<{ value: TestData }>, unknown>({
+        data: parsed?.value.d,
+      }).data.value,
+    ).toMatchInlineSnapshot(`
       name: 'final'
       value: 99
     `);
@@ -462,12 +564,15 @@ describe('localStorage: document store persistence', () => {
   });
 
   test('disableRefetchOnMount keeps cached data without refetching', async () => {
-    setCachedDocumentData('doc-revalidation-no-refetch', 'sess1', {
-      name: 'stale',
-      value: 1,
-    });
-    const key = 'tsdf.sess1.doc-revalidation-no-refetch';
-    const originalTimestamp = getStoredEntryTimestamp(key);
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    setCachedDocumentData(
+      'doc-revalidation-no-refetch',
+      'sess1',
+      { name: 'stale', value: 1 },
+      undefined,
+      originalTimestamp,
+    );
+    const key = documentStorageKey('doc-revalidation-no-refetch', 'sess1');
 
     const env = createDocPersistenceEnv({
       storeName: 'doc-revalidation-no-refetch',
@@ -523,13 +628,18 @@ describe('localStorage: invalid data cleanup', () => {
   });
 
   test('schema validation failure cleans up localStorage entry', async () => {
-    const key = 'tsdf.sess1.cleanup-schema';
+    const key = documentStorageKey('cleanup-schema', 'sess1');
     const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
       data: { data: { invalid: true } },
       timestamp: Date.now(),
-      version: 1,
     };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
+    registerManagedDocumentKey('cleanup-schema', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
       storeName: 'cleanup-schema',
@@ -546,11 +656,9 @@ describe('localStorage: invalid data cleanup', () => {
   });
 
   test('malformed cache entry cleans up localStorage entry', async () => {
-    const key = 'tsdf.sess1.cleanup-malformed';
-    localStorage.setItem(
-      key,
-      JSON.stringify({ timestamp: Date.now(), version: 1, wrongShape: true }),
-    );
+    const key = documentStorageKey('cleanup-malformed', 'sess1');
+    localStorage.setItem(key, JSON.stringify({ wrongShape: true }));
+    registerManagedDocumentKey('cleanup-malformed', 'sess1');
 
     const env = createDocPersistenceEnv({
       storeName: 'cleanup-malformed',
@@ -567,8 +675,9 @@ describe('localStorage: invalid data cleanup', () => {
   });
 
   test('invalid JSON cleans up localStorage entry', async () => {
-    const key = 'tsdf.sess1.cleanup-invalid-json';
+    const key = documentStorageKey('cleanup-invalid-json', 'sess1');
     localStorage.setItem(key, '{invalid');
+    registerManagedDocumentKey('cleanup-invalid-json', 'sess1');
 
     const env = createDocPersistenceEnv({
       storeName: 'cleanup-invalid-json',
@@ -586,14 +695,19 @@ describe('localStorage: invalid data cleanup', () => {
 
   test('timestamp is refreshed on successful localStorage read', async () => {
     const originalTimestamp = Date.now() - 100_000;
-    const key = 'tsdf.sess1.ts-refresh';
+    const key = documentStorageKey('ts-refresh', 'sess1');
     const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
       {
         data: { data: { value: { name: 'cached', value: 1 } } },
         timestamp: originalTimestamp,
-        version: 1,
       };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
+    registerManagedDocumentKey('ts-refresh', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
       storeName: 'ts-refresh',
@@ -607,15 +721,37 @@ describe('localStorage: invalid data cleanup', () => {
     // Advance past idle fallback timeout
     await advanceTime(2100);
 
-    const raw = localStorage.getItem(key);
-    expect(raw).not.toBeNull();
+    expect(getStoredEntryTimestamp(key)).toBeGreaterThan(originalTimestamp);
+  });
 
-    const parsed = rc_parse_json(raw ?? '', cacheEntryTimestampSchema);
-    expect(parsed.ok).toBe(true);
+  test('timestamp refresh is throttled for recent localStorage reads', async () => {
+    const originalTimestamp = Date.now();
+    const key = documentStorageKey('ts-refresh-throttled', 'sess1');
+    const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+      {
+        data: { data: { value: { name: 'cached', value: 1 } } },
+        timestamp: originalTimestamp,
+      };
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
+    registerManagedDocumentKey(
+      'ts-refresh-throttled',
+      'sess1',
+      entry.timestamp,
+    );
 
-    if (parsed.ok) {
-      expect(parsed.value.timestamp).toBeGreaterThan(originalTimestamp);
-    }
+    createDocPersistenceEnv({
+      storeName: 'ts-refresh-throttled',
+      sessionKey: 'sess1',
+    });
+
+    await advanceTime(2100);
+
+    expect(getStoredEntryTimestamp(key)).toBe(originalTimestamp);
   });
 });
 
@@ -623,13 +759,18 @@ describe('standard schema support', () => {
   test('works with Standard Schema v1 via rc_to_standard', () => {
     const standardSchema = rc_to_standard(testDataSchema);
 
-    const key = 'tsdf.sess-std.std-doc';
+    const key = documentStorageKey('std-doc', 'sess-std');
     const entry: StorageCacheEntry<{ data: TestData }> = {
       data: { data: { name: 'standard', value: 99 } },
       timestamp: Date.now(),
-      version: 1,
     };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, undefined),
+      ),
+    );
+    registerManagedDocumentKey('std-doc', 'sess-std', entry.timestamp);
 
     const store = createDocumentStore<TestData>({
       id: 'std-doc',
@@ -639,11 +780,7 @@ describe('standard schema support', () => {
       lowPriorityThrottleMs: 200,
       baseCoalescingWindowMs: 10,
       blockWindowClose: null,
-      persistentStorage: {
-        storeName: 'std-doc',
-        backend: 'localStorage',
-        schema: standardSchema,
-      },
+      persistentStorage: { adapter: 'local-sync', schema: standardSchema },
     });
 
     expect(store.store.state.data).toMatchInlineSnapshot(`

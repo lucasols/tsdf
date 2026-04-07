@@ -157,49 +157,47 @@ function getHigherPriorityFetchType(
 }
 
 export class RequestScheduler<T> {
-  private readonly fetchFn: (
+  readonly #fetchFn: (
     requests: BatchRequest<T>[],
     fetchContext: FetchContext,
   ) => Promise<Map<string, boolean>>;
-  private readonly onEvent:
+  readonly #onEvent:
     | ((
         event: RequestSchedulerEvents,
         data?: RequestSchedulerEventData,
       ) => void)
     | undefined;
-  private readonly lowPriorityThrottleMs: number;
-  private readonly getCoalescingWindowMs: () => number;
-  private readonly dynamicRealtimeThrottleMs:
+  readonly #lowPriorityThrottleMs: number;
+  readonly #getCoalescingWindowMs: () => number;
+  readonly #dynamicRealtimeThrottleMs:
     | ((lastFetchDuration: number) => number)
     | undefined;
-  private readonly mediumPriorityDelayMs: number | undefined;
-  private readonly maxBatchSize: number | undefined;
-  private readonly coalescePayload:
-    | ((existing: T, incoming: T) => T)
-    | undefined;
-  private readonly usesRealTimeUpdates: boolean;
+  readonly #mediumPriorityDelayMs: number | undefined;
+  readonly #maxBatchSize: number | undefined;
+  readonly #coalescePayload: ((existing: T, incoming: T) => T) | undefined;
+  readonly #usesRealTimeUpdates: boolean;
 
-  private state: SchedulerState<T>;
+  #state: SchedulerState<T>;
 
   constructor(options: RequestSchedulerOptions<T>) {
-    this.fetchFn = options.fetchFn;
-    this.onEvent = options.on;
-    this.lowPriorityThrottleMs = options.lowPriorityThrottleMs;
-    this.getCoalescingWindowMs = options.getCoalescingWindowMs;
-    this.dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
-    this.mediumPriorityDelayMs = options.mediumPriorityDelayMs;
-    this.maxBatchSize = options.maxBatchSize;
-    this.coalescePayload = options.coalescePayload;
-    this.usesRealTimeUpdates = options.usesRealTimeUpdates;
+    this.#fetchFn = options.fetchFn;
+    this.#onEvent = options.on;
+    this.#lowPriorityThrottleMs = options.lowPriorityThrottleMs;
+    this.#getCoalescingWindowMs = options.getCoalescingWindowMs;
+    this.#dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
+    this.#mediumPriorityDelayMs = options.mediumPriorityDelayMs;
+    this.#maxBatchSize = options.maxBatchSize;
+    this.#coalescePayload = options.coalescePayload;
+    this.#usesRealTimeUpdates = options.usesRealTimeUpdates;
 
-    this.state = this.createInitialState();
+    this.#state = this.#createInitialState();
 
     if (options.initialLastFetchStartTime !== undefined) {
-      this.state.timing.lastFetchStartTime = options.initialLastFetchStartTime;
+      this.#state.timing.lastFetchStartTime = options.initialLastFetchStartTime;
     }
   }
 
-  private createInitialState(): SchedulerState<T> {
+  #createInitialState(): SchedulerState<T> {
     return {
       phase: { type: 'idle' },
       pending: {
@@ -220,7 +218,7 @@ export class RequestScheduler<T> {
   }
 
   get hasPendingFetch(): boolean {
-    const { phase, pending } = this.state;
+    const { phase, pending } = this.#state;
     return (
       phase.type !== 'idle' ||
       pending.scheduledRequests.size > 0 ||
@@ -230,39 +228,39 @@ export class RequestScheduler<T> {
   }
 
   get fetchIsInProgress(): boolean {
-    return this.state.phase.type === 'fetching';
+    return this.#state.phase.type === 'fetching';
   }
 
   get mutationIsInProgress(): boolean {
-    for (const count of this.state.pending.mutationsInProgress.values()) {
+    for (const count of this.#state.pending.mutationsInProgress.values()) {
       if (count > 0) return true;
     }
     return false;
   }
 
   isMutationInProgress(requestId: string): boolean {
-    const count = this.state.pending.mutationsInProgress.get(requestId);
+    const count = this.#state.pending.mutationsInProgress.get(requestId);
     return count !== undefined && count > 0;
   }
 
   setLastFetchDuration(duration: number): void {
-    this.state.timing.lastFetchDuration = duration;
+    this.#state.timing.lastFetchDuration = duration;
   }
 
   setLastFetchStartTime(startTime: number): void {
-    this.state.timing.lastFetchStartTime = startTime;
+    this.#state.timing.lastFetchStartTime = startTime;
   }
 
   setLastFetchStartTimeForRequest(requestId: string, startTime: number): void {
     const currentStartTime =
-      this.state.timing.lastFetchStartTimePerRequest.get(requestId);
+      this.#state.timing.lastFetchStartTimePerRequest.get(requestId);
 
     if (currentStartTime === undefined || startTime > currentStartTime) {
-      this.state.timing.lastFetchStartTimePerRequest.set(requestId, startTime);
+      this.#state.timing.lastFetchStartTimePerRequest.set(requestId, startTime);
     }
 
-    if (startTime > this.state.timing.lastFetchStartTime) {
-      this.state.timing.lastFetchStartTime = startTime;
+    if (startTime > this.#state.timing.lastFetchStartTime) {
+      this.#state.timing.lastFetchStartTime = startTime;
     }
   }
 
@@ -277,29 +275,29 @@ export class RequestScheduler<T> {
     startedAt: number,
     duration: number,
   ): void {
-    const previousStartTime = this.state.timing.lastFetchStartTime;
+    const previousStartTime = this.#state.timing.lastFetchStartTime;
     this.syncExternalFetchStart(requestIds, startedAt);
 
     if (startedAt > previousStartTime) {
-      this.state.timing.lastFetchStartTime = startedAt;
-      this.state.timing.lastFetchDuration = duration;
+      this.#state.timing.lastFetchStartTime = startedAt;
+      this.#state.timing.lastFetchDuration = duration;
       return;
     }
 
-    if (startedAt === this.state.timing.lastFetchStartTime) {
-      this.state.timing.lastFetchDuration = Math.max(
-        this.state.timing.lastFetchDuration,
+    if (startedAt === this.#state.timing.lastFetchStartTime) {
+      this.#state.timing.lastFetchDuration = Math.max(
+        this.#state.timing.lastFetchDuration,
         duration,
       );
     }
   }
 
   getFetchIsInProgress(): boolean {
-    return this.state.phase.type === 'fetching';
+    return this.#state.phase.type === 'fetching';
   }
 
   getCurrentBatchSize(): number {
-    const { phase } = this.state;
+    const { phase } = this.#state;
     if (phase.type === 'coalescing') {
       return phase.pendingRequests.size;
     }
@@ -312,12 +310,12 @@ export class RequestScheduler<T> {
     payload: T,
     options?: ScheduleFetchOptions,
   ): ScheduleFetchResults {
-    return this.scheduleRequest(
+    return this.#scheduleRequest(
       requestId,
       fetchType,
       payload,
       options,
-      this.hasKnownRequest(requestId),
+      this.#hasKnownRequest(requestId),
     );
   }
 
@@ -328,19 +326,23 @@ export class RequestScheduler<T> {
   ): Promise<boolean | 'timeout'> {
     const { timeoutMs = 30_000 } = options;
 
-    this.scheduleRequest(requestId, 'highPriority', payload, undefined, false);
+    this.#scheduleRequest(requestId, 'highPriority', payload, undefined, false);
 
-    const fetchPromise = this.waitForRequest(requestId);
+    const fetchPromise = this.#waitForRequest(requestId);
 
+    let timeoutId: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<'timeout'>((resolve) => {
-      setTimeout(() => resolve('timeout'), timeoutMs);
+      timeoutId = setTimeout(() => resolve('timeout'), timeoutMs);
     });
 
-    return Promise.race([fetchPromise, timeoutPromise]);
+    return Promise.race([fetchPromise, timeoutPromise]).then((result) => {
+      clearTimeout(timeoutId);
+      return result;
+    });
   }
 
-  private async waitForRequest(requestId: string): Promise<boolean> {
-    const { phase, pending } = this.state;
+  async #waitForRequest(requestId: string): Promise<boolean> {
+    const { phase, pending } = this.#state;
 
     const scheduledRequest = pending.scheduledRequests.get(requestId);
     if (scheduledRequest) {
@@ -358,8 +360,8 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (this.state.phase.type === 'fetching') {
-      const fetchingRequest = this.state.phase.fetchingRequests.get(requestId);
+    if (this.#state.phase.type === 'fetching') {
+      const fetchingRequest = this.#state.phase.fetchingRequests.get(requestId);
       if (fetchingRequest) {
         await new Promise<void>((resolve) => {
           fetchingRequest.awaitCallbacks.push(() => resolve());
@@ -367,11 +369,11 @@ export class RequestScheduler<T> {
       }
     }
 
-    return this.state.lastAbortedRequests.has(requestId);
+    return this.#state.lastAbortedRequests.has(requestId);
   }
 
   startMutation(requestId: string): () => boolean {
-    const { phase, pending, abort } = this.state;
+    const { phase, pending, abort } = this.#state;
 
     const currentCount = pending.mutationsInProgress.get(requestId) ?? 0;
     pending.mutationsInProgress.set(requestId, currentCount + 1);
@@ -382,12 +384,12 @@ export class RequestScheduler<T> {
       const request = phase.pendingRequests.get(requestId);
       if (request) {
         phase.pendingRequests.delete(requestId);
-        this.state.pending.scheduledRequests.set(requestId, request);
+        this.#state.pending.scheduledRequests.set(requestId, request);
       }
 
       if (phase.pendingRequests.size === 0) {
         clearTimeout(phase.timeoutId);
-        this.state.phase = { type: 'idle' };
+        this.#state.phase = { type: 'idle' };
       }
     }
 
@@ -398,11 +400,11 @@ export class RequestScheduler<T> {
       }
     }
 
-    return () => this.endMutation(requestId);
+    return () => this.#endMutation(requestId);
   }
 
   reset(): void {
-    const { phase, pending, abort } = this.state;
+    const { phase, pending, abort } = this.#state;
 
     if (phase.type === 'coalescing') {
       clearTimeout(phase.timeoutId);
@@ -418,7 +420,7 @@ export class RequestScheduler<T> {
       abort.controller.abort();
     }
 
-    this.state = this.createInitialState();
+    this.#state = this.#createInitialState();
   }
 
   cancelCoalescingRequests(requestIds: string[]): boolean {
@@ -426,33 +428,33 @@ export class RequestScheduler<T> {
 
     let wasCancelled = false;
 
-    if (this.state.phase.type !== 'coalescing') return false;
+    if (this.#state.phase.type !== 'coalescing') return false;
 
     for (const requestId of requestIds) {
-      const request = this.state.phase.pendingRequests.get(requestId);
-      if (!request || !this.isRemoteStartCancelable(request)) continue;
+      const request = this.#state.phase.pendingRequests.get(requestId);
+      if (!request || !this.#isRemoteStartCancelable(request)) continue;
 
-      this.state.phase.pendingRequests.delete(requestId);
-      this.finalizePendingRequestCallbacks(request, true);
+      this.#state.phase.pendingRequests.delete(requestId);
+      this.#finalizePendingRequestCallbacks(request, true);
       wasCancelled = true;
     }
 
-    if (this.state.phase.pendingRequests.size === 0) {
-      clearTimeout(this.state.phase.timeoutId);
-      this.state.phase = { type: 'idle' };
+    if (this.#state.phase.pendingRequests.size === 0) {
+      clearTimeout(this.#state.phase.timeoutId);
+      this.#state.phase = { type: 'idle' };
     }
 
     return wasCancelled;
   }
 
-  private scheduleRequest(
+  #scheduleRequest(
     requestId: string,
     fetchType: FetchType,
     payload: T,
     options: ScheduleFetchOptions | undefined,
     remoteStartCancelable: boolean,
   ): ScheduleFetchResults {
-    if (fetchType === 'realtimeUpdate' && !this.usesRealTimeUpdates) {
+    if (fetchType === 'realtimeUpdate' && !this.#usesRealTimeUpdates) {
       throw new Error(
         'realtimeUpdate fetch type cannot be used if usesRealTimeUpdates is not enabled',
       );
@@ -461,7 +463,7 @@ export class RequestScheduler<T> {
     const startTime = Date.now();
 
     if (fetchType === 'mediumPriority') {
-      return this.handleMediumPriority(
+      return this.#handleMediumPriority(
         requestId,
         payload,
         options?.mediumPriorityDelayMs,
@@ -469,9 +471,9 @@ export class RequestScheduler<T> {
       );
     }
 
-    if (this.dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
+    if (this.#dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
       if (
-        this.handleRealtimeUpdate(
+        this.#handleRealtimeUpdate(
           startTime,
           requestId,
           payload,
@@ -484,13 +486,13 @@ export class RequestScheduler<T> {
 
     if (
       remoteStartCancelable &&
-      this.shouldSkipFetch(requestId, fetchType, startTime)
+      this.#shouldSkipFetch(requestId, fetchType, startTime)
     ) {
       return 'skipped';
     }
 
-    if (this.state.pending.mutationsInProgress.has(requestId)) {
-      this.addToScheduledRequests(
+    if (this.#state.pending.mutationsInProgress.has(requestId)) {
+      this.#addToScheduledRequests(
         requestId,
         payload,
         fetchType,
@@ -500,13 +502,13 @@ export class RequestScheduler<T> {
       return 'scheduled';
     }
 
-    if (this.state.phase.type === 'fetching') {
-      const shouldAbortCurrentFetch = this.shouldCurrentFetchBeAborted();
+    if (this.#state.phase.type === 'fetching') {
+      const shouldAbortCurrentFetch = this.#shouldCurrentFetchBeAborted();
 
       if (shouldAbortCurrentFetch) {
-        this.forceAbortCurrentFetch();
+        this.#forceAbortCurrentFetch();
       } else {
-        this.addToScheduledRequests(
+        this.#addToScheduledRequests(
           requestId,
           payload,
           fetchType,
@@ -517,8 +519,8 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (this.state.phase.type === 'coalescing') {
-      return this.addToCoalescingBatch(
+    if (this.#state.phase.type === 'coalescing') {
+      return this.#addToCoalescingBatch(
         requestId,
         payload,
         fetchType,
@@ -527,7 +529,7 @@ export class RequestScheduler<T> {
       );
     }
 
-    this.transitionToCoalescing(
+    this.#transitionToCoalescing(
       requestId,
       payload,
       fetchType,
@@ -537,14 +539,14 @@ export class RequestScheduler<T> {
     return 'triggered';
   }
 
-  private transitionToCoalescing(
+  #transitionToCoalescing(
     requestId: string,
     payload: T,
     priority: FetchType,
     addedAt: number,
     remoteStartCancelable: boolean,
   ): void {
-    this.assertPhase('idle', 'transitionToCoalescing');
+    this.#assertPhase('idle', 'transitionToCoalescing');
 
     const pendingRequests = new Map<string, PendingRequest<T>>();
     pendingRequests.set(requestId, {
@@ -556,28 +558,28 @@ export class RequestScheduler<T> {
     });
 
     const timeoutId = setTimeout(() => {
-      this.onCoalescingTimeout();
-    }, this.getCoalescingWindowMs());
+      this.#onCoalescingTimeout();
+    }, this.#getCoalescingWindowMs());
 
-    this.state.phase = { type: 'coalescing', timeoutId, pendingRequests };
+    this.#state.phase = { type: 'coalescing', timeoutId, pendingRequests };
   }
 
-  private addToCoalescingBatch(
+  #addToCoalescingBatch(
     requestId: string,
     payload: T,
     priority: FetchType,
     addedAt: number,
     remoteStartCancelable: boolean,
   ): ScheduleFetchResults {
-    const phase = this.state.phase;
+    const phase = this.#state.phase;
     if (phase.type !== 'coalescing') {
       throw new Error('[tsdf] Expected coalescing phase');
     }
 
     const existing = phase.pendingRequests.get(requestId);
     if (existing) {
-      existing.payload = this.coalescePayload
-        ? this.coalescePayload(existing.payload, payload)
+      existing.payload = this.#coalescePayload
+        ? this.#coalescePayload(existing.payload, payload)
         : payload;
       existing.priority = getHigherPriorityFetchType(
         existing.priority,
@@ -596,27 +598,30 @@ export class RequestScheduler<T> {
       remoteStartCancelable,
     });
 
-    if (this.maxBatchSize && phase.pendingRequests.size >= this.maxBatchSize) {
-      this.onEvent?.('batch-size-triggered');
+    if (
+      this.#maxBatchSize &&
+      phase.pendingRequests.size >= this.#maxBatchSize
+    ) {
+      this.#onEvent?.('batch-size-triggered');
       clearTimeout(phase.timeoutId);
-      this.onCoalescingTimeout();
+      this.#onCoalescingTimeout();
       return 'batch-triggered';
     }
 
     return 'added-to-batch';
   }
 
-  private addToScheduledRequests(
+  #addToScheduledRequests(
     requestId: string,
     payload: T,
     priority: FetchType,
     addedAt: number,
     remoteStartCancelable: boolean,
   ): void {
-    const existing = this.state.pending.scheduledRequests.get(requestId);
+    const existing = this.#state.pending.scheduledRequests.get(requestId);
     if (existing) {
-      existing.payload = this.coalescePayload
-        ? this.coalescePayload(existing.payload, payload)
+      existing.payload = this.#coalescePayload
+        ? this.#coalescePayload(existing.payload, payload)
         : payload;
       existing.priority = getHigherPriorityFetchType(
         existing.priority,
@@ -627,7 +632,7 @@ export class RequestScheduler<T> {
       return;
     }
 
-    this.state.pending.scheduledRequests.set(requestId, {
+    this.#state.pending.scheduledRequests.set(requestId, {
       payload,
       priority,
       addedAt,
@@ -636,8 +641,8 @@ export class RequestScheduler<T> {
     });
   }
 
-  private onCoalescingTimeout(): void {
-    const { phase, pending } = this.state;
+  #onCoalescingTimeout(): void {
+    const { phase, pending } = this.#state;
 
     if (phase.type !== 'coalescing') return;
 
@@ -652,35 +657,35 @@ export class RequestScheduler<T> {
       }
     }
 
-    this.state.phase = { type: 'idle' };
+    this.#state.phase = { type: 'idle' };
 
     for (const [requestId, request] of pendingRequests) {
       if (!requestsToFetch.has(requestId)) {
-        this.finalizePendingRequestCallbacks(request, true);
+        this.#finalizePendingRequestCallbacks(request, true);
       }
     }
 
     if (requestsToFetch.size === 0) return;
 
-    void this.transitionToFetching(requestsToFetch, Date.now());
+    void this.#transitionToFetching(requestsToFetch, Date.now());
   }
 
-  private async transitionToFetching(
+  async #transitionToFetching(
     requests: Map<string, PendingRequest<T>>,
     startTime: number,
   ): Promise<boolean> {
-    this.assertPhase('idle', 'transitionToFetching');
+    this.#assertPhase('idle', 'transitionToFetching');
 
     const fetchId = getAutoIncrementId();
     const abortController = new AbortController();
 
-    this.state.abort.lastFetchId = fetchId;
-    this.state.abort.controller = abortController;
-    this.state.lastFetchWasAborted = false;
-    this.state.lastAbortedRequests.clear();
+    this.#state.abort.lastFetchId = fetchId;
+    this.#state.abort.controller = abortController;
+    this.#state.lastFetchWasAborted = false;
+    this.#state.lastAbortedRequests.clear();
 
-    const prevFetchStartTime = this.state.timing.lastFetchStartTime;
-    this.state.timing.lastFetchStartTime = startTime;
+    const prevFetchStartTime = this.#state.timing.lastFetchStartTime;
+    this.#state.timing.lastFetchStartTime = startTime;
 
     for (const requestId of requests.keys()) {
       this.setLastFetchStartTimeForRequest(requestId, startTime);
@@ -696,7 +701,7 @@ export class RequestScheduler<T> {
       });
     }
 
-    this.state.phase = {
+    this.#state.phase = {
       type: 'fetching',
       fetchId,
       startTime,
@@ -704,32 +709,14 @@ export class RequestScheduler<T> {
       rtuCallback: null,
     };
 
-    this.clearRtuDelayed();
-    this.cancelMediumPriority();
+    this.#clearRtuDelayed();
+    this.#cancelMediumPriority();
 
-    const shouldAbort = function shouldAbort(
-      this: RequestScheduler<T>,
-    ): boolean {
-      const { abort, pending } = this.state;
-      const shouldAbortFetch =
-        fetchId !== abort.lastFetchId || fetchId <= abort.abortBoundary;
-
-      const anyMutation = Array.from(requests.keys()).some((reqId) =>
-        pending.mutationsInProgress.has(reqId),
-      );
-
-      const shouldAbortNow = shouldAbortFetch || anyMutation;
-
-      if (shouldAbortNow) {
-        this.state.lastFetchWasAborted = true;
-        for (const requestId of requests.keys()) {
-          this.state.lastAbortedRequests.add(requestId);
-        }
-        abortController.abort();
-      }
-
-      return shouldAbortNow;
-    }.bind(this);
+    const shouldAbort = this.#createShouldAbort(
+      fetchId,
+      requests,
+      abortController,
+    );
 
     const batchRequests: BatchRequest<T>[] = Array.from(requests.entries()).map(
       ([requestId, request]) => ({ requestId, payload: request.payload }),
@@ -737,7 +724,7 @@ export class RequestScheduler<T> {
 
     let results: Map<string, boolean>;
     try {
-      results = await this.fetchFn(batchRequests, {
+      results = await this.#fetchFn(batchRequests, {
         shouldAbort,
         getStartTime: () => startTime,
         signal: abortController.signal,
@@ -749,25 +736,25 @@ export class RequestScheduler<T> {
       }
     }
 
-    this.state.abort.controller = null;
+    this.#state.abort.controller = null;
 
-    if (!this.isCurrentFetch(fetchId)) {
-      this.state.timing.lastFetchStartTime = prevFetchStartTime;
+    if (!this.#isCurrentFetch(fetchId)) {
+      this.#state.timing.lastFetchStartTime = prevFetchStartTime;
       return false;
     }
 
     const anySuccess = Array.from(results.values()).some((value) => value);
     if (anySuccess) {
-      this.state.timing.lastFetchDuration = Date.now() - startTime;
+      this.#state.timing.lastFetchDuration = Date.now() - startTime;
     }
 
-    const { fetchingRequests: callbacks, rtuCallback } = this.state.phase;
+    const { fetchingRequests: callbacks, rtuCallback } = this.#state.phase;
 
-    this.clearRtuDelayed();
-    this.state.phase = { type: 'idle' };
+    this.#clearRtuDelayed();
+    this.#state.phase = { type: 'idle' };
 
     for (const [requestId, { awaitCallbacks }] of callbacks) {
-      const wasAborted = this.state.lastAbortedRequests.has(requestId);
+      const wasAborted = this.#state.lastAbortedRequests.has(requestId);
       for (const callback of awaitCallbacks) {
         callback(wasAborted);
       }
@@ -777,30 +764,30 @@ export class RequestScheduler<T> {
       rtuCallback();
     }
 
-    this.flushScheduledRequests();
+    this.#flushScheduledRequests();
 
     return true;
   }
 
-  private endMutation(requestId: string): boolean {
-    const currentCount = this.state.pending.mutationsInProgress.get(requestId);
+  #endMutation(requestId: string): boolean {
+    const currentCount = this.#state.pending.mutationsInProgress.get(requestId);
     if (!currentCount) return false;
 
     if (currentCount <= 1) {
-      this.state.pending.mutationsInProgress.delete(requestId);
+      this.#state.pending.mutationsInProgress.delete(requestId);
     } else {
-      this.state.pending.mutationsInProgress.set(requestId, currentCount - 1);
+      this.#state.pending.mutationsInProgress.set(requestId, currentCount - 1);
     }
 
-    if (!this.state.pending.mutationsInProgress.has(requestId)) {
-      this.flushScheduledRequests();
+    if (!this.#state.pending.mutationsInProgress.has(requestId)) {
+      this.#flushScheduledRequests();
     }
 
     return true;
   }
 
-  private flushScheduledRequests(): void {
-    const { pending, phase } = this.state;
+  #flushScheduledRequests(): void {
+    const { pending, phase } = this.#state;
 
     if (pending.scheduledRequests.size === 0) return;
 
@@ -817,14 +804,14 @@ export class RequestScheduler<T> {
       if (!pending.mutationsInProgress.has(requestId)) {
         pending.scheduledRequests.delete(requestId);
 
-        if (this.wasSupersededAfterBeingScheduled(requestId, request)) {
-          this.finalizePendingRequestCallbacks(request, true);
+        if (this.#wasSupersededAfterBeingScheduled(requestId, request)) {
+          this.#finalizePendingRequestCallbacks(request, true);
           continue;
         }
 
         if (
           request.priority === 'realtimeUpdate' &&
-          this.dynamicRealtimeThrottleMs
+          this.#dynamicRealtimeThrottleMs
         ) {
           rtuRequestsToFlush.push({
             requestId,
@@ -838,14 +825,14 @@ export class RequestScheduler<T> {
     }
 
     for (const request of rtuRequestsToFlush) {
-      const wasDelayed = this.scheduleDelayedRTU(
+      const wasDelayed = this.#scheduleDelayedRTU(
         Date.now(),
         request.requestId,
         request.payload,
         request.remoteStartCancelable,
       );
       if (!wasDelayed) {
-        this.onEvent?.('scheduled-rt-fetch-started');
+        this.#onEvent?.('scheduled-rt-fetch-started');
         requestsToFlush.set(request.requestId, {
           payload: request.payload,
           priority: 'highPriority',
@@ -858,14 +845,14 @@ export class RequestScheduler<T> {
 
     if (requestsToFlush.size === 0) return;
 
-    this.onEvent?.('scheduled-fetch-started');
+    this.#onEvent?.('scheduled-fetch-started');
 
-    if (this.state.phase.type === 'coalescing') {
+    if (this.#state.phase.type === 'coalescing') {
       for (const [requestId, request] of requestsToFlush) {
-        const existing = this.state.phase.pendingRequests.get(requestId);
+        const existing = this.#state.phase.pendingRequests.get(requestId);
         if (existing) {
-          existing.payload = this.coalescePayload
-            ? this.coalescePayload(existing.payload, request.payload)
+          existing.payload = this.#coalescePayload
+            ? this.#coalescePayload(existing.payload, request.payload)
             : request.payload;
           existing.priority = getHigherPriorityFetchType(
             existing.priority,
@@ -875,31 +862,31 @@ export class RequestScheduler<T> {
             existing.remoteStartCancelable && request.remoteStartCancelable;
           existing.awaitCallbacks.push(...request.awaitCallbacks);
         } else {
-          this.state.phase.pendingRequests.set(requestId, request);
+          this.#state.phase.pendingRequests.set(requestId, request);
         }
       }
       return;
     }
 
     const timeoutId = setTimeout(() => {
-      this.onCoalescingTimeout();
-    }, this.getCoalescingWindowMs());
+      this.#onCoalescingTimeout();
+    }, this.#getCoalescingWindowMs());
 
-    this.state.phase = {
+    this.#state.phase = {
       type: 'coalescing',
       timeoutId,
       pendingRequests: requestsToFlush,
     };
   }
 
-  private shouldSkipFetch(
+  #shouldSkipFetch(
     requestId: string,
     fetchType: FetchType,
     startTime: number,
   ): boolean {
     if (fetchType !== 'lowPriority') return false;
 
-    const { phase, pending } = this.state;
+    const { phase, pending } = this.#state;
 
     if (phase.type === 'fetching') return true;
 
@@ -911,7 +898,7 @@ export class RequestScheduler<T> {
       return !pending.scheduledRequests.has(requestId);
     }
 
-    const isWithinThrottleWindow = this.isWithinThrottleWindow(
+    const isWithinThrottleWindow = this.#isWithinThrottleWindow(
       requestId,
       startTime,
     );
@@ -923,23 +910,20 @@ export class RequestScheduler<T> {
     return isWithinThrottleWindow;
   }
 
-  private isWithinThrottleWindow(
-    requestId: string,
-    startTime: number,
-  ): boolean {
+  #isWithinThrottleWindow(requestId: string, startTime: number): boolean {
     const lastFetchTime =
-      this.state.timing.lastFetchStartTimePerRequest.get(requestId);
+      this.#state.timing.lastFetchStartTimePerRequest.get(requestId);
     if (lastFetchTime !== undefined) {
       const timeSinceLastFetch = startTime - lastFetchTime;
-      if (timeSinceLastFetch < this.lowPriorityThrottleMs) {
+      if (timeSinceLastFetch < this.#lowPriorityThrottleMs) {
         return true;
       }
     }
 
-    if (this.state.timing.lastFetchStartTime) {
+    if (this.#state.timing.lastFetchStartTime) {
       const timeSinceLastFetch =
-        startTime - this.state.timing.lastFetchStartTime;
-      if (timeSinceLastFetch < this.lowPriorityThrottleMs) {
+        startTime - this.#state.timing.lastFetchStartTime;
+      if (timeSinceLastFetch < this.#lowPriorityThrottleMs) {
         return true;
       }
     }
@@ -947,34 +931,34 @@ export class RequestScheduler<T> {
     return false;
   }
 
-  private clearRtuDelayed(): void {
-    const rtu = this.state.pending.rtuDelayed;
+  #clearRtuDelayed(): void {
+    const rtu = this.#state.pending.rtuDelayed;
     if (rtu) {
       clearTimeout(rtu.timeoutId);
-      this.state.pending.rtuDelayed = null;
-      this.onEvent?.('rt-fetch-cancelled');
+      this.#state.pending.rtuDelayed = null;
+      this.#onEvent?.('rt-fetch-cancelled');
     }
   }
 
-  private handleRealtimeUpdate(
+  #handleRealtimeUpdate(
     startTime: number,
     requestId: string,
     payload: T,
     remoteStartCancelable: boolean,
   ): boolean {
-    const { timing, phase, pending } = this.state;
+    const { timing, phase, pending } = this.#state;
 
     if (
       !timing.lastFetchDuration ||
       !timing.lastFetchStartTime ||
-      !this.dynamicRealtimeThrottleMs
+      !this.#dynamicRealtimeThrottleMs
     ) {
       return false;
     }
 
     if (pending.rtuDelayed && pending.rtuDelayed.requestId === requestId) {
-      pending.rtuDelayed.payload = this.coalescePayload
-        ? this.coalescePayload(pending.rtuDelayed.payload, payload)
+      pending.rtuDelayed.payload = this.#coalescePayload
+        ? this.#coalescePayload(pending.rtuDelayed.payload, payload)
         : payload;
       pending.rtuDelayed.remoteStartCancelable =
         pending.rtuDelayed.remoteStartCancelable && remoteStartCancelable;
@@ -983,7 +967,7 @@ export class RequestScheduler<T> {
 
     if (phase.type === 'fetching') {
       phase.rtuCallback = () => {
-        this.scheduleDelayedRTU(
+        this.#scheduleDelayedRTU(
           Date.now(),
           requestId,
           payload,
@@ -994,7 +978,7 @@ export class RequestScheduler<T> {
     }
 
     if (pending.mutationsInProgress.has(requestId)) {
-      this.addToScheduledRequests(
+      this.#addToScheduledRequests(
         requestId,
         payload,
         'realtimeUpdate',
@@ -1004,7 +988,7 @@ export class RequestScheduler<T> {
       return true;
     }
 
-    return this.scheduleDelayedRTU(
+    return this.#scheduleDelayedRTU(
       startTime,
       requestId,
       payload,
@@ -1012,19 +996,19 @@ export class RequestScheduler<T> {
     );
   }
 
-  private scheduleDelayedRTU(
+  #scheduleDelayedRTU(
     startTime: number,
     requestId: string,
     payload: T,
     remoteStartCancelable: boolean,
   ): boolean {
-    if (!this.dynamicRealtimeThrottleMs) return false;
+    if (!this.#dynamicRealtimeThrottleMs) return false;
 
-    const { timing } = this.state;
+    const { timing } = this.#state;
     const timeSinceLastFetch =
       startTime - (timing.lastFetchStartTime + timing.lastFetchDuration);
 
-    const minimumRealtimeInterval = this.dynamicRealtimeThrottleMs(
+    const minimumRealtimeInterval = this.#dynamicRealtimeThrottleMs(
       timing.lastFetchDuration,
     );
 
@@ -1034,11 +1018,11 @@ export class RequestScheduler<T> {
 
     const delay = minimumRealtimeInterval - timeSinceLastFetch;
 
-    this.state.pending.rtuDelayed = {
+    this.#state.pending.rtuDelayed = {
       timeoutId: setTimeout(() => {
-        this.state.pending.rtuDelayed = null;
-        this.onEvent?.('scheduled-rt-fetch-started');
-        this.scheduleRequest(
+        this.#state.pending.rtuDelayed = null;
+        this.#onEvent?.('scheduled-rt-fetch-started');
+        this.#scheduleRequest(
           requestId,
           'highPriority',
           payload,
@@ -1051,18 +1035,18 @@ export class RequestScheduler<T> {
       remoteStartCancelable,
     };
 
-    this.onEvent?.('rt-fetch-scheduled', { delayMs: delay });
+    this.#onEvent?.('rt-fetch-scheduled', { delayMs: delay });
 
     return true;
   }
 
-  private handleMediumPriority(
+  #handleMediumPriority(
     requestId: string,
     payload: T,
     customDelayMs: number | undefined,
     remoteStartCancelable: boolean,
   ): ScheduleFetchResults {
-    const delayMs = customDelayMs ?? this.mediumPriorityDelayMs;
+    const delayMs = customDelayMs ?? this.#mediumPriorityDelayMs;
 
     if (delayMs === undefined) {
       throw new Error(
@@ -1070,8 +1054,8 @@ export class RequestScheduler<T> {
       );
     }
 
-    if (!this.state.timing.lastFetchStartTime) {
-      return this.scheduleRequest(
+    if (!this.#state.timing.lastFetchStartTime) {
+      return this.#scheduleRequest(
         requestId,
         'highPriority',
         payload,
@@ -1080,36 +1064,36 @@ export class RequestScheduler<T> {
       );
     }
 
-    if (this.state.pending.mediumPriorityDelayed) {
-      clearTimeout(this.state.pending.mediumPriorityDelayed.timeoutId);
+    if (this.#state.pending.mediumPriorityDelayed) {
+      clearTimeout(this.#state.pending.mediumPriorityDelayed.timeoutId);
     }
 
-    this.state.pending.mediumPriorityDelayed = {
+    this.#state.pending.mediumPriorityDelayed = {
       timeoutId: setTimeout(() => {
-        this.executeMediumPriorityFetch(requestId);
+        this.#executeMediumPriorityFetch(requestId);
       }, delayMs),
       requestId,
       payload,
       remoteStartCancelable,
     };
 
-    this.onEvent?.('medium-priority-scheduled', { delayMs });
+    this.#onEvent?.('medium-priority-scheduled', { delayMs });
 
     return 'medium-scheduled';
   }
 
-  private executeMediumPriorityFetch(requestId: string): void {
-    const delayedRequest = this.state.pending.mediumPriorityDelayed;
+  #executeMediumPriorityFetch(requestId: string): void {
+    const delayedRequest = this.#state.pending.mediumPriorityDelayed;
     if (!delayedRequest || delayedRequest.requestId !== requestId) return;
 
-    this.state.pending.mediumPriorityDelayed = null;
+    this.#state.pending.mediumPriorityDelayed = null;
 
-    this.onEvent?.('medium-priority-fetch-started');
+    this.#onEvent?.('medium-priority-fetch-started');
 
-    const { phase, pending } = this.state;
+    const { phase, pending } = this.#state;
 
     if (phase.type !== 'idle' || pending.mutationsInProgress.has(requestId)) {
-      this.addToScheduledRequests(
+      this.#addToScheduledRequests(
         requestId,
         delayedRequest.payload,
         'mediumPriority',
@@ -1119,7 +1103,7 @@ export class RequestScheduler<T> {
       return;
     }
 
-    this.scheduleRequest(
+    this.#scheduleRequest(
       requestId,
       'highPriority',
       delayedRequest.payload,
@@ -1128,37 +1112,37 @@ export class RequestScheduler<T> {
     );
   }
 
-  private cancelMediumPriority(): void {
-    if (this.state.pending.mediumPriorityDelayed) {
-      clearTimeout(this.state.pending.mediumPriorityDelayed.timeoutId);
-      this.state.pending.mediumPriorityDelayed = null;
-      this.onEvent?.('medium-priority-cancelled');
+  #cancelMediumPriority(): void {
+    if (this.#state.pending.mediumPriorityDelayed) {
+      clearTimeout(this.#state.pending.mediumPriorityDelayed.timeoutId);
+      this.#state.pending.mediumPriorityDelayed = null;
+      this.#onEvent?.('medium-priority-cancelled');
     }
   }
 
-  private isRemoteStartCancelable(request: PendingRequest<T>): boolean {
+  #isRemoteStartCancelable(request: PendingRequest<T>): boolean {
     return request.remoteStartCancelable;
   }
 
-  private wasSupersededAfterBeingScheduled(
+  #wasSupersededAfterBeingScheduled(
     requestId: string,
     request: PendingRequest<T>,
   ): boolean {
     if (!request.remoteStartCancelable) return false;
 
     const lastFetchStartTime =
-      this.state.timing.lastFetchStartTimePerRequest.get(requestId);
+      this.#state.timing.lastFetchStartTimePerRequest.get(requestId);
 
     return (
       lastFetchStartTime !== undefined && lastFetchStartTime > request.addedAt
     );
   }
 
-  private hasKnownRequest(requestId: string): boolean {
-    return this.state.timing.lastFetchStartTimePerRequest.has(requestId);
+  #hasKnownRequest(requestId: string): boolean {
+    return this.#state.timing.lastFetchStartTimePerRequest.has(requestId);
   }
 
-  private finalizePendingRequestCallbacks(
+  #finalizePendingRequestCallbacks(
     request: PendingRequest<T>,
     wasAborted: boolean,
   ): void {
@@ -1168,13 +1152,13 @@ export class RequestScheduler<T> {
     request.awaitCallbacks.length = 0;
   }
 
-  private isCurrentFetch(fetchId: number): boolean {
-    const { phase } = this.state;
+  #isCurrentFetch(fetchId: number): boolean {
+    const { phase } = this.#state;
     return phase.type === 'fetching' && phase.fetchId === fetchId;
   }
 
-  private shouldCurrentFetchBeAborted(): boolean {
-    const { phase, abort, pending } = this.state;
+  #shouldCurrentFetchBeAborted(): boolean {
+    const { phase, abort, pending } = this.#state;
 
     if (phase.type !== 'fetching') return false;
 
@@ -1187,8 +1171,8 @@ export class RequestScheduler<T> {
     return false;
   }
 
-  private forceAbortCurrentFetch(): void {
-    const { phase, abort } = this.state;
+  #forceAbortCurrentFetch(): void {
+    const { phase, abort } = this.#state;
 
     if (phase.type !== 'fetching') return;
 
@@ -1197,9 +1181,9 @@ export class RequestScheduler<T> {
       abort.controller = null;
     }
 
-    this.state.lastFetchWasAborted = true;
+    this.#state.lastFetchWasAborted = true;
     for (const requestId of phase.fetchingRequests.keys()) {
-      this.state.lastAbortedRequests.add(requestId);
+      this.#state.lastAbortedRequests.add(requestId);
     }
 
     for (const [, { awaitCallbacks }] of phase.fetchingRequests) {
@@ -1208,16 +1192,41 @@ export class RequestScheduler<T> {
       }
     }
 
-    this.state.phase = { type: 'idle' };
+    this.#state.phase = { type: 'idle' };
   }
 
-  private assertPhase(
-    expected: SchedulerPhase<T>['type'],
-    operation: string,
-  ): void {
-    if (this.state.phase.type !== expected) {
+  #createShouldAbort(
+    fetchId: number,
+    requests: Map<string, PendingRequest<T>>,
+    abortController: AbortController,
+  ): () => boolean {
+    return function shouldAbort(this: RequestScheduler<T>): boolean {
+      const { abort, pending } = this.#state;
+      const shouldAbortFetch =
+        fetchId !== abort.lastFetchId || fetchId <= abort.abortBoundary;
+
+      const anyMutation = Array.from(requests.keys()).some((reqId) =>
+        pending.mutationsInProgress.has(reqId),
+      );
+
+      const shouldAbortNow = shouldAbortFetch || anyMutation;
+
+      if (shouldAbortNow) {
+        this.#state.lastFetchWasAborted = true;
+        for (const requestId of requests.keys()) {
+          this.#state.lastAbortedRequests.add(requestId);
+        }
+        abortController.abort();
+      }
+
+      return shouldAbortNow;
+    }.bind(this);
+  }
+
+  #assertPhase(expected: SchedulerPhase<T>['type'], operation: string): void {
+    if (this.#state.phase.type !== expected) {
       throw new Error(
-        `[tsdf] Invalid phase for ${operation}: expected '${expected}', got '${this.state.phase.type}'`,
+        `[tsdf] Invalid phase for ${operation}: expected '${expected}', got '${this.#state.phase.type}'`,
       );
     }
   }

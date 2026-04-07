@@ -38,6 +38,21 @@ export type TSFDListQueryState<
   itemFieldInvalidationFields: Record<string, string[]>;
 };
 
+export type ListQueryOfflineOverlay<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = {
+  item: ItemState | null;
+  itemPayload?: ItemPayload;
+  queryMemberships: Record<string, number>;
+  /**
+   * Temporary-id remaps can leave a child mutation in manual resolution while
+   * it already targets the real server item. Keep that overlay visible until
+   * the child resolution is cleared.
+   */
+  keepVisibleWhileResolutionRequired?: boolean;
+};
+
 export type FieldsInput = string[] | '*';
 
 export type TSFDUseListQueryReturn<
@@ -59,6 +74,8 @@ export type TSFDUseListQueryReturn<
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
   queryMetadata: QueryMetadata;
 };
 
@@ -75,6 +92,8 @@ export type TSFDUseListItemReturn<
   error: StoreError | null;
   isLoading: boolean;
   itemStateKey: string;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
   queryMetadata: QueryMetadata;
 };
 

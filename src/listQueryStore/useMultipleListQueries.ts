@@ -10,6 +10,12 @@ import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
+import {
+  createOfflineEntityLookup,
+  filterActiveOfflineOverlays,
+  hasPendingOfflineSync,
+} from '../persistentStorage/offline/entityMetadata';
+import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import {
@@ -22,11 +28,18 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
+import {
+  excludeLoadedFields,
+  fallbackItemHasRequestedFields,
+} from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
+  type ListQueryOfflineOverlay,
   type ListQueryUseMultipleListQueriesQuery,
   type PartialResourcesConfig,
+  type TSDFItemQuery,
   type TSFDListQuery,
   type TSFDListQueryState,
   type TSFDUseListQueryReturn,
@@ -91,8 +104,23 @@ export function useMultipleListQueries<
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
+  readFallbackQueryState:
+    | ((queryKey: string) => TSFDListQuery<QueryPayload> | undefined)
+    | undefined,
   preloadQueries:
     | ((payloads: QueryPayload[]) => Promise<boolean[]>)
+    | undefined,
+  preloadQueriesBeforePaint: boolean,
+  readFallbackItemState:
+    | ((
+        itemKey: string,
+      ) =>
+        | {
+            item: ItemState | null | undefined;
+            itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+            loadedFields: string[] | undefined;
+          }
+        | undefined)
     | undefined,
   scheduleAutomaticListQueryFetch: (
     fetchType: FetchType,
@@ -105,6 +133,10 @@ export function useMultipleListQueries<
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
+  offlineEntities: readonly GlobalOfflineEntity[],
+  offlineOverlays: Readonly<
+    Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
+  >,
 ): readonly TSFDUseListQueryReturn<
   SelectedItem,
   QueryPayload,
@@ -186,18 +218,89 @@ export function useMultipleListQueries<
     ? debouncedFetchQueriesWithId
     : queriesWithId;
 
-  const getQueryItems = useCallback(
-    (
-      state: State,
-      query: TSFDListQuery<QueryPayload>,
-      fields: FieldsInput | undefined,
-    ): SelectedItem[] => {
-      return filterAndMap(query.items, (itemKey) => {
-        let item = state.items[itemKey];
-        const itemPayload = state.itemQueries[itemKey]?.payload;
-        if (!item || !itemPayload) return false;
+  const offlineEntitiesByKey = useMemo(
+    () => createOfflineEntityLookup(offlineEntities),
+    [offlineEntities],
+  );
+  const activeOfflineOverlays = useMemo(
+    () => filterActiveOfflineOverlays(offlineEntitiesByKey, offlineOverlays),
+    [offlineEntitiesByKey, offlineOverlays],
+  );
+  const { deletedOverlayItemKeys, overlayItemsByQueryKey } = useMemo(() => {
+    const deleted = new Set<string>();
+    const byQueryKey = new Map<string, { itemKey: string; index: number }[]>();
 
-        // Apply field selection for partial resources
+    for (const [itemKey, overlay] of Object.entries(activeOfflineOverlays)) {
+      if (overlay.item === null) {
+        deleted.add(itemKey);
+        continue;
+      }
+
+      for (const [queryKey, index] of Object.entries(
+        overlay.queryMemberships,
+      )) {
+        let queryItems = byQueryKey.get(queryKey);
+
+        if (!queryItems) {
+          queryItems = [];
+          byQueryKey.set(queryKey, queryItems);
+        }
+
+        queryItems.push({ itemKey, index });
+      }
+    }
+
+    for (const queryItems of byQueryKey.values()) {
+      queryItems.sort((left, right) => {
+        if (left.index !== right.index) {
+          return left.index - right.index;
+        }
+
+        return left.itemKey.localeCompare(right.itemKey);
+      });
+    }
+
+    return {
+      deletedOverlayItemKeys: deleted,
+      overlayItemsByQueryKey: byQueryKey,
+    };
+  }, [activeOfflineOverlays]);
+
+  const selectVisibleItems = useCallback(
+    (
+      itemKeys: readonly string[],
+      fields: FieldsInput | undefined,
+      getItemState: (
+        itemKey: string,
+      ) =>
+        | {
+            item: ItemState | null | undefined;
+            itemPayload: ItemPayload | undefined;
+          }
+        | undefined,
+    ): SelectedItem[] => {
+      return filterAndMap(itemKeys, (itemKey) => {
+        const overlay = activeOfflineOverlays[itemKey];
+        if (overlay?.item === null) return false;
+        let item = overlay?.item;
+        let itemPayload = overlay?.itemPayload;
+
+        if (item === undefined || itemPayload === undefined) {
+          const currentItemState = getItemState(itemKey);
+
+          if (item === undefined) {
+            item = currentItemState?.item ?? undefined;
+          }
+
+          if (itemPayload === undefined) {
+            itemPayload = currentItemState?.itemPayload;
+          }
+        }
+
+        if (!item || itemPayload === undefined) {
+          return false;
+        }
+
         if (partialResources && Array.isArray(fields) && fields.length > 0) {
           item = partialResources.selectFields(fields, item);
         }
@@ -205,22 +308,24 @@ export function useMultipleListQueries<
         if (itemSelector) {
           return itemSelector(item, itemPayload, itemKey);
         }
-        return (
-          // WORKAROUND: Runtime itemSelector presence does not narrow SelectedItem, so the default branch must forward the raw item through the generic.
-          __LEGIT_CAST__<SelectedItem, ItemState>(item)
-        );
+
+        // WORKAROUND: Runtime itemSelector presence does not narrow
+        // SelectedItem, so the default branch must forward ItemState through
+        // the caller's generic.
+        return __LEGIT_CAST__<SelectedItem, ItemState>(item);
       });
     },
-    [itemSelector, partialResources],
+    [activeOfflineOverlays, itemSelector, partialResources],
   );
 
   const getUnresolvedPendingInvalidationFields = useCallback(
     (itemKey: string, state?: State): string[] => {
-      const loadedFields =
-        (state?.itemLoadedFields ?? store.state.itemLoadedFields)[itemKey] ??
-        [];
-      return (itemPendingInvalidationFields.get(itemKey) ?? []).filter(
-        (field) => !loadedFields.includes(field),
+      const itemLoadedFields = state
+        ? state.itemLoadedFields
+        : store.state.itemLoadedFields;
+      return excludeLoadedFields(
+        itemLoadedFields[itemKey],
+        itemPendingInvalidationFields.get(itemKey),
       );
     },
     [itemPendingInvalidationFields, store],
@@ -259,6 +364,44 @@ export function useMultipleListQueries<
       return highestPriority;
     },
     [getUnresolvedPendingInvalidationFields, itemFieldInvalidationPriorities],
+  );
+
+  const getVisibleQueryItemKeys = useCallback(
+    (queryKey: string, itemKeys: readonly string[]): readonly string[] => {
+      const missingOverlayItems = overlayItemsByQueryKey.get(queryKey);
+      const hasDeletions = deletedOverlayItemKeys.size > 0;
+
+      if (
+        !hasDeletions &&
+        (!missingOverlayItems || missingOverlayItems.length === 0)
+      ) {
+        return itemKeys;
+      }
+
+      const visibleItemKeys = hasDeletions
+        ? itemKeys.filter((itemKey) => !deletedOverlayItemKeys.has(itemKey))
+        : [...itemKeys];
+
+      if (!missingOverlayItems || missingOverlayItems.length === 0) {
+        return visibleItemKeys;
+      }
+
+      const existingItemKeys = new Set(visibleItemKeys);
+
+      for (const { itemKey, index } of missingOverlayItems) {
+        if (existingItemKeys.has(itemKey)) continue;
+
+        visibleItemKeys.splice(
+          Math.min(index, visibleItemKeys.length),
+          0,
+          itemKey,
+        );
+        existingItemKeys.add(itemKey);
+      }
+
+      return visibleItemKeys;
+    },
+    [deletedOverlayItemKeys, overlayItemsByQueryKey],
   );
 
   const resultSelector = useCallback(
@@ -309,14 +452,18 @@ export function useMultipleListQueries<
                 : {}),
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
+              pendingSync: false,
               queryMetadata: resultQueryMetadata,
             };
           }
 
           let status = query.status;
+          const visibleItemKeys = getVisibleQueryItemKeys(
+            queryKey,
+            query.items,
+          );
           const hasCachedItemsInState = query.items.some((itemKey) => {
-            const item = state.items[itemKey];
-            return item !== null && item !== undefined;
+            return state.items[itemKey] != null;
           });
 
           // Override status when partial resources has items with missing fields
@@ -341,26 +488,11 @@ export function useMultipleListQueries<
               );
             });
 
-            const hasAffectedFieldInvalidation = query.items.some((itemKey) => {
-              const itemFieldInvalidationFields =
-                state.itemFieldInvalidationFields[itemKey];
-
-              return (
-                !!itemFieldInvalidationFields &&
-                fields.some((f) => itemFieldInvalidationFields.includes(f))
-              );
-            });
-
             if (someItemMissingFields) {
               if (!hasCachedItemsInState) {
                 status = 'loading';
               } else if (someItemMissingFieldsInState) {
                 status = showPartialAsRefetching ? 'refetching' : 'loading';
-              } else if (
-                hasAffectedFieldInvalidation ||
-                showPartialAsRefetching
-              ) {
-                status = 'refetching';
               } else {
                 // Requested fields are present in cached items; keep stale data
                 // visible and expose a refetching status while metadata catches up.
@@ -430,7 +562,10 @@ export function useMultipleListQueries<
             status,
             items: shouldHideItemsWhileLoading
               ? []
-              : getQueryItems(state, query, fields),
+              : selectVisibleItems(visibleItemKeys, fields, (itemKey) => ({
+                  item: state.items[itemKey],
+                  itemPayload: state.itemQueries[itemKey]?.payload,
+                })),
             error: query.error,
             hasMore: query.hasMore,
             ...(loadingFields ? { loadingFields } : {}),
@@ -438,17 +573,116 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
+            pendingSync: hasPendingOfflineSync(
+              offlineEntitiesByKey,
+              visibleItemKeys,
+            ),
             queryMetadata: resultQueryMetadata,
           };
         },
       );
     },
-    [queriesWithId, getQueryItems, partialResources],
+    [
+      getVisibleQueryItemKeys,
+      offlineEntitiesByKey,
+      partialResources,
+      queriesWithId,
+      selectVisibleItems,
+    ],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
+  const visibleStoreState = useMemo(() => {
+    return storeState.map(
+      (
+        result,
+        index,
+      ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, QueryMetadata> => {
+        const queryConfig = queriesWithId[index];
+        if (result.status !== 'loading' && result.status !== 'idle') {
+          return result;
+        }
+
+        if (queryConfig && readFallbackQueryState) {
+          const fallbackQuery = readFallbackQueryState(queryConfig.key);
+
+          if (fallbackQuery && readFallbackItemState) {
+            const visibleItemKeys = getVisibleQueryItemKeys(
+              result.queryKey,
+              fallbackQuery.items,
+            );
+            const requestedFields = Array.isArray(queryConfig.fields)
+              ? queryConfig.fields
+              : undefined;
+            const fallbackItemStatesByKey = new Map<
+              string,
+              ReturnType<NonNullable<typeof readFallbackItemState>>
+            >();
+
+            for (const itemKey of visibleItemKeys) {
+              const fallbackItemState = readFallbackItemState(itemKey);
+              fallbackItemStatesByKey.set(itemKey, fallbackItemState);
+
+              if (
+                requestedFields &&
+                partialResources &&
+                !fallbackItemHasRequestedFields(
+                  fallbackItemState,
+                  requestedFields,
+                )
+              ) {
+                return result;
+              }
+            }
+            const fallbackItems = selectVisibleItems(
+              visibleItemKeys,
+              queryConfig.fields,
+              (itemKey) => {
+                const fallbackItemState = fallbackItemStatesByKey.get(itemKey);
+
+                return {
+                  item: fallbackItemState?.item,
+                  itemPayload: fallbackItemState?.itemQuery?.payload,
+                };
+              },
+            );
+
+            return {
+              queryKey: result.queryKey,
+              status: 'success',
+              items: fallbackItems,
+              error: null,
+              hasMore: fallbackQuery.hasMore,
+              payload: queryConfig.omitPayload
+                ? undefined
+                : fallbackQuery.payload,
+              fields: queryConfig.fields,
+              isLoading: false,
+              isLoadingMore: false,
+              pendingSync: hasPendingOfflineSync(
+                offlineEntitiesByKey,
+                visibleItemKeys,
+              ),
+              queryMetadata: result.queryMetadata,
+            };
+          }
+        }
+
+        return result;
+      },
+    );
+  }, [
+    storeState,
+    queriesWithId,
+    readFallbackQueryState,
+    readFallbackItemState,
+    partialResources,
+    getVisibleQueryItemKeys,
+    offlineEntitiesByKey,
+    selectVisibleItems,
+  ]);
   const autoFetchSignals = store.useSelectorRC(
     useCallback(
       (state: State) => {
@@ -478,9 +712,9 @@ export function useMultipleListQueries<
             Array.isArray(fields) && fields.length > 0
               ? query.items
                   .flatMap((itemKey) => {
-                    const loadedFields = state.itemLoadedFields[itemKey] ?? [];
-                    return fields.filter(
-                      (field) => !loadedFields.includes(field),
+                    return excludeLoadedFields(
+                      state.itemLoadedFields[itemKey],
+                      fields,
                     );
                   })
                   .filter(
@@ -558,11 +792,27 @@ export function useMultipleListQueries<
 
   useRegisterActiveKeys(activeQueryKeys, registerActiveQueries, touchQueries);
 
+  useIsomorphicLayoutEffect(() => {
+    if (
+      !preloadQueriesBeforePaint ||
+      !preloadQueries ||
+      fetchQueriesWithId.length < 1
+    ) {
+      return;
+    }
+
+    void preloadQueries(fetchQueriesWithId.map(({ payload }) => payload));
+  }, [fetchQueriesWithId, preloadQueries, preloadQueriesBeforePaint]);
+
   useEffect(() => {
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadQueries && fetchQueriesWithId.length > 0) {
+      if (
+        !preloadQueriesBeforePaint &&
+        preloadQueries &&
+        fetchQueriesWithId.length > 0
+      ) {
         await preloadQueries(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
@@ -698,7 +948,6 @@ export function useMultipleListQueries<
         ignoreQueriesInRefetchOnMount.delete(queryId);
       }
     })();
-
     return () => {
       effectState.cancelled = true;
     };
@@ -706,6 +955,7 @@ export function useMultipleListQueries<
     getQueryState,
     ignoreQueriesInRefetchOnMount,
     preloadQueries,
+    preloadQueriesBeforePaint,
     fetchQueriesWithId,
     store,
     scheduleAutomaticListQueryFetch,
@@ -717,5 +967,5 @@ export function useMultipleListQueries<
     getUnresolvedPendingInvalidationFields,
   ]);
 
-  return storeState;
+  return visibleStoreState;
 }

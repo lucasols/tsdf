@@ -1,5 +1,6 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
+import { rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -12,15 +13,31 @@ import {
 
 import type { TSFDUseCollectionItemReturn } from '../../src/collectionStore/collectionStore';
 import type { TSFDUseListItemReturn } from '../../src/listQueryStore/types';
+import type {
+  DefineCollectionOfflineOperations,
+  DefineListQueryOfflineOperations,
+  DefineOfflineOperation,
+} from '../../src/main';
+import { createOfflineSession } from '../../src/main';
 import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
+  type ListQueryParams,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import {
+  userPatchSchema,
+  userRowSchema,
+} from '../offline/offlineReplayTestShared';
+import {
+  collectionSchema,
+  listQueryQueryPayloadSchema,
+} from '../offline/offlineTestShared';
 import { flushAllTimers, range } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -28,11 +45,13 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  localStorage.clear();
 });
 
 afterEach(() => {
   cleanup();
   vi.runOnlyPendingTimers();
+  localStorage.clear();
 });
 
 type Todo = { title: string; completed: boolean };
@@ -138,6 +157,12 @@ describe('document hook memoization', () => {
     expect(renders).toBe(rendersBeforeInvalidation);
   });
 });
+
+type PendingSyncCollectionOperations = DefineCollectionOfflineOperations<
+  { value: { name: string } },
+  string,
+  { patchName: DefineOfflineOperation<{ itemId: string; name: string }> }
+>;
 
 describe('collection hook memoization', () => {
   test('useItem keeps plain data stable across rerenders and unrelated item updates', async () => {
@@ -258,7 +283,10 @@ describe('collection hook memoization', () => {
       [];
 
     const hook = renderHook(() => {
-      const result = env.apiStore.useMultipleItems([...queries]);
+      // Multi-query hooks now expect callers (or the React Compiler) to keep
+      // query arrays stable when referential stability matters.
+      const memoizedQueries = useMemo(() => [...queries], []);
+      const result = env.apiStore.useMultipleItems(memoizedQueries);
 
       renders += 1;
       changes.push({
@@ -332,10 +360,10 @@ describe('collection hook memoization', () => {
         }),
         [],
       );
-      const result = env.apiStore.useMultipleItems(
-        [{ payload: '1' }, { payload: '2' }],
-        { selector },
-      );
+      // The selector is memoized here, and the query array is memoized too,
+      // because multi-query hook stability is now a caller-side contract.
+      const queries = useMemo(() => [{ payload: '1' }, { payload: '2' }], []);
+      const result = env.apiStore.useMultipleItems(queries, { selector });
 
       renders += 1;
       changes.push({
@@ -380,7 +408,90 @@ describe('collection hook memoization', () => {
     `);
     expect(renders).toBe(rendersBeforeInvalidation);
   });
+
+  test('useMultipleItems updates pendingSync without changing loaded data and stays stable on plain rerender', async () => {
+    const network = createOfflineNetworkMock(false);
+    network.install();
+
+    const env = createCollectionStoreTestEnv<
+      { name: string },
+      PendingSyncCollectionOperations
+    >(
+      { '1': { name: 'Ada' }, '2': { name: 'Grace' } },
+      {
+        getSessionKey: () => 'collection-pending-sync-memoization',
+        testScenario: 'loaded',
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'collection-pending-sync-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, () => ({
+                    value: { name: input.name },
+                  }));
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      // This simulates the expected caller/compiler contract: stable args in,
+      // stable multi-hook result out when only offline metadata changes.
+      const queries = useMemo(() => [{ payload: '1' }, { payload: '2' }], []);
+      return env.apiStore.useMultipleItems(queries);
+    });
+
+    await flushAllTimers();
+
+    const stableBeforeQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableBeforeQueue);
+
+    await act(async () => {
+      await env.apiStore.performMutation('1', {
+        mutation: () => Promise.resolve({ value: { name: 'Ada queued' } }),
+        offline: {
+          operation: 'patchName',
+          input: { itemId: '1', name: 'Ada queued' },
+        },
+      });
+    });
+    await Promise.resolve();
+
+    expect(hook.result.current.map((item) => item.pendingSync))
+      .toMatchInlineSnapshot(`
+        ['✅', '❌']
+      `);
+    expect(hook.result.current.map((item) => item.data?.value.name))
+      .toMatchInlineSnapshot(`
+        ['Ada', 'Grace']
+      `);
+
+    const stableAfterQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableAfterQueue);
+  });
 });
+
+type PendingSyncListQueryOperations = DefineListQueryOfflineOperations<
+  { id: number; name: string },
+  ListQueryParams,
+  string,
+  { patchUserName: DefineOfflineOperation<{ itemId: string; name: string }> }
+>;
 
 describe('list-query hook memoization', () => {
   test('useItem keeps plain data stable across rerenders and unrelated item updates', async () => {
@@ -493,10 +604,13 @@ describe('list-query hook memoization', () => {
       [];
 
     const hook = renderHook(() => {
-      const result = env.apiStore.useMultipleItems([
-        { payload: 'users||1' },
-        { payload: 'users||2' },
-      ]);
+      // Multi-query hooks rely on caller/compiler-memoized query arrays rather
+      // than rebuilding stability internally.
+      const queries = useMemo(
+        () => [{ payload: 'users||1' }, { payload: 'users||2' }],
+        [],
+      );
+      const result = env.apiStore.useMultipleItems(queries);
 
       renders += 1;
       changes.push({
@@ -567,8 +681,14 @@ describe('list-query hook memoization', () => {
         }),
         [],
       );
+      // The query array is memoized explicitly to reflect the intended
+      // compiler-backed calling convention for multi-item hooks.
+      const queries = useMemo(
+        () => [{ payload: 'users||1' }, { payload: 'users||2' }],
+        [],
+      );
       const result = env.apiStore.useMultipleItems<{ label: string | null }>(
-        [{ payload: 'users||1' }, { payload: 'users||2' }],
+        queries,
         { selector },
       );
 
@@ -739,10 +859,16 @@ describe('list-query hook memoization', () => {
     }> = [];
 
     const hook = renderHook(() => {
-      const result = env.apiStore.useMultipleListQueries([
-        { payload: { tableId: 'users' } },
-        { payload: { tableId: 'products' } },
-      ]);
+      // Query-array stability is expected from the caller/compiler for the
+      // multi-query APIs.
+      const queries = useMemo(
+        () => [
+          { payload: { tableId: 'users' } },
+          { payload: { tableId: 'products' } },
+        ],
+        [],
+      );
+      const result = env.apiStore.useMultipleListQueries(queries);
 
       renders += 1;
       changes.push({
@@ -815,11 +941,17 @@ describe('list-query hook memoization', () => {
         (data: { id: number; name: string }) => ({ label: data.name }),
         [],
       );
-      const result = env.apiStore.useMultipleListQueries<{ label: string }>(
-        [
+      // Keep the query list stable at the call site to reflect the contract of
+      // the public multi-query hooks.
+      const queries = useMemo(
+        () => [
           { payload: { tableId: 'users' } },
           { payload: { tableId: 'products' } },
         ],
+        [],
+      );
+      const result = env.apiStore.useMultipleListQueries<{ label: string }>(
+        queries,
         { itemSelector },
       );
 
@@ -865,5 +997,185 @@ describe('list-query hook memoization', () => {
       - { products: '❌', result: '❌', users: '❌' }
     `);
     expect(renders).toBe(rendersBeforeInvalidation);
+  });
+
+  test('useMultipleItems updates pendingSync without changing loaded item data and stays stable on plain rerender', async () => {
+    const network = createOfflineNetworkMock(false);
+    network.install();
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PendingSyncListQueryOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        getSessionKey: () => 'list-query-item-pending-sync-memoization',
+        testScenario: { loaded: { tables: ['users'] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'list-query-item-pending-sync-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      // Pending-sync changes should preserve outer-array stability when the
+      // caller/compiler keeps the multi-item query array stable.
+      const queries = useMemo(
+        () => [{ payload: 'users||1' }, { payload: 'users||2' }],
+        [],
+      );
+      return env.apiStore.useMultipleItems(queries);
+    });
+
+    await flushAllTimers();
+
+    const stableBeforeQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableBeforeQueue);
+
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ name: 'Ada queued' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Ada queued' },
+        },
+      });
+    });
+    await Promise.resolve();
+
+    expect(hook.result.current.map((item) => item.pendingSync))
+      .toMatchInlineSnapshot(`
+        ['✅', '❌']
+      `);
+    expect(hook.result.current.map((item) => item.data?.name))
+      .toMatchInlineSnapshot(`
+        ['Ada', 'Grace']
+      `);
+
+    const stableAfterQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableAfterQueue);
+  });
+
+  test('useMultipleListQueries updates query pendingSync when an item becomes pending and stays stable on plain rerender', async () => {
+    const network = createOfflineNetworkMock(false);
+    network.install();
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PendingSyncListQueryOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+        products: [{ id: 1, name: 'Keyboard' }],
+      },
+      {
+        getSessionKey: () => 'list-query-query-pending-sync-memoization',
+        testScenario: { loaded: { tables: ['users', 'products'] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () => 'list-query-query-pending-sync-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      // As above, the multi-query hook relies on stable caller-provided query
+      // arrays instead of internal deep-stable repair logic.
+      const queries = useMemo(
+        () => [
+          { payload: { tableId: 'users' } },
+          { payload: { tableId: 'products' } },
+        ],
+        [],
+      );
+      return env.apiStore.useMultipleListQueries(queries);
+    });
+
+    await flushAllTimers();
+
+    const stableBeforeQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableBeforeQueue);
+
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ name: 'Ada queued' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Ada queued' },
+        },
+      });
+    });
+    await Promise.resolve();
+
+    expect(hook.result.current.map((query) => query.pendingSync))
+      .toMatchInlineSnapshot(`
+        ['✅', '❌']
+      `);
+    expect(hook.result.current[0]?.items.map((item) => item.name))
+      .toMatchInlineSnapshot(`
+        ['Ada', 'Grace']
+      `);
+
+    const stableAfterQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableAfterQueue);
   });
 });

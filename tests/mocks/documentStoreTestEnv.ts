@@ -4,15 +4,20 @@ import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
+import type { AnyOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
+import { seedDocumentScenarioPersistentStorage } from './seedScenarioPersistentStorage';
 import {
   createServerMock,
   type FetchErrorConfig,
@@ -20,6 +25,7 @@ import {
 } from './serverMock';
 import {
   createActionTracker,
+  createOfflineTimelineTestLogger,
   createEmojiCyclers,
   createUITracker,
   getDefaultLowPriorityThrottleMs,
@@ -40,12 +46,26 @@ export type DocumentStoreTestScenario<D> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
-export type DocumentStoreTestEnvOptions<D, StorageState = unknown> = {
+type TestDocumentOfflineOperationsRegistry<D> = Record<
+  string,
+  AnyOfflineOperationDefinition
+> &
+  ([D] extends [never] ? never : unknown);
+
+type TestDocumentOfflineOperationsConfig<D> =
+  TestDocumentOfflineOperationsRegistry<D> | null;
+
+export type DocumentStoreTestEnvOptions<
+  D,
+  TOfflineOperations extends TestDocumentOfflineOperationsConfig<D> = null,
+  StorageState = unknown,
+> = {
   id?: string;
   getSessionKey?: () => string | false;
   sharedServerState?: SharedServerMockState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
-  browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+  testBrowserTabId?: string;
+  browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
   /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
   bindFocusController?: {
     getWindowIsFocused: () => boolean;
@@ -66,19 +86,25 @@ export type DocumentStoreTestEnvOptions<D, StorageState = unknown> = {
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: DocumentPersistentStorageConfig<
     { value: D },
-    StorageState
+    StorageState,
+    TOfflineOperations
   >;
   storageAdapter?: StorageAdapter;
   __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
-export function createDocumentStoreTestEnv<D, StorageState = unknown>(
+export function createDocumentStoreTestEnv<
+  D,
+  TOfflineOperations extends TestDocumentOfflineOperationsConfig<D> = null,
+  StorageState = unknown,
+>(
   serverInitialData: D,
   {
     id = getNextStoreId('document'),
     getSessionKey = () => 'test-session',
     sharedServerState,
     browserTabsTransportFactory,
+    testBrowserTabId,
     browserTabsLeadershipTimings,
     bindFocusController,
     dynamicRealtimeThrottleMs,
@@ -93,7 +119,7 @@ export function createDocumentStoreTestEnv<D, StorageState = unknown>(
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: DocumentStoreTestEnvOptions<D, StorageState> = {},
+  }: DocumentStoreTestEnvOptions<D, TOfflineOperations, StorageState> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -113,6 +139,10 @@ export function createDocumentStoreTestEnv<D, StorageState = unknown>(
   } = createActionTracker();
 
   const { getMutationEmoji } = createEmojiCyclers();
+  const offlineTimelineLogger = createOfflineTimelineTestLogger({
+    addAction,
+    getSessionKey,
+  });
 
   const { uiChanges, trackUIChanges } = createUITracker<
     number | string | undefined
@@ -125,64 +155,131 @@ export function createDocumentStoreTestEnv<D, StorageState = unknown>(
   );
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
+  const resolvedPersistentStorage =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
 
-  const documentStore = createDocumentStore<{ value: D }, StorageState>({
-    id,
-    getSessionKey,
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs,
-    baseCoalescingWindowMs,
-    fetchFn: async (signal) => {
-      const value = await serverMock.fetch(signal);
-      return { value };
-    },
-    usesRealTimeUpdates,
-    dynamicRealtimeThrottleMs,
-    revalidateOnWindowFocus,
-    transportReconnectCooldownMs,
-    mediumPriorityDelayMs,
-    blockWindowClose: blockWindowClose ?? null,
-    persistentStorage,
-    '~test': {
-      ...testOptions,
-      storageAdapter,
-      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
-      onWindowFocus: bindFocusController
-        ? (handler: () => void) => {
-            return bindFocusController.onWindowFocus(handler);
-          }
-        : undefined,
-      onWindowFocusChange: bindFocusController
-        ? (handler: () => void) => {
-            const cleanupFocus = bindFocusController.onWindowFocus(handler);
-            const cleanupBlur = bindFocusController.onWindowBlur(handler);
-            return () => {
-              cleanupFocus();
-              cleanupBlur();
-            };
-          }
-        : undefined,
-      browserTabsTransportFactory,
-      browserTabsLeadershipTimings,
-      onReceiveRemoteMsg: (
-        message: DocumentBrowserTabsMessage<{ value: D }>,
-      ) => {
-        if (message.kind === 'document-snapshot') {
-          addAction(`<${message.consistency}-snapshot-received`, {
-            actionValue: message.data?.value,
-          });
-        }
+  const unregisterMockStoreInstance =
+    testBrowserTabId === undefined
+      ? () => {}
+      : registerMockStoreInstance({
+          storeId: id,
+          storeType: 'document',
+          testBrowserTabId,
+        });
+
+  let documentStore: ReturnType<
+    typeof createDocumentStore<{ value: D }, TOfflineOperations, StorageState>
+  >;
+
+  try {
+    documentStore = createDocumentStore<
+      { value: D },
+      TOfflineOperations,
+      StorageState
+    >({
+      id,
+      getSessionKey,
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs,
+      baseCoalescingWindowMs,
+      fetchFn: async (signal) => {
+        const value = await serverMock.fetch(signal);
+        return { value };
       },
-    },
-    onSchedulerEvent: (event, data) => {
-      logSchedulerEvent(event, addAction, data);
-    },
+      usesRealTimeUpdates,
+      dynamicRealtimeThrottleMs,
+      revalidateOnWindowFocus,
+      transportReconnectCooldownMs,
+      mediumPriorityDelayMs,
+      blockWindowClose: blockWindowClose ?? null,
+      persistentStorage: resolvedPersistentStorage,
+      '~test': {
+        ...testOptions,
+        getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+        onWindowFocus: bindFocusController
+          ? (handler: () => void) => {
+              return bindFocusController.onWindowFocus(handler);
+            }
+          : undefined,
+        onWindowFocusChange: bindFocusController
+          ? (handler: () => void) => {
+              const cleanupFocus = bindFocusController.onWindowFocus(handler);
+              const cleanupBlur = bindFocusController.onWindowBlur(handler);
+              return () => {
+                cleanupFocus();
+                cleanupBlur();
+              };
+            }
+          : undefined,
+        browserTabsTransportFactory,
+        browserTabsLeadershipTimings,
+        onReceiveRemoteMsg: (
+          message: DocumentBrowserTabsMessage<{ value: D }>,
+        ) => {
+          if (message.kind === 'document-snapshot') {
+            addAction(`<${message.consistency}-snapshot-received`, {
+              actionValue: message.data?.value,
+            });
+          }
+        },
+        onSessionKeyChanged: (event) => {
+          offlineTimelineLogger.onSessionKeyChanged(event);
+          if (resolvedPersistentStorage?.offline) {
+            offlineTimelineLogger.handleSessionKeyChangedForResolutionObserver({
+              event,
+              getOfflineResolutions: () =>
+                documentStore
+                  .getOfflineResolutions()
+                  .map(({ id: resolutionId, operation }) => ({
+                    id: resolutionId,
+                    operation,
+                  })),
+              adapter: resolvedPersistentStorage.adapter,
+              config: resolvedPersistentStorage.offline.session.getConfig(),
+            });
+          }
+        },
+        onOfflineTimelineEvent: (event) => {
+          offlineTimelineLogger.onOfflineTimelineEvent(event);
+        },
+      },
+      onSchedulerEvent: (event, data) => {
+        logSchedulerEvent(event, addAction, data);
+      },
+    });
+  } catch (error) {
+    unregisterMockStoreInstance();
+    throw error;
+  }
+
+  seedDocumentScenarioPersistentStorage({
+    storeName: id,
+    sessionKey: getSessionKey(),
+    persistentStorage: resolvedPersistentStorage ?? null,
+    initialData: testOptions?.initialData,
+    timestamp: testOptions?.initialLastFetchStartTime,
   });
 
   if (usesRealTimeUpdates) {
     serverMock.wsEvents.on('data_changed', () => {
       addAction('received-ws-data-change-event');
       documentStore.invalidateData('realtimeUpdate');
+    });
+  }
+
+  if (resolvedPersistentStorage?.offline) {
+    offlineTimelineLogger.attachResolutionObserver({
+      getOfflineResolutions: () =>
+        documentStore
+          .getOfflineResolutions()
+          .map(({ id: resolutionId, operation }) => ({
+            id: resolutionId,
+            operation,
+          })),
+      adapter: resolvedPersistentStorage.adapter,
+      config: resolvedPersistentStorage.offline.session.getConfig(),
     });
   }
 

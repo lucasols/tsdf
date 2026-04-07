@@ -63,10 +63,10 @@ function createEnv(options: {
   onPersistentStorageError?: (error: unknown) => void;
 }) {
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
-      storeName: options.storeName,
-      backend: 'localStorage',
+      adapter: 'local-sync',
       schema: options.schema ?? createConvertedSchema(),
       onPersistentStorageError: options.onPersistentStorageError,
     },

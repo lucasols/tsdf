@@ -59,19 +59,98 @@ export type {
 
 // Persistent Storage types
 export type {
+  AsyncStorageAdapter,
+  AsyncStorageDiscoveredScope,
+  AsyncStorageDriver,
+  AsyncStorageDriverSetEntry,
+  AsyncStorageMetadataOrder,
+  AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitTouch,
+  AsyncStorageNamespaceCommitUpsert,
+  AsyncStorageNamespaceGetResult,
+  AsyncStorageNamespaceHandle,
+  AsyncStorageNamespaceKind,
+  AsyncStorageNamespaceScope,
+  AsyncStorageReadOptions,
   PersistentStorageSchema,
   PersistentStorageDataSchema,
   ConvertedPersistentStorageDataSchema,
-  StorageBackend,
   PersistentStorageBaseConfig,
   PersistentStoragePreloadResult,
   DocumentPersistentStorageConfig,
   CollectionPersistentStorageConfig,
   ListQueryPersistentStorageConfig,
+  StorageAdapter,
 } from './persistentStorage/types';
+
+export type {
+  OfflineAccumulationConfig,
+  OfflineAccumulationMergeContext,
+  CollectionOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
+  DefineCollectionOfflineOperations,
+  DefineOfflineOperation,
+  DefineDocumentOfflineOperations,
+  DefineListQueryOfflineOperations,
+  DocumentOfflineOperationDefinition,
+  OfflineConflictResolutionAction,
+  GlobalOfflineEntity,
+  GlobalOfflineStatus,
+  OfflineMutationInput,
+  OfflineRuntimeConfig,
+  OfflineRuntimeConfigUpdate,
+  OfflineMutationQueueingConfig,
+  OfflineMutationQueueingCause,
+  OfflineMutationQueueingPolicy,
+  OfflineSession,
+  OfflineSessionConfig,
+  OfflineReplayRetryConfig,
+  OfflineResolutionAction,
+  OfflineResolutionActionForOperation,
+  OfflineResolutionConflictParseErrorCode,
+  OfflineResolutionConflictParseError,
+  OfflineResolutionRecordForStore,
+  OfflineResolutionRecordForOperation,
+  OfflineSupersedeConfig,
+  ListQueryOfflineEntityRef,
+  ListQueryOfflineOperationDefinition,
+  OfflineResolutionRecord,
+  OfflineRetryExhaustedResolutionAction,
+  OfflineMutationDescriptor,
+  OfflineQueueEntry,
+  OperationConflict,
+  OperationResult,
+  ParsedOfflineResolutionConflictResultForOperation,
+  OfflineSyncState,
+  OfflineTempEntitiesConfig,
+  OfflineTempEntitiesReconciliation,
+  OfflineTempEntityConfig,
+  OfflineTempEntityPendingEntry,
+} from './persistentStorage/offline/types';
+
+export { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
+
+export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
+
+export {
+  createOfflineSession,
+  getGlobalOfflineEntities,
+  getGlobalOfflineResolutions,
+  getGlobalOfflineStatus,
+  useGlobalOfflineEntities,
+  useGlobalOfflineResolutions,
+  useGlobalOfflineStatus,
+} from './persistentStorage/offline/sessionCoordinator';
 
 // Persistent Storage utilities
 export {
   clearSessionStorage,
   clearAllSessionStorage,
 } from './persistentStorage/persistentStorageManager';
+
+export {
+  localPersistentStorage,
+  opfsPersistentStorage,
+} from './persistentStorage/storageAdapter';
+
+export { createAsyncStorageAdapter } from './persistentStorage/asyncStorageAdapter';

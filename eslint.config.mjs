@@ -11,6 +11,7 @@ export default lsStackEslintCfg({
       rules: {
         'react-hooks/rules-of-hooks': 'error',
         'react-hooks/exhaustive-deps': 'warn',
+        '@ls-stack/prefer-named-functions': 0,
         'no-restricted-imports': [
           'error',
           {
@@ -54,6 +55,11 @@ export default lsStackEslintCfg({
               'CallExpression[callee.property.name="toMatchInlineSnapshot"][arguments.0.type="ArrayExpression"]',
             message:
               'Avoid .toMatchInlineSnapshot with array values. Only pass a string argument.',
+          },
+          {
+            selector:
+              ':matches(PropertyDefinition, MethodDefinition)[accessibility="private"]',
+            message: 'Use #private instead',
           },
         ],
         '@ls-stack/require-usage-explanation': [

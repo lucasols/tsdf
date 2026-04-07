@@ -20,6 +20,7 @@ Exported from `tsdf`:
 | `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                   |
 | `StorageBackend`                                                                                             | `'localStorage' \| 'opfs'`                                  |
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                        |
+| `createOfflineSession({ getSessionKey, config })`                                                            | Creates a shared offline session for multiple stores        |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                            |
 | `clearSessionStorage(sessionKey, backend)`                                                                   | Clears all TSDF entries for one session/backend             |
 | `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across all backends |
@@ -38,9 +39,8 @@ Common options (applies to all store configs):
 
 | Option                            | Required | Description                                             |
 | --------------------------------- | -------- | ------------------------------------------------------- |
-| `storeName`                       | Yes      | Unique name of the persisted store namespace.           |
 | `schema`                          | Yes      | Schema used to validate restored data.                  |
-| `backend`                         | No       | `'opfs'` by default.                                    |
+| `adapter`                         | Yes      | `'local-sync'` or a custom async adapter.               |
 | `version`                         | No       | Cache version; bump to invalidate old entries.          |
 | `onPersistentStorageError(error)` | No       | Callback for write/read failures (quota, decode, etc.). |
 
@@ -51,7 +51,11 @@ Store-specific options:
 | Collection Store | `maxItems`, `pinnedItems`, `ignoreItems`                                                |
 | List Query Store | `maxItems`, `maxQueries`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
 
-> `PersistentStorageConfig` uses the store's existing `getSessionKey` automatically. When `getSessionKey` returns `false`, no persistence operations run.
+> `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store's existing `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
+
+If `persistentStorage.offline` is configured, create one shared offline session with `createOfflineSession(...)` and pass that session to every store that should share connectivity policy and runtime controls. Store-local offline behavior stays in `persistentStorage.offline.operations`.
+
+Session-level `mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
 
 ## Backend behavior
 
@@ -72,13 +76,23 @@ Store-specific options:
 
 ```ts
 import { rc_object, rc_string } from 'runcheck';
-import { createDocumentStore } from 'tsdf';
+import { createDocumentStore, createOfflineSession } from 'tsdf';
 
 type Settings = { id: string; theme: 'light' | 'dark' };
 
+const getSessionKey = () => (userId ? `tenant:${userId}` : false);
+
+const offlineSession = createOfflineSession({
+  getSessionKey,
+  config: {
+    network: { enabled: true },
+    mutationQueueing: { network: 'allow', outage: 'allow' },
+  },
+});
+
 const settingsStore = createDocumentStore<Settings>({
   id: 'document-settings',
-  getSessionKey: () => (userId ? `tenant:${userId}` : false),
+  getSessionKey,
   fetchFn: (signal) => api.getSettings(signal),
   errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
@@ -86,8 +100,7 @@ const settingsStore = createDocumentStore<Settings>({
   backgroundCoalescingWindowMultiplier: 2,
   blockWindowClose: null,
   persistentStorage: {
-    storeName: 'settings',
-    backend: 'opfs',
+    adapter: 'local-sync',
     version: 2,
     schema: rc_object({
       data: rc_object({ id: rc_string(), theme: rc_string() }),
@@ -95,6 +108,7 @@ const settingsStore = createDocumentStore<Settings>({
     onPersistentStorageError: (error) => {
       console.error('Settings persistence failed', error);
     },
+    offline: { session: offlineSession, operations: {} },
   },
 });
 ```
