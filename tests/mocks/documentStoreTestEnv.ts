@@ -1,15 +1,20 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 
 import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
-import type { AnyOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
+import type {
+  AnyOfflineOperationDefinition,
+  OfflineSession,
+} from '../../src/persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
+import { createStoreManager, type StoreManager } from '../../src/storeManager';
 import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
@@ -55,6 +60,27 @@ type TestDocumentOfflineOperationsRegistry<D> = Record<
 type TestDocumentOfflineOperationsConfig<D> =
   TestDocumentOfflineOperationsRegistry<D> | null;
 
+type TestDocumentPersistentStorageConfig<
+  D,
+  StorageState,
+  TOfflineOperations extends TestDocumentOfflineOperationsConfig<D>,
+> = Omit<
+  DocumentPersistentStorageConfig<
+    { value: D },
+    StorageState,
+    TOfflineOperations
+  >,
+  'offline'
+> & {
+  offline?: NonNullable<
+    DocumentPersistentStorageConfig<
+      { value: D },
+      StorageState,
+      TOfflineOperations
+    >['offline']
+  > & { session?: OfflineSession };
+};
+
 export type DocumentStoreTestEnvOptions<
   D,
   TOfflineOperations extends TestDocumentOfflineOperationsConfig<D> = null,
@@ -62,6 +88,7 @@ export type DocumentStoreTestEnvOptions<
 > = {
   id?: string;
   getSessionKey?: () => string | false;
+  storeManager?: StoreManager;
   sharedServerState?: SharedServerMockState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
   testBrowserTabId?: string;
@@ -84,8 +111,8 @@ export type DocumentStoreTestEnvOptions<
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  persistentStorage?: DocumentPersistentStorageConfig<
-    { value: D },
+  persistentStorage?: TestDocumentPersistentStorageConfig<
+    D,
     StorageState,
     TOfflineOperations
   >;
@@ -101,7 +128,8 @@ export function createDocumentStoreTestEnv<
   serverInitialData: D,
   {
     id = getNextStoreId('document'),
-    getSessionKey = () => 'test-session',
+    getSessionKey: getSessionKeyOption = () => 'test-session',
+    storeManager,
     sharedServerState,
     browserTabsTransportFactory,
     testBrowserTabId,
@@ -138,6 +166,22 @@ export function createDocumentStoreTestEnv<
     clearTimeline: clearActionTimeline,
   } = createActionTracker();
 
+  const persistentStorageWithResolvedAdapter =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
+  const resolvedStoreManager =
+    storeManager ??
+    createStoreManager({
+      getSessionKey: getSessionKeyOption,
+      errorNormalizer: normalizeError,
+      offlineSession:
+        persistentStorageWithResolvedAdapter?.offline?.session?.getConfig() ??
+        undefined,
+    });
+  const getSessionKey = resolvedStoreManager.getSessionKey;
+  const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
+
   const { getMutationEmoji } = createEmojiCyclers();
   const offlineTimelineLogger = createOfflineTimelineTestLogger({
     addAction,
@@ -155,10 +199,24 @@ export function createDocumentStoreTestEnv<
   );
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
-  const resolvedPersistentStorage =
-    persistentStorage && storageAdapter
-      ? { ...persistentStorage, adapter: storageAdapter }
-      : persistentStorage;
+  const resolvedPersistentStorage = persistentStorageWithResolvedAdapter
+    ? __LEGIT_CAST__<
+        DocumentPersistentStorageConfig<
+          { value: D },
+          StorageState,
+          TOfflineOperations
+        >,
+        unknown
+      >({
+        ...persistentStorageWithResolvedAdapter,
+        offline: persistentStorageWithResolvedAdapter.offline
+          ? {
+              operations:
+                persistentStorageWithResolvedAdapter.offline.operations,
+            }
+          : undefined,
+      })
+    : persistentStorageWithResolvedAdapter;
 
   const unregisterMockStoreInstance =
     testBrowserTabId === undefined
@@ -180,8 +238,7 @@ export function createDocumentStoreTestEnv<
       StorageState
     >({
       id,
-      getSessionKey,
-      errorNormalizer: normalizeError,
+      storeManager: resolvedStoreManager,
       lowPriorityThrottleMs,
       baseCoalescingWindowMs,
       fetchFn: async (signal) => {
@@ -237,7 +294,7 @@ export function createDocumentStoreTestEnv<
                     operation,
                   })),
               adapter: resolvedPersistentStorage.adapter,
-              config: resolvedPersistentStorage.offline.session.getConfig(),
+              config: resolvedOfflineSession!.getConfig(),
             });
           }
         },
@@ -262,26 +319,52 @@ export function createDocumentStoreTestEnv<
     timestamp: testOptions?.initialLastFetchStartTime,
   });
 
-  if (usesRealTimeUpdates) {
-    serverMock.wsEvents.on('data_changed', () => {
-      addAction('received-ws-data-change-event');
-      documentStore.invalidateData('realtimeUpdate');
-    });
-  }
+  const disposeTestEnvResources = (() => {
+    const cleanupCallbacks: Array<() => void> = [
+      unregisterMockStoreInstance,
+      () => {
+        offlineTimelineLogger.dispose();
+      },
+    ];
 
-  if (resolvedPersistentStorage?.offline) {
-    offlineTimelineLogger.attachResolutionObserver({
-      getOfflineResolutions: () =>
-        documentStore
-          .getOfflineResolutions()
-          .map(({ id: resolutionId, operation }) => ({
-            id: resolutionId,
-            operation,
-          })),
-      adapter: resolvedPersistentStorage.adapter,
-      config: resolvedPersistentStorage.offline.session.getConfig(),
-    });
-  }
+    if (usesRealTimeUpdates) {
+      cleanupCallbacks.push(
+        serverMock.wsEvents.on('data_changed', () => {
+          addAction('received-ws-data-change-event');
+          documentStore.invalidateData('realtimeUpdate');
+        }),
+      );
+    }
+
+    if (resolvedPersistentStorage?.offline) {
+      offlineTimelineLogger.attachResolutionObserver({
+        getOfflineResolutions: () =>
+          documentStore
+            .getOfflineResolutions()
+            .map(({ id: resolutionId, operation }) => ({
+              id: resolutionId,
+              operation,
+            })),
+        adapter: resolvedPersistentStorage.adapter,
+        config: resolvedOfflineSession!.getConfig(),
+      });
+    }
+
+    let isDisposed = false;
+    return () => {
+      if (isDisposed) return;
+      isDisposed = true;
+
+      for (const cleanup of cleanupCallbacks) {
+        cleanup();
+      }
+    };
+  })();
+  const disposeDocumentStore = documentStore.dispose.bind(documentStore);
+  documentStore.dispose = () => {
+    disposeTestEnvResources();
+    disposeDocumentStore();
+  };
 
   const env = {
     apiStore: documentStore,

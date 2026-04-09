@@ -1615,10 +1615,11 @@ export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
 }
 
 export function createOfflineSession(args: {
-  getSessionKey: () => string | false;
   config: OfflineSessionConfig;
+  getSessionKey?: () => string | false;
 }): OfflineSession {
-  const { getSessionKey, config } = args;
+  const getSessionKey = args.getSessionKey ?? (() => false);
+  const { config } = args;
   const inactiveScope = `offline-session:${Math.random().toString(36).slice(2)}`;
   const baseRuntimeConfig: OfflineRuntimeConfig = {
     network: { enabled: config.network?.enabled ?? false },

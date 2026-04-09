@@ -430,6 +430,7 @@ type TempCreateDescendantCollection = {
 export type OfflineStoreController<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
+  dispose: () => void;
   hydrateIfNeeded: () => Promise<void>;
   canQueueMutation: () => boolean;
   prepareForMutation: <TName extends keyof TOperations & string>(
@@ -486,6 +487,7 @@ export function createOfflineStoreController<
 }: CreateOfflineStoreControllerOptions<TOperations>): OfflineStoreController<TOperations> {
   const sessionConfig = offlineSession.getConfig();
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
+  let isDisposed = false;
   let activeSession: ActiveSessionState | null = null;
   let replayScheduled = false;
   let replayRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -702,7 +704,18 @@ export function createOfflineStoreController<
     hydratedPromise = null;
   }
 
+  function dispose(): void {
+    if (isDisposed) return;
+
+    isDisposed = true;
+    teardownActiveSession();
+    resetReplayRetryState();
+    replayQueue.clear();
+  }
+
   function ensureActiveSession(): ActiveSessionState | null {
+    if (isDisposed) return null;
+
     const sessionKey = getSessionKey();
     const targetSessionKey = offlineSession.getSessionKey();
 
@@ -3370,7 +3383,7 @@ export function createOfflineStoreController<
   }
 
   function canQueueMutation(): boolean {
-    return getSessionKey() !== false;
+    return !isDisposed && getSessionKey() !== false;
   }
 
   async function prepareForFetch(): Promise<void> {
@@ -3381,6 +3394,7 @@ export function createOfflineStoreController<
   }
 
   return {
+    dispose,
     hydrateIfNeeded,
     canQueueMutation,
     prepareForMutation,

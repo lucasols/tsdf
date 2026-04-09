@@ -60,7 +60,10 @@ import {
   type ParsedOfflineResolutionConflictResultForOperation,
 } from './persistentStorage/offline/types';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
-import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
+import type {
+  DocumentPersistentStorageConfig,
+  ResolvedDocumentPersistentStorageConfig,
+} from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -72,6 +75,12 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
+import {
+  registerStoreWithManager,
+  resolveStoreManagerOfflineSession,
+  type StoreManager,
+  validateStoreManagerSessionConsistency,
+} from './storeManager';
 import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import {
   type BrowserTabsPriorityTimings,
@@ -202,14 +211,9 @@ export type DocumentStoreOptions<
   debugName?: string;
   /** Stable id shared by the same logical document store across browser tabs. */
   id: string;
-  /**
-   * Returns the current authenticated session / tenant key used to scope
-   * browser-tabs sync. Return `false` to disable browser-tabs sync when no
-   * account is loaded.
-   */
-  getSessionKey: () => string | false;
+  /** Shared global store manager providing session scoping and error normalization. */
+  storeManager: StoreManager;
   fetchFn: (signal: AbortSignal) => Promise<State>;
-  errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   dynamicRealtimeThrottleMs?: (params: {
@@ -234,7 +238,7 @@ export type DocumentStoreOptions<
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`, and the
+   * Session scoping always reuses this store manager's `getSessionKey`, and the
    * persisted namespace always reuses this store's `id`. */
   persistentStorage?: DocumentPersistentStorageConfig<
     State,
@@ -276,9 +280,8 @@ export function createDocumentStore<
 >({
   debugName,
   id,
-  getSessionKey,
+  storeManager,
   fetchFn,
-  errorNormalizer,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
@@ -316,17 +319,68 @@ export function createDocumentStore<
   let initialStatus: DocumentStatus = 'idle';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
-  const getSessionKeyForRuntime =
+  const resolvedOfflineSession = resolveStoreManagerOfflineSession({
+    storeManager,
+    storeName: id,
+    usesOfflineStorage: persistentStorageConfig?.offline !== undefined,
+  });
+  const getSessionKeyBase =
     import.meta.env.TEST && testOptions
-      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
-      : getSessionKey;
+      ? wrapGetSessionKeyForTest(
+          storeManager.getSessionKey,
+          testOptions.onSessionKeyChanged,
+        )
+      : storeManager.getSessionKey;
+  const getSessionKeyForRuntime =
+    resolvedOfflineSession === null
+      ? getSessionKeyBase
+      : () =>
+          validateStoreManagerSessionConsistency({
+            storeManager,
+            storeName: id,
+            offlineSession: resolvedOfflineSession,
+            getSessionKey: getSessionKeyBase,
+          });
+  const errorNormalizer = storeManager.errorNormalizer;
+  const resolvedOfflineSessionForPersistentStorage =
+    persistentStorageConfig?.offline === undefined
+      ? undefined
+      : (() => {
+          if (resolvedOfflineSession === null) {
+            throw new Error(
+              `[tsdf] Store "${id}" requires an offline session but none was configured on the store manager`,
+            );
+          }
 
-  const resolvedPersistentStorageConfig = persistentStorageConfig
-    ? {
+          return resolvedOfflineSession;
+        })();
+
+  // WORKAROUND: The public persistent-storage config intentionally omits the
+  // manager-owned offline session, so stores reattach that resolved session at
+  // runtime before passing the config to persistence internals.
+  const resolvedPersistentStorageConfig: ResolvedDocumentPersistentStorageConfig<
+    State,
+    StorageState,
+    TOfflineOperations
+  > | null = persistentStorageConfig
+    ? __LEGIT_CAST__<
+        ResolvedDocumentPersistentStorageConfig<
+          State,
+          StorageState,
+          TOfflineOperations
+        >,
+        unknown
+      >({
         ...persistentStorageConfig,
+        offline: persistentStorageConfig.offline
+          ? {
+              ...persistentStorageConfig.offline,
+              session: resolvedOfflineSessionForPersistentStorage,
+            }
+          : undefined,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
-      }
+      })
     : null;
 
   if (import.meta.env.TEST && testOptions) {
@@ -885,10 +939,12 @@ export function createDocumentStore<
    *   next window focus event.
    */
   function onTransportReconnect(): void {
+    if (isDisposed) return;
     focusLifecycle.onTransportReconnect();
   }
 
   function reset(): void {
+    if (isDisposed) return;
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
     clearOfflineOverlay();
@@ -905,6 +961,22 @@ export function createDocumentStore<
     });
     focusLifecycle.reset();
     persistence?.attach(store);
+  }
+
+  /** Releases store resources and unregisters the store from its manager. */
+  function dispose(): void {
+    if (isDisposed) return;
+
+    isDisposed = true;
+    unregisterStoreFromManager();
+    scheduler.reset();
+    lastDocumentSyncVersion = undefined;
+    clearOfflineOverlay();
+    browserTabsSync.close();
+    browserTabsPriority.close();
+    focusLifecycle.dispose();
+    persistence?.dispose();
+    offlineController?.dispose();
   }
 
   function startMutation(): () => boolean {
@@ -1330,6 +1402,12 @@ export function createDocumentStore<
     });
   }
 
+  let isDisposed = false;
+  const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
+    id,
+    reset,
+  });
+
   return {
     store,
     events,
@@ -1346,6 +1424,7 @@ export function createDocumentStore<
     invalidateData,
     updateState,
     reset,
+    dispose,
     startMutation,
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {

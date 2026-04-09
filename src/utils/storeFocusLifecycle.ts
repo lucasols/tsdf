@@ -101,6 +101,15 @@ export function createStoreFocusLifecycle({
     });
   }
 
+  function dispose(): void {
+    cleanupFocusListener?.();
+    cleanupFocusListener = null;
+    clearReconnectFocusListener();
+    clearReconnectCooldownTimeout();
+    hasPendingReconnectRevalidateOnFocus = false;
+    lastTransportReconnectRevalidateAt = Number.NEGATIVE_INFINITY;
+  }
+
   function onTransportReconnect(): void {
     if (!usesRealTimeUpdates) return;
 
@@ -124,5 +133,5 @@ export function createStoreFocusLifecycle({
 
   reset();
 
-  return { onTransportReconnect, reset };
+  return { onTransportReconnect, reset, dispose };
 }

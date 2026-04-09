@@ -60,6 +60,7 @@ import { createProtectedStorageKey } from '../persistentStorage/persistentStorag
 import type {
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
+  ResolvedCollectionPersistentStorageConfig,
 } from '../persistentStorage/types';
 import {
   BatchRequest,
@@ -72,6 +73,12 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from '../requestScheduler';
+import {
+  registerStoreWithManager,
+  resolveStoreManagerOfflineSession,
+  type StoreManager,
+  validateStoreManagerSessionConsistency,
+} from '../storeManager';
 import {
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
@@ -257,12 +264,8 @@ export type CollectionStoreOptions<
   debugName?: string;
   /** Stable id shared by the same logical collection store across browser tabs. */
   id: string;
-  /**
-   * Returns the current authenticated session / tenant key used to scope
-   * browser-tabs sync. Return `false` to disable browser-tabs sync when no
-   * account is loaded.
-   */
-  getSessionKey: () => string | false;
+  /** Shared global store manager providing session scoping and error normalization. */
+  storeManager: StoreManager;
   fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>;
   /** Optional batch fetch function for fetching multiple items at once */
   batchFetchFn?: (
@@ -279,7 +282,6 @@ export type CollectionStoreOptions<
   /** Called when cache-limit eviction removes items from in-memory state. */
   onStateCleanup?: (cleanup: CollectionStateCleanup<ItemPayload>) => void;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
-  errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
@@ -305,7 +307,7 @@ export type CollectionStoreOptions<
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`, and the
+   * Session scoping always reuses this store manager's `getSessionKey`, and the
    * persisted namespace always reuses this store's `id`. */
   persistentStorage?: CollectionPersistentStorageConfig<
     ItemState,
@@ -360,7 +362,7 @@ export function createCollectionStore<
 >({
   debugName,
   id,
-  getSessionKey,
+  storeManager,
   fetchFn,
   batchFetchFn,
   getItemsBatchKey,
@@ -369,7 +371,6 @@ export function createCollectionStore<
   onStateCleanup,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
-  errorNormalizer,
   mediumPriorityDelayMs,
   dynamicRealtimeThrottleMs,
   revalidateOnWindowFocus,
@@ -416,17 +417,70 @@ export function createCollectionStore<
   let initialStatus: CollectionItemStatus = 'success';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
-  const getSessionKeyForRuntime =
+  const resolvedOfflineSession = resolveStoreManagerOfflineSession({
+    storeManager,
+    storeName: id,
+    usesOfflineStorage: persistentStorageConfig?.offline !== undefined,
+  });
+  const getSessionKeyBase =
     import.meta.env.TEST && testOptions
-      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
-      : getSessionKey;
+      ? wrapGetSessionKeyForTest(
+          storeManager.getSessionKey,
+          testOptions.onSessionKeyChanged,
+        )
+      : storeManager.getSessionKey;
+  const getSessionKeyForRuntime =
+    resolvedOfflineSession === null
+      ? getSessionKeyBase
+      : () =>
+          validateStoreManagerSessionConsistency({
+            storeManager,
+            storeName: id,
+            offlineSession: resolvedOfflineSession,
+            getSessionKey: getSessionKeyBase,
+          });
+  const errorNormalizer = storeManager.errorNormalizer;
+  const resolvedOfflineSessionForPersistentStorage =
+    persistentStorageConfig?.offline === undefined
+      ? undefined
+      : (() => {
+          if (resolvedOfflineSession === null) {
+            throw new Error(
+              `[tsdf] Store "${id}" requires an offline session but none was configured on the store manager`,
+            );
+          }
 
-  const resolvedPersistentStorageConfig = persistentStorageConfig
-    ? {
+          return resolvedOfflineSession;
+        })();
+
+  // WORKAROUND: The public persistent-storage config intentionally omits the
+  // manager-owned offline session, so stores reattach that resolved session at
+  // runtime before passing the config to persistence internals.
+  const resolvedPersistentStorageConfig: ResolvedCollectionPersistentStorageConfig<
+    ItemState,
+    ItemPayload,
+    StorageState,
+    TOfflineOperations
+  > | null = persistentStorageConfig
+    ? __LEGIT_CAST__<
+        ResolvedCollectionPersistentStorageConfig<
+          ItemState,
+          ItemPayload,
+          StorageState,
+          TOfflineOperations
+        >,
+        unknown
+      >({
         ...persistentStorageConfig,
+        offline: persistentStorageConfig.offline
+          ? {
+              ...persistentStorageConfig.offline,
+              session: resolvedOfflineSessionForPersistentStorage,
+            }
+          : undefined,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
-      }
+      })
     : null;
 
   if (import.meta.env.TEST && testOptions) {
@@ -1882,10 +1936,12 @@ export function createCollectionStore<
    *   next window focus event.
    */
   function onTransportReconnect(): void {
+    if (isDisposed) return;
     focusLifecycle.onTransportReconnect();
   }
 
   function reset() {
+    if (isDisposed) return;
     for (const scheduler of batchKeySchedulers.values()) {
       scheduler.reset();
     }
@@ -1909,6 +1965,35 @@ export function createCollectionStore<
     store.setState(persistence?.createInitialState({}) ?? {});
     focusLifecycle.reset();
     persistence?.attach(store);
+  }
+
+  /** Releases store resources and unregisters the store from its manager. */
+  function dispose(): void {
+    if (isDisposed) return;
+
+    isDisposed = true;
+    unregisterStoreFromManager();
+
+    for (const scheduler of batchKeySchedulers.values()) {
+      scheduler.reset();
+    }
+    batchKeySchedulers.clear();
+
+    for (const scheduler of perItemSchedulers.values()) {
+      scheduler.reset();
+    }
+    perItemSchedulers.clear();
+
+    invalidationWasTriggered.clear();
+    lastCollectionSyncVersions.clear();
+    clearOfflineOverlays();
+    itemCacheRuntime.clearAll();
+    cacheLimitEnforcementScheduler.cancel();
+    browserTabsSync.close();
+    browserTabsPriority.close();
+    focusLifecycle.dispose();
+    persistence?.dispose();
+    offlineController?.dispose();
   }
 
   /** Detects whether a specific item inside a collection item's data is still loading.
@@ -2033,6 +2118,12 @@ export function createCollectionStore<
     });
   }
 
+  let isDisposed = false;
+  const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
+    id,
+    reset,
+  });
+
   return {
     store,
     events,
@@ -2048,6 +2139,7 @@ export function createCollectionStore<
     useListItemIsDeleted,
     useListItem,
     reset,
+    dispose,
     preloadItemFromStorage,
     getItemKey,
     getItemState,
