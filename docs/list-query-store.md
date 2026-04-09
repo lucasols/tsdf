@@ -159,7 +159,7 @@ derivedQueries: {
   getQueryGroup: (queryPayload) => queryPayload.tableId,
   getItemGroup: (_item, itemPayload) => itemPayload.split('||')[0] ?? '',
   isComplete: (queryPayload, { queries }) => queries.length > 0,
-  deriveQuery: (queryPayload, items) => {
+  deriveQuery: (queryPayload, items, { isOfflineMode, deriveSource }) => {
     return items.map(({ key }) => key);
   },
 }
@@ -169,6 +169,8 @@ Behavior:
 
 - Online: exact query cache wins; otherwise TSDF can derive when `isComplete(...)` returns `true`
 - Offline: derivation is attempted before the exact cached query result
+- `deriveQuery(...)` receives `{ isOfflineMode, deriveSource }`
+- `deriveSource` is `'online'`, `'offline'`, or `'sticky-offline'`
 - Derived results expose `isDerived: true`
 - Derived results always expose `hasMore: false`
 - Derived results do not create `state.queries[queryKey]`

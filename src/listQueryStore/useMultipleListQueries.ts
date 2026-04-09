@@ -40,6 +40,7 @@ import {
 } from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
+  type DerivedQueryContext,
   type DerivedQueriesConfig,
   type FieldsInput,
   type ListQueryOfflineOverlay,
@@ -507,9 +508,18 @@ export function useMultipleListQueries<
       }
 
       const derivedItems = getDerivedGroupItems(state, groupKey);
+      const deriveQueryContext: DerivedQueryContext = {
+        isOfflineMode,
+        deriveSource: isOfflineMode
+          ? 'offline'
+          : stickyDerived
+            ? 'sticky-offline'
+            : 'online',
+      };
       const derivedItemKeys = derivedQueries.deriveQuery(
         queryConfig.payload,
         derivedItems,
+        deriveQueryContext,
       );
 
       if (derivedItemKeys !== false) {

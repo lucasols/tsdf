@@ -21,11 +21,13 @@ export type {
 } from './listQueryStore/listQueryStore';
 
 export type {
+  DerivedQueryContext,
   DerivedQueriesConfig,
   FetchListFnReturn,
   FetchListFnReturnItem,
   FieldsInput,
   FieldsOption,
+  DerivedQuerySource,
   ListQueryStoreInitialData,
   ListQueryUseMultipleItemsQuery,
   ListQueryUseMultipleListQueriesQuery,

@@ -224,6 +224,21 @@ export type DerivedQueryItem<ItemState extends ValidStoreState> = {
   data: ItemState;
 };
 
+/** Why a derived query is currently being resolved. */
+export type DerivedQuerySource = 'online' | 'offline' | 'sticky-offline';
+
+/** Runtime context passed to `derivedQueries.deriveQuery(...)`. */
+export type DerivedQueryContext = {
+  /** Whether the store is currently in offline mode. */
+  isOfflineMode: boolean;
+  /**
+   * What caused derivation to run.
+   * `sticky-offline` means a query that was derived offline is still sticking
+   * to the local derived view after reconnect, until explicit invalidation.
+   */
+  deriveSource: DerivedQuerySource;
+};
+
 export type DerivedQueriesConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -248,6 +263,7 @@ export type DerivedQueriesConfig<
   deriveQuery: (
     queryPayload: QueryPayload,
     items: DerivedQueryItem<ItemState>[],
+    context: DerivedQueryContext,
   ) => string[] | false;
 };
 

@@ -165,23 +165,24 @@ test('online exact cached queries stay exact instead of being re-derived from th
 });
 
 test('online filtered queries can be derived from a complete local group without creating a synthetic cache entry', async () => {
+  const deriveQuery = vi.fn<TestDeriveQuery>((queryPayload, items) => {
+    const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
+
+    return items
+      .filter(({ data }) =>
+        startsWithFilterValue
+          ? data.name.startsWith(startsWithFilterValue)
+          : true,
+      )
+      .sort((left, right) => left.data.name.localeCompare(right.data.name))
+      .map(({ key }) => key);
+  });
   const env = createListQueryStoreTestEnv(initialServerData, {
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
       isComplete: alwaysComplete,
-      deriveQuery: (queryPayload, items) => {
-        const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
-
-        return items
-          .filter(({ data }) =>
-            startsWithFilterValue
-              ? data.name.startsWith(startsWithFilterValue)
-              : true,
-          )
-          .sort((left, right) => left.data.name.localeCompare(right.data.name))
-          .map(({ key }) => key);
-      },
+      deriveQuery,
     },
   });
 
@@ -218,6 +219,16 @@ test('online filtered queries can be derived from a complete local group without
     itemNames: ['Ada', 'Alan']
     queryKeys: []
     requests: []
+  `);
+
+  const onlineDerivedContext = deriveQuery.mock.lastCall?.[2];
+  if (!onlineDerivedContext) {
+    throw new Error('Expected deriveQuery to receive context');
+  }
+
+  expect(onlineDerivedContext).toMatchInlineSnapshot(`
+    deriveSource: 'online'
+    isOfflineMode: '❌'
   `);
 });
 
@@ -717,23 +728,24 @@ test('offline derived queries stay sticky across reconnect until the query is in
   network.install();
   const sessionKey = 'derived-queries-offline';
   const renders = createLoggerStore({ arrays: 'all' });
+  const deriveQuery = vi.fn<TestDeriveQuery>((queryPayload, items) => {
+    const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
+
+    return items
+      .filter(({ data }) =>
+        startsWithFilterValue
+          ? data.name.startsWith(startsWithFilterValue)
+          : true,
+      )
+      .sort((left, right) => left.data.name.localeCompare(right.data.name))
+      .map(({ key }) => key);
+  });
   const env = createListQueryStoreTestEnv(initialServerData, {
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
       isComplete: alwaysComplete,
-      deriveQuery: (queryPayload, items) => {
-        const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
-
-        return items
-          .filter(({ data }) =>
-            startsWithFilterValue
-              ? data.name.startsWith(startsWithFilterValue)
-              : true,
-          )
-          .sort((left, right) => left.data.name.localeCompare(right.data.name))
-          .map(({ key }) => key);
-      },
+      deriveQuery,
     },
     persistentStorage: {
       adapter: 'local-sync',
@@ -788,6 +800,24 @@ test('offline derived queries stay sticky across reconnect until the query is in
   expect(
     env.serverTable.getRequestHistory('list', { includeTime: false }).length,
   ).toBe(0);
+  expect(
+    Array.from(
+      new Map(
+        deriveQuery.mock.calls.map(([, , context]) => {
+          return [
+            `${context.deriveSource}:${context.isOfflineMode}`,
+            {
+              deriveSource: context.deriveSource,
+              isOfflineMode: context.isOfflineMode,
+            },
+          ];
+        }),
+      ).values(),
+    ),
+  ).toMatchInlineSnapshot(`
+    - { deriveSource: 'offline', isOfflineMode: '✅' }
+    - { deriveSource: 'sticky-offline', isOfflineMode: '❌' }
+  `);
 
   renders.addMark('Invalidate after reconnect');
 
