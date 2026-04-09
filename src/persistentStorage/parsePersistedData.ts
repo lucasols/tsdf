@@ -4,8 +4,8 @@ import {
   rc_object,
   rc_parse,
   rc_string,
-  type RcType,
   rc_unknown,
+  type RcType,
 } from 'runcheck';
 
 import type { ValidPayload } from '../utils/storeShared';

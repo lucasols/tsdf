@@ -582,6 +582,7 @@ test('direct list-query store offline public api', async () => {
   expect(firstQuery).toMatchInlineSnapshot(`
     error: null
     hasMore: '❌'
+    isDerived: '❌'
     isLoading: '❌'
     isLoadingMore: '❌'
     items: ['Ada conflict', 'Grace offline']
@@ -772,6 +773,7 @@ test('direct list-query store offline public api', async () => {
   expect(multiHook.result.current[0]).toMatchInlineSnapshot(`
     error: null
     hasMore: '❌'
+    isDerived: '❌'
     isLoading: '❌'
     isLoadingMore: '❌'
     items: ['Ada resolved', 'Grace offline']

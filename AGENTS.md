@@ -16,6 +16,7 @@ TSDF (TypeScript Data Fetching) is a data fetching library built on top of `t-st
 - Prefer expressing API constraints, invalid configuration combinations, and usage contracts in the type system when that keeps the API clearer
 - Do not add runtime validation solely to protect untyped JavaScript consumers unless the user explicitly asks for it or the runtime check protects persisted data / network data / other truly unsafe inputs
 - When a type-level contract is sufficient for intended consumers, prefer the simpler type-only enforcement over duplicating the same rule at runtime
+- This library don't support server-side rendering (SSR), so dont introduce isomorphic code like useIsomorphicLayoutEffect.
 
 ## Development Commands
 

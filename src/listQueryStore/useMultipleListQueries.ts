@@ -5,7 +5,13 @@ import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
-import { useCallback, useContext, useEffect, useMemo } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from 'react';
 import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
@@ -28,13 +34,13 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
 } from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
+  type DerivedQueriesConfig,
   type FieldsInput,
   type ListQueryOfflineOverlay,
   type ListQueryUseMultipleListQueriesQuery,
@@ -111,6 +117,9 @@ export function useMultipleListQueries<
     | ((payloads: QueryPayload[]) => Promise<boolean[]>)
     | undefined,
   preloadQueriesBeforePaint: boolean,
+  preloadDerivedQueryItems:
+    | ((payloads: QueryPayload[]) => Promise<boolean[]>)
+    | undefined,
   readFallbackItemState:
     | ((
         itemKey: string,
@@ -133,6 +142,10 @@ export function useMultipleListQueries<
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
+  derivedQueries:
+    | DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>
+    | undefined,
+  isOfflineMode: boolean,
   offlineEntities: readonly GlobalOfflineEntity[],
   offlineOverlays: Readonly<
     Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
@@ -160,6 +173,11 @@ export function useMultipleListQueries<
     loadSize: number | undefined;
     queryMetadata: QueryMetadata | undefined;
   };
+
+  type ResolvedEffectiveQuery = {
+    query: TSFDListQuery<QueryPayload>;
+    isDerived: boolean;
+  } | null;
 
   const queriesWithId = useMemo((): QueryWithId[] => {
     return queries.map((queryProps) => ({
@@ -265,6 +283,8 @@ export function useMultipleListQueries<
       overlayItemsByQueryKey: byQueryKey,
     };
   }, [activeOfflineOverlays]);
+
+  const stickyDerivedQueryKeys = useConst(() => new Set<string>());
 
   const selectVisibleItems = useCallback(
     (
@@ -404,6 +424,123 @@ export function useMultipleListQueries<
     [deletedOverlayItemKeys, overlayItemsByQueryKey],
   );
 
+  const getDerivedGroupItems = useCallback(
+    (state: State, groupKey: string) => {
+      if (!derivedQueries) return [];
+
+      const itemsByKey = new Map<string, ItemState>();
+
+      for (const itemKey of Object.keys(state.items)) {
+        const overlay = activeOfflineOverlays[itemKey];
+        if (overlay?.item === null) continue;
+
+        const item =
+          overlay?.item !== undefined ? overlay.item : state.items[itemKey];
+        const itemPayload =
+          overlay?.itemPayload ?? state.itemQueries[itemKey]?.payload;
+
+        if (item == null || itemPayload === undefined) continue;
+        if (derivedQueries.getItemGroup(item, itemPayload) !== groupKey) {
+          continue;
+        }
+
+        itemsByKey.set(itemKey, item);
+      }
+
+      for (const [itemKey, overlay] of Object.entries(activeOfflineOverlays)) {
+        if (Object.hasOwn(state.items, itemKey)) continue;
+        if (overlay.item == null || overlay.itemPayload === undefined) continue;
+        if (
+          derivedQueries.getItemGroup(overlay.item, overlay.itemPayload) !==
+          groupKey
+        ) {
+          continue;
+        }
+
+        itemsByKey.set(itemKey, overlay.item);
+      }
+
+      return Array.from(itemsByKey, ([key, data]) => ({ key, data }));
+    },
+    [activeOfflineOverlays, derivedQueries],
+  );
+
+  const resolveEffectiveQuery = useCallback(
+    (
+      state: State,
+      queryConfig: { key: string; payload: QueryPayload },
+    ): ResolvedEffectiveQuery => {
+      const exactQuery = state.queries[queryConfig.key];
+      const stickyDerived = stickyDerivedQueryKeys.has(queryConfig.key);
+
+      if (!derivedQueries) {
+        return exactQuery ? { query: exactQuery, isDerived: false } : null;
+      }
+
+      const shouldAttemptDerived =
+        isOfflineMode || stickyDerived || exactQuery === undefined;
+
+      if (!shouldAttemptDerived) {
+        return { query: exactQuery, isDerived: false };
+      }
+
+      const groupKey = derivedQueries.getQueryGroup(queryConfig.payload);
+
+      if (!isOfflineMode && !stickyDerived) {
+        const groupQueries = Object.values(state.queries)
+          .filter(
+            (query) => derivedQueries.getQueryGroup(query.payload) === groupKey,
+          )
+          .map((query) => ({
+            payload: query.payload,
+            hasMore: query.hasMore,
+            itemCount: query.items.length,
+          }));
+
+        if (
+          !derivedQueries.isComplete(queryConfig.payload, {
+            queries: groupQueries,
+          })
+        ) {
+          return exactQuery ? { query: exactQuery, isDerived: false } : null;
+        }
+      }
+
+      const derivedItems = getDerivedGroupItems(state, groupKey);
+      const derivedItemKeys = derivedQueries.deriveQuery(
+        queryConfig.payload,
+        derivedItems,
+      );
+
+      if (derivedItemKeys !== false) {
+        if (derivedItems.length === 0 && derivedItemKeys.length === 0) {
+          return exactQuery ? { query: exactQuery, isDerived: false } : null;
+        }
+
+        return {
+          isDerived: true,
+          query: {
+            error: null,
+            hasMore: false,
+            items: derivedItemKeys,
+            payload: queryConfig.payload,
+            refetchOnMount: false,
+            status: 'success',
+            wasLoaded: true,
+          },
+        };
+      }
+
+      return exactQuery ? { query: exactQuery, isDerived: false } : null;
+    },
+    [
+      derivedQueries,
+      getDerivedGroupItems,
+      isOfflineMode,
+      stickyDerivedQueryKeys,
+    ],
+  );
+
   const resultSelector = useCallback(
     (state: State) => {
       return queriesWithId.map(
@@ -421,7 +558,10 @@ export function useMultipleListQueries<
           QueryPayload,
           QueryMetadata
         > => {
-          const query = state.queries[queryKey];
+          const effectiveQuery = resolveEffectiveQuery(state, {
+            key: queryKey,
+            payload,
+          });
           let loadingFields: string[] | undefined;
           const resultQueryMetadata =
             // WORKAROUND: queryMetadata stays optional on input queries, but the public hook result preserves the caller's QueryMetadata generic.
@@ -429,7 +569,7 @@ export function useMultipleListQueries<
               queryMetadata,
             );
 
-          if (!query) {
+          if (!effectiveQuery) {
             const pendingLoadingFields =
               partialResources &&
               showPartialAsRefetching &&
@@ -445,6 +585,7 @@ export function useMultipleListQueries<
               items: [],
               error: null,
               hasMore: false,
+              isDerived: false,
               payload: omitPayload ? undefined : payload,
               fields,
               ...(pendingLoadingFields
@@ -457,14 +598,16 @@ export function useMultipleListQueries<
             };
           }
 
-          let status = query.status;
+          let status = effectiveQuery.query.status;
           const visibleItemKeys = getVisibleQueryItemKeys(
             queryKey,
-            query.items,
+            effectiveQuery.query.items,
           );
-          const hasCachedItemsInState = query.items.some((itemKey) => {
-            return state.items[itemKey] != null;
-          });
+          const hasCachedItemsInState = effectiveQuery.query.items.some(
+            (itemKey) => {
+              return state.items[itemKey] != null;
+            },
+          );
 
           // Override status when partial resources has items with missing fields
           if (
@@ -473,20 +616,23 @@ export function useMultipleListQueries<
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
-            const someItemMissingFields = query.items.some((itemKey) => {
-              const loadedFields = state.itemLoadedFields[itemKey] ?? [];
-              return fields.some((f) => !loadedFields.includes(f));
-            });
-            const someItemMissingFieldsInState = query.items.some((itemKey) => {
-              const item = state.items[itemKey];
-              if (!item || typeof item !== 'object') return true;
-              const itemRecord =
-                // WORKAROUND: Partial-resource checks need indexed property access, but ItemState is generic and does not expose a string index signature.
-                __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
-              return fields.some(
-                (f) => !(f in itemRecord) || itemRecord[f] === undefined,
-              );
-            });
+            const someItemMissingFields = effectiveQuery.query.items.some(
+              (itemKey) => {
+                const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+                return fields.some((f) => !loadedFields.includes(f));
+              },
+            );
+            const someItemMissingFieldsInState =
+              effectiveQuery.query.items.some((itemKey) => {
+                const item = state.items[itemKey];
+                if (!item || typeof item !== 'object') return true;
+                const itemRecord =
+                  // WORKAROUND: Partial-resource checks need indexed property access, but ItemState is generic and does not expose a string index signature.
+                  __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
+                return fields.some(
+                  (f) => !(f in itemRecord) || itemRecord[f] === undefined,
+                );
+              });
 
             if (someItemMissingFields) {
               if (!hasCachedItemsInState) {
@@ -504,15 +650,17 @@ export function useMultipleListQueries<
             fields === '*' &&
             (status === 'success' || status === 'refetching')
           ) {
-            const hasAnyFieldInvalidation = query.items.some((itemKey) => {
-              const itemFieldInvalidationFields =
-                state.itemFieldInvalidationFields[itemKey];
+            const hasAnyFieldInvalidation = effectiveQuery.query.items.some(
+              (itemKey) => {
+                const itemFieldInvalidationFields =
+                  state.itemFieldInvalidationFields[itemKey];
 
-              return (
-                !!itemFieldInvalidationFields &&
-                itemFieldInvalidationFields.length > 0
-              );
-            });
+                return (
+                  !!itemFieldInvalidationFields &&
+                  itemFieldInvalidationFields.length > 0
+                );
+              },
+            );
 
             if (hasAnyFieldInvalidation) {
               status = 'refetching';
@@ -522,9 +670,9 @@ export function useMultipleListQueries<
           if (partialResources && showPartialAsRefetching) {
             if (Array.isArray(fields) && fields.length > 0) {
               const pendingRequestedFields = fields.filter((field) =>
-                status === 'loading' && query.items.length === 0
+                status === 'loading' && effectiveQuery.query.items.length === 0
                   ? true
-                  : query.items.some((itemKey) => {
+                  : effectiveQuery.query.items.some((itemKey) => {
                       const loadedFields =
                         state.itemLoadedFields[itemKey] ?? [];
                       return !loadedFields.includes(field);
@@ -537,7 +685,7 @@ export function useMultipleListQueries<
             } else if (fields === '*') {
               const pendingInvalidationFields = Array.from(
                 new Set(
-                  query.items.flatMap(
+                  effectiveQuery.query.items.flatMap(
                     (itemKey) =>
                       state.itemFieldInvalidationFields[itemKey] ?? [],
                   ),
@@ -566,11 +714,12 @@ export function useMultipleListQueries<
                   item: state.items[itemKey],
                   itemPayload: state.itemQueries[itemKey]?.payload,
                 })),
-            error: query.error,
-            hasMore: query.hasMore,
+            error: effectiveQuery.query.error,
+            hasMore: effectiveQuery.query.hasMore,
+            isDerived: effectiveQuery.isDerived,
             ...(loadingFields ? { loadingFields } : {}),
             isLoading: status === 'loading',
-            payload: omitPayload ? undefined : query.payload,
+            payload: omitPayload ? undefined : effectiveQuery.query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
             pendingSync: hasPendingOfflineSync(
@@ -587,6 +736,7 @@ export function useMultipleListQueries<
       offlineEntitiesByKey,
       partialResources,
       queriesWithId,
+      resolveEffectiveQuery,
       selectVisibleItems,
     ],
   );
@@ -605,7 +755,14 @@ export function useMultipleListQueries<
           return result;
         }
 
-        if (queryConfig && readFallbackQueryState) {
+        if (
+          queryConfig &&
+          readFallbackQueryState &&
+          !(
+            derivedQueries &&
+            (isOfflineMode || stickyDerivedQueryKeys.has(queryConfig.key))
+          )
+        ) {
           const fallbackQuery = readFallbackQueryState(queryConfig.key);
 
           if (fallbackQuery && readFallbackItemState) {
@@ -655,6 +812,7 @@ export function useMultipleListQueries<
               items: fallbackItems,
               error: null,
               hasMore: fallbackQuery.hasMore,
+              isDerived: false,
               payload: queryConfig.omitPayload
                 ? undefined
                 : fallbackQuery.payload,
@@ -679,42 +837,52 @@ export function useMultipleListQueries<
     readFallbackQueryState,
     readFallbackItemState,
     partialResources,
+    derivedQueries,
     getVisibleQueryItemKeys,
+    isOfflineMode,
     offlineEntitiesByKey,
     selectVisibleItems,
+    stickyDerivedQueryKeys,
   ]);
   const autoFetchSignals = store.useSelectorRC(
     useCallback(
       (state: State) => {
         if (!partialResources) return [];
 
-        return queriesWithId.map(({ key, fields }) => {
-          const query = state.queries[key];
-          if (!query) {
+        return queriesWithId.map((queryConfig) => {
+          const effectiveQuery = resolveEffectiveQuery(state, queryConfig);
+          const query = state.queries[queryConfig.key];
+
+          if (!effectiveQuery) {
             return {
-              status: null,
+              isDerived: false,
+              pendingInvalidationPriority: null,
+              queryItemKeys: new Array<string>(),
               refetchOnMount: null,
+              status: null,
               missingRequestedFieldsKey: '',
               unresolvedInvalidationFieldsKey: '',
-              pendingInvalidationPriority: null,
             };
           }
 
           const unresolvedFields = Array.from(
             new Set(
-              query.items.flatMap((itemKey) =>
+              effectiveQuery.query.items.flatMap((itemKey) =>
                 getUnresolvedPendingInvalidationFields(itemKey, state),
               ),
             ),
           ).sort();
+          const requestedFields = Array.isArray(queryConfig.fields)
+            ? queryConfig.fields
+            : undefined;
 
           const missingRequestedFields =
-            Array.isArray(fields) && fields.length > 0
-              ? query.items
+            requestedFields && requestedFields.length > 0
+              ? effectiveQuery.query.items
                   .flatMap((itemKey) => {
                     return excludeLoadedFields(
                       state.itemLoadedFields[itemKey],
-                      fields,
+                      requestedFields,
                     );
                   })
                   .filter(
@@ -724,24 +892,38 @@ export function useMultipleListQueries<
               : [];
 
           let unresolvedInvalidationFieldsKey = '';
-          if (fields === '*') {
+          if (queryConfig.fields === '*') {
             unresolvedInvalidationFieldsKey = JSON.stringify(unresolvedFields);
-          } else if (Array.isArray(fields) && fields.length > 0) {
+          } else if (
+            Array.isArray(queryConfig.fields) &&
+            queryConfig.fields.length > 0
+          ) {
             unresolvedInvalidationFieldsKey = JSON.stringify(
-              unresolvedFields.filter((field) => fields.includes(field)),
+              unresolvedFields.filter((field) =>
+                queryConfig.fields?.includes(field),
+              ),
             );
           }
 
           const pendingInvalidationPriority =
-            fields === '*'
-              ? getHighestPendingInvalidationPriority(query.items, undefined)
-              : Array.isArray(fields) && fields.length > 0
-                ? getHighestPendingInvalidationPriority(query.items, fields)
+            queryConfig.fields === '*'
+              ? getHighestPendingInvalidationPriority(
+                  effectiveQuery.query.items,
+                  undefined,
+                )
+              : Array.isArray(queryConfig.fields) &&
+                  queryConfig.fields.length > 0
+                ? getHighestPendingInvalidationPriority(
+                    effectiveQuery.query.items,
+                    queryConfig.fields,
+                  )
                 : undefined;
 
           return {
-            status: query.status,
-            refetchOnMount: query.refetchOnMount,
+            isDerived: effectiveQuery.isDerived,
+            status: effectiveQuery.query.status,
+            refetchOnMount: query?.refetchOnMount ?? null,
+            queryItemKeys: effectiveQuery.query.items,
             missingRequestedFieldsKey: JSON.stringify(missingRequestedFields),
             unresolvedInvalidationFieldsKey,
             pendingInvalidationPriority: pendingInvalidationPriority ?? null,
@@ -753,6 +935,7 @@ export function useMultipleListQueries<
         getUnresolvedPendingInvalidationFields,
         partialResources,
         queriesWithId,
+        resolveEffectiveQuery,
       ],
     ),
     { equalityFn: deepEqual },
@@ -770,9 +953,14 @@ export function useMultipleListQueries<
 
       if (key !== event.queryKey) continue;
 
-      if (disableRefetches && store.state.queries[key]?.wasLoaded) continue;
+      const resolvedQuery = resolveEffectiveQuery(store.state, {
+        key,
+        payload,
+      });
+      if (disableRefetches && resolvedQuery?.query.wasLoaded) continue;
 
       if (!queryInvalidationWasTriggered.has(key)) {
+        stickyDerivedQueryKeys.delete(key);
         store.produceState((draft) => {
           const query = draft.queries[key];
           if (!query?.refetchOnMount) return;
@@ -792,28 +980,51 @@ export function useMultipleListQueries<
 
   useRegisterActiveKeys(activeQueryKeys, registerActiveQueries, touchQueries);
 
-  useIsomorphicLayoutEffect(() => {
-    if (
-      !preloadQueriesBeforePaint ||
-      !preloadQueries ||
-      fetchQueriesWithId.length < 1
-    ) {
+  useLayoutEffect(() => {
+    if (!preloadQueriesBeforePaint || fetchQueriesWithId.length < 1) {
       return;
     }
 
-    void preloadQueries(fetchQueriesWithId.map(({ payload }) => payload));
-  }, [fetchQueriesWithId, preloadQueries, preloadQueriesBeforePaint]);
+    const payloads = fetchQueriesWithId.map(
+      (query): QueryPayload => query.payload,
+    );
+    if (preloadQueries) {
+      void preloadQueries(payloads);
+    }
+    if (derivedQueries && isOfflineMode && preloadDerivedQueryItems) {
+      void preloadDerivedQueryItems(payloads);
+    }
+  }, [
+    derivedQueries,
+    fetchQueriesWithId,
+    isOfflineMode,
+    preloadDerivedQueryItems,
+    preloadQueries,
+    preloadQueriesBeforePaint,
+  ]);
 
   useEffect(() => {
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (
+      const shouldPreloadQueries =
         !preloadQueriesBeforePaint &&
-        preloadQueries &&
-        fetchQueriesWithId.length > 0
-      ) {
-        await preloadQueries(fetchQueriesWithId.map(({ payload }) => payload));
+        fetchQueriesWithId.length > 0 &&
+        !!(
+          preloadQueries ||
+          (derivedQueries && isOfflineMode && preloadDerivedQueryItems)
+        );
+
+      if (shouldPreloadQueries) {
+        const payloads = fetchQueriesWithId.map(
+          (query): QueryPayload => query.payload,
+        );
+        await Promise.all([
+          preloadQueries ? preloadQueries(payloads) : Promise.resolve([]),
+          derivedQueries && isOfflineMode && preloadDerivedQueryItems
+            ? preloadDerivedQueryItems(payloads)
+            : Promise.resolve([]),
+        ]);
         if (effectState.cancelled) return;
       }
 
@@ -833,22 +1044,33 @@ export function useMultipleListQueries<
         if (isOffScreen) continue;
 
         const queryState = getQueryState(payload);
+        const effectiveQuery = resolveEffectiveQuery(store.state, {
+          key: queryId,
+          payload,
+        });
+        const effectiveQueryState = effectiveQuery?.query;
         let fetchType = queryState?.refetchOnMount || 'lowPriority';
         let fieldsToFetch = fields;
-        let requiredFetch = queryState === undefined || !queryState.wasLoaded;
+        let requiredFetch =
+          effectiveQueryState === undefined || !effectiveQueryState.wasLoaded;
 
         let shouldFetch = requiredFetch || !!queryState?.refetchOnMount;
 
+        if (effectiveQuery?.isDerived) {
+          requiredFetch = false;
+          shouldFetch = !!queryState?.refetchOnMount;
+        }
+
         // For partial resources, refetch when the requested field set changes
         // or when a full-resource hook is affected by field invalidation.
-        if (partialResources && !shouldFetch && queryState) {
+        if (partialResources && !shouldFetch && effectiveQueryState) {
           const isQueryFetchInFlight =
-            queryState.status === 'loading' ||
-            queryState.status === 'refetching' ||
-            queryState.status === 'loadingMore';
+            effectiveQueryState.status === 'loading' ||
+            effectiveQueryState.status === 'refetching' ||
+            effectiveQueryState.status === 'loadingMore';
 
           if (Array.isArray(fields) && fields.length > 0) {
-            const hasMissingRequestedFields = queryState.items.some(
+            const hasMissingRequestedFields = effectiveQueryState.items.some(
               (itemKey) => {
                 const loadedFields =
                   store.state.itemLoadedFields[itemKey] ?? [];
@@ -867,7 +1089,7 @@ export function useMultipleListQueries<
               }
             }
 
-            const hasAffectedFieldInvalidation = queryState.items.some(
+            const hasAffectedFieldInvalidation = effectiveQueryState.items.some(
               (itemKey) => {
                 const itemFieldInvalidationFields =
                   getUnresolvedPendingInvalidationFields(itemKey);
@@ -885,7 +1107,10 @@ export function useMultipleListQueries<
               fieldsToFetch = fields;
 
               const invalidationPriority =
-                getHighestPendingInvalidationPriority(queryState.items, fields);
+                getHighestPendingInvalidationPriority(
+                  effectiveQueryState.items,
+                  fields,
+                );
 
               if (
                 invalidationPriority &&
@@ -896,9 +1121,13 @@ export function useMultipleListQueries<
               }
             }
           } else if (fields === '*') {
-            const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
-              return getUnresolvedPendingInvalidationFields(itemKey).length > 0;
-            });
+            const hasAnyFieldInvalidation = effectiveQueryState.items.some(
+              (itemKey) => {
+                return (
+                  getUnresolvedPendingInvalidationFields(itemKey).length > 0
+                );
+              },
+            );
 
             if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
               shouldFetch = true;
@@ -906,7 +1135,7 @@ export function useMultipleListQueries<
 
               const invalidationPriority =
                 getHighestPendingInvalidationPriority(
-                  queryState.items,
+                  effectiveQueryState.items,
                   undefined,
                 );
 
@@ -929,7 +1158,7 @@ export function useMultipleListQueries<
 
         if (
           shouldScheduleAutomaticFetch({
-            wasLoaded: queryState?.wasLoaded,
+            wasLoaded: effectiveQueryState?.wasLoaded,
             shouldFetch,
             requiredFetch,
             disableRefetches,
@@ -938,6 +1167,7 @@ export function useMultipleListQueries<
             skipFreshFetch: !!partialResources,
           })
         ) {
+          stickyDerivedQueryKeys.delete(queryId);
           scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
             fields: fieldsToFetch,
           });
@@ -954,9 +1184,13 @@ export function useMultipleListQueries<
   }, [
     getQueryState,
     ignoreQueriesInRefetchOnMount,
+    derivedQueries,
+    isOfflineMode,
+    preloadDerivedQueryItems,
     preloadQueries,
     preloadQueriesBeforePaint,
     fetchQueriesWithId,
+    resolveEffectiveQuery,
     store,
     scheduleAutomaticListQueryFetch,
     partialResources,
@@ -965,6 +1199,30 @@ export function useMultipleListQueries<
     itemPendingInvalidationFields,
     getHighestPendingInvalidationPriority,
     getUnresolvedPendingInvalidationFields,
+    stickyDerivedQueryKeys,
+  ]);
+
+  useEffect(() => {
+    for (const queryConfig of queriesWithId) {
+      const resolved = resolveEffectiveQuery(store.state, queryConfig);
+
+      if (resolved?.isDerived && isOfflineMode) {
+        stickyDerivedQueryKeys.add(queryConfig.key);
+        continue;
+      }
+
+      if (resolved?.isDerived) continue;
+
+      if (store.state.queries[queryConfig.key]?.status === 'success') {
+        stickyDerivedQueryKeys.delete(queryConfig.key);
+      }
+    }
+  }, [
+    isOfflineMode,
+    queriesWithId,
+    resolveEffectiveQuery,
+    stickyDerivedQueryKeys,
+    store,
   ]);
 
   return visibleStoreState;

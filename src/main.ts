@@ -21,6 +21,7 @@ export type {
 } from './listQueryStore/listQueryStore';
 
 export type {
+  DerivedQueriesConfig,
   FetchListFnReturn,
   FetchListFnReturnItem,
   FieldsInput,

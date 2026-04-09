@@ -1807,6 +1807,25 @@ export function useOfflineStoreEntities(args: {
 }
 
 /**
+ * React hook returning offline status for a session or inactive scope.
+ */
+export function useOfflineStoreStatus(args: {
+  sessionKey: string | false;
+  inactiveScope: string;
+}): GlobalOfflineStatus {
+  const coordinator = useSessionOfflineCoordinator(
+    resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
+    false,
+  );
+  const statusSelector = useCallback(
+    (state: SessionStoreState) => state.status,
+    [],
+  );
+
+  return coordinator.store.useSelectorRC(statusSelector);
+}
+
+/**
  * React hook returning offline conflict/retry resolutions for a specific store in a session.
  */
 export function useOfflineStoreResolutions(args: {

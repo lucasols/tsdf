@@ -66,6 +66,9 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - When timing matters, use realistic durations from shared defaults/constants/helpers unless the exact timing value is itself the behavior under test.
 - Strengthen assertions so failures explain the regression clearly.
 - Prefer readable snapshots, timelines, and helpers over dense low-level expectations.
+- Do not introduce setup helpers, factories, or builder wrappers that hide scenario-defining config from the test body.
+- Keep relevant config inline when it explains the behavior under test. If reuse is still worthwhile, limit helpers to small local utility functions that are used inside the inline config instead of replacing the config object itself.
+- If a helper must stay extracted, its name must be fully self-explanatory from the call site. If that is not realistically possible, add detailed JSDoc that explains what the helper does, why it exists, what assumptions it bakes in, and which parts of the test scenario it is meant to keep readable.
 - Improve naming, comments, and structure so the scenario is obvious at a glance.
 - Prefer the most local explanatory comment possible. When confusion comes from a specific callback body, invalid fixture entry, timer advance, mock branch, or config line, put the explanation there instead of only at the test level.
 - Delete or consolidate tests that are redundant, low-signal, or only test speculative low-risk edges through synthetic setup.
@@ -89,6 +92,8 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Flag tests whose narrative is buried across long setup blocks, scattered assertions, raw store poking, or transport/`fetchHistory` details when a clearer structure, timeline snapshot, or `getRequestHistory(...)` assertion would make the behavior obvious.
 - Flag complex tests that do not present the scenario as a clear arrange/act/assert flow.
 - Prefer tests that communicate the regression they guard against immediately through naming, comments, helpers, and snapshots.
+- Flag helpers that hide the meaningful parts of test setup, especially config objects, callback behavior, mock branches, or initial state choices that a reviewer needs to see inline to understand the scenario.
+- Flag extracted helpers whose names are vague, partial, or only understandable after reading their implementation. If a helper remains extracted, either rename it so the call site tells the story on its own or add detailed JSDoc that makes the helper understandable without jumping around the file.
 - Do not treat readability issues as optional cleanup. In improve mode, fix them. In review mode, report them.
 
 ## 6) Validate Behavioral Coverage
@@ -142,6 +147,8 @@ Comments are not optional polish — they are a core readability requirement. A 
 
 - **Every non-trivial test must include comments.** The default expectation is that each important setup step, action, and assertion has a short comment explaining its purpose — especially in time-based, persistence, hydration, retry, sync, cross-tab, or otherwise stateful scenarios.
 - **Comment setup, not just behavior.** If the setup itself carries meaning — for example why the env starts in `loaded`, why a mock is configured a certain way, why offline mode is enabled, or why a fixture shape is chosen — add a short comment before that setup so the reader understands how the scenario is being constructed.
+- **Keep meaningful config visible.** If a config object or callback body carries the test’s story, keep it inline so the reader can understand the scenario without jumping to a helper. Extract only tiny utility logic that supports the inline config.
+- **Helpers need strong names or strong docs.** When a helper is still worth extracting, prefer a name that is fully self-explanatory at the call site. If the behavior, assumptions, or scenario role are still not obvious from the name alone, add detailed JSDoc explaining all three.
 - **Comments must explain _why_, not just label _what_.** A comment like `// refetch` adds nothing — the code already says that. A comment like `// refetch while previous request is still in-flight — should deduplicate` explains the scenario and the expected behavior in one line.
 - **Use comments to separate phases.** Label the setup, action, and assertion phases so a reader can scan the test structure without parsing every line. This is especially important in longer tests with multiple sequential steps.
 - **Place comments where the confusion is.** If the hard part is a specific line inside setup — for example an intentionally invalid `buildPendingEntities`, a suspicious `classifyFailure`, a weird timer duration, or a one-off mock branch — put the explanation directly on that line or callback, not only above the test action.

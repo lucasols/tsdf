@@ -72,6 +72,7 @@ export type TSFDUseListQueryReturn<
   error: StoreError | null;
   queryKey: string;
   hasMore: boolean;
+  isDerived: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
   /** Whether this result has local offline changes that still need to sync to the server. */
@@ -210,6 +211,44 @@ export type OffsetPaginationConfig = {
 export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
   mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
   selectFields: (fields: string[], item: ItemState) => ItemState;
+};
+
+export type DerivedQuerySummary<QueryPayload extends ValidPayload> = {
+  payload: QueryPayload;
+  hasMore: boolean;
+  itemCount: number;
+};
+
+export type DerivedQueryItem<ItemState extends ValidStoreState> = {
+  key: string;
+  data: ItemState;
+};
+
+export type DerivedQueriesConfig<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = {
+  /** Extracts the domain/group key for a query payload. */
+  getQueryGroup: (queryPayload: QueryPayload) => string;
+  /** Extracts the domain/group key for a materialized item. */
+  getItemGroup: (item: ItemState, itemPayload: ItemPayload) => string;
+  /**
+   * Returns whether the local data for the query group is complete enough to
+   * derive from while online.
+   */
+  isComplete: (
+    queryPayload: QueryPayload,
+    context: { queries: DerivedQuerySummary<QueryPayload>[] },
+  ) => boolean;
+  /**
+   * Computes a derived ordered list of item keys for a query, or `false` to
+   * fall back to the regular fetch/cache path.
+   */
+  deriveQuery: (
+    queryPayload: QueryPayload,
+    items: DerivedQueryItem<ItemState>[],
+  ) => string[] | false;
 };
 
 export type FieldsOption<HasPartialResources extends boolean> =
