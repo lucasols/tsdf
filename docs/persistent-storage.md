@@ -53,7 +53,7 @@ Store-specific options:
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
-If `persistentStorage.offline` is configured, pass one shared offline session config to `createStoreManager(...)` and keep store-local offline behavior in `persistentStorage.offline.operations`.
+If `persistentStorage.offline` is configured, pass one shared offline session config to `createStoreManager(...)` and keep store-local offline behavior in `persistentStorage.offline.operations`. `createStoreManager(...)` owns that session internally and expects config, not an existing `OfflineSession` object.
 
 Each offline operation now requires a `kind`:
 
@@ -128,6 +128,7 @@ const settingsStore = createDocumentStore<Settings>({
 
 - On successful fetch, stores save to persistence after debounce (approximately 1s).
 - On startup/reload, stores attempt restore and set `refetchOnMount: 'lowPriority'` so stale data is revalidated.
+- When a store instance is permanently discarded, call `store.dispose()` to release listeners, browser-tab coordination, and store-manager registration.
 - Invalid or incompatible cache entries are removed automatically.
 - Expired entries are removed by a periodic scan:
   - `localStorage`: ~1 week old entries
