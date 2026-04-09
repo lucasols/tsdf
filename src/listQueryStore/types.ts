@@ -229,6 +229,8 @@ export type DerivedQuerySource = 'online' | 'offline' | 'sticky-offline';
 
 /** Runtime context passed to `derivedQueries.deriveQuery(...)`. */
 export type DerivedQueryContext = {
+  /** The requested hook fields for this query, when partial resources are enabled. */
+  fields: FieldsInput | undefined;
   /** Whether the store is currently in offline mode. */
   isOfflineMode: boolean;
   /**
@@ -258,7 +260,8 @@ export type DerivedQueriesConfig<
   ) => boolean;
   /**
    * Computes a derived ordered list of item keys for a query, or `false` to
-   * fall back to the regular fetch/cache path.
+   * fall back to the regular fetch/cache path. `context.fields` lets the
+   * callback decide whether partial-resource queries should still derive.
    */
   deriveQuery: (
     queryPayload: QueryPayload,

@@ -30,6 +30,12 @@ import { listQueryQueryPayloadSchema } from '../offline/offlineTestShared';
 import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import {
+  getLocalStorageTree,
+  getOpfsDirTree,
+  startOpfsPersistentStorageOperationCapture,
+  startPersistentStorageOperationCapture,
+} from '../utils/persistentStorageOptimizationTestUtils';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
@@ -805,8 +811,9 @@ test('offline derived queries stay sticky across reconnect until the query is in
       new Map(
         deriveQuery.mock.calls.map(([, , context]) => {
           return [
-            `${context.deriveSource}:${context.isOfflineMode}`,
+            `${context.deriveSource}:${context.isOfflineMode}:${JSON.stringify(context.fields)}`,
             {
+              fields: context.fields,
               deriveSource: context.deriveSource,
               isOfflineMode: context.isOfflineMode,
             },
@@ -975,29 +982,35 @@ test('sticky offline-derived queries keep following local updates and deletes un
   `);
 });
 
-test('derived partial results still fetch missing fields before settling on the server result', async () => {
+test('deriveQuery receives partial fields and can skip derivation for partial-resource queries', async () => {
+  const deriveQuery = vi.fn<TestDeriveQuery>((queryPayload, items, context) => {
+    if (Array.isArray(context.fields) && context.fields.includes('age')) {
+      return false;
+    }
+
+    const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
+
+    return items
+      .filter(({ data }) =>
+        startsWithFilterValue
+          ? data.name.startsWith(startsWithFilterValue)
+          : true,
+      )
+      .sort((left, right) => left.data.name.localeCompare(right.data.name))
+      .map(({ key }) => key);
+  });
   const env = createListQueryStoreTestEnv(initialServerData, {
     partialResources: partialResourcesConfig,
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
       isComplete: alwaysComplete,
-      deriveQuery: (queryPayload, items) => {
-        const startsWithFilterValue = getStartsWithNameFilter(queryPayload);
-
-        return items
-          .filter(({ data }) =>
-            startsWithFilterValue
-              ? data.name.startsWith(startsWithFilterValue)
-              : true,
-          )
-          .sort((left, right) => left.data.name.localeCompare(right.data.name))
-          .map(({ key }) => key);
-      },
+      deriveQuery,
     },
   });
 
-  // Only seed the fields that make the query derivable, not the full item shape the hook asks for.
+  // Only seed the fields that make the query group sortable, not the full item
+  // shape the hook asks for.
   seedLocalRows(env, [{ itemKey: 'users||1', row: { id: 1, name: 'Ada' } }]);
 
   const hook = renderHook(() =>
@@ -1011,18 +1024,30 @@ test('derived partial results still fetch missing fields before settling on the 
     ),
   );
 
-  // The first render can be derived, but it still needs a fetch because `age` is missing.
+  // Partial-resource derivation policy now lives in `deriveQuery`, so it can
+  // decline to derive when the requested fields are not fully present locally.
   expect({
     isDerived: hook.result.current.isDerived,
     itemCount: hook.result.current.items.length,
     status: hook.result.current.status,
   }).toMatchInlineSnapshot(`
-    isDerived: '✅'
-    itemCount: 1
-    status: 'refetching'
+    isDerived: '❌'
+    itemCount: 0
+    status: 'loading'
   `);
 
-  // Once the fetch finishes, the exact server result should replace the temporary derived result.
+  const partialFieldsContext = deriveQuery.mock.lastCall?.[2];
+  if (!partialFieldsContext) {
+    throw new Error('Expected deriveQuery to receive partial fields context');
+  }
+
+  expect(partialFieldsContext).toMatchInlineSnapshot(`
+    deriveSource: 'online'
+    fields: ['id', 'name', 'age']
+    isOfflineMode: '❌'
+  `);
+
+  // Once the fetch finishes, the exact server result should settle normally.
   await flushAllTimers();
 
   expect({
@@ -1158,6 +1183,24 @@ test('offline derived query hydration only loads the requested group from persis
   await flushAllTimers();
   seedHook.unmount();
 
+  // Snapshot the persisted local-sync state so the restart coverage also
+  // protects the stored query membership and item index shape.
+  expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+    "tsdf (2.13 kb)
+    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.81 kb)
+    └ derived-queries-persisted-groups.derived-queries-persisted-groups-store (1.31 kb)
+      ├ li (0.73 kb)
+      │ ├ "products||1 (0.12 kb)
+      │ ├ "products||2 (0.12 kb)
+      │ ├ "products||3 (0.12 kb)
+      │ ├ "users||1 (0.12 kb)
+      │ ├ "users||2 (0.12 kb)
+      │ └ "users||3 (0.12 kb)
+      └ lq (0.44 kb)
+        ├ {tableId:"products"} (0.23 kb)
+        └ {tableId:"users"} (0.21 kb)"
+  `);
+
   // Restart offline so the next hook can only hydrate from persistence.
   act(() => {
     network.goOffline();
@@ -1187,25 +1230,81 @@ test('offline derived query hydration only loads the requested group from persis
     persistentStorage,
   });
 
-  const hook = renderHook(() =>
-    restartedEnv.apiStore.useListQuery(
+  // Drain the one-off local-sync startup scan so the next capture focuses only
+  // on the restart hydration path that this test cares about.
+  await advanceTime(2100);
+  await flushAllTimers();
+  restartedEnv.clearTimeline();
+  restartedEnv.addTimelineComments('beforeNextAction', [
+    'mount only the users query after restart; products should stay cold',
+  ]);
+
+  const hydrationCapture = startPersistentStorageOperationCapture();
+  const hook = renderHook(() => {
+    const query = restartedEnv.apiStore.useListQuery(
       { tableId: 'users' },
       { disableRefetchOnMount: true },
-    ),
-  );
+    );
+
+    restartedEnv.trackItemUI('query-status', query.status);
+    restartedEnv.trackItemUI(
+      'query-items',
+      query.items.map((item) => item.name).join(', '),
+    );
+    restartedEnv.trackItemUI('is-derived', query.isDerived ? 'yes' : 'no');
+
+    return query;
+  });
 
   // Hydration should materialize only the users group that this hook actually requested.
   await act(async () => {
     await Promise.resolve();
   });
+  const hydrationOperations = hydrationCapture.finish().timelineString;
   await flushAllTimers();
 
+  expect(hydrationOperations).toMatchInlineSnapshot(`
+    "
+    time |
+    0    | 📖 #1 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.lq.{tableId:"users"}
+         |    └ (query data, <{tableId:"users"}>) | 0.17 kb
+    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
+         |    └ (items index) | 0.66 kb
+    .    | 📖 #3 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||1
+         |    └ (item data, <"users||1>) | 0.10 kb
+    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
+         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
+    .    | 📖 #4 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||2
+         |    └ (item data, <"users||2>) | 0.10 kb
+    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
+         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
+    .    | 📖 #5 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||3
+         |    └ (item data, <"users||3>) | 0.10 kb
+    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
+         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
+    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
+         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
+    "
+  `);
+  expect(hydrationOperations).not.toContain('products');
+  expect(restartedEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time | is-derived | query-items      | query-status |
+    2.1s | -          | -                | -            | -- timeline-cleared
+    .    | -          | -                | -            | -- mount only the users query after restart; products should stay cold
+    .    | yes        | Ada, Alan, Grace | success      | [query-status, query-items, is-derived, query-status, query-items, is-derived] ui-initialized
+    "
+  `);
   expect({
     hydratedItemKeys: Object.keys(restartedEnv.store.state.items).sort(),
+    hydratedProductItemKeys: Object.keys(restartedEnv.store.state.items)
+      .filter((itemKey) => itemKey.includes('products'))
+      .sort(),
     isDerived: hook.result.current.isDerived,
     itemNames: hook.result.current.items.map((item) => item.name),
   }).toMatchInlineSnapshot(`
     hydratedItemKeys: ['"users||1', '"users||2', '"users||3']
+    hydratedProductItemKeys: []
     isDerived: '✅'
     itemNames: ['Ada', 'Alan', 'Grace']
   `);
@@ -1267,22 +1366,30 @@ test('offline derived query hydration with opfs preloads only the requested grou
   await flushAllTimers();
   seedHook.unmount();
 
-  expect(mockAdapter.scope(storeId, sessionKey).listQuery.listStoredItemKeys())
-    .toMatchInlineSnapshot(`
-      - '"products||1'
-      - '"products||2'
-      - '"products||3'
-      - '"users||1'
-      - '"users||2'
-      - '"users||3'
-    `);
+  // Snapshot the persisted OPFS layout so the test also protects which groups
+  // and exact queries were written before the offline restart.
+  expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+    "tsdf (2.43 kb)
+    ├ derived-queries-opfs-groups (2.36 kb)
+    │ └ derived-queries-opfs-groups-store (2.30 kb)
+    │   ├ li._i.r.json (0.79 kb)
+    │   ├ li.h~1937155452.p.json (0.15 kb)
+    │   ├ li.h~228010772.p.json (0.14 kb)
+    │   ├ li.h~3098628732.p.json (0.14 kb)
+    │   ├ li.h~3224064498.p.json (0.14 kb)
+    │   ├ li.h~4067562186.p.json (0.14 kb)
+    │   ├ li.h~993806230.p.json (0.14 kb)
+    │   ├ lq._i.r.json (0.31 kb)
+    │   ├ lq.h~2167180490.p.json (0.15 kb)
+    │   └ lq.h~2902406637.p.json (0.13 kb)
+    └ tsdf._am.g* (0.06 kb)"
+  `);
 
   // Restart offline so the next hook can only derive from async-preloaded persisted items.
   act(() => {
     network.goOffline();
   });
   await flushAllTimers();
-  mockAdapter.clearReadRequests();
 
   const restartedEnv = createListQueryStoreTestEnv(initialServerData, {
     derivedQueries: {
@@ -1307,32 +1414,86 @@ test('offline derived query hydration with opfs preloads only the requested grou
     persistentStorage,
   });
 
-  const hook = renderHook(() =>
-    restartedEnv.apiStore.useListQuery(
+  // Drain the one-off async startup scan so the next capture isolates the
+  // derived-group preload reads for this restart path.
+  await advanceTime(3000);
+  await flushAllTimers();
+  mockAdapter.clearInstrumentation();
+  restartedEnv.clearTimeline();
+  restartedEnv.addTimelineComments('beforeNextAction', [
+    'mount only the users query after restart; products should stay cold',
+  ]);
+
+  const hydrationCapture =
+    startOpfsPersistentStorageOperationCapture(mockAdapter);
+  const hook = renderHook(() => {
+    const query = restartedEnv.apiStore.useListQuery(
       { tableId: 'users' },
       { disableRefetchOnMount: true },
-    ),
-  );
+    );
+
+    restartedEnv.trackItemUI('query-status', query.status);
+    restartedEnv.trackItemUI(
+      'query-items',
+      query.items.map((item) => item.name).join(', '),
+    );
+    restartedEnv.trackItemUI('is-derived', query.isDerived ? 'yes' : 'no');
+
+    return query;
+  });
 
   // Give the async derived-group preload effect time to hydrate the requested users group.
   await act(async () => {
     await Promise.resolve();
   });
+  await advanceTime(250);
+  const hydrationOperations = hydrationCapture.finish().timelineString;
   await flushAllTimers();
 
+  expect(hydrationOperations).toMatchInlineSnapshot(`
+    "
+    time |
+    0    | 📖 #1 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq._i.r.json
+         |    └ (queries index) | 0.28 kb
+    .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
+         |    └ (items index) | 0.77 kb
+    3ms  | 📖 #3 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq.h~2902406637.p.json
+         |    └ (query data, <{tableId:"users"}>) | 0.09 kb
+    .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
+         |    └ (items index) | 0.77 kb ⚠️ REPEATED READ <10ms UNCHANGED
+    6ms  | 📖 #4 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~228010772.p.json
+         |    └ (item data, <"users||1>) | 0.10 kb
+    .    | 📖 #5 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~1937155452.p.json
+         |    └ (item data, <"users||2>) | 0.10 kb
+    .    | 📖 #6 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~3224064498.p.json
+         |    └ (item data, <"users||3>) | 0.10 kb
+    9ms  | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
+         |    └ (items index) | 0.77 kb ⚠️ REPEATED READ <10ms UNCHANGED
+    12ms | end
+    "
+  `);
+  expect(hydrationOperations).not.toContain('products');
+  expect(restartedEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | is-derived | query-items      | query-status |
+    3s     | -          | -                | -            | -- timeline-cleared
+    .      | -          | -                | -            | -- mount only the users query after restart; products should stay cold
+    .      | no         |                  | loading      | [query-status, query-items, is-derived] ui-initialized
+    3.009s | yes        | Ada, Alan, Grace | success      | [query-status, query-items, is-derived] ui-changed
+    "
+  `);
   // Only the requested users group should be hydrated into state; unrelated persisted groups stay cold.
   expect({
     hydratedItemKeys: Object.keys(restartedEnv.store.state.items).sort(),
+    hydratedProductItemKeys: Object.keys(restartedEnv.store.state.items)
+      .filter((itemKey) => itemKey.includes('products'))
+      .sort(),
     isDerived: hook.result.current.isDerived,
     itemNames: hook.result.current.items.map((item) => item.name),
-    readRequests: mockAdapter.scopeReadRequests({
-      sessionKey,
-      storeName: storeId,
-    }),
   }).toMatchInlineSnapshot(`
     hydratedItemKeys: ['"users||1', '"users||2', '"users||3']
+    hydratedProductItemKeys: []
     isDerived: '✅'
     itemNames: ['Ada', 'Alan', 'Grace']
-    readRequests: ['lq.{tableId:"users"}', 'li."users||1', 'li."users||2', 'li."users||3']
   `);
 });

@@ -469,7 +469,11 @@ export function useMultipleListQueries<
   const resolveEffectiveQuery = useCallback(
     (
       state: State,
-      queryConfig: { key: string; payload: QueryPayload },
+      queryConfig: {
+        key: string;
+        payload: QueryPayload;
+        fields: FieldsInput | undefined;
+      },
     ): ResolvedEffectiveQuery => {
       const exactQuery = state.queries[queryConfig.key];
       const stickyDerived = stickyDerivedQueryKeys.has(queryConfig.key);
@@ -509,6 +513,7 @@ export function useMultipleListQueries<
 
       const derivedItems = getDerivedGroupItems(state, groupKey);
       const deriveQueryContext: DerivedQueryContext = {
+        fields: queryConfig.fields,
         isOfflineMode,
         deriveSource: isOfflineMode
           ? 'offline'
@@ -571,6 +576,7 @@ export function useMultipleListQueries<
           const effectiveQuery = resolveEffectiveQuery(state, {
             key: queryKey,
             payload,
+            fields,
           });
           let loadingFields: string[] | undefined;
           const resultQueryMetadata =
@@ -966,6 +972,7 @@ export function useMultipleListQueries<
       const resolvedQuery = resolveEffectiveQuery(store.state, {
         key,
         payload,
+        fields,
       });
       if (disableRefetches && resolvedQuery?.query.wasLoaded) continue;
 
@@ -1057,6 +1064,7 @@ export function useMultipleListQueries<
         const effectiveQuery = resolveEffectiveQuery(store.state, {
           key: queryId,
           payload,
+          fields,
         });
         const effectiveQueryState = effectiveQuery?.query;
         let fetchType = queryState?.refetchOnMount || 'lowPriority';
