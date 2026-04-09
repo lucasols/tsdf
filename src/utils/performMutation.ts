@@ -1,6 +1,8 @@
 import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { Result, type Result as TResult } from 't-result';
 
+import { mutationSkipped, type MutationSkipped } from './storeShared';
+
 export type BlockWindowCloseHandler = () => { unblock: () => void };
 
 export type MutationDebounce = {
@@ -13,8 +15,7 @@ type ResultError =
   | Error
   | Record<string, unknown>
   | unknown[]
-  | readonly unknown[]
-  | true;
+  | readonly unknown[];
 
 type MutationLifecycleOptions<T, TError extends ResultError> = {
   startMutation: () => () => unknown;
@@ -38,13 +39,13 @@ export async function performMutationWithLifecycle<
   debounce,
   blockWindowClose,
 }: MutationLifecycleOptions<T, TError>): Promise<
-  TResult<Awaited<T>, TError | true>
+  TResult<Awaited<T>, TError | MutationSkipped>
 > {
   const endMutation = startMutation();
 
   if (optimisticUpdate?.() === false) {
     endMutation();
-    return Result.err(true);
+    return Result.err(mutationSkipped);
   }
 
   let unblockWindowClose: VoidFunction | null = null;
@@ -60,7 +61,7 @@ export async function performMutationWithLifecycle<
 
       if (debounceResult === 'skip') {
         endMutation();
-        return Result.err(true);
+        return Result.err(mutationSkipped);
       }
     }
 
