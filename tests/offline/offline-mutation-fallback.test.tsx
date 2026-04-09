@@ -105,6 +105,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -166,6 +167,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -222,6 +224,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -287,6 +290,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -366,6 +370,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -460,6 +465,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -555,6 +561,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -636,6 +643,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -704,6 +712,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -780,6 +789,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -850,6 +860,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -933,6 +944,7 @@ describe('document', () => {
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
+                kind: 'update',
                 execute: async ({ input }) => {
                   await env.serverMock.delayedSetData(input.value);
                   return input;
@@ -1052,6 +1064,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -1094,6 +1107,7 @@ describe('document', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -1187,6 +1201,7 @@ describe('collection', () => {
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.id],
                 execute: ({ input }) =>
                   env.serverTable
@@ -1290,6 +1305,7 @@ describe('collection', () => {
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.id],
                 execute: renameItemExecute,
                 onSuccessExecute: ({ input }) => {
@@ -1300,6 +1316,7 @@ describe('collection', () => {
               },
               createItems: {
                 inputSchema: batchCollectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) =>
                   input.map((item) => `temp:${item.name}`),
                 tempEntities: {
@@ -1458,6 +1475,7 @@ describe('collection', () => {
             operations: {
               createItems: {
                 inputSchema: batchCollectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) =>
                   input.map((item) => `temp:${item.name}`),
                 tempEntities: {
@@ -1574,6 +1592,7 @@ describe('collection', () => {
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.id],
                 execute: ({ input }) =>
                   env.serverTable
@@ -1662,6 +1681,7 @@ describe('collection', () => {
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.id],
                 execute: ({ input }) =>
                   env.serverTable
@@ -1758,6 +1778,7 @@ describe('collection', () => {
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.id],
                 execute: ({ input }) =>
                   env.serverTable
@@ -1836,6 +1857,7 @@ describe('list-query', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) =>
                   env.serverTable
@@ -1918,6 +1940,7 @@ describe('list-query', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) =>
                   env.serverTable
@@ -1995,6 +2018,7 @@ describe('list-query', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) =>
                   env.serverTable
@@ -2089,6 +2113,7 @@ describe('list-query', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) =>
                   env.serverTable
@@ -2191,6 +2216,7 @@ describe('list-query', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) =>
                   env.serverTable
@@ -2253,6 +2279,7 @@ test('fallback queueing does not reapply the optimistic update', async () => {
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -2362,6 +2389,7 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({
@@ -2404,6 +2432,7 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
       entityKey: '"temp:Ada'
       entityKind: 'item'
       id: 'hybrid-temp-entity-session:hybrid-temp-entity-store:"temp:Ada'
+      kind: 'create'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'hybrid-temp-entity-session'

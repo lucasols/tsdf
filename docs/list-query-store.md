@@ -228,8 +228,9 @@ Use it when:
 - you want offline queue UI without triggering fetches
 
 Unlike `useListQuery(...)`, it does not load query results or expose query
-status. It only derives data from the offline queue, overlays, live store
-state, and persisted item snapshots.
+status. It derives data from the offline queue, overlays, live store state,
+and persisted item snapshots, using the precomputed offline entity lifecycle
+kind so pending deletes do not need item hydration before they appear.
 
 ### Mutation Methods
 

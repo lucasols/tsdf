@@ -96,6 +96,7 @@ test('collection offline create rejects queueing the same temp id twice', async 
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({
@@ -175,6 +176,7 @@ test('collection offline create rejects queueing the same temp id twice', async 
       entityKey: '"temp:Ada'
       entityKind: 'item'
       id: 'offline-temp-id-session:collection-1:"temp:Ada'
+      kind: 'create'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-temp-id-session'
@@ -234,6 +236,7 @@ test('document offline accumulation keeps a single persisted queue entry and rep
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute,
             onSuccessExecute: ({ input }) => {
@@ -291,6 +294,7 @@ test('document offline accumulation keeps a single persisted queue entry and rep
       entityKey: 'document'
       entityKind: 'document'
       id: 'offline-accumulation-session:offline-accumulation-doc:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-accumulation-session'
@@ -410,6 +414,7 @@ test('collection offline accumulation keeps a single persisted queue entry and r
           operations: {
             renameUser: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               accumulation: {
                 mergeInput: ({ incomingInput }) => incomingInput,
@@ -482,6 +487,7 @@ test('collection offline accumulation keeps a single persisted queue entry and r
       entityKey: '"users||1'
       entityKind: 'item'
       id: 'offline-accumulation-collection-session:offline-accumulation-collection:"users||1'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-accumulation-collection-session'
@@ -600,6 +606,7 @@ test('list-query offline accumulation keeps a single persisted queue entry and r
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               accumulation: {
                 mergeInput: ({ incomingInput }) => incomingInput,
@@ -685,6 +692,7 @@ test('list-query offline accumulation keeps a single persisted queue entry and r
       entityKey: '"users||1'
       entityKind: 'item'
       id: 'offline-accumulation-list-query-session:offline-accumulation-list-query:"users||1'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-accumulation-list-query-session'
@@ -807,6 +815,7 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchExecute,
               onSuccessExecute: ({ input }) => {
@@ -818,6 +827,7 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
             },
             deleteUser: {
               inputSchema: deleteItemInputSchema,
+              kind: 'delete',
               getEntityRefs: ({ input }) => [input.itemId],
               supersedes: { scope: 'same-entity' },
               execute: deleteExecute,
@@ -877,6 +887,7 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
       entityKey: '"users||1'
       entityKind: 'item'
       id: 'offline-supersede-delete-session:offline-supersede-delete-store:"users||1'
+      kind: 'delete'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-supersede-delete-session'
@@ -976,6 +987,7 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
           operations: {
             setUserName: {
               inputSchema: setUserNameInputSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               supersedes: { scope: 'same-entity', operations: 'self' },
               execute: setUserNameExecute,
@@ -988,6 +1000,7 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
             },
             setUserRole: {
               inputSchema: setUserRoleInputSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: setUserRoleExecute,
               onSuccessExecute: ({ input }) => {
@@ -1081,6 +1094,7 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
       entityKey: '"users||1'
       entityKind: 'item'
       id: 'offline-selective-supersede-session:offline-selective-supersede-store:"users||1'
+      kind: 'update'
       pendingMutations: 2
       requiresResolution: '❌'
       sessionKey: 'offline-selective-supersede-session'
@@ -1161,6 +1175,7 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1291,6 +1306,7 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1400,6 +1416,7 @@ test('ambiguous replay failures require manual resolution by default instead of 
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1440,6 +1457,7 @@ test('ambiguous replay failures require manual resolution by default instead of 
       entityKey: 'document'
       entityKind: 'document'
       id: 'retry-default-safe-session:retry-default-safe-store:document'
+      kind: 'update'
       pendingMutations: 0
       requiresResolution: '✅'
       sessionKey: 'retry-default-safe-session'
@@ -1484,6 +1502,7 @@ test('healthy replay failures are retried 3 times and then move into the resolut
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1549,6 +1568,7 @@ test('healthy replay failures are retried 3 times and then move into the resolut
       entityKey: 'document'
       entityKind: 'document'
       id: 'retry-exhaustion-session:document-4:document'
+      kind: 'update'
       pendingMutations: 0
       requiresResolution: '✅'
       sessionKey: 'retry-exhaustion-session'
@@ -1630,6 +1650,7 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1914,6 +1935,7 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -1960,6 +1982,7 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
       entityKey: 'document'
       entityKind: 'document'
       id: 'retry-outage-session:document-6:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'retry-outage-session'
@@ -2000,6 +2023,7 @@ test('going offline again resets the healthy replay failure budget', async () =>
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -2158,6 +2182,7 @@ test('new mutations queue separately instead of merging into entries that may ha
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute,
             onSuccessExecute: ({ input }) => {
@@ -2256,6 +2281,7 @@ test('supersede does not discard entries that may have already been applied on t
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             supersedes: { scope: 'same-entity' },
             execute,
             onSuccessExecute: ({ input }) => {
@@ -2385,6 +2411,7 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute,
             onSuccessExecute: ({ input }) => {
               env.apiStore.updateState((draft) => {
@@ -2493,6 +2520,7 @@ test('session switches do not leave replayed queue entries in the old namespace'
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: () =>
               new Promise<{ value: number }>((resolve) => {
                 resolveReplay = (result) => {
@@ -2569,6 +2597,7 @@ test('document offline mutations are queued durably and replay when the browser 
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -2627,6 +2656,7 @@ test('document offline mutations are queued durably and replay when the browser 
       entityKey: 'document'
       entityKind: 'document'
       id: 'offline-doc-session:offline-doc-store:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'offline-doc-session'
@@ -2719,6 +2749,7 @@ test('accumulation still merges entries when the queue starts from a hybrid fall
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute: async ({ input }) => {
               await env.serverMock.delayedSetData(input.value);
@@ -2846,6 +2877,7 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute,
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {

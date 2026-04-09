@@ -86,6 +86,7 @@ test('usePendingOfflineItems exposes visible queued items, pending deletes, filt
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: async ({ input }) => {
                 await env.serverTable.delayedSetItem(input.itemId, {
@@ -103,6 +104,7 @@ test('usePendingOfflineItems exposes visible queued items, pending deletes, filt
             },
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -120,6 +122,7 @@ test('usePendingOfflineItems exposes visible queued items, pending deletes, filt
             },
             deleteUser: {
               inputSchema: deleteItemInputSchema,
+              kind: 'delete',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: async ({ input }) => {
                 await env.serverTable.delayedRemoveItem(input.itemId);
@@ -268,6 +271,7 @@ test('usePendingOfflineItems can opt resolution-required visible items back in',
           operations: {
             conflictUser: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: async ({ input }) => {
                 await env.serverTable.delayedSetItem(input.itemId, {
@@ -390,6 +394,7 @@ test('usePendingOfflineItems can opt resolution-required deletes back into delet
           operations: {
             deleteUser: {
               inputSchema: deleteItemInputSchema,
+              kind: 'delete',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: () => {
                 throw new Error('delete failed');

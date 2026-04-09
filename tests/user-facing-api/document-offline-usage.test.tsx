@@ -33,7 +33,6 @@ type PatchDocInput = { value: number | undefined; label: string | undefined };
 const patchDocAccumulationSchema = patchDocAccumulationZodSchema;
 const FETCH_DELAY_MS = 30;
 
-type ValueInput = { value: number };
 type ConflictData = { reason: string };
 
 function delay(ms: number) {
@@ -57,6 +56,7 @@ afterEach(() => {
 const invalidDocumentTempEntityOperation: DirectDocumentOfflineOperations['setValue'] =
   {
     inputSchema: setValueInputSchema,
+    kind: 'update',
     execute: ({ input }) => input,
     // @ts-expect-error - document offline operations do not support tempEntity
     tempEntity: {
@@ -174,6 +174,179 @@ test('direct document store runtime offline controls public api', async () => {
   `);
 });
 
+type ValueInput = { value: number };
+
+type LifecycleDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  {
+    createDoc: DefineOfflineOperation<ValueInput>;
+    updateDoc: DefineOfflineOperation<ValueInput>;
+    deleteDoc: DefineOfflineOperation<ValueInput>;
+  }
+>;
+
+function createLifecycleDocumentStore(sessionKey: string) {
+  const network = createOfflineNetworkMock(false);
+  network.install();
+  const offlineSession = createOfflineSession({
+    getSessionKey: () => sessionKey,
+    config: {
+      network: network.config,
+      mutationQueueing: { network: 'allow', outage: 'allow' },
+    },
+  });
+  const serverMock = createServerMock<DocState>({ value: 1, label: 'server' });
+
+  const documentStore = createDocumentStore<
+    DocState,
+    LifecycleDocumentOfflineOperations
+  >({
+    id: `direct-document-lifecycle-${sessionKey}`,
+    getSessionKey: () => sessionKey,
+    fetchFn: () => Promise.resolve({ ...serverMock.current }),
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        session: offlineSession,
+        operations: {
+          createDoc: {
+            inputSchema: setValueInputSchema,
+            kind: 'create',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `created:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `created:${input.value}`;
+              });
+            },
+          },
+          updateDoc: {
+            inputSchema: setValueInputSchema,
+            kind: 'update',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `updated:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `updated:${input.value}`;
+              });
+            },
+          },
+          deleteDoc: {
+            inputSchema: setValueInputSchema,
+            kind: 'delete',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `deleted:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `deleted:${input.value}`;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return { documentStore };
+}
+
+test('offline entity kind reduces queued lifecycle operations once per document', async () => {
+  const scenarios = [
+    {
+      name: 'create only',
+      expectedKind: 'create',
+      steps: [{ operation: 'createDoc', value: 2 }],
+    },
+    {
+      name: 'update only',
+      expectedKind: 'update',
+      steps: [{ operation: 'updateDoc', value: 3 }],
+    },
+    {
+      name: 'create then update',
+      expectedKind: 'createAndUpdate',
+      steps: [
+        { operation: 'createDoc', value: 4 },
+        { operation: 'updateDoc', value: 5 },
+      ],
+    },
+    {
+      name: 'update then delete',
+      expectedKind: 'delete',
+      steps: [
+        { operation: 'updateDoc', value: 6 },
+        { operation: 'deleteDoc', value: 7 },
+      ],
+    },
+    {
+      name: 'delete then create',
+      expectedKind: 'create',
+      steps: [
+        { operation: 'deleteDoc', value: 8 },
+        { operation: 'createDoc', value: 9 },
+      ],
+    },
+  ] as const;
+
+  const lifecycleKinds: Record<string, string | undefined> = {};
+
+  for (const [index, scenario] of scenarios.entries()) {
+    const { documentStore } = createLifecycleDocumentStore(
+      `direct-document-lifecycle-${index}`,
+    );
+
+    await flushAllTimers();
+
+    // Queue the scenario's offline operations while the session stays offline.
+    for (const step of scenario.steps) {
+      await act(async () => {
+        await documentStore.performMutation({
+          optimisticUpdate: () => {
+            documentStore.updateState((draft) => {
+              draft.value = step.value;
+              draft.label = `${step.operation}:${step.value}`;
+            });
+          },
+          mutation: () => Promise.resolve({ value: step.value }),
+          offline: { operation: step.operation, input: { value: step.value } },
+        });
+      });
+    }
+    await Promise.resolve();
+
+    lifecycleKinds[scenario.name] =
+      documentStore.getOfflineEntities()[0]?.kind ?? undefined;
+  }
+
+  expect(lifecycleKinds).toMatchInlineSnapshot(`
+    create only: 'create'
+    create then update: 'createAndUpdate'
+    delete then create: 'create'
+    update only: 'update'
+    update then delete: 'delete'
+  `);
+});
+
 type DirectDocumentOfflineOperations = DefineDocumentOfflineOperations<
   DocState,
   {
@@ -233,6 +406,7 @@ test('direct document store offline public api', async () => {
         operations: {
           setValue: {
             inputSchema: setValueInputSchema,
+            kind: 'update',
             execute: ({ input }) => {
               serverMock.setData({
                 value: input.value,
@@ -248,6 +422,7 @@ test('direct document store offline public api', async () => {
           },
           patchDoc: {
             inputSchema: patchDocAccumulationSchema,
+            kind: 'update',
             accumulation: {
               mergeInput: ({ existingInput, incomingInput }) => ({
                 value: incomingInput.value ?? existingInput.value,
@@ -269,6 +444,7 @@ test('direct document store offline public api', async () => {
           },
           skipSyncValue: {
             inputSchema: setValueInputSchema,
+            kind: 'update',
             getServerSnapshot: () => {
               skipSyncReplayOrder.push('getServerSnapshot');
               return { ...serverMock.current };
@@ -297,6 +473,7 @@ test('direct document store offline public api', async () => {
           },
           conflictValue: {
             inputSchema: setValueInputSchema,
+            kind: 'update',
             getServerSnapshot: () => {
               conflictReplayOrder.push('getServerSnapshot');
               return { ...serverMock.current };
@@ -476,6 +653,7 @@ test('direct document store offline public api', async () => {
       entityKey: 'document'
       entityKind: 'document'
       id: 'direct-document-offline-session:direct-document-offline:document'
+      kind: 'update'
       pendingMutations: 4
       requiresResolution: '❌'
       sessionKey: 'direct-document-offline-session'
@@ -494,6 +672,7 @@ test('direct document store offline public api', async () => {
       entityKey: 'document'
       entityKind: 'document'
       id: 'direct-document-offline-session:direct-document-offline:document'
+      kind: 'update'
       pendingMutations: 4
       requiresResolution: '❌'
       sessionKey: 'direct-document-offline-session'
@@ -586,6 +765,7 @@ test('direct document store offline public api', async () => {
       entityKey: 'document'
       entityKind: 'document'
       id: 'direct-document-offline-session:direct-document-offline:document'
+      kind: 'update'
       pendingMutations: 0
       requiresResolution: '✅'
       sessionKey: 'direct-document-offline-session'

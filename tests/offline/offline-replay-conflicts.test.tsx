@@ -187,6 +187,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute,
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {
@@ -356,6 +357,7 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 executedInputs.push(input.value);
                 await env.serverMock.delayedSetData(input.value);
@@ -489,6 +491,7 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -575,6 +578,7 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -640,6 +644,7 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
       entityKey: 'document'
       entityKind: 'document'
       id: 'offline-conflict-hydration-session:offline-conflict-hydration-doc:document'
+      kind: 'update'
       pendingMutations: 0
       requiresResolution: '✅'
       sessionKey: 'offline-conflict-hydration-session'
@@ -685,6 +690,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               execute: () =>
                 new Promise<{ id: string; name: string }>((resolve) => {
@@ -882,6 +888,7 @@ test('committing a temp-entity conflict with an external result reconciles the o
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               execute,
               conflictHandling: {
@@ -1038,6 +1045,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1057,6 +1065,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
             },
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
               onSuccessExecute: ({ input }) => {
@@ -1333,6 +1342,7 @@ test('mutations queued via hybrid fallback still enter the normal conflict resol
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute,
               onSuccessExecute: ({ input }) => {
                 env.apiStore.updateState((draft) => {

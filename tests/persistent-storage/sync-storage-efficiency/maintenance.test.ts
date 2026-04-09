@@ -423,6 +423,7 @@ describe('sync storage efficiency: maintenance', () => {
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
+                kind: 'update',
                 execute: ({ input }) => input,
                 onSuccessExecute: ({ input }) => {
                   protectedDocEnv.apiStore.updateState((draft) => {
@@ -569,6 +570,7 @@ describe('sync storage efficiency: maintenance', () => {
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
+                kind: 'update',
                 execute: ({ input }) => input,
                 onSuccessExecute: ({ input }) => {
                   env.apiStore.updateState((draft) => {
@@ -634,7 +636,7 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
            |    └ (namespace index) | 0.08 kb
       .    | ✍️ #4 ✅->✅ tsdf.offline-session-write-skip.protected-doc.oe.document
-           |    └ (entry data, <document>) | 0.14 kb -> 0.14 kb
+           |    └ (entry data, <document>) | 0.16 kb -> 0.16 kb
       .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
            |    └ (namespace index) | 0.08 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m

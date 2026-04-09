@@ -122,6 +122,7 @@ describe('list-query replay', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute,
                 onSuccessExecute: ({ input }) => {
@@ -348,6 +349,7 @@ describe('list-query replay', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -365,6 +367,7 @@ describe('list-query replay', () => {
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }): Promise<{ name: string }> => {
                   replayedOperations.push({
@@ -615,6 +618,7 @@ describe('list-query replay', () => {
             operations: {
               createUsers: {
                 inputSchema: batchCreateUserInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) =>
                   input.map((item) => `temp:${item.name}`),
                 tempEntities: {
@@ -642,6 +646,7 @@ describe('list-query replay', () => {
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }): Promise<{ name: string }> => {
                   replayedOperations.push({
@@ -919,6 +924,7 @@ describe('list-query replay', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -936,6 +942,7 @@ describe('list-query replay', () => {
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) => {
                   replayedOperations.push({
@@ -955,6 +962,7 @@ describe('list-query replay', () => {
               },
               deleteUser: {
                 inputSchema: deleteItemInputSchema,
+                kind: 'delete',
                 getEntityRefs: ({ input }) => [input.itemId],
                 supersedes: {
                   scope: 'same-entity',
@@ -1167,6 +1175,7 @@ describe('list-query replay', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1179,6 +1188,7 @@ describe('list-query replay', () => {
               },
               createChildUser: {
                 inputSchema: nestedChildCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 dependsOn: ({ input }) => [input.parentId],
                 tempEntity: {
@@ -1196,6 +1206,7 @@ describe('list-query replay', () => {
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: patchUserExecute,
                 onSuccessExecute: ({ input }) => {
@@ -1558,6 +1569,7 @@ describe('list-query replay', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1570,6 +1582,7 @@ describe('list-query replay', () => {
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: patchUserExecute,
                 onSuccessExecute: ({ input }) => {
@@ -1868,6 +1881,7 @@ describe('list-query replay', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1880,6 +1894,7 @@ describe('list-query replay', () => {
               },
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: ({ input }) => {
                   return env.serverTable
@@ -2055,6 +2070,7 @@ describe('list-query replay', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -2132,6 +2148,7 @@ describe('list-query replay', () => {
         entityKey: '"temp:Linus offline'
         entityKind: 'item'
         id: 'offline-replay-temp-list-query-session:list-query-1:"temp:Linus offline'
+        kind: 'create'
         pendingMutations: 1
         requiresResolution: '❌'
         sessionKey: 'offline-replay-temp-list-query-session'

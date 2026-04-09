@@ -262,6 +262,8 @@ Behavior:
 
 - Returns visible pending creates and updates through `items`
 - Returns pending deletes through `deletedItems`
+- Uses the offline entity lifecycle kind to classify deletes before item
+  hydration is needed
 - Does not fetch, preload queries, or expose loading state
 - Reacts to offline queue changes, replay, and offline overlay updates
 - Can hydrate from persisted offline state on cold startup, including when the

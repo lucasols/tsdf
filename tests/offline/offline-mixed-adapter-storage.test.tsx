@@ -87,6 +87,7 @@ function createMixedOfflineDocumentEnv({
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }) => {
                 await envRef.current?.serverMock.delayedSetData(input.value);
                 return input;

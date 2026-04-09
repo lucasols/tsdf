@@ -111,6 +111,7 @@ describe('document overlays', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }: UpdateValueExecuteContext) => {
                 await env.serverMock.delayedSetData(input.value, {
                   durationMs: 2000,
@@ -255,6 +256,7 @@ describe('document overlays', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: () => {
                 throw new Error('Replay failed');
               },
@@ -381,6 +383,7 @@ describe('collection overlays', () => {
             operations: {
               renameItem: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'update',
                 getEntityRefs: () => ['users||1'],
                 execute: async ({ input }) => {
                   await env.serverTable.delayedUpdateItem(
@@ -497,6 +500,7 @@ describe('collection overlays', () => {
             operations: {
               deleteItem: {
                 inputSchema: deleteItemInputSchema,
+                kind: 'delete',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: async ({ input }) => {
                   await env.serverTable.delayedRemoveItem(input.itemId, {
@@ -610,6 +614,7 @@ describe('collection overlays', () => {
             operations: {
               renameItem: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'update',
                 getEntityRefs: () => ['users||1'],
                 execute: () => {
                   throw new Error('Replay failed');
@@ -738,6 +743,7 @@ describe('list-query overlays', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: async ({ input }) => {
                   await env.serverTable.delayedUpdateItem(
@@ -863,6 +869,7 @@ describe('list-query overlays', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: async ({ input }) => {
                   await env.serverTable.delayedUpdateItem(
@@ -1007,6 +1014,7 @@ describe('list-query overlays', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1149,6 +1157,7 @@ describe('list-query overlays', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                kind: 'create',
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1269,6 +1278,7 @@ describe('list-query overlays', () => {
             operations: {
               deleteUser: {
                 inputSchema: deleteItemInputSchema,
+                kind: 'delete',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: async ({ input }) => {
                   await env.serverTable.delayedRemoveItem(input.itemId, {

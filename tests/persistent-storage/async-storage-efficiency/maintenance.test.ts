@@ -787,6 +787,7 @@ describe('async storage efficiency: maintenance', () => {
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
+                kind: 'update',
                 execute: ({ input }) => input,
                 onSuccessExecute: ({ input }) => {
                   protectedDocEnv.apiStore.updateState((draft) => {

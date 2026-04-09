@@ -131,6 +131,7 @@ test('stores unregister their previous offline session when the session key beco
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -171,6 +172,7 @@ test('stores unregister their previous offline session when the session key beco
         entityKey: 'document'
         entityKind: 'document'
         id: 'offline-session-cleanup:offline-session-cleanup-doc:document'
+        kind: 'update'
         pendingMutations: 1
         requiresResolution: '❌'
         sessionKey: 'offline-session-cleanup'
@@ -212,6 +214,7 @@ test('logging back into the same session replays durable offline mutations queue
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
@@ -378,6 +381,7 @@ test('a global offline view sees the same blocked temp item as the store after r
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -390,6 +394,7 @@ test('a global offline view sees the same blocked temp item as the store after r
             },
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: async ({ input }) => {
                 await env.serverTable.delayedUpdateItem(input.itemId, {
@@ -592,6 +597,7 @@ test('offline mutations fail fast when no session key is available', async () =>
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -690,6 +696,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }: UpdateValueExecuteContext) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -991,6 +998,7 @@ test('global and per-store offline entity selectors aggregate queued work across
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: (_ctx_: UpdateValueExecuteContext) =>
                 pendingReplay.then(async (result) => {
                   await env.serverMock.delayedSetData(result.value);
@@ -1056,6 +1064,7 @@ test('global and per-store offline entity selectors aggregate queued work across
       entityKey: 'document'
       entityKind: 'document'
       id: 'shared-offline-entities:offline-doc-a:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'shared-offline-entities'
@@ -1071,6 +1080,7 @@ test('global and per-store offline entity selectors aggregate queued work across
       entityKey: 'document'
       entityKind: 'document'
       id: 'shared-offline-entities:offline-doc-b:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'shared-offline-entities'
@@ -1089,6 +1099,7 @@ test('global and per-store offline entity selectors aggregate queued work across
       entityKey: 'document'
       entityKind: 'document'
       id: 'shared-offline-entities:offline-doc-a:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'shared-offline-entities'
@@ -1104,6 +1115,7 @@ test('global and per-store offline entity selectors aggregate queued work across
       entityKey: 'document'
       entityKind: 'document'
       id: 'shared-offline-entities:offline-doc-b:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'shared-offline-entities'
@@ -1122,6 +1134,7 @@ test('global and per-store offline entity selectors aggregate queued work across
       entityKey: 'document'
       entityKind: 'document'
       id: 'shared-offline-entities:offline-doc-a:document'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'shared-offline-entities'
@@ -1158,6 +1171,7 @@ test('global offline entities stay empty after restart until a store mounts', as
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -1229,6 +1243,7 @@ test('global offline entities stay empty after restart until a store mounts', as
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await restartedEnv.serverMock.delayedSetData(input.value);
               return input;
@@ -1282,6 +1297,7 @@ test('queued mutations from multiple stores in one session share a single global
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }: UpdateValueExecuteContext) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -1381,6 +1397,7 @@ test('reconnect replays queued mutations from multiple stores one at a time in g
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }: UpdateValueExecuteContext) => {
                 replayLog.push(`${args.storeName}:start:${input.value}`);
 
@@ -1565,6 +1582,7 @@ test('a store initialized while an earlier shared-session replay is already in f
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }: UpdateValueExecuteContext) => {
                 replayLog.push(`${args.storeName}:start:${input.value}`);
                 await args.onExecute?.(input);

@@ -138,6 +138,7 @@ const invalidCollectionAccumulationTempEntity: NonNullable<
   DirectCollectionOfflineOperations['createTodo']
 > = {
   inputSchema: createTodoInputSchema,
+  kind: 'create',
   getEntityRefs: ({ input }) => [`temp:${input.title}`],
   accumulation: {
     mergeInput: ({ incomingInput }: { incomingInput: CreateTodoInput }) =>
@@ -200,6 +201,7 @@ test('direct collection store offline public api', async () => {
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
+            kind: 'update',
             getEntityRefs: ({ input }) => [input.id],
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute: ({ input }) => {
@@ -217,6 +219,7 @@ test('direct collection store offline public api', async () => {
           },
           renameManyTodos: {
             inputSchema: renameManyTodosInputSchema,
+            kind: 'update',
             getEntityRefs: ({ input }) => input.map((item) => item.id),
             execute: ({ input }) => {
               for (const item of input) {
@@ -237,6 +240,7 @@ test('direct collection store offline public api', async () => {
           },
           skipSyncTodo: {
             inputSchema: todoInputSchema,
+            kind: 'update',
             getEntityRefs: ({ input }) => [input.id],
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.title}`);
@@ -258,6 +262,7 @@ test('direct collection store offline public api', async () => {
           },
           conflictTodo: {
             inputSchema: todoInputSchema,
+            kind: 'update',
             getEntityRefs: ({ input }) => [input.id],
             conflictHandling: {
               schema: todoConflictSchema,
@@ -282,6 +287,7 @@ test('direct collection store offline public api', async () => {
           },
           createTodo: {
             inputSchema: createTodoInputSchema,
+            kind: 'create',
             getEntityRefs: ({ input }) => [`temp:${input.title}`],
             tempEntity: {
               buildPendingEntity: (input) => ({
@@ -363,6 +369,7 @@ test('direct collection store offline public api', async () => {
           // @ts-expect-error - runtime validation should reject tempEntity plus success callback
           createTodo: {
             inputSchema: createTodoInputSchema,
+            kind: 'create',
             getEntityRefs: ({ input }: { input: CreateTodoInput }) => [
               `temp:${input.title}`,
             ],
@@ -538,6 +545,7 @@ test('direct collection store offline public api', async () => {
       entityKey: '"1'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"1'
+      kind: 'update'
       pendingMutations: 4
       requiresResolution: '❌'
       sessionKey: 'direct-collection-offline-session'
@@ -553,6 +561,7 @@ test('direct collection store offline public api', async () => {
       entityKey: '"2'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"2'
+      kind: 'update'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'direct-collection-offline-session'
@@ -568,6 +577,7 @@ test('direct collection store offline public api', async () => {
       entityKey: '"temp:Todo 3 offline'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"temp:Todo 3 offline'
+      kind: 'create'
       pendingMutations: 1
       requiresResolution: '❌'
       sessionKey: 'direct-collection-offline-session'
@@ -665,6 +675,7 @@ test('direct collection store offline public api', async () => {
       entityKey: '"1'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"1'
+      kind: 'update'
       pendingMutations: 0
       requiresResolution: '✅'
       sessionKey: 'direct-collection-offline-session'

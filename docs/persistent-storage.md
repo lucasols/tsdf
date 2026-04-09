@@ -55,6 +55,17 @@ Store-specific options:
 
 If `persistentStorage.offline` is configured, create one shared offline session with `createOfflineSession(...)` and pass that session to every store that should share connectivity policy and runtime controls. Store-local offline behavior stays in `persistentStorage.offline.operations`.
 
+Each offline operation now requires a `kind`:
+
+- `create` for temp-entity or create-style mutations
+- `update` for in-place edits
+- `delete` for destructive mutations
+
+TSDF reduces those operation kinds into a derived `GlobalOfflineEntity.kind`
+value (`create`, `createAndUpdate`, `update`, or `delete`) so queue-aware UI
+can read one stable lifecycle field instead of inferring it from store
+snapshots.
+
 Session-level `mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
 
 ## Backend behavior

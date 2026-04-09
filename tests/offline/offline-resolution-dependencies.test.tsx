@@ -168,6 +168,7 @@ test('nested descendants cascade into blocked resolutions and discard together',
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -180,6 +181,7 @@ test('nested descendants cascade into blocked resolutions and discard together',
             },
             createChildUser: {
               inputSchema: nestedChildCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               dependsOn: ({ input }) => [input.parentId],
               tempEntity: {
@@ -197,6 +199,7 @@ test('nested descendants cascade into blocked resolutions and discard together',
             },
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
               onSuccessExecute: ({ input }) => {
@@ -476,6 +479,7 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -488,6 +492,7 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
             },
             createChildUser: {
               inputSchema: nestedChildCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               dependsOn: ({ input }) => [input.parentId],
               tempEntity: {
@@ -505,6 +510,7 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
             },
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
               onSuccessExecute: ({ input }) => {
@@ -778,6 +784,7 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -790,6 +797,7 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
             },
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
               onSuccessExecute: ({ input }) => {
@@ -1020,6 +1028,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1032,6 +1041,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
             },
             patchUserName: {
               inputSchema: userPatchSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
               onSuccessExecute: ({ input }) => {
@@ -1309,6 +1319,7 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -1321,6 +1332,7 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
             },
             patchUserNameWithAudit: {
               inputSchema: patchWithAuditSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [input.itemId],
               execute: patchUserExecute,
               onSuccessExecute: ({ input }) => {

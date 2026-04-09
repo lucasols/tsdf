@@ -325,6 +325,7 @@ test('disabling active network mode preserves offline state while future operati
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
@@ -548,6 +549,7 @@ test('disabled network support ignores classified network failures while startin
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -625,6 +627,7 @@ test('disabled outage support ignores outage classifications while starting from
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -697,6 +700,7 @@ test('browser reconnects replay queued mutations even while runtime network supp
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
@@ -860,6 +864,7 @@ test('disabling classified network mode preserves recovery and replay for alread
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
@@ -986,6 +991,7 @@ test('disabling active outage mode preserves recovery and replay for already-act
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
@@ -1102,6 +1108,7 @@ test('browser events do not clear preserved outage state while runtime outage su
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
@@ -1220,6 +1227,7 @@ test('runtime mutation queueing overrides are shared across stores in the same s
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
+              kind: 'update',
               execute: async ({ input }: UpdateValueExecuteContext) => {
                 await env.serverMock.delayedSetData(input.value);
                 return input;
@@ -1549,6 +1557,7 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;
@@ -1637,6 +1646,7 @@ test('disabling runtime network support preserves the compact persisted status f
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
+            kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
               await env.serverMock.delayedSetData(input.value);
               return input;

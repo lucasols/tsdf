@@ -158,6 +158,7 @@ const invalidListQueryAccumulationTempEntity: NonNullable<
   DirectListQueryOfflineOperations['createUser']
 > = {
   inputSchema: createUserInputSchema,
+  kind: 'create',
   getEntityRefs: ({ input }) => [`temp:${input.name}`],
   accumulation: {
     mergeInput: ({ incomingInput }: { incomingInput: CreateUserInput }) =>
@@ -246,6 +247,7 @@ test('direct list-query store offline public api', async () => {
           operations: {
             renameUser: {
               inputSchema: userInputSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
               accumulation: {
                 mergeInput: ({ incomingInput }) => incomingInput,
@@ -265,6 +267,7 @@ test('direct list-query store offline public api', async () => {
             },
             renameManyUsers: {
               inputSchema: renameManyUsersInputSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) =>
                 input.map((item) => getUserItemPayload(item.id)),
               execute: ({ input }) => {
@@ -286,6 +289,7 @@ test('direct list-query store offline public api', async () => {
             },
             skipSyncUser: {
               inputSchema: userInputSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
               execute: ({ input }) => {
                 throw new Error(`dispatch failed after send ${input.name}`);
@@ -307,6 +311,7 @@ test('direct list-query store offline public api', async () => {
             },
             conflictUser: {
               inputSchema: userInputSchema,
+              kind: 'update',
               getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
               conflictHandling: {
                 schema: userConflictSchema,
@@ -331,6 +336,7 @@ test('direct list-query store offline public api', async () => {
             },
             createUser: {
               inputSchema: createUserInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }) => [`temp:${input.name}`],
               tempEntity: {
                 buildPendingEntity: (input) => ({ id: -1, name: input.name }),
@@ -410,6 +416,7 @@ test('direct list-query store offline public api', async () => {
             // @ts-expect-error - runtime validation should reject tempEntity plus success callback
             createUser: {
               inputSchema: createUserInputSchema,
+              kind: 'create',
               getEntityRefs: ({ input }: { input: CreateUserInput }) => [
                 `temp:${input.name}`,
               ],
@@ -618,6 +625,7 @@ test('direct list-query store offline public api', async () => {
         entityKey: '"["users",1]'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",1]'
+        kind: 'update'
         pendingMutations: 4
         requiresResolution: '❌'
         sessionKey: 'direct-list-query-offline-session'
@@ -633,6 +641,7 @@ test('direct list-query store offline public api', async () => {
         entityKey: '"["users",2]'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",2]'
+        kind: 'update'
         pendingMutations: 1
         requiresResolution: '❌'
         sessionKey: 'direct-list-query-offline-session'
@@ -648,6 +657,7 @@ test('direct list-query store offline public api', async () => {
         entityKey: '"temp:Linus offline'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"temp:Linus offline'
+        kind: 'create'
         pendingMutations: 1
         requiresResolution: '❌'
         sessionKey: 'direct-list-query-offline-session'
@@ -745,6 +755,7 @@ test('direct list-query store offline public api', async () => {
         entityKey: '"["users",1]'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",1]'
+        kind: 'update'
         pendingMutations: 0
         requiresResolution: '✅'
         sessionKey: 'direct-list-query-offline-session'
@@ -894,6 +905,7 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
           operations: {
             deleteUser: {
               inputSchema: deleteUserInputSchema,
+              kind: 'delete',
               getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
               execute: ({ input }) => {
                 serverTable.removeItem(getUserServerItemId(input.id));

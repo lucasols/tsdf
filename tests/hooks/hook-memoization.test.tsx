@@ -434,6 +434,7 @@ describe('collection hook memoization', () => {
             operations: {
               patchName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
                 onSuccessExecute: ({ input }) => {
@@ -1042,6 +1043,7 @@ describe('list-query hook memoization', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
                 onSuccessExecute: ({ input }) => {
@@ -1131,6 +1133,7 @@ describe('list-query hook memoization', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
                 onSuccessExecute: ({ input }) => {
@@ -1223,6 +1226,7 @@ describe('list-query hook memoization', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
+                kind: 'update',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: () => ({ name: 'ignored' }),
                 onSuccessExecute: ({ input }) => {
@@ -1234,6 +1238,7 @@ describe('list-query hook memoization', () => {
               },
               deleteUser: {
                 inputSchema: deleteItemInputSchema,
+                kind: 'delete',
                 getEntityRefs: ({ input }) => [input.itemId],
                 execute: async () => {},
                 onSuccessExecute: ({ input }) => {
