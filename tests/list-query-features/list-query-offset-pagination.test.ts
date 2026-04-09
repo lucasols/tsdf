@@ -1385,7 +1385,13 @@ describe('offset pagination - awaitListQueryFetch', () => {
     const result = await fetchPromise;
 
     expect(result).toMatchInlineSnapshot(`
-      error{Error}: { message: 'network failure', name: 'StoreFetchError' }
+      error{Error}:
+        message: 'network failure'
+        name: 'StoreFetchError'
+        code: 500
+        id: 'fetch-error'
+        type: 'fetch'
+
       hasMore: '❌'
       items: []
     `);

@@ -625,7 +625,20 @@ test('offline mutations fail fast when no session key is available', async () =>
   expect(mutationResult.ok).toBe(false);
 
   expect(mutationResult.error).toMatchInlineSnapshot(
-    `Error#: { message: 'Offline session unavailable', name: 'Error' }`,
+    `
+      Error#:
+        message: 'Offline session unavailable'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 460
+        id: 'offline-session-unavailable'
+        cause:
+          Error#:
+            message: 'Offline session unavailable'
+            name: 'Error'
+            code: 460
+            id: 'offline-session-unavailable'
+    `,
   );
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 1

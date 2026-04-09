@@ -2,14 +2,10 @@ import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { Result, unknownToError, type Result as ResultType } from 't-result';
+import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 
 import type { TestOfflineTimelineEvent } from '../internal/testTimelineTypes';
-import {
-  isOfflineConnectivityError,
-  offlineConnectivityError,
-} from '../persistentStorage/offline/fetchRuntime';
 import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
@@ -26,7 +22,10 @@ import {
 } from '../utils/performMutation';
 import {
   fetchTypePriority,
-  StoreError,
+  type MutationSkipped,
+  type StoreError,
+  StoreMutationError,
+  toStoreMutationError,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -711,7 +710,7 @@ export function createMutationApi<
     getRelatedQueries?: FilterQuery;
     getRevalidateOnSuccessQueries?: FilterQuery;
     onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
-    onError?: (error: StoreError | true) => void;
+    onError?: (error: StoreMutationError | MutationSkipped) => void;
     silentErrors?: boolean;
     debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
   };
@@ -743,7 +742,7 @@ export function createMutationApi<
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOnlineMutationArgs<T>,
-  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
   /**
    * Runs a list-query mutation that may fall back to durable offline queueing.
    *
@@ -754,12 +753,17 @@ export function createMutationApi<
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOfflineMutationArgs<T>,
-  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
   ): Promise<
-    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   async function performMutation<T>(
     payload: MutationPayload,
@@ -777,13 +781,18 @@ export function createMutationApi<
       offline,
     }: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
   ): Promise<
-    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
   > {
     const payloadToUse: MutationPayloadToUse =
       payload === false || payload == null ? [] : payload;
 
     if (offline && offlineController && !offlineController.canQueueMutation()) {
-      return Result.err(offlineSessionUnavailableError);
+      return Result.err(
+        toStoreMutationError(offlineSessionUnavailableError, errorNormalizer),
+      );
     }
 
     const affectedItems = resolveAffectedItems(payloadToUse);
@@ -830,9 +839,7 @@ export function createMutationApi<
         }
       },
       onError: (exception) => {
-        const error = isOfflineConnectivityError(exception)
-          ? offlineConnectivityError
-          : errorNormalizer(unknownToError(exception));
+        const error = toStoreMutationError(exception, errorNormalizer);
 
         if (!silentErrors && onMutationError) {
           onMutationError(exception, { silentErrors });

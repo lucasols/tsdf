@@ -24,6 +24,28 @@ An `Error` subclass returned by `awaitFetch` methods. Contains the same fields a
 - `'timeout'` — the fetch exceeded the specified `timeoutMs`
 - `'aborted'` — the fetch was aborted (e.g., due to a mutation starting)
 
+## StoreMutationError
+
+An `Error` subclass returned by `performMutation` when the mutation fails.
+It contains the normalized `StoreError` fields plus:
+
+- `kind: 'error'`
+- `cause` — the original thrown value, preserved via `Error.cause`
+
+## MutationSkipped
+
+A sentinel returned by `performMutation` when the mutation is intentionally not
+run, for example because:
+
+- `optimisticUpdate` returned `false`
+- a debounced mutation call was superseded by a newer call
+
+Shape:
+
+```ts
+type MutationSkipped = { kind: 'skipped' };
+```
+
 ## FetchType
 
 Priority levels for [fetch scheduling](./fetch-scheduling.md). Higher priority fetches override lower ones:

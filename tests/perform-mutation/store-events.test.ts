@@ -8,6 +8,7 @@ import {
   vi,
 } from 'vitest';
 
+import { StoreMutationError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -50,18 +51,31 @@ describe('documentStore storeEvents', () => {
   test('emits mutationEnd with success: false on failed mutation', async () => {
     const env = createDocumentStoreTestEnv(1);
     const events: unknown[] = [];
+    const failure = new Error('fail');
 
     env.apiStore.storeEvents.on('*', (event) => {
       events.push(event);
     });
 
     const promise = env.apiStore.performMutation({
-      mutation: () => Promise.reject(new Error('fail')),
+      mutation: () => Promise.reject(failure),
     });
 
     const result = await promise;
 
     assert(!result.ok);
+    assert(result.error instanceof StoreMutationError);
+    expect(result.error).toBeInstanceOf(StoreMutationError);
+    expect(result.error).toMatchInlineSnapshot(`
+      Error#:
+        message: 'fail'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'fail', name: 'Error' }
+    `);
     expect(events).toMatchInlineSnapshot(`
       - payload: { mutationId: 2 }
         type: 'mutationStart'
@@ -158,16 +172,29 @@ describe('collectionStore storeEvents', () => {
   test('emits mutationEnd with success: false on failure', async () => {
     const env = createCollectionStoreTestEnv({ 'item-1': { name: 'Item 1' } });
     const events: unknown[] = [];
+    const failure = new Error('fail');
 
     env.apiStore.storeEvents.on('*', (event) => {
       events.push(event);
     });
 
     const result = await env.apiStore.performMutation('item-1', {
-      mutation: () => Promise.reject(new Error('fail')),
+      mutation: () => Promise.reject(failure),
     });
 
     assert(!result.ok);
+    assert(result.error instanceof StoreMutationError);
+    expect(result.error).toBeInstanceOf(StoreMutationError);
+    expect(result.error).toMatchInlineSnapshot(`
+      Error#:
+        message: 'fail'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'fail', name: 'Error' }
+    `);
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1']
@@ -414,16 +441,29 @@ describe('listQueryStore storeEvents', () => {
       users: [{ id: 1, name: 'User 1' }],
     });
     const events: unknown[] = [];
+    const failure = new Error('fail');
 
     env.apiStore.storeEvents.on('*', (event) => {
       events.push(event);
     });
 
     const result = await env.apiStore.performMutation('users||1', {
-      mutation: () => Promise.reject(new Error('fail')),
+      mutation: () => Promise.reject(failure),
     });
 
     assert(!result.ok);
+    assert(result.error instanceof StoreMutationError);
+    expect(result.error).toBeInstanceOf(StoreMutationError);
+    expect(result.error).toMatchInlineSnapshot(`
+      Error#:
+        message: 'fail'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'fail', name: 'Error' }
+    `);
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']

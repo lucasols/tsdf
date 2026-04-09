@@ -1,20 +1,20 @@
+import { unknownToError } from 't-result';
+
+import type { StoreError } from '../../utils/storeShared';
+
 export const offlineConnectivityError = {
   code: 0,
   id: 'offline',
   message: 'Offline',
 } as const;
 
-export function isOfflineConnectivityError(value: unknown): boolean {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    'code' in value &&
-    'id' in value &&
-    'message' in value &&
-    value.code === offlineConnectivityError.code &&
-    value.id === offlineConnectivityError.id &&
-    value.message === offlineConnectivityError.message
-  );
+export function normalizeFetchResultError(
+  fetchResult: { offline: true } | { offline: false; error: unknown },
+  errorNormalizer: (error: Error) => StoreError,
+): StoreError {
+  return fetchResult.offline
+    ? offlineConnectivityError
+    : errorNormalizer(unknownToError(fetchResult.error));
 }
 
 export type OfflineAwareFetchController = {

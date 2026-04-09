@@ -127,7 +127,15 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-        error: { code: 500, id: 'fetch-error', message: 'browser-offline-direct-error' }
+        error{Error}:
+          message: 'browser-offline-direct-error'
+          name: 'StoreMutationError'
+          kind: 'error'
+          code: 500
+          id: 'fetch-error'
+          cause:
+            Error#: { message: 'browser-offline-direct-error', name: 'Error' }
+
         ok: '❌'
       `);
     expect(directMutation).toHaveBeenCalledTimes(1);
@@ -650,7 +658,15 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-        error: { code: 500, id: 'fetch-error', message: 'network-disallowed-error' }
+        error{Error}:
+          message: 'network-disallowed-error'
+          name: 'StoreMutationError'
+          kind: 'error'
+          code: 500
+          id: 'fetch-error'
+          cause:
+            Error#: { message: 'network-disallowed-error', name: 'Error' }
+
         ok: '❌'
       `);
     expect(directMutation).toHaveBeenCalledTimes(1);
@@ -786,7 +802,15 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-        error: { code: 500, id: 'fetch-error', message: 'outage-disallowed-error' }
+        error{Error}:
+          message: 'outage-disallowed-error'
+          name: 'StoreMutationError'
+          kind: 'error'
+          code: 500
+          id: 'fetch-error'
+          cause:
+            Error#: { message: 'outage-disallowed-error', name: 'Error' }
+
         ok: '❌'
       `);
     expect(directMutation).toHaveBeenCalledTimes(1);
@@ -950,7 +974,15 @@ describe('document', () => {
       error: settledMutation.ok ? null : settledMutation.error,
       ok: settledMutation.ok,
     }).toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'second failure' }
+      error{Error}:
+        message: 'second failure'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'second failure', name: 'Error' }
+
       ok: '❌'
     `);
 
@@ -961,7 +993,15 @@ describe('document', () => {
 
     expect({ error: result.ok ? null : result.error, ok: result.ok })
       .toMatchInlineSnapshot(`
-        error: { code: 500, id: 'fetch-error', message: 'first failure' }
+        error{Error}:
+          message: 'first failure'
+          name: 'StoreMutationError'
+          kind: 'error'
+          code: 500
+          id: 'fetch-error'
+          cause:
+            Error#: { message: 'first failure', name: 'Error' }
+
         ok: '❌'
       `);
     expect(classifyFailure).toHaveBeenCalledTimes(2);
@@ -1481,9 +1521,16 @@ describe('collection', () => {
     expect(result.ok).toBe(false);
     assert(result.ok === false);
     expect(result.error).toMatchInlineSnapshot(`
-      code: 500
-      id: 'fetch-error'
-      message: 'Temp entities for "createItems" must match the resolved temp ids'
+      Error#:
+        message: 'Temp entities for "createItems" must match the resolved temp ids'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#:
+            message: 'Temp entities for "createItems" must match the resolved temp ids'
+            name: 'Error'
     `);
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,

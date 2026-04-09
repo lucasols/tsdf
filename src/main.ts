@@ -4,7 +4,12 @@ export { createCollectionStore } from './collectionStore/collectionStore';
 export { createDocumentStore } from './documentStore';
 export { createListQueryStore } from './listQueryStore/listQueryStore';
 
-export { fetchTypePriority, StoreFetchError } from './utils/storeShared';
+export {
+  fetchTypePriority,
+  mutationSkipped,
+  StoreFetchError,
+  StoreMutationError,
+} from './utils/storeShared';
 export { IsOffScreenContext } from './isOffScreenContext';
 
 // Document Store types
@@ -47,6 +52,7 @@ export type {
 
 // Shared types
 export type {
+  MutationSkipped,
   PayloadDebounce,
   StoreError,
   TSDFStatus,

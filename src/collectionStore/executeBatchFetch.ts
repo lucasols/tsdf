@@ -4,7 +4,7 @@ import { unknownToError } from 't-result';
 import { Store } from 't-state';
 
 import {
-  offlineConnectivityError,
+  normalizeFetchResultError,
   runOfflineAwareFetch,
   type OfflineAwareFetchController,
 } from '../persistentStorage/offline/fetchRuntime';
@@ -88,9 +88,7 @@ export async function executeBatchFetch<
       });
 
       if (!fetchResult.ok) {
-        const error = fetchResult.offline
-          ? offlineConnectivityError
-          : errorNormalizer(unknownToError(fetchResult.error));
+        const error = normalizeFetchResultError(fetchResult, errorNormalizer);
 
         store.produceState(
           (draft) => {
@@ -204,9 +202,7 @@ export async function executeBatchFetch<
           return;
         }
 
-        const error = fetchResult.offline
-          ? offlineConnectivityError
-          : errorNormalizer(unknownToError(fetchResult.error));
+        const error = normalizeFetchResultError(fetchResult, errorNormalizer);
 
         store.produceState(
           (draft) => {

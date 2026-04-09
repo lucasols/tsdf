@@ -84,7 +84,7 @@ The payload can be:
 
 ## Return Value
 
-`performMutation` returns a `Result<T, StoreError | true>`:
+`performMutation` returns a `Result<T, StoreMutationError | MutationSkipped>`:
 
 ```ts
 const result = await store.performMutation(/* ... */);
@@ -92,7 +92,11 @@ const result = await store.performMutation(/* ... */);
 if (result.ok) {
   // result.value is the mutation return value
 } else {
-  // result.error is StoreError or true (when optimisticUpdate returns false)
+  if (result.error.kind === 'skipped') {
+    // optimisticUpdate returned false, or this call was skipped by debounce
+  } else {
+    // result.error is a StoreMutationError with code/id/message and cause
+  }
 }
 ```
 
@@ -116,7 +120,8 @@ If the mutation **fails**, TSDF automatically invalidates the data, causing a re
 
 ### Cancelling a Mutation
 
-Return `false` from `optimisticUpdate` to cancel the mutation entirely:
+Return `false` from `optimisticUpdate` to cancel the mutation entirely.
+The returned `Result` will be `Err({ kind: 'skipped' })` rather than a thrown or normalized error:
 
 ```ts
 optimisticUpdate: (currentState) => {

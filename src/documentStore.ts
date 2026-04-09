@@ -12,7 +12,7 @@ import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { klona } from 'klona/json';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
-import { Result, unknownToError, type Result as ResultType } from 't-result';
+import { Result, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 
 import { useListItem as useListItemBase } from './hooks/useListItem';
@@ -34,7 +34,6 @@ import {
   shouldApplyOfflineOverlay,
 } from './persistentStorage/offline/entityMetadata';
 import {
-  isOfflineConnectivityError,
   offlineConnectivityError,
   runOfflineAwareFetch,
 } from './persistentStorage/offline/fetchRuntime';
@@ -96,8 +95,11 @@ import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
   AbortedStoreError,
   fetchTypePriority,
+  type MutationSkipped,
   NotFoundStoreError,
   StoreFetchError,
+  StoreMutationError,
+  toStoreMutationError,
   TimeoutStoreError,
   TSDFStatus,
   ValidStoreState,
@@ -944,7 +946,7 @@ export function createDocumentStore<
    */
   async function performMutation<T>(
     args: DocumentOnlineMutationArgs<T>,
-  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
   /**
    * Runs a document mutation that may fall back to durable offline queueing.
    *
@@ -954,11 +956,16 @@ export function createDocumentStore<
    */
   async function performMutation<T>(
     args: DocumentOfflineMutationArgs<T>,
-  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
   async function performMutation<T>(
     args: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>,
   ): Promise<
-    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   async function performMutation<T>({
     optimisticUpdate,
@@ -968,10 +975,15 @@ export function createDocumentStore<
     revalidateOnSuccess,
     offline,
   }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
-    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
   > {
     if (offline && offlineController && !offlineController.canQueueMutation()) {
-      return Result.err(offlineSessionUnavailableError);
+      return Result.err(
+        toStoreMutationError(offlineSessionUnavailableError, errorNormalizer),
+      );
     }
 
     const mutationId = getAutoIncrementId();
@@ -1019,9 +1031,7 @@ export function createDocumentStore<
 
         invalidateData();
 
-        return isOfflineConnectivityError(exception)
-          ? offlineConnectivityError
-          : errorNormalizer(unknownToError(exception));
+        return toStoreMutationError(exception, errorNormalizer);
       },
     });
 

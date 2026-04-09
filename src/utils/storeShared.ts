@@ -1,3 +1,5 @@
+import { unknownToError } from 't-result';
+
 import type { FetchType } from '../requestScheduler';
 
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
@@ -43,6 +45,12 @@ export const fetchTypePriority: Record<FetchType, number> = {
   highPriority: 3,
 };
 
+export type MutationSkipped = { kind: 'skipped' };
+
+export const mutationSkipped = {
+  kind: 'skipped',
+} as const satisfies MutationSkipped;
+
 export type StoreError = {
   code: number;
   id: string;
@@ -50,6 +58,69 @@ export type StoreError = {
   path?: string;
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 };
+
+function getStoreErrorLike(value: unknown): StoreError | null {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    !('code' in value) ||
+    typeof value.code !== 'number' ||
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !('message' in value) ||
+    typeof value.message !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    code: value.code,
+    id: value.id,
+    message: value.message,
+    method:
+      'method' in value &&
+      (value.method === 'GET' ||
+        value.method === 'POST' ||
+        value.method === 'PUT' ||
+        value.method === 'DELETE' ||
+        value.method === 'PATCH')
+        ? value.method
+        : undefined,
+    path:
+      'path' in value && typeof value.path === 'string'
+        ? value.path
+        : undefined,
+  };
+}
+
+export class StoreMutationError extends Error {
+  readonly kind = 'error';
+  code: number;
+  id: string;
+  path?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+
+  constructor(error: StoreError, options?: ErrorOptions) {
+    super(error.message, options);
+    this.name = 'StoreMutationError';
+    this.code = error.code;
+    this.id = error.id;
+    this.path = error.path;
+    this.method = error.method;
+  }
+}
+
+export function toStoreMutationError(
+  exception: unknown,
+  errorNormalizer: (exception: Error) => StoreError,
+): StoreMutationError {
+  if (exception instanceof StoreMutationError) return exception;
+
+  const normalizedError =
+    getStoreErrorLike(exception) ?? errorNormalizer(unknownToError(exception));
+
+  return new StoreMutationError(normalizedError, { cause: exception });
+}
 
 export class StoreFetchError extends Error {
   code: number;

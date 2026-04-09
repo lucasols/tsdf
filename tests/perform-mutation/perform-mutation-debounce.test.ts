@@ -58,7 +58,9 @@ describe('documentStore performMutation debounce', () => {
 
     expect(mutationCalls).toMatchInlineSnapshot(`['second']`);
     assert(!firstResult.ok);
-    expect(firstResult.error).toBe(true);
+    expect(firstResult.error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
     assert(secondResult.ok);
     expect(secondResult.value).toBe('second');
   });
@@ -138,7 +140,9 @@ describe('collectionStore performMutation debounce', () => {
 
     expect(mutationCalls).toMatchInlineSnapshot(`['second']`);
     assert(!firstResult.ok);
-    expect(firstResult.error).toBe(true);
+    expect(firstResult.error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
     assert(secondResult.ok);
     expect(secondResult.value).toBe('second');
   });
@@ -223,7 +227,9 @@ describe('listQueryStore performMutation debounce', () => {
 
     expect(mutationCalls).toMatchInlineSnapshot(`['second']`);
     assert(!firstResult.ok);
-    expect(firstResult.error).toBe(true);
+    expect(firstResult.error).toMatchInlineSnapshot(`
+      kind: 'skipped'
+    `);
     assert(secondResult.ok);
     expect(secondResult.value).toBe('second');
   });
