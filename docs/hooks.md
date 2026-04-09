@@ -232,11 +232,17 @@ changes on every keystroke.
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'` | `'loadingMore'`
 - `loadingFields` - Requested partial-resource fields still pending while cached data remains visible
 - `hasMore` - Whether more items are available for pagination
+- `isDerived` - Whether the result is currently coming from `derivedQueries` instead of an exact cached/fetched query
 - `isLoading` - Shorthand for `status === 'loading'`
 - `isLoadingMore` - Shorthand for `status === 'loadingMore'`
 - `error` - The `StoreError` if the fetch failed
 - `payload` - The resolved payload
 - `queryKey` - The internal key for this query
+
+Notes:
+
+- Derived results are hook-level computed views and do not materialize `state.queries[queryKey]`
+- Derived results always expose `hasMore: false`
 
 ## useMultipleItems
 

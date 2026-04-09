@@ -4,7 +4,13 @@ import { useDebouncedValue } from '@ls-stack/react-utils/useDebouncedValue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
-import { useCallback, useContext, useEffect, useMemo } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from 'react';
 import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
@@ -26,7 +32,6 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 import type {
   CollectionStoreEvents,
   CollectionUseMultipleItemsQuery,
@@ -367,7 +372,7 @@ export function useMultipleItems<
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
-  useIsomorphicLayoutEffect(() => {
+  useLayoutEffect(() => {
     if (
       !preloadItemsBeforePaint ||
       !preloadItems ||

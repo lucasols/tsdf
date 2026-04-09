@@ -15,6 +15,7 @@ import {
   type ListQueryStoreOptions,
 } from '../../src/listQueryStore/listQueryStore';
 import type {
+  DerivedQueriesConfig,
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
@@ -161,6 +162,7 @@ export function createListQueryStoreTestEnv<
     disableFetchItemFn,
     optimisticListUpdates,
     partialResources,
+    derivedQueries,
     offsetPagination,
     blockWindowClose,
     persistentStorage,
@@ -211,6 +213,11 @@ export function createListQueryStoreTestEnv<
       typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
     >[0]['optimisticListUpdates'];
     partialResources?: PartialResourcesConfig<TRow>;
+    derivedQueries?: DerivedQueriesConfig<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload
+    >;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
     persistentStorage?: ListQueryPersistentStorageConfig<
@@ -354,6 +361,7 @@ export function createListQueryStoreTestEnv<
     persistentStorage: resolvedPersistentStorage,
     optimisticListUpdates,
     partialResources,
+    derivedQueries,
     '~test': {
       ...testOptions,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,

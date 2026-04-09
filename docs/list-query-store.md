@@ -65,6 +65,7 @@ The type parameters are:
 | `maxItemBatchSize`        | `number`                                                                 | Max items per batch fetch                                                            |
 | `optimisticListUpdates`   | `OptimisticListUpdate[]`                                                 | See [Optimistic List Updates](./optimistic-list-updates.md)                          |
 | `partialResources`        | `PartialResourcesConfig`                                                 | See [Partial Resources](./partial-resources.md)                                      |
+| `derivedQueries`          | `DerivedQueriesConfig`                                                   | Derive hook results from local items instead of fetching when possible               |
 | `offsetPagination`        | `OffsetPaginationConfig`                                                 | See [Offset Pagination](./offset-pagination.md)                                      |
 | `getQueryKey`             | `(params) => ValidPayload \| unknown[]`                                  | Custom query key derivation                                                          |
 | `getItemKey`              | `(params) => ValidPayload \| unknown[]`                                  | Custom item key derivation                                                           |
@@ -146,6 +147,38 @@ Key points:
 - `queries` stores query metadata and an ordered list of item keys
 - `itemQueries` stores per-item fetch metadata (for `fetchItemFn`)
 - `itemLoadedFields` / `itemFieldInvalidationFields` are used by [Partial Resources](./partial-resources.md)
+- Derived query results are hook-level computed views only; they are not stored in `queries`
+
+## Derived Queries
+
+`derivedQueries` lets hooks resolve a list query from locally materialized items
+instead of fetching when the store can produce a reliable result.
+
+```ts
+derivedQueries: {
+  getQueryGroup: (queryPayload) => queryPayload.tableId,
+  getItemGroup: (_item, itemPayload) => itemPayload.split('||')[0] ?? '',
+  isComplete: (queryPayload, { queries }) => queries.length > 0,
+  deriveQuery: (queryPayload, items, { fields, isOfflineMode, deriveSource }) => {
+    if (Array.isArray(fields) && fields.includes('age')) {
+      return false;
+    }
+
+    return items.map(({ key }) => key);
+  },
+}
+```
+
+Behavior:
+
+- Online: exact query cache wins; otherwise TSDF can derive when `isComplete(...)` returns `true`
+- Offline: derivation is attempted before the exact cached query result
+- `deriveQuery(...)` receives `{ fields, isOfflineMode, deriveSource }`
+- `fields` lets derivation opt out of partial-resource queries when local data is insufficient
+- `deriveSource` is `'online'`, `'offline'`, or `'sticky-offline'`
+- Derived results expose `isDerived: true`
+- Derived results always expose `hasMore: false`
+- Derived results do not create `state.queries[queryKey]`
 
 ## API
 

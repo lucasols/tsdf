@@ -30,6 +30,7 @@ import {
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
+  useOfflineStoreStatus,
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from '../persistentStorage/offline/sessionCoordinator';
@@ -46,7 +47,10 @@ import {
   type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
 } from '../persistentStorage/offline/types';
-import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
+import {
+  createProtectedStorageKey,
+  isOfflineNetworkModeActiveSync,
+} from '../persistentStorage/persistentStorageManager';
 import type {
   ListQueryOfflineOperationsConfig,
   ListQueryPersistentStorageConfig,
@@ -88,6 +92,7 @@ import { createMutationApi } from './createMutationApi';
 import { excludeLoadedFields } from './itemFieldUtils';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import {
+  type DerivedQueriesConfig,
   type FetchListFnReturn,
   type FieldsInput,
   type FieldsOption,
@@ -327,6 +332,8 @@ type ListQueryStoreOptionsBase<
     options: { silentErrors?: boolean },
   ) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
+  /** Opt-in hook-level query derivation from locally materialized items. */
+  derivedQueries?: DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Opt-in persistent storage configuration. When provided, cached items and queries
@@ -428,6 +435,7 @@ export function createListQueryStore<
     onSchedulerEvent,
     onMutationError,
     blockWindowClose,
+    derivedQueries,
     getQueryKey: customGetQueryKey,
     getItemKey: customGetItemKey,
     partialResources,
@@ -614,6 +622,7 @@ export function createListQueryStore<
   const persistence = resolvedPersistentStorageConfig
     ? setupListQueryPersistence(resolvedPersistentStorageConfig, {
         getItemKey,
+        getItemDerivedGroup: derivedQueries?.getItemGroup,
         getQueryKey,
       })
     : null;
@@ -1841,6 +1850,15 @@ export function createListQueryStore<
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
+      const offlineStatus = useOfflineStoreStatus({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+      });
+      const isStoreOfflineMode =
+        offlineStatus.isOfflineMode ||
+        isOfflineNetworkModeActiveSync(
+          resolvedOfflineConfig?.session.getConfig().network,
+        );
       const offlineOverlaysSelector = useCallback(
         (
           state: Record<
@@ -1879,6 +1897,14 @@ export function createListQueryStore<
               )
           : undefined,
         !!persistence && !persistence.hasAsyncPreload,
+        persistence && derivedQueries
+          ? (payloads) =>
+              persistence.preloadItemsByDerivedQueryGroup(
+                payloads.map((payload) =>
+                  derivedQueries.getQueryGroup(payload),
+                ),
+              )
+          : undefined,
         persistence?.readHydratedItem,
         scheduleAutomaticListQueryFetch,
         queryInvalidationWasTriggered,
@@ -1886,6 +1912,8 @@ export function createListQueryStore<
         itemPendingInvalidationFields,
         globalDisableRefetchOnMount,
         partialResources,
+        derivedQueries,
+        isStoreOfflineMode,
         offlineEntities,
         offlineOverlays,
       );

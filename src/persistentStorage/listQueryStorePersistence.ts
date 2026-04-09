@@ -113,6 +113,7 @@ type ManagedQueryEntry = {
 
 type ManagedQueryEntriesByKey = Map<string, ManagedQueryEntry>;
 type EntryNamespaceMetadata = { p?: unknown };
+type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & { g?: unknown };
 
 function toItemState<
   ItemState extends ValidStoreState,
@@ -162,6 +163,14 @@ function limitPersistedQueryItems(
   };
 }
 
+function readManifestGroupMeta(meta: unknown): string | undefined {
+  if (typeof meta !== 'object' || meta === null || !('g' in meta)) {
+    return undefined;
+  }
+
+  return typeof meta.g === 'string' ? meta.g : undefined;
+}
+
 export type ListQueryPersistenceSetup<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -177,6 +186,7 @@ export type ListQueryPersistenceSetup<
   maybeHydrateQueries(queryKeys: string[]): Promise<boolean[]>;
   preloadItems(itemKeys: string[]): Promise<boolean[]>;
   preloadQueries(queryKeys: string[]): Promise<boolean[]>;
+  preloadItemsByDerivedQueryGroup(groupKeys: string[]): Promise<boolean[]>;
   getHydratedItemKeys(this: void): string[];
   getHydratedQueryKeys(this: void): string[];
   readHydratedItem(
@@ -219,6 +229,7 @@ export function setupListQueryPersistence<
   options: {
     getItemKey?: (payload: ItemPayload) => string;
     getQueryKey?: (payload: QueryPayload) => string;
+    getItemDerivedGroup?: (item: ItemState, itemPayload: ItemPayload) => string;
   } = {},
 ): ListQueryPersistenceSetup<ItemState, QueryPayload, ItemPayload> {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
@@ -234,6 +245,7 @@ export function setupListQueryPersistence<
   const resolveQueryKey =
     options.getQueryKey ??
     ((payload: QueryPayload) => getCompositeKey(payload));
+  const getItemDerivedGroup = options.getItemDerivedGroup;
   const pinnedItemKeys = new Set(
     (config.pinnedItems ?? []).map((payload) => resolveItemKey(payload)),
   );
@@ -316,7 +328,7 @@ export function setupListQueryPersistence<
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState | StorageState>,
-    EntryNamespaceMetadata
+    ItemEntryNamespaceMetadata
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX },
     {
@@ -1311,6 +1323,80 @@ export function setupListQueryPersistence<
     return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
   }
 
+  async function preloadItemsByDerivedQueryGroup(
+    groupKeys: string[],
+  ): Promise<boolean[]> {
+    if (!getItemDerivedGroup) {
+      return groupKeys.map(() => false);
+    }
+
+    const resultsByGroupKey = new Map<string, Promise<boolean>>();
+
+    for (const groupKey of [...new Set(groupKeys)]) {
+      resultsByGroupKey.set(
+        groupKey,
+        (async () => {
+          const sessionKey = config.getSessionKey();
+          if (sessionKey === false) return false;
+
+          let itemKeys: string[];
+
+          if (localStorageAdapter !== null) {
+            const itemPrefix = getStoragePrefixForStoreNamespace(
+              sessionKey,
+              config.storeName,
+              LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+            );
+            itemKeys = localStorageAdapter
+              .listManifestEntries(itemPrefix)
+              .flatMap((entry) => {
+                const payload = validateWithSchema(
+                  config.itemPayloadSchema,
+                  readManifestPayloadMeta(entry.meta),
+                );
+                if (payload === null || shouldIgnoreItem(payload)) {
+                  return [];
+                }
+
+                return readManifestGroupMeta(entry.meta) === groupKey
+                  ? [entry.entryKey]
+                  : [];
+              });
+          } else {
+            const metadataEntries =
+              await listAllPersistentStorageNamespaceMetadata(itemNamespace, {
+                order: 'key',
+              });
+            itemKeys = metadataEntries.flatMap((entry) => {
+              const payload = validateWithSchema(
+                config.itemPayloadSchema,
+                readManifestPayloadMeta(entry.customMetadata),
+              );
+              if (payload === null || shouldIgnoreItem(payload)) {
+                return [];
+              }
+
+              return readManifestGroupMeta(entry.customMetadata) === groupKey
+                ? [entry.key]
+                : [];
+            });
+          }
+
+          if (itemKeys.length === 0) return false;
+
+          const results = await preloadItems(itemKeys);
+          return results.some(Boolean);
+        })(),
+      );
+    }
+
+    return Promise.all(
+      groupKeys.map(
+        (groupKey) => resultsByGroupKey.get(groupKey) ?? Promise.resolve(false),
+      ),
+    );
+  }
+
   async function maybeHydrateItems(itemKeys: string[]): Promise<boolean[]> {
     return preloadItems(itemKeys);
   }
@@ -2187,7 +2273,10 @@ export function setupListQueryPersistence<
 
     const finalItemDataByKey = new Map<
       string,
-      PersistedListQueryItemData<ItemState | StorageState>
+      {
+        metadata: ItemEntryNamespaceMetadata;
+        value: PersistedListQueryItemData<ItemState | StorageState>;
+      }
     >();
     const finalPersistedItemKeys = new Set(previousKnownLocalItemKeys);
 
@@ -2234,7 +2323,15 @@ export function setupListQueryPersistence<
         payload: itemQuery.payload,
         loadedFields,
       };
-      finalItemDataByKey.set(itemKey, nextValue);
+      finalItemDataByKey.set(itemKey, {
+        metadata: {
+          p: itemQuery.payload,
+          ...(getItemDerivedGroup
+            ? { g: getItemDerivedGroup(item, itemQuery.payload) }
+            : {}),
+        },
+        value: nextValue,
+      });
       finalPersistedItemKeys.add(itemKey);
     }
 
@@ -2352,6 +2449,7 @@ export function setupListQueryPersistence<
     const itemUpserts = new Map<
       string,
       {
+        metadata: ItemEntryNamespaceMetadata;
         snapshot: string;
         value: PersistedListQueryItemData<ItemState | StorageState>;
       }
@@ -2372,10 +2470,10 @@ export function setupListQueryPersistence<
       queryUpserts.set(queryKey, { snapshot, value });
     }
 
-    for (const [itemKey, value] of finalItemDataByKey) {
+    for (const [itemKey, entry] of finalItemDataByKey) {
       if (!finalPersistedItemKeys.has(itemKey)) continue;
 
-      const snapshot = JSON.stringify(value);
+      const snapshot = JSON.stringify(entry.value);
       const existingSnapshot = itemSnapshotByKey.get(itemKey);
       if (
         existingSnapshot === snapshot &&
@@ -2384,7 +2482,11 @@ export function setupListQueryPersistence<
         continue;
       }
 
-      itemUpserts.set(itemKey, { snapshot, value });
+      itemUpserts.set(itemKey, {
+        metadata: entry.metadata,
+        snapshot,
+        value: entry.value,
+      });
     }
 
     const commitTasks: Promise<void>[] = [];
@@ -2408,6 +2510,7 @@ export function setupListQueryPersistence<
           upserts: Array.from(itemUpserts, ([key, entry]) => ({
             data: entry.value,
             key,
+            metadata: entry.metadata,
           })),
         }),
       );
@@ -2529,6 +2632,7 @@ export function setupListQueryPersistence<
     maybeHydrateQueries,
     preloadItems,
     preloadQueries,
+    preloadItemsByDerivedQueryGroup,
     getHydratedItemKeys: () => [...hydratedPersistedItemKeys],
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],
     readHydratedItem,
