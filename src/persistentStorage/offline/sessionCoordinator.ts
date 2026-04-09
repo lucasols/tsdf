@@ -987,9 +987,10 @@ export class SessionOfflineCoordinator {
     }
   }
 
-  async refreshNetworkState(): Promise<boolean> {
-    const token = ++this.#networkStateToken;
-    const detectedOffline = await this.#getCurrentOfflineState();
+  #applyRefreshedNetworkState(
+    token: number,
+    detectedOffline: boolean,
+  ): boolean {
     if (token !== this.#networkStateToken) {
       return this.store.state.status.network.active;
     }
@@ -1026,6 +1027,20 @@ export class SessionOfflineCoordinator {
 
     this.setNetworkActive(false, { classified: false });
     return false;
+  }
+
+  async refreshNetworkState(): Promise<boolean> {
+    const token = ++this.#networkStateToken;
+    const detectedOffline = this.#getCurrentOfflineState();
+
+    if (typeof detectedOffline === 'boolean') {
+      return Promise.resolve(
+        this.#applyRefreshedNetworkState(token, detectedOffline),
+      );
+    }
+
+    const resolvedDetectedOffline = await Promise.resolve(detectedOffline);
+    return this.#applyRefreshedNetworkState(token, resolvedDetectedOffline);
   }
 
   setNetworkActive(
