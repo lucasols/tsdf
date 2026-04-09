@@ -12,7 +12,6 @@ import { z } from 'zod';
 
 import {
   createListQueryStore,
-  createOfflineSession,
   createStoreManager,
   type DefineListQueryOfflineOperations,
   type DefineOfflineOperation,
@@ -355,46 +354,45 @@ test('direct list-query store offline public api', async () => {
           },
         },
       },
-    },
-  });
+    });
 
-  const queryPayload = { tableId: 'users' as const };
-  const userOnePayload = getUserItemPayload(1);
-  const userTwoPayload = getUserItemPayload(2);
+    const queryPayload = { tableId: 'users' as const };
+    const userOnePayload = getUserItemPayload(1);
+    const userTwoPayload = getUserItemPayload(2);
 
-  const listHook = renderHook(() =>
-    listQueryStore.useListQuery(queryPayload, {
-      loadSize: 3,
-      itemSelector: (item) => item.name,
-    }),
-  );
-  const multiHook = renderHook(() =>
-    listQueryStore.useMultipleListQueries(
-      [{ payload: queryPayload, loadSize: 3 }],
-      { itemSelector: (item) => item.name },
-    ),
-  );
-  await flushAllTimers();
+    const listHook = renderHook(() =>
+      listQueryStore.useListQuery(queryPayload, {
+        loadSize: 3,
+        itemSelector: (item) => item.name,
+      }),
+    );
+    const multiHook = renderHook(() =>
+      listQueryStore.useMultipleListQueries(
+        [{ payload: queryPayload, loadSize: 3 }],
+        { itemSelector: (item) => item.name },
+      ),
+    );
+    await flushAllTimers();
 
-  expect(
-    pick(listHook.result.current, ['items', 'payload', 'queryKey', 'status']),
-  ).toMatchInlineSnapshot(`
+    expect(
+      pick(listHook.result.current, ['items', 'payload', 'queryKey', 'status']),
+    ).toMatchInlineSnapshot(`
     items: ['Ada', 'Grace']
     payload: { tableId: 'users' }
     queryKey: '["users"]'
     status: 'success'
   `);
 
-  const invalidTempSuccessServerTable = createServerTableMock<User>({});
-  const invalidTempSuccessListQueryStore = createListQueryStore<
-    User,
-    UsersQueryPayload,
-    UserPayload,
-    false,
-    false,
-    InvalidListQueryTempSuccessOperations
-  >({
-    id: 'invalid-temp-success-callback-list-query',
+    const invalidTempSuccessServerTable = createServerTableMock<User>({});
+    const invalidTempSuccessListQueryStore = createListQueryStore<
+      User,
+      UsersQueryPayload,
+      UserPayload,
+      false,
+      false,
+      InvalidListQueryTempSuccessOperations
+    >({
+      id: 'invalid-temp-success-callback-list-query',
       storeManager,
       fetchListFn: () => Promise.resolve({ items: [], hasMore: false }),
       fetchItemFn: () => Promise.resolve({ id: 1, name: 'Ada' }),
@@ -844,9 +842,10 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
   network.install();
 
   const createStore = () => {
-    const offlineSession = createOfflineSession({
+    const storeManager = createStoreManager({
       getSessionKey: () => sessionKey,
-      config: { network: network.config },
+      errorNormalizer: normalizeError,
+      offlineSession: { network: network.config },
     });
 
     return createListQueryStore<
@@ -858,7 +857,7 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
       DirectListQueryDeleteOfflineOperations
     >({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager,
       fetchListFn: async (_payload_, size: number) => {
         await delay(FETCH_DELAY_MS);
         const listResult = serverTable.listSync({
@@ -888,7 +887,6 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
       getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
       getItemKey: (payload: UserPayload) =>
         typeof payload === 'string' ? payload : getUserEntityKey(payload.id),
-      errorNormalizer: normalizeError,
       defaultQuerySize: 3,
       lowPriorityThrottleMs: 5,
       baseCoalescingWindowMs: 10,
@@ -899,7 +897,6 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
         itemPayloadSchema: userPayloadSchema,
         queryPayloadSchema: usersQueryPayloadSchema,
         offline: {
-          session: offlineSession,
           operations: {
             deleteUser: {
               inputSchema: deleteUserInputSchema,

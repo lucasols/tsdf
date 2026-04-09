@@ -189,9 +189,10 @@ type LifecycleDocumentOfflineOperations = DefineDocumentOfflineOperations<
 function createLifecycleDocumentStore(sessionKey: string) {
   const network = createOfflineNetworkMock(false);
   network.install();
-  const offlineSession = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: {
+    errorNormalizer: normalizeError,
+    offlineSession: {
       network: network.config,
       mutationQueueing: { network: 'allow', outage: 'allow' },
     },
@@ -203,9 +204,8 @@ function createLifecycleDocumentStore(sessionKey: string) {
     LifecycleDocumentOfflineOperations
   >({
     id: `direct-document-lifecycle-${sessionKey}`,
-    getSessionKey: () => sessionKey,
+    storeManager,
     fetchFn: () => Promise.resolve({ ...serverMock.current }),
-    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
@@ -213,7 +213,6 @@ function createLifecycleDocumentStore(sessionKey: string) {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           createDoc: {
             inputSchema: setValueInputSchema,
