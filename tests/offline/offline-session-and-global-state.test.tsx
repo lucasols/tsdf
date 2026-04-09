@@ -1714,9 +1714,9 @@ test('a store initialized while an earlier shared-session replay is already in f
   expect(restartedEnvA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
-    0     | -- the restarted session boots online and begins replaying the earliest queued store
+    10ms  | -- the restarted session boots online and begins replaying the earliest queued store
+    .     | 🔴 >fetch-started
     .     | offline:updateValue replay-started
-    10ms  | 🔴 >fetch-started
     810ms | 🔴 <fetch-finished (value: 1)
     5.2s  | server-data-changed (value: 2)
     .     | offline:updateValue replay-finished

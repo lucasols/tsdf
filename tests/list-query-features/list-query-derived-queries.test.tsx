@@ -760,6 +760,7 @@ test('offline derived queries stay sticky across reconnect until the query is in
 
     renders.add({
       status: query.status,
+      isOnline: network.isOnline(),
       isDerived: query.isDerived,
       itemNames: query.items.map((item) => item.name),
     });
@@ -806,18 +807,28 @@ test('offline derived queries stay sticky across reconnect until the query is in
   ).toBe(1);
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
-    -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Ada, Alan, Grace, Offline user]
+    -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    ┌─
+    ⋅ status: success
+    ⋅ isOnline: ❌
+    ⋅ isDerived: ✅
+    ⋅ itemNames: [Ada, Alan, Grace, Offline user]
+    └─
 
     >>> Reconnect without invalidation
 
-    -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Ada, Alan, Grace, Offline user]
+    ┌─
+    ⋅ status: success
+    ⋅ isOnline: ✅
+    ⋅ isDerived: ✅
+    ⋅ itemNames: [Ada, Alan, Grace, Offline user]
+    └─
 
     >>> Invalidate after reconnect
 
-    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
-    -> status: refetching ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
-    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    -> status: refetching ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
     "
   `);
 });
