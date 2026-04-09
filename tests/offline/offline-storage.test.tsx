@@ -5,11 +5,18 @@ import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-import { clearSessionStorage, createOfflineSession } from '../../src/main';
+import {
+  clearSessionStorage,
+  createOfflineSession,
+  type ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
@@ -27,7 +34,9 @@ import {
 } from '../utils/persistentStorageOptimizationTestUtils';
 import {
   type CreateListQueryUserOperations,
+  deleteItemInputSchema,
   type UpdateValueOperations,
+  userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
@@ -41,6 +50,7 @@ import {
 let network = createOfflineNetworkMock();
 
 const offlineStorageUsersQuery = { tableId: 'users' } as const;
+
 type OfflineStorageUserRow = { id: number; name: string };
 
 const offlineStorageUsersTable: { users: OfflineStorageUserRow[] } = {
@@ -173,6 +183,89 @@ function createOfflinePartialListQueryEnv({
               nextUserIdRef.current += 1;
               await env.serverTable.delayedSetItem(`users||${data.id}`, data);
               return data;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return env;
+}
+
+type OfflinePendingItemsOperations = {
+  patchUserName: ListQueryOfflineOperationDefinition<
+    OfflineStorageUserRow,
+    ListQueryParams,
+    string,
+    { itemId: string; name: string },
+    unknown
+  >;
+  deleteUser: ListQueryOfflineOperationDefinition<
+    OfflineStorageUserRow,
+    ListQueryParams,
+    string,
+    { itemId: string },
+    unknown
+  >;
+};
+
+function createOfflinePendingItemsListQueryEnv({
+  adapter,
+  sessionKey,
+  storeName,
+  testScenario = 'idle',
+}: {
+  adapter: 'local-sync' | typeof opfsPersistentStorage;
+  sessionKey: string;
+  storeName: string;
+  testScenario?: 'idle' | { loaded: { queries: { tableId: string }[] } };
+}) {
+  const env = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    OfflinePendingItemsOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    testScenario,
+    persistentStorage: {
+      adapter,
+      schema: userRowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryQueryPayloadSchema,
+      offline: {
+        session: createOfflineSession({
+          getSessionKey: () => sessionKey,
+          config: { network: network.config },
+        }),
+        operations: {
+          patchUserName: {
+            inputSchema: userPatchSchema,
+            getEntityRefs: ({ input }) => [input.itemId],
+            execute: async ({ input }) => {
+              await env.serverTable.delayedSetItem(input.itemId, {
+                id: Number(input.itemId.split('||')[1]),
+                name: input.name,
+              });
+              return { name: input.name };
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateItemState(input.itemId, (item) => ({
+                ...item,
+                name: input.name,
+              }));
+            },
+          },
+          deleteUser: {
+            inputSchema: deleteItemInputSchema,
+            getEntityRefs: ({ input }) => [input.itemId],
+            execute: async ({ input }) => {
+              await env.serverTable.delayedRemoveItem(input.itemId);
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.deleteItemState(input.itemId);
             },
           },
         },
@@ -660,6 +753,233 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
 
   hook.unmount();
 });
+
+test('local-sync idle offline boot hydrates pending offline items from storage without a list query mount', async () => {
+  const sessionKey = 'offline-sync-pending-items-session';
+  const storeName = 'offline-sync-pending-items-store';
+
+  const firstEnv = createOfflinePendingItemsListQueryEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+  });
+
+  // Queue the offline work while the list is already loaded so the restart can
+  // rely entirely on persisted offline metadata plus item storage snapshots.
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  // Keep one row visible as a pending edit.
+  await act(async () => {
+    await firstEnv.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          name: 'Ada queued',
+        }));
+      },
+      mutation: async () => {
+        await firstEnv.serverTable.delayedSetItem('users||1', {
+          id: 1,
+          name: 'Ada queued',
+        });
+        return { name: 'Ada queued' };
+      },
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada queued' },
+      },
+    });
+  });
+
+  // Delete another row so the hook has to restore the deleted payload from the
+  // offline entity metadata rather than from a mounted query.
+  await act(async () => {
+    await firstEnv.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        firstEnv.apiStore.deleteItemState('users||2');
+      },
+      mutation: async () => {
+        await firstEnv.serverTable.delayedRemoveItem('users||2');
+      },
+      offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+    });
+  });
+  await flushAllTimers();
+
+  // Restart the app into a fresh idle store while the browser is still offline.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  const restartedEnv = createOfflinePendingItemsListQueryEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+  });
+
+  restartedEnv.addTimelineComments('beforeNextAction', [
+    'restart offline and mount only usePendingOfflineItems; it should recover both visible edits and deleted payloads from storage',
+  ]);
+  const hook = renderHook(() => {
+    const pending = restartedEnv.apiStore.usePendingOfflineItems({
+      selector: (item) => item.name,
+    });
+    restartedEnv.trackItemUI('pending-items', pending.items.join(', '));
+    restartedEnv.trackItemUI(
+      'pending-deletes',
+      pending.deletedItems.join(', ') || '(none)',
+    );
+    return pending;
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  // Local-sync storage can hydrate synchronously, so the first render should
+  // already reflect the full pending offline state.
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    deletedItems: ['users||2']
+    items: ['Ada queued']
+  `);
+  expect(
+    restartedEnv.apiStore
+      .getOfflineEntities()
+      .map((entity) => ({
+        entityKey: entity.entityKey,
+        pendingMutations: entity.pendingMutations,
+        syncState: entity.syncState,
+      })),
+  ).toMatchInlineSnapshot(`
+    - entityKey: '"users||1'
+      pendingMutations: 1
+      syncState: 'pending'
+    - entityKey: '"users||2'
+      pendingMutations: 1
+      syncState: 'pending'
+  `);
+  expect(restartedEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time | pending-deletes | pending-items |
+    0    | -               | -             | -- restart offline and mount only usePendingOfflineItems; it should recover both visible edits and deleted payloads from storage
+    .    | users||2        | Ada queued    | [pending-items, pending-deletes, pending-items, pending-deletes] ui-initialized
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('async OPFS idle offline boot hydrates pending offline items from storage without a list query mount', async () => {
+  const sessionKey = 'offline-opfs-pending-items-session';
+  const storeName = 'offline-opfs-pending-items-store';
+
+  createOpfsPersistentStorageTestStore();
+
+  const firstEnv = createOfflinePendingItemsListQueryEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+  });
+
+  // Queue the same visible edit plus delete pair, but persist them through the
+  // async OPFS adapter so the restart path has to preload item snapshots.
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          name: 'Ada queued',
+        }));
+      },
+      mutation: async () => {
+        await firstEnv.serverTable.delayedSetItem('users||1', {
+          id: 1,
+          name: 'Ada queued',
+        });
+        return { name: 'Ada queued' };
+      },
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada queued' },
+      },
+    }),
+  );
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        firstEnv.apiStore.deleteItemState('users||2');
+      },
+      mutation: async () => {
+        await firstEnv.serverTable.delayedRemoveItem('users||2');
+      },
+      offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Reboot into an idle store so the hook has to restore state from persisted
+  // OPFS records instead of from any mounted query.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+
+  const restartedEnv = createOfflinePendingItemsListQueryEnv({
+    adapter: opfsPersistentStorage,
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+  });
+
+  restartedEnv.addTimelineComments('beforeNextAction', [
+    'restart offline with OPFS storage and mount only usePendingOfflineItems; the async preload should recover the same pending state',
+  ]);
+  const hook = renderHook(() => {
+    const pending = restartedEnv.apiStore.usePendingOfflineItems({
+      selector: (item) => item.name,
+    });
+    restartedEnv.trackItemUI(
+      'pending-items',
+      pending.items.join(', ') || '(none)',
+    );
+    restartedEnv.trackItemUI(
+      'pending-deletes',
+      pending.deletedItems.join(', ') || '(none)',
+    );
+    return pending;
+  });
+
+  // Async storage cannot hydrate on the first render, so wait for the preload
+  // to materialize the persisted item snapshot into live store state.
+  await act(async () => {
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(hook.result.current).toMatchInlineSnapshot(`
+    deletedItems: ['users||2']
+    items: ['Ada queued']
+  `);
+  expect(restartedEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time | pending-deletes | pending-items |
+    0    | -               | -             | -- restart offline with OPFS storage and mount only usePendingOfflineItems; the async preload should recover the same pending state
+    .    | (none)          | (none)        | [pending-items, pending-deletes] ui-initialized
+    15ms | (none)          | Ada queued    | [pending-items] ui-changed
+    2s   | users||2        | Ada queued    | [pending-deletes] ui-changed
+    "
+  `);
+
+  hook.unmount();
+}, 10_000);
 
 test('the default OPFS offline persistence keeps the raw file paths and JSON payloads transparent', async () => {
   const sessionKey = 'offline-opfs-format-session';

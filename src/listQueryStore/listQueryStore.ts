@@ -32,6 +32,7 @@ import {
 import {
   useOfflineStoreStatus,
   useOfflineStoreEntities,
+  useOfflineStoreEntitiesWithPayload,
   useOfflineStoreResolutions,
 } from '../persistentStorage/offline/sessionCoordinator';
 import {
@@ -110,6 +111,7 @@ import {
   type TSFDListQueryState,
   type TSFDUseListItemReturn,
   type TSFDUseListQueryReturn,
+  type TSFDUsePendingOfflineItemsReturn,
 } from './types';
 import { useFindItem as useFindItemHook } from './useFindItem';
 import { useItem as useItemHook, UseItemOptions } from './useItem';
@@ -125,6 +127,10 @@ import {
   useMultipleListQueries as useMultipleListQueriesHook,
   UseMultipleListQueriesOptions,
 } from './useMultipleListQueries';
+import {
+  usePendingOfflineItems as usePendingOfflineItemsHook,
+  type UsePendingOfflineItemsOptions,
+} from './usePendingOfflineItems';
 
 export type ListQueryStoreEvents = {
   invalidateQuery: { priority: FetchType; queryKey: string };
@@ -602,6 +608,16 @@ export function createListQueryStore<
       items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
       options: UseMultipleItemsOptions<ItemState, S>,
     ): readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[];
+  };
+
+  type UsePendingOfflineItemsApi = {
+    <SelectedItem = ItemState>(
+      options?: UsePendingOfflineItemsOptions<
+        ItemState,
+        ItemPayload,
+        SelectedItem
+      >,
+    ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload>;
   };
 
   const getSessionKeyForRuntime =
@@ -2028,6 +2044,60 @@ export function createListQueryStore<
     );
   };
 
+  /**
+   * Returns the current offline-tracked list items for this store without
+   * performing any fetches. Visible queued creates/updates are exposed through
+   * `items`, while pending deletes are exposed separately through
+   * `deletedItems`.
+   */
+  const usePendingOfflineItems: UsePendingOfflineItemsApi =
+    function usePendingOfflineItems<SelectedItem = ItemState>(
+      options: UsePendingOfflineItemsOptions<
+        ItemState,
+        ItemPayload,
+        SelectedItem
+      > = {},
+    ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload> {
+      const offlineEntities = useOfflineStoreEntitiesWithPayload({
+        sessionKey: getSessionKeyForRuntime(),
+        inactiveScope: id,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+      const offlineOverlaysSelector = useCallback(
+        (
+          state: Record<
+            string,
+            ListQueryOfflineOverlay<ItemState, ItemPayload>
+          >,
+        ) => {
+          return state;
+        },
+        [],
+      );
+      const offlineOverlays = offlineOverlayStore.useSelectorRC(
+        offlineOverlaysSelector,
+      );
+
+      return usePendingOfflineItemsHook<
+        ItemState,
+        QueryPayload,
+        ItemPayload,
+        SelectedItem
+      >(
+        options,
+        store,
+        registerActiveStandaloneItems,
+        touchItems,
+        persistence?.preloadItems
+          ? (itemKeys) => persistence.preloadItems(itemKeys)
+          : undefined,
+        !!persistence && !persistence.hasAsyncPreload,
+        persistence?.readHydratedItem,
+        offlineEntities,
+        offlineOverlays,
+      );
+    };
+
   function useFindItem<SelectedItem = ItemState | null>(
     findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
     options: {
@@ -2358,6 +2428,7 @@ export function createListQueryStore<
     loadMore: loadMoreApi,
     getItemKey,
     getItemState,
+    usePendingOfflineItems,
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
     useOfflineEntities: () => {
       return useOfflineStoreEntities({

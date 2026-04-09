@@ -18,6 +18,7 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
@@ -28,6 +29,7 @@ const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
 const renameManyUsersInputSchema = rc_array(userInputSchema);
 const createUserInputSchema = rc_object({ name: rc_string });
+const deleteUserInputSchema = rc_object({ id: rc_number });
 const userConflictSchema = rc_object({ reason: rc_string });
 const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
 const userPayloadSchema = z.union([
@@ -817,4 +819,138 @@ test('direct list-query store offline public api', async () => {
     multiHook.unmount();
     createdUserHook.unmount();
   });
+});
+
+type DirectListQueryDeleteOfflineOperations = DefineListQueryOfflineOperations<
+  User,
+  UsersQueryPayload,
+  UserPayload,
+  { deleteUser: DefineOfflineOperation<{ id: number }> }
+>;
+
+test('usePendingOfflineItems restores deleted object payloads after offline restart', async () => {
+  const network = createOfflineNetworkMock();
+  const sessionKey = 'direct-list-query-pending-delete-session';
+  const storeId = 'direct-list-query-pending-delete';
+  network.install();
+
+  const createStore = () => {
+    const offlineSession = createOfflineSession({
+      getSessionKey: () => sessionKey,
+      config: { network: network.config },
+    });
+
+    return createListQueryStore<
+      User,
+      UsersQueryPayload,
+      UserPayload,
+      false,
+      false,
+      DirectListQueryDeleteOfflineOperations
+    >({
+      id: storeId,
+      getSessionKey: () => sessionKey,
+      fetchListFn: async (_payload_, size: number) => {
+        await delay(FETCH_DELAY_MS);
+        const listResult = serverTable.listSync({
+          tableId: 'users',
+          limit: size,
+        });
+        return {
+          items: listResult.items.map(({ data }) => ({
+            itemPayload: getUserItemPayload(data.id),
+            data: { ...data },
+          })),
+          hasMore: listResult.hasMore,
+        };
+      },
+      fetchItemFn: async (payload: UserPayload) => {
+        await delay(FETCH_DELAY_MS);
+        if (typeof payload === 'string') {
+          throw new Error(`Missing user ${payload}`);
+        }
+
+        const item = serverTable.get(getUserServerItemId(payload.id));
+        if (!item) {
+          throw new Error(`Missing user ${payload.id}`);
+        }
+        return { ...item };
+      },
+      getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
+      getItemKey: (payload: UserPayload) =>
+        typeof payload === 'string' ? payload : getUserEntityKey(payload.id),
+      errorNormalizer: normalizeError,
+      defaultQuerySize: 3,
+      lowPriorityThrottleMs: 5,
+      baseCoalescingWindowMs: 10,
+      blockWindowClose: null,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userSchema,
+        itemPayloadSchema: userPayloadSchema,
+        queryPayloadSchema: usersQueryPayloadSchema,
+        offline: {
+          session: offlineSession,
+          operations: {
+            deleteUser: {
+              inputSchema: deleteUserInputSchema,
+              getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
+              execute: ({ input }) => {
+                serverTable.removeItem(getUserServerItemId(input.id));
+              },
+              onSuccessExecute: ({ input }) => {
+                listQueryStore.deleteItemState(getUserItemPayload(input.id));
+              },
+            },
+          },
+        },
+      },
+    });
+  };
+
+  const serverTable = createServerTableMock<User>({
+    [getUserServerItemId(1)]: { id: 1, name: 'Ada' },
+    [getUserServerItemId(2)]: { id: 2, name: 'Grace' },
+  });
+  let listQueryStore = createStore();
+  const queryPayload = { tableId: 'users' as const };
+  const userOnePayload = getUserItemPayload(1);
+
+  // Load the list once so persistence can later restore the deleted item from
+  // offline metadata without needing a mounted query.
+  const listHook = renderHook(() => listQueryStore.useListQuery(queryPayload));
+  await flushAllTimers();
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  await act(async () => {
+    await listQueryStore.performMutation(userOnePayload, {
+      optimisticUpdate: () => {
+        listQueryStore.deleteItemState(userOnePayload);
+      },
+      mutation: () => Promise.resolve(undefined),
+      offline: { operation: 'deleteUser', input: { id: 1 } },
+    });
+  });
+  await flushAllTimers();
+
+  listHook.unmount();
+
+  // Simulate a fresh app boot with only the pending-items hook mounted.
+  __resetSessionOfflineCoordinatorRegistryForTests();
+  listQueryStore = createStore();
+
+  const pendingHook = renderHook(() => listQueryStore.usePendingOfflineItems());
+  await flushAllTimers();
+
+  expect(pendingHook.result.current).toMatchInlineSnapshot(`
+    deletedItems:
+      - { id: 1, tableId: 'users' }
+    items: []
+  `);
+
+  pendingHook.unmount();
 });

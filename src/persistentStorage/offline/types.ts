@@ -328,6 +328,15 @@ export type GlobalOfflineEntity = {
   tempId?: ValidPayload;
 };
 
+/**
+ * Internal variant of {@link GlobalOfflineEntity} that carries an optional
+ * derived item payload for hooks that need to resolve payloads from offline
+ * metadata without a mounted query. Not part of the public API.
+ */
+export type InternalGlobalOfflineEntity = GlobalOfflineEntity & {
+  payload?: ValidPayload;
+};
+
 /** Reference to an entity participating in offline sync tracking. */
 export type OfflineEntityRef = {
   entityKey: string;

@@ -98,6 +98,11 @@ export type TSFDUseListItemReturn<
   queryMetadata: QueryMetadata;
 };
 
+export type TSFDUsePendingOfflineItemsReturn<
+  Selected,
+  ItemPayload extends ValidPayload,
+> = { items: Selected[]; deletedItems: ItemPayload[] };
+
 export type FetchListFnReturnItem<
   ItemPayload extends ValidPayload,
   ItemState extends ValidStoreState,

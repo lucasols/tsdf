@@ -22,6 +22,7 @@ import {
 } from './sessionProtectionRegistry';
 import type {
   GlobalOfflineEntity,
+  InternalGlobalOfflineEntity,
   GlobalOfflineStatus,
   OfflineFailureClassification,
   OfflineFailureContext,
@@ -41,16 +42,24 @@ import {
   getIsOfflineModeFromStatus,
 } from './types';
 
+function stripInternalEntityPayload(
+  entity: InternalGlobalOfflineEntity,
+): GlobalOfflineEntity {
+  if (!('payload' in entity)) return entity;
+  const { payload: _payload, ...publicEntity } = entity;
+  return publicEntity;
+}
+
 type SessionStoreState = {
   status: GlobalOfflineStatus;
-  entities: GlobalOfflineEntity[];
+  entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
 };
 
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
-  entities: GlobalOfflineEntity[];
+  entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
 };
 
@@ -67,7 +76,7 @@ type SessionReplayHead = {
 
 type SessionStoreContribution = {
   adapter: StorageAdapter;
-  entities: GlobalOfflineEntity[];
+  entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   protectedKeys: string[];
   replayHead: SessionReplayHead | null;
@@ -798,7 +807,7 @@ export class SessionOfflineCoordinator {
   }
 
   getEntities(): GlobalOfflineEntity[] {
-    return this.store.state.entities;
+    return this.store.state.entities.map(stripInternalEntityPayload);
   }
 
   getResolutions(): OfflineResolutionRecord[] {
@@ -1209,7 +1218,7 @@ export class SessionOfflineCoordinator {
   }
 
   #refreshAggregates(): void {
-    const allEntities: GlobalOfflineEntity[] = [];
+    const allEntities: InternalGlobalOfflineEntity[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
     for (const contribution of this.#storeContributions.values()) {
@@ -1697,11 +1706,14 @@ export function createOfflineSession(args: {
     useOfflineEntities: () => {
       const coordinator = useSessionCoordinator();
       const entitiesSelector = useCallback(
-        (state: SessionStoreState) => state.entities,
+        (state: SessionStoreState) =>
+          state.entities.map(stripInternalEntityPayload),
         [],
       );
 
-      return coordinator.store.useSelectorRC(entitiesSelector);
+      return coordinator.store.useSelectorRC(entitiesSelector, {
+        equalityFn: deepEqual,
+      });
     },
     useOfflineResolutions: () => {
       const coordinator = useSessionCoordinator();
@@ -1769,11 +1781,14 @@ export function useGlobalOfflineEntities(
 ): readonly GlobalOfflineEntity[] {
   const coordinator = useSessionOfflineCoordinator(sessionKey, true);
   const entitiesSelector = useCallback(
-    (state: SessionStoreState) => state.entities,
+    (state: SessionStoreState) =>
+      state.entities.map(stripInternalEntityPayload),
     [],
   );
 
-  return coordinator.store.useSelectorRC(entitiesSelector);
+  return coordinator.store.useSelectorRC(entitiesSelector, {
+    equalityFn: deepEqual,
+  });
 }
 
 /**
@@ -1796,11 +1811,11 @@ export function useGlobalOfflineResolutions(
 /**
  * React hook returning offline entities for a specific store in a session.
  */
-export function useOfflineStoreEntities(args: {
+export function useOfflineStoreEntitiesWithPayload(args: {
   sessionKey: string | false;
   inactiveScope: string;
   storeName?: string;
-}): readonly GlobalOfflineEntity[] {
+}): readonly InternalGlobalOfflineEntity[] {
   const coordinator = useSessionOfflineCoordinator(
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
     false,
@@ -1819,6 +1834,16 @@ export function useOfflineStoreEntities(args: {
   return coordinator.store.useSelectorRC(entitiesSelector, {
     equalityFn: deepEqual,
   });
+}
+
+export function useOfflineStoreEntities(args: {
+  sessionKey: string | false;
+  inactiveScope: string;
+  storeName?: string;
+}): readonly GlobalOfflineEntity[] {
+  const entities = useOfflineStoreEntitiesWithPayload(args);
+
+  return useMemo(() => entities.map(stripInternalEntityPayload), [entities]);
 }
 
 /**

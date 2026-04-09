@@ -27,9 +27,11 @@ import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
 import {
   isModeEffectivelyActive,
   OfflineResolutionConflictParseError,
+  offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
+  type InternalGlobalOfflineEntity,
   type OfflineMutationInput,
   type OfflineMutationQueueingCause,
   type OfflineMutationQueueingPolicy,
@@ -114,7 +116,7 @@ type ActiveSessionState = {
     typeof createPersistentStorageNamespaceHandle<PersistedOfflineResolutionRecord>
   >;
   entityNamespace: ReturnType<
-    typeof createPersistentStorageNamespaceHandle<GlobalOfflineEntity>
+    typeof createPersistentStorageNamespaceHandle<InternalGlobalOfflineEntity>
   >;
 };
 
@@ -133,6 +135,7 @@ const compactOfflineEntitySchema = rc_object({
   a: rc_number,
   u: rc_number,
   t: rc_unknown.optionalKey(),
+  v: rc_unknown.optionalKey(),
 });
 const compactOfflineQueueEntrySchema = rc_object({
   d: rc_string,
@@ -765,7 +768,7 @@ export function createOfflineStoreController<
         entryPrefix: OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
       });
     const entityNamespace =
-      createPersistentStorageNamespaceHandle<GlobalOfflineEntity>(
+      createPersistentStorageNamespaceHandle<InternalGlobalOfflineEntity>(
         {
           storeName,
           adapter,
@@ -792,6 +795,7 @@ export function createOfflineStoreController<
                 a: entity.createdAt,
                 u: entity.updatedAt,
                 ...(entity.tempId !== undefined ? { t: entity.tempId } : {}),
+                ...(entity.payload !== undefined ? { v: entity.payload } : {}),
               };
             },
             deserialize(raw) {
@@ -828,6 +832,14 @@ export function createOfflineStoreController<
                       // WORKAROUND: Compact entity payloads persist temp ids as unknown JSON values, and the controller rebinds that validated payload back to ValidPayload when hydrating.
                       tempId: __LEGIT_CAST__<ValidPayload, unknown>(
                         compactEntity.t,
+                      ),
+                    }
+                  : {}),
+                ...(compactEntity.v !== undefined
+                  ? {
+                      // WORKAROUND: Derived item payloads are persisted as unknown JSON values and are narrowed back to ValidPayload when hydrating the internal entity cache.
+                      payload: __LEGIT_CAST__<ValidPayload, unknown>(
+                        compactEntity.v,
                       ),
                     }
                   : {}),
@@ -1197,12 +1209,12 @@ export function createOfflineStoreController<
     if (!session || !isActiveSessionState(session)) return;
     const sessionState = session;
     const dependencySnapshot = createResolutionDependencySnapshot();
-    const entitiesByKey = new Map<string, GlobalOfflineEntity>();
+    const entitiesByKey = new Map<string, InternalGlobalOfflineEntity>();
 
     function createEntityBase(
       ref: OfflineEntityRef,
     ): Pick<
-      GlobalOfflineEntity,
+      InternalGlobalOfflineEntity,
       | 'id'
       | 'sessionKey'
       | 'storeName'
@@ -1251,6 +1263,12 @@ export function createOfflineStoreController<
               tempIds: entry.tempIds,
               entityKey: ref.entityKey,
             }) ?? existing?.tempId,
+          payload:
+            getPayloadForEntityRef({
+              operationName: entry.operation,
+              input: entry.input,
+              entityKey: ref.entityKey,
+            }) ?? existing?.payload,
         });
       }
     }
@@ -1283,6 +1301,12 @@ export function createOfflineStoreController<
               tempIds: resolution.tempIds,
               entityKey: ref.entityKey,
             }) ?? existing?.tempId,
+          payload:
+            getPayloadForEntityRef({
+              operationName: resolution.operation,
+              input: resolution.input,
+              entityKey: ref.entityKey,
+            }) ?? existing?.payload,
         });
       }
     }
@@ -1660,6 +1684,42 @@ export function createOfflineStoreController<
 
     if (rawEntityRefs.length === 0) return fallbackEntityRefs;
     return resolveNormalizedRefs(rawEntityRefs);
+  }
+
+  function getPayloadForEntityRef(args: {
+    entityKey: string;
+    input: unknown;
+    operationName: string;
+  }): ValidPayload | undefined {
+    const operation = operations[args.operationName];
+    const rawEntityRefs =
+      operation && typeof operation.getEntityRefs === 'function'
+        ? operation.getEntityRefs({ input: args.input })
+        : (storeAdapter.getEntityRefs?.({
+            operationName: args.operationName,
+            input: args.input,
+          }) ?? []);
+    if (rawEntityRefs.length === 0) return undefined;
+
+    const resolvedEntityRefs = resolveNormalizedRefs(rawEntityRefs);
+    for (const [index, ref] of resolvedEntityRefs.entries()) {
+      if (ref.entityKind !== 'item' || ref.entityKey !== args.entityKey) {
+        continue;
+      }
+
+      const rawEntityRef = rawEntityRefs[index];
+      if (offlineItemEntityRefSchema.parse(rawEntityRef).unwrapOrNull()) {
+        return undefined;
+      }
+
+      // WORKAROUND: Offline queue entity refs are typed as unknown at the
+      // shared controller boundary, so list-query item payloads must be
+      // narrowed back to ValidPayload after confirming the ref is not already a
+      // normalized `{ entityKey, entityKind }` object.
+      return __LEGIT_CAST__<ValidPayload, unknown>(rawEntityRef);
+    }
+
+    return undefined;
   }
 
   function buildOperationBaseContext(args: {

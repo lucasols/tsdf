@@ -48,6 +48,7 @@ export type {
   TSFDListQueryState,
   TSFDUseListItemReturn,
   TSFDUseListQueryReturn,
+  TSFDUsePendingOfflineItemsReturn,
 } from './listQueryStore/types';
 
 // Shared types

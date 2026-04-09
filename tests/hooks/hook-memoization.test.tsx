@@ -29,6 +29,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
+  deleteItemInputSchema,
   userPatchSchema,
   userRowSchema,
 } from '../offline/offlineReplayTestShared';
@@ -491,6 +492,16 @@ type PendingSyncListQueryOperations = DefineListQueryOfflineOperations<
   ListQueryParams,
   string,
   { patchUserName: DefineOfflineOperation<{ itemId: string; name: string }> }
+>;
+
+type PendingOfflineItemsListQueryOperations = DefineListQueryOfflineOperations<
+  { id: number; name: string },
+  ListQueryParams,
+  string,
+  {
+    patchUserName: DefineOfflineOperation<{ itemId: string; name: string }>;
+    deleteUser: DefineOfflineOperation<{ itemId: string }>;
+  }
 >;
 
 describe('list-query hook memoization', () => {
@@ -1173,6 +1184,112 @@ describe('list-query hook memoization', () => {
       .toMatchInlineSnapshot(`
         ['Ada', 'Grace']
       `);
+
+    const stableAfterQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableAfterQueue);
+  });
+
+  test('usePendingOfflineItems stays stable on plain rerender while exposing visible items and deleted payloads', async () => {
+    const network = createOfflineNetworkMock(false);
+    network.install();
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PendingOfflineItemsListQueryOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        getSessionKey: () => 'list-query-pending-offline-items-memoization',
+        testScenario: { loaded: { tables: ['users'] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            session: createOfflineSession({
+              getSessionKey: () =>
+                'list-query-pending-offline-items-memoization',
+              config: { network: network.config },
+            }),
+            operations: {
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: () => ({ name: 'ignored' }),
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.updateItemState(input.itemId, (item) => ({
+                    ...item,
+                    name: input.name,
+                  }));
+                },
+              },
+              deleteUser: {
+                inputSchema: deleteItemInputSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: async () => {},
+                onSuccessExecute: ({ input }) => {
+                  env.apiStore.deleteItemState(input.itemId);
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      return env.apiStore.usePendingOfflineItems({
+        selector: (item) => item.name,
+      });
+    });
+
+    await flushAllTimers();
+
+    const stableBeforeQueue = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(stableBeforeQueue);
+
+    // Queue one visible edit and one delete so the hook has to keep both
+    // collection outputs stable across plain rerenders.
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||1', (item) => ({
+            ...item,
+            name: 'Ada queued',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Ada queued' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Ada queued' },
+        },
+      });
+    });
+    await act(async () => {
+      await env.apiStore.performMutation('users||2', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||2');
+        },
+        mutation: async () => {},
+        offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+      });
+    });
+    await Promise.resolve();
+
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      deletedItems: ['users||2']
+      items: ['Ada queued']
+    `);
 
     const stableAfterQueue = hook.result.current;
     hook.rerender();
