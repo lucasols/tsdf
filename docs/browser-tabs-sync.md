@@ -7,7 +7,7 @@ TSDF can keep data and fetch activity synchronized across tabs and windows, redu
 Browser tabs sync is available when all of these are true:
 
 - All tabs use the same `id` for the same store
-- `getSessionKey()` returns the same string in all tabs
+- `storeManager.getSessionKey()` returns the same string in all tabs
 - Tab communication is available (default: `BroadcastChannel`)
 
 If `getSessionKey` returns `false`, sync is disabled for that store instance.
@@ -40,11 +40,16 @@ Tabs use a versioned message model so later snapshots do not overwrite fresher r
 Add the following options to any store that should sync:
 
 ```ts
-const store = createDocumentStore({
-  id: 'document-store',
+const storeManager = createStoreManager({
   getSessionKey: () => {
     return isLoggedIn ? `tenant:${tenantId}` : false;
   },
+  errorNormalizer: normalizeError,
+});
+
+const store = createDocumentStore({
+  id: 'document-store',
+  storeManager,
   /* ... */
 });
 ```

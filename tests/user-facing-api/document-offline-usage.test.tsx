@@ -5,8 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
-  createOfflineSession,
   createDocumentStore,
+  createStoreManager,
   type DefineDocumentOfflineOperations,
   type DefineOfflineOperation,
   getGlobalOfflineEntities,
@@ -81,26 +81,27 @@ test('direct document store runtime offline controls public api', async () => {
   const network = createOfflineNetworkMock(false);
   const sessionKey = 'direct-document-runtime-controls';
   network.install();
-  const offlineSession = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
+    errorNormalizer: normalizeError,
+    offlineSession: { network: network.config },
   });
+  const offlineSession = storeManager.getOfflineSession()!;
 
   const documentStore_ = createDocumentStore<
     DocState,
     RuntimeOnlyDocumentOfflineOperations
   >({
     id: 'direct-document-runtime-controls',
-    getSessionKey: () => sessionKey,
+    storeManager,
     fetchFn: () => Promise.resolve({ value: 1, label: 'server' }),
-    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: offlineSession },
+      offline: {},
     },
   });
 
@@ -372,9 +373,10 @@ test('direct document store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-session';
   network.install();
-  const offlineSession = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: {
+    errorNormalizer: normalizeError,
+    offlineSession: {
       network: network.config,
       mutationQueueing: { network: 'allow', outage: 'allow' },
     },
@@ -389,12 +391,11 @@ test('direct document store offline public api', async () => {
     DirectDocumentOfflineOperations
   >({
     id: 'direct-document-offline',
-    getSessionKey: () => sessionKey,
+    storeManager,
     fetchFn: async () => {
       await delay(FETCH_DELAY_MS);
       return { ...serverMock.current };
     },
-    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
@@ -402,7 +403,6 @@ test('direct document store offline public api', async () => {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           setValue: {
             inputSchema: setValueInputSchema,

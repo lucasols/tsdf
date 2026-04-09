@@ -17,8 +17,14 @@ type User = {
   bio: string;
 };
 
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const userStore = createListQueryStore<User, UserFilter, string, true>({
   //                                                              ^^^^ enables partial resources
+  storeManager,
 
   fetchListFn: (filter, size, { signal, fields }) => {
     // `fields` is string[] | undefined

@@ -5,7 +5,14 @@ TSDF has built-in support for real-time data sources like WebSockets or Server-S
 ## Enabling Real-Time Mode
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const store = createDocumentStore<Data>({
+  id: 'document-data',
+  storeManager,
   usesRealTimeUpdates: true,
   dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {
     if (windowIsNotFocused) return lastFetchDuration * 10;
@@ -103,7 +110,14 @@ Behavior:
 ## Pattern: WebSocket Integration
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const taskStore = createListQueryStore<Task, TaskFilter, string>({
+  id: 'tasks',
+  storeManager,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
   fetchItemFn: (taskId, { signal }) => api.getTask(taskId, signal),
   usesRealTimeUpdates: true,

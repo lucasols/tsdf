@@ -7,7 +7,7 @@ See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./i
 ## Creating a List Query Store
 
 ```ts
-import { createListQueryStore } from 'tsdf';
+import { createListQueryStore, createStoreManager } from 'tsdf';
 
 type Task = {
   id: string;
@@ -16,14 +16,17 @@ type Task = {
   priority: number;
 };
 type TaskFilter = { status?: 'todo' | 'done'; projectId: string };
+const storeManager = createStoreManager({
+  getSessionKey: () =>
+    authState.userId ? `tenant:${authState.tenantId}` : false,
+  errorNormalizer: normalizeError,
+});
 
 const taskStore = createListQueryStore<Task, TaskFilter, string>({
   id: 'list-query-tasks',
-  getSessionKey: () =>
-    authState.userId ? `tenant:${authState.tenantId}` : false,
+  storeManager,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
   fetchItemFn: (taskId, { signal }) => api.getTask(taskId, signal),
-  errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
   backgroundCoalescingWindowMultiplier: 3,
@@ -43,16 +46,15 @@ The type parameters are:
 
 ### Required Options
 
-| Option                                 | Type                                                                | Description                                                                               |
-| -------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `id`                                   | `string`                                                            | Stable logical store id shared across tabs                                                |
-| `getSessionKey`                        | `() => string \| false`                                             | Return session key for [Browser Tabs Sync](./browser-tabs-sync.md), or `false` to disable |
-| `fetchListFn`                          | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                       |
-| `errorNormalizer`                      | `(exception: Error) => StoreError`                                  | Normalizes errors                                                                         |
-| `lowPriorityThrottleMs`                | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
-| `baseCoalescingWindowMs`               | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                                           |
+| Option                                 | Type                                                                | Description                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `id`                                   | `string`                                                            | Stable logical store id shared across tabs                                              |
+| `storeManager`                         | `StoreManager`                                                      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
+| `fetchListFn`                          | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                     |
+| `lowPriorityThrottleMs`                | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `baseCoalescingWindowMs`               | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                                         |
 
 ### Optional Options
 

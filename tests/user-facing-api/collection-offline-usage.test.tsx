@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 import {
   createCollectionStore,
-  createOfflineSession,
+  createStoreManager,
   type DefineCollectionOfflineOperations,
   type DefineOfflineOperation,
   getGlobalOfflineEntities,
@@ -161,9 +161,10 @@ test('direct collection store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-session';
   network.install();
-  const offlineSession = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
+    errorNormalizer: normalizeError,
+    offlineSession: { network: network.config },
   });
 
   let nextTodoId = 3;
@@ -178,7 +179,7 @@ test('direct collection store offline public api', async () => {
     DirectCollectionOfflineOperations
   >({
     id: 'direct-collection-offline',
-    getSessionKey: () => sessionKey,
+    storeManager,
     fetchFn: async (payload: TodoPayload) => {
       await delay(FETCH_DELAY_MS);
       const item = serverTable.get(payload);
@@ -188,7 +189,6 @@ test('direct collection store offline public api', async () => {
       return { ...item };
     },
     getCollectionItemKey: (payload: TodoPayload) => payload,
-    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
@@ -197,7 +197,6 @@ test('direct collection store offline public api', async () => {
       schema: todoSchema,
       payloadSchema: todoPayloadSchema,
       offline: {
-        session: offlineSession,
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
@@ -352,10 +351,9 @@ test('direct collection store offline public api', async () => {
     InvalidCollectionTempSuccessOperations
   >({
     id: 'invalid-temp-success-callback-collection',
-    getSessionKey: () => sessionKey,
+    storeManager,
     fetchFn: () => Promise.resolve({ title: 'Todo', completed: false }),
     getCollectionItemKey: (payload: TodoPayload) => payload,
-    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
@@ -364,7 +362,6 @@ test('direct collection store offline public api', async () => {
       schema: todoSchema,
       payloadSchema: todoPayloadSchema,
       offline: {
-        session: offlineSession,
         operations: {
           // @ts-expect-error - runtime validation should reject tempEntity plus success callback
           createTodo: {

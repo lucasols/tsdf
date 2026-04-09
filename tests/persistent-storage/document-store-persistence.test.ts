@@ -26,6 +26,7 @@ import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
@@ -758,6 +759,10 @@ describe('localStorage: invalid data cleanup', () => {
 describe('standard schema support', () => {
   test('works with Standard Schema v1 via rc_to_standard', () => {
     const standardSchema = rc_to_standard(testDataSchema);
+    const storeManager = createStoreManager({
+      getSessionKey: () => 'sess-std',
+      errorNormalizer: normalizeError,
+    });
 
     const key = documentStorageKey('std-doc', 'sess-std');
     const entry: StorageCacheEntry<{ data: TestData }> = {
@@ -774,9 +779,8 @@ describe('standard schema support', () => {
 
     const store = createDocumentStore<TestData>({
       id: 'std-doc',
-      getSessionKey: () => 'sess-std',
+      storeManager,
       fetchFn: () => Promise.resolve({ name: 'fresh', value: 1 }),
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 200,
       baseCoalescingWindowMs: 10,
       blockWindowClose: null,
