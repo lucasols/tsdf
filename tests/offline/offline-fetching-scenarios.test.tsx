@@ -250,13 +250,13 @@ describe('offline fetching scenarios', () => {
     `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d._i.r.json`))
       .toMatchInlineSnapshot(`
-      e:
-        - a: 1735689600000
-    `);
+        e:
+          - a: 1735689600000
+      `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d.e.p.json`))
       .toMatchInlineSnapshot(`
-      d: { value: 8 }
-    `);
+        d: { value: 8 }
+      `);
 
     const env = createDocumentStoreTestEnv(1, {
       id: storeName,

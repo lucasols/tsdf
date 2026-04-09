@@ -236,6 +236,30 @@ export function useMultipleListQueries<
   const fetchQueriesWithId = shouldDebounceFetchQueries
     ? debouncedFetchQueriesWithId
     : queriesWithId;
+  const getDerivedPreloadPayloads = useCallback(
+    (queryConfigs: QueryWithId[]): QueryPayload[] => {
+      if (!derivedQueries || !isOfflineMode || !preloadDerivedQueryItems) {
+        return [];
+      }
+
+      return queryConfigs.flatMap((queryConfig) => {
+        if (getQueryState(queryConfig.payload) !== undefined) {
+          return [];
+        }
+
+        return readFallbackQueryState?.(queryConfig.key) === undefined
+          ? [queryConfig.payload]
+          : [];
+      });
+    },
+    [
+      derivedQueries,
+      getQueryState,
+      isOfflineMode,
+      preloadDerivedQueryItems,
+      readFallbackQueryState,
+    ],
+  );
 
   const offlineEntitiesByKey = useMemo(
     () => createOfflineEntityLookup(offlineEntities),
@@ -1008,13 +1032,14 @@ export function useMultipleListQueries<
     if (preloadQueries) {
       void preloadQueries(payloads);
     }
-    if (derivedQueries && isOfflineMode && preloadDerivedQueryItems) {
-      void preloadDerivedQueryItems(payloads);
+    const derivedPreloadPayloads =
+      getDerivedPreloadPayloads(fetchQueriesWithId);
+    if (derivedPreloadPayloads.length > 0 && preloadDerivedQueryItems) {
+      void preloadDerivedQueryItems(derivedPreloadPayloads);
     }
   }, [
-    derivedQueries,
     fetchQueriesWithId,
-    isOfflineMode,
+    getDerivedPreloadPayloads,
     preloadDerivedQueryItems,
     preloadQueries,
     preloadQueriesBeforePaint,
@@ -1024,13 +1049,12 @@ export function useMultipleListQueries<
     const effectState = { cancelled: false };
 
     void (async () => {
+      const derivedPreloadPayloads =
+        getDerivedPreloadPayloads(fetchQueriesWithId);
       const shouldPreloadQueries =
         !preloadQueriesBeforePaint &&
         fetchQueriesWithId.length > 0 &&
-        !!(
-          preloadQueries ||
-          (derivedQueries && isOfflineMode && preloadDerivedQueryItems)
-        );
+        !!(preloadQueries || derivedPreloadPayloads.length > 0);
 
       if (shouldPreloadQueries) {
         const payloads = fetchQueriesWithId.map(
@@ -1038,8 +1062,8 @@ export function useMultipleListQueries<
         );
         await Promise.all([
           preloadQueries ? preloadQueries(payloads) : Promise.resolve([]),
-          derivedQueries && isOfflineMode && preloadDerivedQueryItems
-            ? preloadDerivedQueryItems(payloads)
+          derivedPreloadPayloads.length > 0 && preloadDerivedQueryItems
+            ? preloadDerivedQueryItems(derivedPreloadPayloads)
             : Promise.resolve([]),
         ]);
         if (effectState.cancelled) return;
@@ -1201,9 +1225,8 @@ export function useMultipleListQueries<
     };
   }, [
     getQueryState,
+    getDerivedPreloadPayloads,
     ignoreQueriesInRefetchOnMount,
-    derivedQueries,
-    isOfflineMode,
     preloadDerivedQueryItems,
     preloadQueries,
     preloadQueriesBeforePaint,

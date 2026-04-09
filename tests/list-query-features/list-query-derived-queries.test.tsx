@@ -1280,10 +1280,6 @@ test('offline derived query hydration only loads the requested group from persis
          |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #5 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||3
          |    └ (item data, <"users||3>) | 0.10 kb
-    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
-    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
     "
   `);
   expect(hydrationOperations).not.toContain('products');
@@ -1467,9 +1463,7 @@ test('offline derived query hydration with opfs preloads only the requested grou
          |    └ (item data, <"users||2>) | 0.10 kb
     .    | 📖 #6 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~3224064498.p.json
          |    └ (item data, <"users||3>) | 0.10 kb
-    9ms  | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
-         |    └ (items index) | 0.77 kb ⚠️ REPEATED READ <10ms UNCHANGED
-    12ms | end
+    9ms  | end
     "
   `);
   expect(hydrationOperations).not.toContain('products');
