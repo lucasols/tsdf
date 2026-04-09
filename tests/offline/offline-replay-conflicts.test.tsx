@@ -624,6 +624,10 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
     error{Error}:
       message: "$.reason: Type 'undefined' is not assignable to 'string'"
       name: 'OfflineResolutionConflictParseError'
+      code: 'invalid-conflict-payload'
+      operation: 'updateValue'
+      rawValue: { wrong: 'shape' }
+      validationError: ["$.reason: Type 'undefined' is not assignable to 'string'"]
 
     validationIssues: ["$.reason: Type 'undefined' is not assignable to 'string'"]
   `);

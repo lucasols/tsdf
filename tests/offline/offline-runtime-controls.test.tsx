@@ -400,7 +400,15 @@ test('disabling active network mode preserves offline state while future operati
       : disabledNetworkMutationResult.error,
     ok: disabledNetworkMutationResult.ok,
   }).toMatchInlineSnapshot(`
-    error: { code: 500, id: 'fetch-error', message: 'disabled-network-direct-error' }
+    error{Error}:
+      message: 'disabled-network-direct-error'
+      name: 'StoreMutationError'
+      kind: 'error'
+      code: 500
+      id: 'fetch-error'
+      cause:
+        Error#: { message: 'disabled-network-direct-error', name: 'Error' }
+
     ok: '❌'
   `);
   expect(directMutationWhileDisabled).toHaveBeenCalledTimes(1);
@@ -568,7 +576,15 @@ test('disabled network support ignores classified network failures while startin
 
   expect({ error: result.ok ? null : result.error, ok: result.ok })
     .toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'disabled-network-error' }
+      error{Error}:
+        message: 'disabled-network-error'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'disabled-network-error', name: 'Error' }
+
       ok: '❌'
     `);
   expect(directMutation).toHaveBeenCalledTimes(1);
@@ -635,7 +651,15 @@ test('disabled outage support ignores outage classifications while starting from
 
   expect({ error: result.ok ? null : result.error, ok: result.ok })
     .toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'disabled-outage-error' }
+      error{Error}:
+        message: 'disabled-outage-error'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'disabled-outage-error', name: 'Error' }
+
       ok: '❌'
     `);
   expect(directMutation).toHaveBeenCalledTimes(1);
@@ -1266,9 +1290,14 @@ test('runtime mutation queueing overrides are shared across stores in the same s
   expect(disallowedResult.ok).toBe(false);
   expect(disallowedResult.error).toMatchInlineSnapshot(
     `
-      code: 500
-      id: 'fetch-error'
-      message: 'runtime-network-disallowed-direct-error-a'
+      Error#:
+        message: 'runtime-network-disallowed-direct-error-a'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'runtime-network-disallowed-direct-error-a', name: 'Error' }
     `,
   );
   expect(directMutationA).toHaveBeenCalledTimes(1);
@@ -1294,9 +1323,14 @@ test('runtime mutation queueing overrides are shared across stores in the same s
   expect(otherStoreResult.ok).toBe(false);
   expect(otherStoreResult.error).toMatchInlineSnapshot(
     `
-      code: 500
-      id: 'fetch-error'
-      message: 'runtime-network-disallowed-direct-error-b'
+      Error#:
+        message: 'runtime-network-disallowed-direct-error-b'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'runtime-network-disallowed-direct-error-b', name: 'Error' }
     `,
   );
   expect(directMutationB).toHaveBeenCalledTimes(1);

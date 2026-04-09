@@ -331,7 +331,12 @@ test('await fetch', async () => {
 
   expect(errorResult).toMatchInlineSnapshot(`
     data: null
-    error{Error}: { message: 'error', name: 'StoreFetchError' }
+    error{Error}:
+      message: 'error'
+      name: 'StoreFetchError'
+      code: 500
+      id: 'fetch-error'
+      type: 'fetch'
   `);
 
   expect(serverTable.numOfFinishedFetches).toBe(2);

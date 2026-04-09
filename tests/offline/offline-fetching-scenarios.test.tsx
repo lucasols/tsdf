@@ -118,7 +118,12 @@ describe('offline fetching scenarios', () => {
 
     expect(result).toMatchInlineSnapshot(`
       data: null
-      error{Error}: { message: 'Offline', name: 'StoreFetchError' }
+      error{Error}:
+        message: 'Offline'
+        name: 'StoreFetchError'
+        code: 0
+        id: 'offline'
+        type: 'fetch'
     `);
     expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
@@ -370,7 +375,12 @@ describe('offline fetching scenarios', () => {
 
     expect(result).toMatchInlineSnapshot(`
       data: null
-      error{Error}: { message: 'Offline', name: 'StoreFetchError' }
+      error{Error}:
+        message: 'Offline'
+        name: 'StoreFetchError'
+        code: 0
+        id: 'offline'
+        type: 'fetch'
     `);
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
@@ -773,7 +783,13 @@ describe('offline fetching scenarios', () => {
     const result = await resultPromise;
 
     expect(result).toMatchInlineSnapshot(`
-      error{Error}: { message: 'Offline', name: 'StoreFetchError' }
+      error{Error}:
+        message: 'Offline'
+        name: 'StoreFetchError'
+        code: 0
+        id: 'offline'
+        type: 'fetch'
+
       hasMore: '❌'
       items: []
     `);

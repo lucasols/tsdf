@@ -151,10 +151,16 @@ test('collection offline create rejects queueing the same temp id twice', async 
     error: duplicateQueued.ok ? null : duplicateQueued.error,
     ok: duplicateQueued.ok,
   }).toMatchInlineSnapshot(`
-    error:
+    error{Error}:
+      message: 'Offline operation "createUser" cannot queue temp entity "temp:Ada" more than once while it is still pending'
+      name: 'StoreMutationError'
+      kind: 'error'
       code: 500
       id: 'fetch-error'
-      message: 'Offline operation "createUser" cannot queue temp entity "temp:Ada" more than once while it is still pending'
+      cause:
+        Error#:
+          message: 'Offline operation "createUser" cannot queue temp entity "temp:Ada" more than once while it is still pending'
+          name: 'Error'
 
     ok: '❌'
   `);

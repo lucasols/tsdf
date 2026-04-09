@@ -410,10 +410,16 @@ test('direct collection store offline public api', async () => {
     error: invalidTempSuccessResult.ok ? null : invalidTempSuccessResult.error,
     ok: invalidTempSuccessResult.ok,
   }).toMatchInlineSnapshot(`
-    error:
+    error{Error}:
+      message: 'Offline operation "createTodo" cannot configure onSuccessExecute when tempEntity or tempEntities is present'
+      name: 'StoreMutationError'
+      kind: 'error'
       code: 500
       id: 'fetch-error'
-      message: 'Offline operation "createTodo" cannot configure onSuccessExecute when tempEntity or tempEntities is present'
+      cause:
+        Error#:
+          message: 'Offline operation "createTodo" cannot configure onSuccessExecute when tempEntity or tempEntities is present'
+          name: 'Error'
 
     ok: '❌'
   `);

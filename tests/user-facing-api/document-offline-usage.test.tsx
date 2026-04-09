@@ -405,9 +405,16 @@ test('direct document store offline public api', async () => {
 
   assert(!invalidAccumulationResult.ok);
   expect(invalidAccumulationResult.error).toMatchInlineSnapshot(`
-    code: 500
-    id: 'fetch-error'
-    message: 'Invalid offline operation input for "patchDoc"'
+    Error#:
+      message: 'Invalid offline operation input for "patchDoc"'
+      name: 'StoreMutationError'
+      kind: 'error'
+      code: 500
+      id: 'fetch-error'
+      cause:
+        Error#:
+          message: 'Invalid offline operation input for "patchDoc"'
+          name: 'Error'
   `);
 
   await act(async () => {

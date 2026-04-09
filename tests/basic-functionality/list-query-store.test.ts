@@ -768,7 +768,12 @@ describe('fetch item', () => {
 
     expect(pick(errorResult, ['data', 'error'])).toMatchInlineSnapshot(`
       data: null
-      error{Error}: { message: 'error', name: 'StoreFetchError' }
+      error{Error}:
+        message: 'error'
+        name: 'StoreFetchError'
+        code: 500
+        id: 'fetch-error'
+        type: 'fetch'
     `);
 
     expect(env.serverTable.numOfFinishedFetches).toEqual(2);

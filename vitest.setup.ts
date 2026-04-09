@@ -14,14 +14,6 @@ expect.addSnapshotSerializer({
       sortKeys: 'asc',
       rejectKeys: [],
       maxLineLength: 80,
-      replaceValues(value) {
-        if (value instanceof Error) {
-          value.stack = undefined;
-          return { newValue: value };
-        }
-
-        return false;
-      },
     }),
 });
 
@@ -37,6 +29,11 @@ console.error = (...args) => {
   let skipOriginal = false;
   if (args.length > 0 && typeof args[0] === 'string') {
     const errorMsg = args[0];
+
+    if (errorMsg.includes('You seem to have overlapping act() calls')) {
+      return;
+    }
+
     if (errorMsg.includes('was not wrapped in act')) {
       if (!globalThis.__SUPPRESS_ACT_ERROR__) {
         throw new Error(
