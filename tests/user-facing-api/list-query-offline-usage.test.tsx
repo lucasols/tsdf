@@ -377,11 +377,11 @@ test('direct list-query store offline public api', async () => {
     expect(
       pick(listHook.result.current, ['items', 'payload', 'queryKey', 'status']),
     ).toMatchInlineSnapshot(`
-    items: ['Ada', 'Grace']
-    payload: { tableId: 'users' }
-    queryKey: '["users"]'
-    status: 'success'
-  `);
+      items: ['Ada', 'Grace']
+      payload: { tableId: 'users' }
+      queryKey: '["users"]'
+      status: 'success'
+    `);
 
     const invalidTempSuccessServerTable = createServerTableMock<User>({});
     const invalidTempSuccessListQueryStore = createListQueryStore<
