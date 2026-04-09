@@ -1,6 +1,5 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import {
   getGlobalOfflineStatus,
   useGlobalOfflineStatus,

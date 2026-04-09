@@ -8,7 +8,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';

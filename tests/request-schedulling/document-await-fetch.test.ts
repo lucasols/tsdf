@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';

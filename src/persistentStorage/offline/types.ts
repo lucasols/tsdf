@@ -10,7 +10,6 @@ import {
   rc_unknown,
 } from 'runcheck';
 import type { Result as ResultType } from 't-result';
-
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type { PersistentStorageSchema } from '../types';
 import type { SchemaValidationError } from '../validateWithSchema';

@@ -14,7 +14,6 @@ import { klona } from 'klona/json';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Result, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
-
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';

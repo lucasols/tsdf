@@ -7,7 +7,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';

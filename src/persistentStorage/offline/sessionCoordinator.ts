@@ -2,7 +2,6 @@ import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { useCallback, useMemo } from 'react';
 import { rc_object, rc_parse } from 'runcheck';
 import { Store } from 't-state';
-
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,

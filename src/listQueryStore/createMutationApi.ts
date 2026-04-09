@@ -4,7 +4,6 @@ import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
-
 import type { TestOfflineTimelineEvent } from '../internal/testTimelineTypes';
 import {
   type OfflineMutationResult,

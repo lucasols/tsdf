@@ -12,7 +12,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,

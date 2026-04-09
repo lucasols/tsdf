@@ -7,7 +7,6 @@ import {
   rc_unknown,
   type RcType,
 } from 'runcheck';
-
 import type { ValidPayload } from '../utils/storeShared';
 import type {
   ConvertedPersistentStorageDataSchema,

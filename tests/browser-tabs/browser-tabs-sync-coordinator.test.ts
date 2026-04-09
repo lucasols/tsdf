@@ -1,5 +1,4 @@
 import { expect, test } from 'vitest';
-
 import type { BrowserTabsTabStatusMessage } from '../../src/utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinator,

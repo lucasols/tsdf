@@ -1,5 +1,4 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-
 import type { ValidStoreState } from '../utils/storeShared';
 
 export function fallbackItemHasRequestedFields<

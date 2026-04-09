@@ -11,7 +11,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { clearSessionStorage } from '../../src/main';
 import { createAsyncStorageAdapter } from '../../src/persistentStorage/asyncStorageAdapter';
 import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';

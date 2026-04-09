@@ -1,7 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
-
 import type { AsyncStorageNamespaceScope } from './types';
 
 export const OPFS_ROOT_DIR = 'tsdf';

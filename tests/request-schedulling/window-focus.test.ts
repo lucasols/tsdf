@@ -1,6 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';

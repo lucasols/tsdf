@@ -3,7 +3,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import { createOfflineSession } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';

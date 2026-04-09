@@ -2,7 +2,6 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {

@@ -1,6 +1,5 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { rc_number, rc_object, rc_parse, rc_string } from 'runcheck';
-
 import {
   createBrowserTabsPriority,
   type BrowserTabsTabStatusMessage,

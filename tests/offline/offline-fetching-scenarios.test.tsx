@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-
 import { createOfflineSession } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';

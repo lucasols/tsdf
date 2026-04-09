@@ -2,7 +2,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createOfflineSession } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';

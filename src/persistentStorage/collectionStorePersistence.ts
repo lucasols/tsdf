@@ -2,7 +2,6 @@ import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { type __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
-
 import type {
   TSFDCollectionItem,
   TSFDCollectionState,

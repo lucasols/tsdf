@@ -11,7 +11,6 @@ import {
   rc_string,
   rc_tuple,
 } from 'runcheck';
-
 import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';

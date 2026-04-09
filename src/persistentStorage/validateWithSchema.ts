@@ -2,7 +2,6 @@ import { isPromise } from '@ls-stack/utils/typeGuards';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { rc_parse } from 'runcheck';
 import { Result, type Result as ResultType } from 't-result';
-
 import type { PersistentStorageSchema } from './types';
 
 export type SchemaValidationError =

@@ -12,7 +12,6 @@ import {
   rc_unknown,
 } from 'runcheck';
 import { Result } from 't-result';
-
 import type { ValidPayload } from '../../utils/storeShared';
 import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
 import {

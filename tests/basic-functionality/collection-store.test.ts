@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-
 import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';

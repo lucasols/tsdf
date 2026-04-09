@@ -11,7 +11,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';

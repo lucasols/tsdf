@@ -12,7 +12,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { DerivedQueriesConfig } from '../../src/main';
 import { createOfflineSession } from '../../src/main';

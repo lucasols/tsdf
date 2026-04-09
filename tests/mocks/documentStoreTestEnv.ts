@@ -1,6 +1,5 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
-
 import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,

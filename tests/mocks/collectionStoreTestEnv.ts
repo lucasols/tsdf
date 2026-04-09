@@ -1,7 +1,6 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
-
 import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,

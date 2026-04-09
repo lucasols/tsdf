@@ -1,5 +1,4 @@
 import { unknownToError } from 't-result';
-
 import type { StoreError } from '../../utils/storeShared';
 
 export const offlineConnectivityError = {

@@ -1,5 +1,4 @@
 import { expect, test } from 'vitest';
-
 import { setupBrowserTabsTestLifecycle } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from './collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from './documentStoreTestEnv';

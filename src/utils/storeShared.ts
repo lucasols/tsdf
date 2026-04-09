@@ -1,5 +1,4 @@
 import { unknownToError } from 't-result';
-
 import type { FetchType } from '../requestScheduler';
 
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
