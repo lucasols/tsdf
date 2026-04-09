@@ -244,6 +244,42 @@ Notes:
 - Derived results are hook-level computed views and do not materialize `state.queries[queryKey]`
 - Derived results always expose `hasMore: false`
 
+## usePendingOfflineItems
+
+**Store**: [List Query Store](./list-query-store.md)
+
+Returns the current offline-tracked list items for the store without fetching.
+This is useful when you want to show queued offline creates, updates, and
+deletes independently from any mounted `useListQuery(...)`.
+
+```tsx
+const { items, deletedItems } = store.usePendingOfflineItems({
+  selector: (item) => ({ id: item.id, name: item.name }),
+});
+```
+
+Behavior:
+
+- Returns visible pending creates and updates through `items`
+- Returns pending deletes through `deletedItems`
+- Does not fetch, preload queries, or expose loading state
+- Reacts to offline queue changes, replay, and offline overlay updates
+- Can hydrate from persisted offline state on cold startup, including when the
+  app boots offline and no list query has mounted yet
+
+### Options
+
+- `selector` - Maps each visible pending item before returning it
+- `filterPayload` - Filters entries by item payload before they are added to
+  `items` or `deletedItems`
+- `includeResolutionRequired` - Includes entries currently blocked in
+  manual-resolution state. By default those entries are hidden
+
+### Return value
+
+- `items` - Visible pending items (or selected items)
+- `deletedItems` - Payloads for pending deletes
+
 ## useMultipleItems
 
 **Stores**: [Collection Store](./collection-store.md), [List Query Store](./list-query-store.md)

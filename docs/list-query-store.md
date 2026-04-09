@@ -187,6 +187,7 @@ Behavior:
 | Hook                                        | Description                                | Details                                                                 |
 | ------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
 | `useListQuery(payload, options?)`           | Fetch and subscribe to a list query        | See [Hooks - useListQuery](./hooks.md#uselistquery)                     |
+| `usePendingOfflineItems(options?)`          | Read queued offline items without fetching | See [Hooks - usePendingOfflineItems](./hooks.md#usependingofflineitems) |
 | `useMultipleListQueries(queries, options?)` | Fetch multiple list queries                | See [Hooks - useMultipleListQueries](./hooks.md#usemultiplelistqueries) |
 | `useItem(payload, options?)`                | Fetch and subscribe to a single item       | See [Hooks - useItem](./hooks.md#useitem)                               |
 | `useMultipleItems(items, options?)`         | Fetch multiple individual items            | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems)             |
@@ -214,6 +215,21 @@ Behavior:
 | `preloadItemFromStorage` | `(params) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>` | Preload cached list items from async storage (OPFS) |
 | `getItemKey`             | `(params) => string`                                                 | Get composite key for an item payload               |
 | `getItemState`           | `(payload) => ItemState \| null`                                     | Get item data                                       |
+
+### Offline Queue Hook
+
+`usePendingOfflineItems(options?)` is the list-query-store hook for reading the
+store's pending offline item state directly.
+
+Use it when:
+
+- you need queued offline items even if no query is mounted
+- you want pending deletes separately from visible pending items
+- you want offline queue UI without triggering fetches
+
+Unlike `useListQuery(...)`, it does not load query results or expose query
+status. It only derives data from the offline queue, overlays, live store
+state, and persisted item snapshots.
 
 ### Mutation Methods
 

@@ -141,6 +141,11 @@ These are useful in components that need control over when async hydration shoul
 - `preloadItemFromStorage(params): Promise<PersistentStoragePreloadResult<ItemPayload>[]>`
 - `params`: single payload or payload array.
 
+When list-query offline persistence is enabled, `usePendingOfflineItems()` can
+also restore pending offline item state from persistence without mounting
+`useListQuery()`. This is especially useful for offline-first screens that boot
+directly into queued work.
+
 `preload*` returns `preloaded` boolean for each payload.
 
 When the selected backend does not support async preload, preload methods report errors to `onPersistentStorageError` and return `preloaded: false`.
