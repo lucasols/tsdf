@@ -30,11 +30,13 @@ import {
   offlineItemEntityRefSchema,
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
+  type OfflineEntityMutationKind,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
   type OfflineMutationInput,
   type OfflineMutationQueueingCause,
   type OfflineMutationQueueingPolicy,
+  type OfflineOperationKind,
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
   type OfflineResolutionActionForOperation,
@@ -128,6 +130,7 @@ type NamespacePersistenceHandle<T> = Pick<
 const compactOfflineEntitySchema = rc_object({
   k: rc_string,
   g: rc_literals('d', 'i', 'q'),
+  h: rc_literals('c', 'cu', 'u', 'x'),
   p: rc_number.optionalKey(),
   s: rc_literals('p', 's', 'n', 'r'),
   b: rc_array(rc_string).optionalKey(),
@@ -213,6 +216,59 @@ function toCompactOfflineEntitySyncState(
       return 'n';
     case 'resolution-required':
       return 'r';
+  }
+}
+
+function toCompactOfflineEntityMutationKind(
+  kind: OfflineEntityMutationKind,
+): 'c' | 'cu' | 'u' | 'x' {
+  switch (kind) {
+    case 'create':
+      return 'c';
+    case 'createAndUpdate':
+      return 'cu';
+    case 'update':
+      return 'u';
+    case 'delete':
+      return 'x';
+  }
+}
+
+function fromCompactOfflineEntityMutationKind(
+  kind: 'c' | 'cu' | 'u' | 'x',
+): OfflineEntityMutationKind {
+  switch (kind) {
+    case 'c':
+      return 'create';
+    case 'cu':
+      return 'createAndUpdate';
+    case 'u':
+      return 'update';
+    case 'x':
+      return 'delete';
+  }
+}
+
+function reduceOfflineEntityKind(
+  current: OfflineEntityMutationKind | undefined,
+  next: OfflineOperationKind,
+): OfflineEntityMutationKind {
+  switch (next) {
+    case 'delete':
+      return 'delete';
+    case 'create':
+      return 'create';
+    case 'update':
+      switch (current) {
+        case 'create':
+        case 'createAndUpdate':
+          return 'createAndUpdate';
+        case 'update':
+          return 'update';
+        case 'delete':
+        case undefined:
+          return 'update';
+      }
   }
 }
 
@@ -782,6 +838,7 @@ export function createOfflineStoreController<
               return {
                 k: entity.entityKey,
                 g: toCompactOfflineEntityKind(entity.entityKind),
+                h: toCompactOfflineEntityMutationKind(entity.kind),
                 ...(entity.pendingMutations !== 0
                   ? { p: entity.pendingMutations }
                   : {}),
@@ -818,6 +875,7 @@ export function createOfflineStoreController<
                 storeType,
                 entityKey: compactEntity.k,
                 entityKind: fromCompactOfflineEntityKind(compactEntity.g),
+                kind: fromCompactOfflineEntityMutationKind(compactEntity.h),
                 pendingMutations: compactEntity.p ?? 0,
                 syncState,
                 requiresResolution: syncState === 'resolution-required',
@@ -1010,6 +1068,12 @@ export function createOfflineStoreController<
       operation?.tempEntity !== undefined ||
       operation?.tempEntities !== undefined
     );
+  }
+
+  function getOperationLifecycleKind(
+    operationName: string,
+  ): OfflineOperationKind {
+    return operations[operationName]?.kind ?? 'update';
   }
 
   function resolveNormalizedRefs(rawRefs: unknown[]): OfflineEntityRef[] {
@@ -1233,6 +1297,7 @@ export function createOfflineStoreController<
     }
 
     for (const entry of queueEntries.values()) {
+      const operationKind = getOperationLifecycleKind(entry.operation);
       for (const ref of entry.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
         const childResolutionIds =
@@ -1245,6 +1310,7 @@ export function createOfflineStoreController<
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
+          kind: reduceOfflineEntityKind(existing?.kind, operationKind),
           pendingMutations: (existing?.pendingMutations ?? 0) + 1,
           syncState:
             existing?.syncState === 'needs-confirmation'
@@ -1274,6 +1340,7 @@ export function createOfflineStoreController<
     }
 
     for (const resolution of resolutions.values()) {
+      const operationKind = getOperationLifecycleKind(resolution.operation);
       for (const ref of resolution.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
         const childResolutionIds =
@@ -1286,6 +1353,7 @@ export function createOfflineStoreController<
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
+          kind: reduceOfflineEntityKind(existing?.kind, operationKind),
           pendingMutations: existing?.pendingMutations ?? 0,
           syncState: 'resolution-required',
           requiresResolution: true,

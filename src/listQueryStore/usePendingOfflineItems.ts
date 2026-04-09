@@ -69,8 +69,16 @@ export function usePendingOfflineItems<
       return true;
     });
   }, [includeResolutionRequired, offlineEntities]);
-  const eligibleItemKeys = useMemo(() => {
-    return eligibleEntities.map((entity) => entity.entityKey);
+  const { eligibleItemKeys, preloadableItemKeys } = useMemo(() => {
+    const allKeys: string[] = [];
+    const preloadKeys: string[] = [];
+    for (const entity of eligibleEntities) {
+      allKeys.push(entity.entityKey);
+      if (entity.kind !== 'delete') {
+        preloadKeys.push(entity.entityKey);
+      }
+    }
+    return { eligibleItemKeys: allKeys, preloadableItemKeys: preloadKeys };
   }, [eligibleEntities]);
 
   useRegisterActiveKeys(eligibleItemKeys, registerActiveItems, touchItems);
@@ -80,7 +88,7 @@ export function usePendingOfflineItems<
       setPreloadedItemPresenceByKey((current) => {
         const next: Record<string, boolean> = {};
 
-        for (const itemKey of eligibleItemKeys) {
+        for (const itemKey of preloadableItemKeys) {
           const currentPresence = current[itemKey];
           if (currentPresence !== undefined) {
             next[itemKey] = currentPresence;
@@ -100,7 +108,7 @@ export function usePendingOfflineItems<
         return changed ? next : current;
       });
     },
-    [eligibleItemKeys],
+    [preloadableItemKeys],
   );
 
   useIsomorphicLayoutEffect(() => {
@@ -109,23 +117,23 @@ export function usePendingOfflineItems<
     if (
       !preloadItemsBeforePaint ||
       !preloadItems ||
-      eligibleItemKeys.length < 1
+      preloadableItemKeys.length < 1
     ) {
       return () => {
         cancelled = true;
       };
     }
 
-    void preloadItems(eligibleItemKeys).then((results) => {
+    void preloadItems(preloadableItemKeys).then((results) => {
       if (cancelled) return;
-      rememberPreloadResults(eligibleItemKeys, results);
+      rememberPreloadResults(preloadableItemKeys, results);
     });
 
     return () => {
       cancelled = true;
     };
   }, [
-    eligibleItemKeys,
+    preloadableItemKeys,
     preloadItems,
     preloadItemsBeforePaint,
     rememberPreloadResults,
@@ -137,23 +145,23 @@ export function usePendingOfflineItems<
     if (
       preloadItemsBeforePaint ||
       !preloadItems ||
-      eligibleItemKeys.length < 1
+      preloadableItemKeys.length < 1
     ) {
       return () => {
         cancelled = true;
       };
     }
 
-    void preloadItems(eligibleItemKeys).then((results) => {
+    void preloadItems(preloadableItemKeys).then((results) => {
       if (cancelled) return;
-      rememberPreloadResults(eligibleItemKeys, results);
+      rememberPreloadResults(preloadableItemKeys, results);
     });
 
     return () => {
       cancelled = true;
     };
   }, [
-    eligibleItemKeys,
+    preloadableItemKeys,
     preloadItems,
     preloadItemsBeforePaint,
     rememberPreloadResults,
@@ -174,8 +182,9 @@ export function usePendingOfflineItems<
             : undefined;
         const hasStateItem = Object.hasOwn(state.items, itemKey);
         const hasStateItemQuery = Object.hasOwn(state.itemQueries, itemKey);
+        const isDeletedByKind = entity.kind === 'delete';
         const hydratedItem =
-          hasStateItem && hasStateItemQuery
+          isDeletedByKind || (hasStateItem && hasStateItemQuery)
             ? undefined
             : readHydratedItem?.(itemKey);
         const normalizedStringItemKey = itemKey.startsWith('"')
@@ -206,6 +215,7 @@ export function usePendingOfflineItems<
               // payload stores have to fall back to the stable item key here.
               __LEGIT_CAST__<ItemPayload, string>(normalizedStringItemKey));
         const missingPersistedItemSnapshot =
+          !isDeletedByKind &&
           !hasStateItem &&
           !hasStateItemQuery &&
           hydratedItem === undefined &&
@@ -217,6 +227,7 @@ export function usePendingOfflineItems<
         }
 
         const isDeleted =
+          isDeletedByKind ||
           rawOverlay?.item === null ||
           (hasStateItemQuery && state.itemQueries[itemKey] === null) ||
           missingPersistedItemSnapshot;

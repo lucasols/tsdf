@@ -23,6 +23,14 @@ export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
 export type OfflineFailureClassification = 'outage' | 'network' | 'ignore';
 /** Kinds of entities participating in offline conflict/sync tracking. */
 export type OfflineEntityKind = 'document' | 'item' | 'query';
+/** Lifecycle declared per offline operation definition. */
+export type OfflineOperationKind = 'create' | 'update' | 'delete';
+/** Effective lifecycle derived for an offline entity across queued work. */
+export type OfflineEntityMutationKind =
+  | 'create'
+  | 'createAndUpdate'
+  | 'update'
+  | 'delete';
 
 /** Runtime schema for validating serialized offline item entity references. */
 export const offlineItemEntityRefSchema = rc_object({
@@ -306,6 +314,8 @@ export type GlobalOfflineEntity = {
   entityKey: string;
   /** Entity kind used in queue partitioning. */
   entityKind: OfflineEntityKind;
+  /** Effective lifecycle derived from queued operations targeting this entity. */
+  kind: OfflineEntityMutationKind;
   /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
   /** Current sync state for the entity. */
@@ -1056,6 +1066,8 @@ export type OfflineOperationDefinition<
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
+  /** Lifecycle classification for the queued operation. */
+  kind: OfflineOperationKind;
   /**
    * Optional queue pruning for newer operations that supersede older queued work.
    *
@@ -1134,6 +1146,7 @@ type OperationEntityRefsContext<TInput> = {
 /** Non-store-specific offline operation definition alias. */
 export type AnyOfflineOperationDefinition = {
   inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
+  kind: OfflineOperationKind;
   conflictHandling?: {
     schema: PersistentStorageSchema<__LEGIT_ANY__>;
     detectConflict: (ctx: __LEGIT_ANY__) => unknown;
@@ -1292,10 +1305,12 @@ export type DocumentOfflineOperationDefinition<
  * const operations: Operations = {
  *   updateName: {
  *     inputSchema: z.object({ name: z.string() }),
+ *     kind: 'update',
  *     execute: ({ input }) => ({ name: input.name }),
  *   },
  *   archive: {
  *     inputSchema: z.object({ reason: z.string() }),
+ *     kind: 'delete',
  *     conflictHandling: {
  *       schema: z.object({ code: z.string() }),
  *       detectConflict: () => false,
