@@ -1,13 +1,18 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { shouldApplyOfflineOverlay } from '../persistentStorage/offline/entityMetadata';
 import type { InternalGlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
-import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 import type {
   ListQueryOfflineOverlay,
   TSFDListQueryState,
@@ -111,7 +116,7 @@ export function usePendingOfflineItems<
     [preloadableItemKeys],
   );
 
-  useIsomorphicLayoutEffect(() => {
+  useLayoutEffect(() => {
     let cancelled = false;
 
     if (
