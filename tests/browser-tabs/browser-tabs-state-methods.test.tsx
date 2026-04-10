@@ -282,7 +282,6 @@ test('list query state changes emitted during an in-flight mutation sync immedia
         await wait(200);
         return { id: 1, name: 'Alice' };
       },
-      getRelatedQueries: (query) => query.tableId === 'users',
     });
   });
 

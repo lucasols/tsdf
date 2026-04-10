@@ -117,7 +117,7 @@ describe('localStorage: document store persistence', () => {
         storeName: 'doc.with-dot',
         sessionKey: 'sess1',
       }),
-    ).toThrowError(
+    ).toThrow(
       '[tsdf] store id "doc.with-dot" must not contain "." when persistentStorage is enabled.',
     );
   });

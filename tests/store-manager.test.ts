@@ -52,7 +52,7 @@ test('duplicate ids are rejected within the same store manager', () => {
 
   expect(() => {
     createDocumentStoreTestEnv(2, { id: 'shared-doc', storeManager });
-  }).toThrowError(
+  }).toThrow(
     '[tsdf] Duplicate store id "shared-doc" created in the same storeManager. Store ids must be unique per manager so global operations like resetAll(...) stay unambiguous.',
   );
 });

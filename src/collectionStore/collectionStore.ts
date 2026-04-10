@@ -1707,6 +1707,11 @@ export function createCollectionStore<
     | undefined
     | null;
   type CollectionMutationPayloadToUse = ItemPayload | ItemPayload[];
+  type CollectionMutationRollbackSnapshot = {
+    itemKey: string;
+    payload: ItemPayload;
+    item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
+  };
 
   type CollectionMutationArgs<T> = {
     optimisticUpdate?: (
@@ -1794,6 +1799,17 @@ export function createCollectionStore<
     const affectedItems = Array.isArray(payloadToUse)
       ? payloadToUse
       : [payloadToUse];
+    const affectedItemEntries = getItemsKeyArray(payloadToUse);
+
+    if (
+      !import.meta.env.PROD &&
+      optimisticUpdate &&
+      (payload === false || payload == null)
+    ) {
+      throw new Error(
+        'Optimistic collection mutations require a concrete item payload.',
+      );
+    }
 
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(
@@ -1803,6 +1819,14 @@ export function createCollectionStore<
 
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
+    const optimisticRollbackSnapshots: CollectionMutationRollbackSnapshot[] =
+      optimisticUpdate
+        ? affectedItemEntries.map(({ itemKey, payload: itemPayload }) => ({
+            itemKey,
+            payload: itemPayload,
+            item: klona(store.state[itemKey]),
+          }))
+        : [];
 
     const directMutation = () => mutation(payloadToUse);
 
@@ -1845,12 +1869,42 @@ export function createCollectionStore<
       onError: (exception) => {
         const error = toStoreMutationError(exception, errorNormalizer);
 
-        if (!silentErrors && onMutationError) {
-          onMutationError(exception, { silentErrors });
+        if (optimisticRollbackSnapshots.length > 0) {
+          const restoredItemKeys: string[] = [];
+
+          runWithBroadcastConsistency('confirmed', () => {
+            store.produceState(
+              (draft) => {
+                for (const snapshot of optimisticRollbackSnapshots) {
+                  if (snapshot.item === undefined) {
+                    delete draft[snapshot.itemKey];
+                    continue;
+                  }
+
+                  draft[snapshot.itemKey] = snapshot.item;
+                }
+              },
+              { action: 'rollback-mutation-error' },
+            );
+
+            for (const snapshot of optimisticRollbackSnapshots) {
+              if (snapshot.item) {
+                restoredItemKeys.push(snapshot.itemKey);
+              } else {
+                cleanupItemResources(snapshot.itemKey, snapshot.payload);
+              }
+
+              publishItemSnapshot(snapshot.itemKey);
+            }
+          });
+
+          if (restoredItemKeys.length > 0) {
+            touchItemsAndMaybeEnforceLimits(restoredItemKeys);
+          }
         }
 
-        if (affectedItems.length > 0) {
-          invalidateItem(payloadToUse);
+        if (!silentErrors && onMutationError) {
+          onMutationError(exception, { silentErrors });
         }
 
         return error;

@@ -235,7 +235,7 @@ describe('localStorage: list query store persistence', () => {
   test('dev-only check rejects store ids containing dots', () => {
     expect(() =>
       createEnv({ storeName: 'users.with-dot', sessionKey: 'sess1' }),
-    ).toThrowError(
+    ).toThrow(
       '[tsdf] store id "users.with-dot" must not contain "." when persistentStorage is enabled.',
     );
   });

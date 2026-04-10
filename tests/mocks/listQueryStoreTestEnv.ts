@@ -810,8 +810,9 @@ export function createListQueryStoreTestEnv<
               mutationId,
             });
           },
-          revalidateOnSuccess: withRevalidation,
-          getRelatedQueries: (payload) => payload.tableId === tableId,
+          revalidateOnSuccess: withRevalidation
+            ? { queries: (payload) => payload.tableId === tableId }
+            : false,
         });
       });
 

@@ -1060,6 +1060,9 @@ export function createDocumentStore<
 
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
+    const optimisticRollbackSnapshot = optimisticUpdate
+      ? klona(store.state.data)
+      : undefined;
 
     const directMutation = () =>
       mutation({ updateState, currentState: store.state.data });
@@ -1097,11 +1100,18 @@ export function createDocumentStore<
         }
       },
       onError: (exception) => {
+        if (optimisticUpdate) {
+          runWithBroadcastConsistency('confirmed', () => {
+            store.setKey('data', optimisticRollbackSnapshot ?? null, {
+              action: 'rollback-mutation-error',
+            });
+            publishDocumentSnapshot();
+          });
+        }
+
         if (onMutationError) {
           onMutationError(exception, { dontShowToast: dontShowErrorToast });
         }
-
-        invalidateData();
 
         return toStoreMutationError(exception, errorNormalizer);
       },
