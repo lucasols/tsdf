@@ -184,6 +184,55 @@ test('collection rollback removes optimistic creations when the payload is concr
   );
 });
 
+test('collection optimistic delete failures restore the deleted item', async () => {
+  const env = createCollectionStoreTestEnv(
+    { 'item-1': { name: 'Item 1' } },
+    { testScenario: 'loaded' },
+  );
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const result = env.apiStore.useItem('item-1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      name: result.data?.value.name ?? null,
+      status: result.status,
+    });
+  });
+
+  // Optimistically delete the item and fail the request so rollback must
+  // restore the full pre-mutation item snapshot.
+  await act(async () => {
+    await env.apiStore.performMutation('item-1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('item-1');
+      },
+      mutation: () => Promise.reject(new Error('boom')),
+    });
+  });
+
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> name: Item 1 ⋅ status: success
+    -> name: null ⋅ status: deleted
+    -> name: Item 1 ⋅ status: success
+    "
+  `);
+  expect(pick(env.apiStore.getItemState('item-1'), ['data', 'refetchOnMount']))
+    .toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Item 1' }
+
+      refetchOnMount: '❌'
+    `);
+});
+
 test('collection optimistic mutations require a concrete payload in non-production builds', async () => {
   const env = createCollectionStoreTestEnv(
     { 'item-1': { name: 'Item 1' } },
@@ -342,9 +391,7 @@ test('list-query rollback removes temp items added through addItemToQueries', as
         { id: 2, name: 'Grace', type: 'user' },
       ],
     },
-    {
-      testScenario: { loaded: { queries: [usersQuery] } },
-    },
+    { testScenario: { loaded: { queries: [usersQuery] } } },
   );
 
   // Optimistically create a new item and manually insert it into the query
@@ -371,6 +418,82 @@ test('list-query rollback removes temp items added through addItemToQueries', as
   expect(env.apiStore.getItemState(tempItemId)).toMatchInlineSnapshot(
     `undefined`,
   );
+  expect(
+    pick(env.apiStore.getQueryState(usersQuery), ['items', 'refetchOnMount']),
+  ).toMatchInlineSnapshot(`
+    items: ['"users||1', '"users||2']
+    refetchOnMount: '❌'
+  `);
+});
+
+test('list-query optimistic delete failures restore item state and query membership', async () => {
+  const usersQuery = { tableId: 'users' };
+  const env = createListQueryStoreTestEnv<ListQueryUser>(
+    {
+      users: [
+        { id: 1, name: 'Ada', type: 'admin' },
+        { id: 2, name: 'Grace', type: 'user' },
+      ],
+    },
+    { testScenario: { loaded: { queries: [usersQuery] } } },
+  );
+
+  const itemRenders = createLoggerStore();
+  const queryRenders = createLoggerStore({ arrays: 'all' });
+
+  renderHook(() => {
+    const item = env.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    itemRenders.add({ name: item.data?.name ?? null, status: item.status });
+  });
+
+  renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    queryRenders.add({
+      items: query.items.map((item) => item.name),
+      status: query.status,
+    });
+  });
+
+  // Optimistically delete Ada, then fail the mutation. Both the item hook and
+  // the loaded query should snap back to their original state.
+  await act(async () => {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||1');
+      },
+      mutation: () => Promise.reject(new Error('boom')),
+    });
+  });
+
+  await flushAllTimers();
+
+  expect(itemRenders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> name: Ada ⋅ status: success
+    -> name: null ⋅ status: deleted
+    -> name: Ada ⋅ status: success
+    "
+  `);
+  expect(queryRenders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> items: [Ada, Grace] ⋅ status: success
+    -> items: [Grace] ⋅ status: success
+    -> items: [Ada, Grace] ⋅ status: success
+    "
+  `);
+  expect(pick(env.apiStore.getItemState('users||1'), ['name', 'type']))
+    .toMatchInlineSnapshot(`
+      name: 'Ada'
+      type: 'admin'
+    `);
   expect(
     pick(env.apiStore.getQueryState(usersQuery), ['items', 'refetchOnMount']),
   ).toMatchInlineSnapshot(`
