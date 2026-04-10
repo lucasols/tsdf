@@ -2,6 +2,7 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   buildFileName,
@@ -654,9 +655,11 @@ function compactDocumentOpfsIndexSnapshotValue(
     entries,
   );
   const keys = Object.keys(entriesRecord);
-  if (keys.length !== 1 || keys[0] !== 'document') return value;
+  if (keys.length !== 1 || keys[0] !== DOCUMENT_PERSISTED_ENTRY_KEY) {
+    return value;
+  }
 
-  return { ...record, e: [entriesRecord.document] };
+  return { ...record, e: [entriesRecord[DOCUMENT_PERSISTED_ENTRY_KEY]] };
 }
 
 export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {

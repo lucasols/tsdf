@@ -26,6 +26,7 @@ import type {
   TestSessionKeyChangedEvent,
 } from './internal/testTimelineTypes';
 import { IsOffScreenContext } from './isOffScreenContext';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from './persistentStorage/documentEntryKey';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import {
   createOfflineEntityLookup,
@@ -463,7 +464,7 @@ export function createDocumentStore<
                   sessionKey,
                   storeName: id,
                   kind: 'document',
-                  key: 'document',
+                  key: DOCUMENT_PERSISTED_ENTRY_KEY,
                 }),
               ];
             },
