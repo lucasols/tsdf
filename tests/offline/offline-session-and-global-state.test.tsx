@@ -317,8 +317,8 @@ test('logging back into the same session replays durable offline mutations queue
     .     | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
     .     | "value:1 pending:no"  | scheduled-fetch-triggered
     1.82s | "value:1 pending:yes" | ui-changed
-    .     | "value:1 pending:yes" | offline:updateValue replay-started
     .     | "value:1 pending:yes" | 🟠 >fetch-started
+    .     | "value:1 pending:yes" | offline:updateValue replay-started
     2.62s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
     3.02s | "value:1 pending:yes" | server-data-changed (value: 2)
     .     | "value:1 pending:yes" | offline:updateValue replay-finished
