@@ -430,7 +430,7 @@ test('a global offline view sees the same blocked temp item as the store after r
     'queue a temp create and then edit the same temp item while still offline',
   ]);
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',

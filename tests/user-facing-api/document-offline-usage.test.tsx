@@ -805,7 +805,7 @@ test('direct document store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-offline-session'
-    updatedAt: 1735689601050
+    updatedAt: 1735689601040
   `);
 
   documentHook.unmount();

@@ -650,7 +650,7 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
     'go offline and queue a temp create; the optimistic row has data but no loadedFields metadata',
   ]);
   await act(async () => {
-    await firstEnv.apiStore.performMutation(null, {
+    await firstEnv.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         firstEnv.apiStore.addItemToState(
           'temp:Linus offline',

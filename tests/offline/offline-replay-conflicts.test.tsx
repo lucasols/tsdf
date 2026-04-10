@@ -1097,7 +1097,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
     'queue the temp create and a dependent edit while offline',
   ]);
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',

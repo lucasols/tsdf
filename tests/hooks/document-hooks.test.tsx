@@ -440,7 +440,6 @@ test('rollback on error', async () => {
   expect(renders).toMatchInlineSnapshot(`
     - ['world', 'success', null]
     - ['was updated', 'success', null]
-    - ['was updated', 'refetching', null]
     - ['world', 'success', null]
   `);
 });
