@@ -1185,8 +1185,8 @@ test('offline derived query hydration only loads the requested group from persis
   // Snapshot the persisted local-sync state so the restart coverage also
   // protects the stored query membership and item index shape.
   expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-    "tsdf (2.13 kb)
-    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.81 kb)
+    "tsdf (2.08 kb)
+    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.76 kb)
     └ derived-queries-persisted-groups.derived-queries-persisted-groups-store (1.31 kb)
       ├ li (0.73 kb)
       │ ├ "products||1 (0.12 kb)
@@ -1268,15 +1268,15 @@ test('offline derived query hydration only loads the requested group from persis
     0    | 📖 #1 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.lq.{tableId:"users"}
          |    └ (query data, <{tableId:"users"}>) | 0.17 kb
     .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.66 kb
+         |    └ (items index) | 0.61 kb
     .    | 📖 #3 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||1
          |    └ (item data, <"users||1>) | 0.10 kb
     .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
+         |    └ (items index) | 0.61 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #4 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||2
          |    └ (item data, <"users||2>) | 0.10 kb
     .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.66 kb ⚠️ REPEATED READ <10ms UNCHANGED
+         |    └ (items index) | 0.61 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #5 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||3
          |    └ (item data, <"users||3>) | 0.10 kb
     "

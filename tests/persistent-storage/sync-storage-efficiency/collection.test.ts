@@ -80,22 +80,22 @@ describe('sync storage efficiency: collection', () => {
       .    | 🔑[3] #5 ✅ tsdf.sess1.collection-expiration.ci."fresh-user
            |    └ (entry data, <"fresh-user>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
-           |    └ (namespace index) | 0.37 kb
+           |    └ (namespace index) | 0.34 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user
            |    └ (entry data, <"expired-user>)
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2
            |    └ (entry data, <"expired-user-2>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
-           |    └ (namespace index) | 0.37 kb -> 0.12 kb
+           |    └ (namespace index) | 0.34 kb -> 0.12 kb
       "
     `);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.46 kb)
-      ├ _m (0.23 kb)
+      "tsdf (0.45 kb)
+      ├ _m (0.22 kb)
       │ ├ g (0.04 kb)
-      │ └ r.n:sess1.collection-expiration.ci.m (0.19 kb)
+      │ └ r.n:sess1.collection-expiration.ci.m (0.18 kb)
       └ sess1.collection-expiration.ci."fresh-user (0.22 kb)"
     `);
 
@@ -105,9 +105,7 @@ describe('sync storage efficiency: collection', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - a: 1735689600000
-          k: '"fresh-user'
-          p: 'fresh-user'
+        "fresh-user: { a: 1735689600000, p: 'fresh-user' }
     `);
 
     expect(getParsedLocalStorageValue(freshItemKey)).toMatchInlineSnapshot(`
@@ -164,12 +162,12 @@ describe('sync storage efficiency: collection', () => {
       .    | 🔑[3] #5 ✅ tsdf.sess1.collection-startup-max-items.ci."c
            |    └ (entry data, <"c>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
-           |    └ (namespace index) | 0.24 kb
+           |    └ (namespace index) | 0.21 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-startup-max-items.ci."a
            |    └ (entry data, <"a>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
-           |    └ (namespace index) | 0.24 kb -> 0.16 kb
+           |    └ (namespace index) | 0.21 kb -> 0.15 kb
       "
     `);
     expect(
@@ -178,12 +176,8 @@ describe('sync storage efficiency: collection', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - a: 1735689600100
-          k: '"b'
-          p: 'b'
-        - a: 1735689600200
-          k: '"c'
-          p: 'c'
+        "b: { a: 1735689600100, p: 'b' }
+        "c: { a: 1735689600200, p: 'c' }
     `);
   });
 
@@ -229,26 +223,26 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.15 kb
       .    | ✍️ #2 ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c
            |    └ (entry data, <"c>) | ❌ -> 0.10 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.16 kb -> 0.24 kb
+           |    └ (namespace index) | 0.15 kb -> 0.21 kb
            ·
       3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.24 kb
+           |    └ (namespace index) | 0.21 kb
       .    | 🗑️ #3 ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a
            |    └ (entry data, <"a>)
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.24 kb -> 0.16 kb
+           |    └ (namespace index) | 0.21 kb -> 0.15 kb
       "
     `);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.55 kb)
-      ├ _m (0.27 kb)
+      "tsdf (0.54 kb)
+      ├ _m (0.26 kb)
       │ ├ g (0.04 kb)
-      │ └ r.n:sess1.col-max-items-metadata.ci.m (0.23 kb)
+      │ └ r.n:sess1.col-max-items-metadata.ci.m (0.21 kb)
       └ sess1.col-max-items-metadata.ci (0.27 kb)
         ├ "b (0.11 kb)
         └ "c (0.10 kb)"
@@ -298,27 +292,27 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.15 kb
       .    | ✍️ #2 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."c
            |    └ (entry data, <"c>) | ❌ -> 0.10 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.16 kb -> 0.24 kb
+           |    └ (namespace index) | 0.15 kb -> 0.21 kb
            ·
       2.1s | ✍️ #3 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."d
            |    └ (entry data, <"d>) | ❌ -> 0.10 kb
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.24 kb
+           |    └ (namespace index) | 0.21 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.24 kb -> 0.31 kb
+           |    └ (namespace index) | 0.21 kb -> 0.28 kb
            ·
       3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.31 kb
+           |    └ (namespace index) | 0.28 kb
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."b
            |    └ (entry data, <"b>)
       .    | 🗑️ #5 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."a
            |    └ (entry data, <"a>)
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.31 kb -> 0.16 kb
+           |    └ (namespace index) | 0.28 kb -> 0.15 kb
       "
     `);
   });
@@ -359,14 +353,14 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
-           |    └ (namespace index) | 0.09 kb
+           |    └ (namespace index) | 0.08 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-direct-get-item-state.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
-           |    └ (namespace index) | 0.09 kb
+           |    └ (namespace index) | 0.08 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
-           |    └ (namespace index) | 0.09 kb -> 0.09 kb
+           |    └ (namespace index) | 0.08 kb -> 0.08 kb
       "
     `);
   });
@@ -397,15 +391,26 @@ describe('sync storage efficiency: collection', () => {
 
     // Simulate another tab marking the item as offline-protected before the touch runs.
     const currentManifest = getParsedLocalStorageValue<{
-      e: Array<Record<string, unknown>>;
+      e: Record<string, Record<string, unknown>>;
       v: number;
     }>(manifestKey);
+    if (currentManifest === null) {
+      throw new Error(`Missing localStorage manifest for ${manifestKey}`);
+    }
+
+    const entryKey = persistentStore
+      .scope(storeName, sessionKey)
+      .collection.itemKey('1');
+    const currentEntry = currentManifest.e[entryKey];
+    if (currentEntry === undefined) {
+      throw new Error(`Missing collection manifest entry for ${manifestKey}`);
+    }
 
     localStorage.setItem(
       manifestKey,
       JSON.stringify({
         ...currentManifest,
-        e: currentManifest?.e.map((entry) => ({ ...entry, o: true })),
+        e: { ...currentManifest.e, [entryKey]: { ...currentEntry, o: true } },
       }),
     );
 
@@ -422,10 +427,7 @@ describe('sync storage efficiency: collection', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        - a: 1735689604100
-          k: '"1'
-          o: '✅'
-          p: '1'
+        "1: { a: 1735689604100, o: '✅', p: '1' }
     `);
   });
 
@@ -467,11 +469,11 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
-           |    └ (namespace index) | 0.09 kb
+           |    └ (namespace index) | 0.08 kb
       .    | ✍️ #2 ✅->✅ tsdf.sess1.col-mutation-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
-           |    └ (namespace index) | 0.09 kb -> 0.09 kb
+           |    └ (namespace index) | 0.08 kb -> 0.08 kb
       "
     `);
   });
@@ -507,9 +509,9 @@ describe('sync storage efficiency: collection', () => {
       time |
       1s   | 🗑️ #1 ✅->❌ tsdf.sess1.col-delete-flow.ci."1 (entry data, <"1>)
       .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.15 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
-           |    └ (namespace index) | 0.16 kb -> 0.09 kb
+           |    └ (namespace index) | 0.15 kb -> 0.08 kb
       "
     `);
   });
@@ -561,11 +563,11 @@ describe('sync storage efficiency: collection', () => {
       "
       time  |
       1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
-            |    └ (namespace index) | 0.09 kb
+            |    └ (namespace index) | 0.08 kb
       .     | ✍️ #2 ✅->✅ tsdf.sess1.col-invalidation-flow.ci."1
             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
-            |    └ (namespace index) | 0.09 kb -> 0.09 kb
+            |    └ (namespace index) | 0.08 kb -> 0.08 kb
       "
     `);
   });
@@ -601,15 +603,26 @@ describe('sync storage efficiency: collection', () => {
 
     // Simulate another tab marking this cached item as offline-protected in the shared manifest.
     const currentManifest = getParsedLocalStorageValue<{
-      e: Array<Record<string, unknown>>;
+      e: Record<string, Record<string, unknown>>;
       v: number;
     }>(manifestKey);
+    if (currentManifest === null) {
+      throw new Error(`Missing localStorage manifest for ${manifestKey}`);
+    }
+
+    const entryKey = persistentStore
+      .scope(storeName, sessionKey)
+      .collection.itemKey('1');
+    const currentEntry = currentManifest.e[entryKey];
+    if (currentEntry === undefined) {
+      throw new Error(`Missing collection manifest entry for ${manifestKey}`);
+    }
 
     localStorage.setItem(
       manifestKey,
       JSON.stringify({
         ...currentManifest,
-        e: currentManifest?.e.map((entry) => ({ ...entry, o: true })),
+        e: { ...currentManifest.e, [entryKey]: { ...currentEntry, o: true } },
       }),
     );
 
@@ -634,10 +647,7 @@ describe('sync storage efficiency: collection', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        - a: 1735689605910
-          k: '"1'
-          o: '✅'
-          p: '1'
+        "1: { a: 1735689605910, o: '✅', p: '1' }
     `);
   });
 
@@ -705,11 +715,11 @@ describe('sync storage efficiency: collection', () => {
       "
       time  |
       1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
-            |    └ (namespace index) | 0.09 kb
+            |    └ (namespace index) | 0.08 kb
       .     | ✍️ #2 ✅->✅ tsdf.sess1.col-coalesced-invalidations.ci."1
             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
-            |    └ (namespace index) | 0.09 kb -> 0.09 kb
+            |    └ (namespace index) | 0.08 kb -> 0.08 kb
       "
     `);
   });
@@ -743,14 +753,14 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.09 kb
+           |    └ (namespace index) | 0.08 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.09 kb
+           |    └ (namespace index) | 0.08 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.09 kb -> 0.09 kb
+           |    └ (namespace index) | 0.08 kb -> 0.08 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -797,7 +807,7 @@ describe('sync storage efficiency: collection', () => {
       .     | ✍️ #2 ❌->✅ tsdf.sess1.col-remount-no-cache.ci."1
             |    └ (entry data, <"1>) | ❌ -> 0.11 kb
       .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
-            |    └ (namespace index) | ❌ -> 0.09 kb
+            |    └ (namespace index) | ❌ -> 0.08 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -837,22 +847,22 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.15 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-multi-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #3 ✅ tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (entry data, <"2>) | 0.11 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.15 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb -> 0.16 kb
+           |    └ (namespace index) | 0.15 kb -> 0.15 kb
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.15 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb -> 0.16 kb
+           |    └ (namespace index) | 0.15 kb -> 0.15 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
