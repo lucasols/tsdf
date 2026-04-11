@@ -54,6 +54,7 @@ import {
   isOfflineNetworkModeActiveSync,
   getStoragePrefixForStoreNamespace,
   listAllPersistentStorageNamespaceMetadata,
+  listPersistentStorageNamespaceMetadataByFilter,
   mergeLocalStorageOfflineProtection,
   readManifestPayloadMeta,
   readStorageEntryFromLocalStorageSync,
@@ -1363,9 +1364,10 @@ export function setupListQueryPersistence<
               });
           } else {
             const metadataEntries =
-              await listAllPersistentStorageNamespaceMetadata(itemNamespace, {
-                order: 'key',
-              });
+              await listPersistentStorageNamespaceMetadataByFilter(
+                itemNamespace,
+                { equals: groupKey, key: 'g', order: 'key' },
+              );
             itemKeys = metadataEntries.flatMap((entry) => {
               const payload = validateWithSchema(
                 config.itemPayloadSchema,
@@ -1375,9 +1377,7 @@ export function setupListQueryPersistence<
                 return [];
               }
 
-              return readManifestGroupMeta(entry.customMetadata) === groupKey
-                ? [entry.key]
-                : [];
+              return [entry.key];
             });
           }
 

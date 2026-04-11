@@ -287,6 +287,9 @@ export function setupCollectionPersistence<
     const deleteKeys = new Set<string>();
     const nextEntries = new Map(indexState.entries);
     let indexChanged = false;
+    const staticPolicyChanged =
+      JSON.stringify(indexState.staticPolicy) !==
+      JSON.stringify(persistedStaticPolicy);
 
     for (const [key, metadata] of indexState.entries) {
       const payload = validateWithSchema(
@@ -300,7 +303,42 @@ export function setupCollectionPersistence<
       }
     }
 
-    if (!indexChanged) {
+    const effectiveStaticPolicy =
+      persistedStaticPolicy ?? indexState.staticPolicy;
+    if (
+      effectiveStaticPolicy?.maxEntries !== undefined &&
+      nextEntries.size > effectiveStaticPolicy.maxEntries
+    ) {
+      const candidateEntries = [...nextEntries.entries()].map(
+        ([itemKey, metadata]) => ({
+          itemKey,
+          lastAccessAt: metadata.lastAccessAt,
+          pinned: pinnedItemKeys.has(itemKey),
+        }),
+      );
+
+      candidateEntries.sort(
+        createEvictionComparator(
+          [(entry) => entry.pinned],
+          (entry) => entry.lastAccessAt,
+        ),
+      );
+
+      const keptKeys = new Set(
+        candidateEntries
+          .slice(0, effectiveStaticPolicy.maxEntries)
+          .map(({ itemKey }) => itemKey),
+      );
+
+      for (const { itemKey } of candidateEntries) {
+        if (keptKeys.has(itemKey)) continue;
+        deleteKeys.add(getPayloadRecordKey(itemKey));
+        nextEntries.delete(itemKey);
+        indexChanged = true;
+      }
+    }
+
+    if (!indexChanged && !staticPolicyChanged) {
       return { scopePlans: [], storeDeletePlans: [] };
     }
 
@@ -314,7 +352,7 @@ export function setupCollectionPersistence<
           deleteKeys: [...deleteKeys],
           persistEntries: nextEntries.size > 0 ? nextEntries : null,
           persistStaticPolicy:
-            nextEntries.size > 0 ? indexState.staticPolicy : undefined,
+            nextEntries.size > 0 ? persistedStaticPolicy : undefined,
           scope,
         } satisfies AsyncStartupCleanupScopePlan,
       ],

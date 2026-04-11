@@ -1,16 +1,26 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
+import {
+  getNamespaceId as getNamespaceIdInternal,
+  getPayloadRecordKey as getPayloadRecordKeyInternal,
+  parseAsyncStorageRecordKey,
+} from './asyncStorageShared';
 import type { AsyncStorageNamespaceScope } from './types';
 
-export const OPFS_ROOT_DIR = 'tsdf';
+export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
+export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
 
 export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
-  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
+  return getNamespaceIdInternal(scope);
 }
+
+export function getPayloadRecordKey(key: string): string {
+  return getPayloadRecordKeyInternal(key);
+}
+
+export const OPFS_ROOT_DIR = 'tsdf';
 export const JSON_FILE_EXTENSION = '.json';
-export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
-export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
 
 const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
 const HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX = 'h~';
@@ -42,10 +52,6 @@ export function encodeFileNameSegment(value: string): string {
 
 export function joinPath(...segments: string[]): string {
   return segments.filter((segment) => segment.length > 0).join('/');
-}
-
-export function getPayloadRecordKey(key: string): string {
-  return `${PAYLOAD_RECORD_PREFIX}${key}`;
 }
 
 export function getFileNameKindAlias(
@@ -145,14 +151,7 @@ export function parseRecordKey(
 ):
   | { recordKind: 'payload'; userKey: string }
   | { rawKey: string; recordKind: 'raw' } {
-  if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
-    return {
-      recordKind: 'payload',
-      userKey: key.slice(PAYLOAD_RECORD_PREFIX.length),
-    };
-  }
-
-  return { rawKey: key, recordKind: 'raw' };
+  return parseAsyncStorageRecordKey(key);
 }
 
 export function toRecordKey(

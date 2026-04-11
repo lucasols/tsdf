@@ -1,5 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { serializeProtectedRef } from './asyncStorageAdapter';
+import { isObject } from '@ls-stack/utils/typeGuards';
+import { serializeProtectedRef } from './asyncStorageShared';
 import {
   createCompactLocalStorageEntry,
   parseCompactLocalStorageEntry,
@@ -15,6 +16,7 @@ import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegi
 import type { OfflineNetworkModeConfig } from './offline/types';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
+  indexedDbPersistentStorage,
   localPersistentStorage,
   opfsPersistentStorage,
   type LocalStorageMetadataOptions,
@@ -585,6 +587,11 @@ export type PersistentStorageNamespaceHandle<
   listMetadata(args?: {
     order?: AsyncStorageMetadataOrder;
   }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]>;
+  listMetadataByFilter(args: {
+    equals: unknown;
+    key: string;
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]>;
   clear(): Promise<void>;
   dispose(): void;
 };
@@ -597,6 +604,16 @@ export async function listAllPersistentStorageNamespaceMetadata<
   args: { order?: AsyncStorageMetadataOrder } = {},
 ): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
   return namespace.listMetadata(args);
+}
+
+export async function listPersistentStorageNamespaceMetadataByFilter<
+  T,
+  TMetadata extends Record<string, unknown> = Record<string, never>,
+>(
+  namespace: PersistentStorageNamespaceHandle<T, TMetadata>,
+  args: { equals: unknown; key: string; order?: AsyncStorageMetadataOrder },
+): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
+  return namespace.listMetadataByFilter(args);
 }
 
 export function createPersistentStorageNamespaceHandle<
@@ -947,6 +964,78 @@ export function createPersistentStorageNamespaceHandle<
     }
   }
 
+  async function listMetadataByFilter(args: {
+    equals: unknown;
+    key: string;
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
+    try {
+      if (asyncAdapter !== null) {
+        const namespace = getAsyncNamespace();
+        if (!namespace) return [];
+
+        if (typeof namespace.listMetadataByFilter === 'function') {
+          return namespace.listMetadataByFilter({
+            filter: { equals: args.equals, key: args.key },
+            order: args.order,
+          });
+        }
+
+        return (await namespace.listMetadata({ order: args.order })).filter(
+          (entry) => {
+            // WORKAROUND: Async metadata is normalized to a plain record before
+            // reaching this fallback path.
+            const metadata = __LEGIT_CAST__<Record<string, unknown>, unknown>(
+              entry.customMetadata,
+            );
+            return metadata[args.key] === args.equals;
+          },
+        );
+      }
+
+      const prefix = getPrefix();
+      if (prefix === false) return [];
+
+      const order = args.order ?? 'key';
+      return localPersistentStorage
+        .listManifestEntries(prefix)
+        .filter((entry) => {
+          const metadata = isObject(entry.meta) ? entry.meta : null;
+          return metadata?.[args.key] === args.equals;
+        })
+        .sort((left, right) => {
+          if (order === 'key') {
+            return left.entryKey.localeCompare(right.entryKey);
+          }
+
+          const direction = order === 'lru-asc' ? 1 : -1;
+          if (left.lastAccessAt !== right.lastAccessAt) {
+            return direction * (left.lastAccessAt - right.lastAccessAt);
+          }
+
+          return left.entryKey.localeCompare(right.entryKey);
+        })
+        .map((entry) => ({
+          customMetadata: entry.meta
+            ? // WORKAROUND: Sync manifest metadata is stored as a plain record,
+              // and this cast only rebinds the caller's metadata generic.
+              __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
+            : (() => {
+                // WORKAROUND: Empty metadata is represented as a shared empty
+                // record, and this cast only rebinds the caller's metadata generic.
+                return __LEGIT_CAST__<TMetadata, Record<string, never>>({});
+              })(),
+          key: entry.entryKey,
+          lastAccessAt: entry.lastAccessAt,
+          writtenAt: entry.lastAccessAt,
+          version: asyncVersion,
+        }));
+    } catch (error) {
+      onPersistentStorageError?.(error);
+      return [];
+    }
+  }
+
   async function listKeys(): Promise<string[]> {
     if (asyncAdapter !== null) {
       const namespace = getAsyncNamespace();
@@ -995,6 +1084,7 @@ export function createPersistentStorageNamespaceHandle<
     remove,
     listKeys,
     listMetadata,
+    listMetadataByFilter,
     clear,
     dispose,
   };
@@ -1084,7 +1174,7 @@ export function getStoragePrefixForStoreNamespace(
 }
 
 export function createProtectedStorageKey(args: {
-  backend?: 'localStorage' | 'opfs';
+  backend?: 'async' | 'localStorage';
   sessionKey: string;
   storeName: string;
   kind: string;
@@ -1144,6 +1234,7 @@ export async function clearAllSessionStorage(
   await Promise.all([
     clearSessionStorage(sessionKey, 'local-sync'),
     clearSessionStorage(sessionKey, opfsPersistentStorage),
+    clearSessionStorage(sessionKey, indexedDbPersistentStorage),
   ]);
 }
 
@@ -1175,6 +1266,7 @@ export function resetExpirationScanTracking(): void {
   localStorageTouchTimestamps = new Map<string, number>();
   resetManagedLocalStorageState();
   opfsPersistentStorage.resetForTests?.();
+  indexedDbPersistentStorage.resetForTests?.();
 }
 
 export async function readProtectedStorageKeys(

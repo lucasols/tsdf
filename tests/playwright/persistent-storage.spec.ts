@@ -33,11 +33,12 @@ async function waitForDebounce(page: Page): Promise<void> {
 }
 
 type AdapterCase = {
-  adapterKey: 'localStorage' | 'opfs';
-  label: 'localStorage' | 'opfs';
+  adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
+  label: 'indexedDb' | 'localStorage' | 'opfs';
 };
 
 for (const adapterCase of [
+  { adapterKey: 'indexedDb', label: 'indexedDb' },
   { adapterKey: 'localStorage', label: 'localStorage' },
   { adapterKey: 'opfs', label: 'opfs' },
 ] as const satisfies readonly AdapterCase[]) {
