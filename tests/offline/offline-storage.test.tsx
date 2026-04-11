@@ -6,18 +6,18 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   clearSessionStorage,
-  createOfflineSession,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -102,15 +102,16 @@ function createOfflineDocumentEnv({
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario,
     persistentStorage: {
       adapter,
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -155,6 +156,11 @@ function createOfflinePartialListQueryEnv({
   >(offlineStorageUsersTable, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario,
     partialResources: partialResourcesConfig,
     persistentStorage: {
@@ -163,10 +169,6 @@ function createOfflinePartialListQueryEnv({
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           createUser: {
             inputSchema: collectionCreateInputSchema,
@@ -230,6 +232,11 @@ function createOfflinePendingItemsListQueryEnv({
   >(offlineStorageUsersTable, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario,
     persistentStorage: {
       adapter,
@@ -237,10 +244,6 @@ function createOfflinePendingItemsListQueryEnv({
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           patchUserName: {
             inputSchema: userPatchSchema,
@@ -312,15 +315,16 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1000,15 +1004,16 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: opfsPersistentStorage,
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,

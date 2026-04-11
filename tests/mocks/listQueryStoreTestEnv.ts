@@ -21,7 +21,6 @@ import type {
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
-  OfflineSession,
 } from '../../src/persistentStorage/offline/types';
 import type {
   ListQueryPersistentStorageConfig,
@@ -88,26 +87,13 @@ type TestListQueryPersistentStorageConfig<
   TRow extends Row,
   StorageState,
   TOfflineOperations extends TestListQueryOfflineOperationsConfig<TRow>,
-> = Omit<
-  ListQueryPersistentStorageConfig<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload,
-    StorageState,
-    TOfflineOperations
-  >,
-  'offline'
-> & {
-  offline?: NonNullable<
-    ListQueryPersistentStorageConfig<
-      TRow,
-      ListQueryParams,
-      ListQueryItemPayload,
-      StorageState,
-      TOfflineOperations
-    >['offline']
-  > & { session?: OfflineSession };
-};
+> = ListQueryPersistentStorageConfig<
+  TRow,
+  ListQueryParams,
+  ListQueryItemPayload,
+  StorageState,
+  TOfflineOperations
+>;
 
 type ListQuerySnapshotConfig = {
   tables?: string[];
@@ -282,10 +268,12 @@ export function createListQueryStoreTestEnv<
     createStoreManager({
       getSessionKey: getSessionKeyOption,
       errorNormalizer: normalizeError,
-      offlineSession:
-        persistentStorageWithResolvedAdapter?.offline?.session?.getConfig() ??
-        undefined,
     });
+  if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {
+    throw new Error(
+      '[tsdf:test] Offline persistentStorage in test envs must be paired with a storeManager configured with offlineSession',
+    );
+  }
   const getSessionKey = resolvedStoreManager.getSessionKey;
   const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
   const { getMutationEmoji } = createEmojiCyclers();

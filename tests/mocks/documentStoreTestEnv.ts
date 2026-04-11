@@ -4,10 +4,7 @@ import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
-import type {
-  AnyOfflineOperationDefinition,
-  OfflineSession,
-} from '../../src/persistentStorage/offline/types';
+import type { AnyOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
@@ -63,22 +60,11 @@ type TestDocumentPersistentStorageConfig<
   D,
   StorageState,
   TOfflineOperations extends TestDocumentOfflineOperationsConfig<D>,
-> = Omit<
-  DocumentPersistentStorageConfig<
-    { value: D },
-    StorageState,
-    TOfflineOperations
-  >,
-  'offline'
-> & {
-  offline?: NonNullable<
-    DocumentPersistentStorageConfig<
-      { value: D },
-      StorageState,
-      TOfflineOperations
-    >['offline']
-  > & { session?: OfflineSession };
-};
+> = DocumentPersistentStorageConfig<
+  { value: D },
+  StorageState,
+  TOfflineOperations
+>;
 
 export type DocumentStoreTestEnvOptions<
   D,
@@ -174,10 +160,12 @@ export function createDocumentStoreTestEnv<
     createStoreManager({
       getSessionKey: getSessionKeyOption,
       errorNormalizer: normalizeError,
-      offlineSession:
-        persistentStorageWithResolvedAdapter?.offline?.session?.getConfig() ??
-        undefined,
     });
+  if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {
+    throw new Error(
+      '[tsdf:test] Offline persistentStorage in test envs must be paired with a storeManager configured with offlineSession',
+    );
+  }
   const getSessionKey = resolvedStoreManager.getSessionKey;
   const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
 

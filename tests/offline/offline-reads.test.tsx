@@ -4,13 +4,13 @@ import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-import { createOfflineSession } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   flushAllTimers,
   pick,
@@ -77,17 +77,16 @@ test('when an already-loaded document refetches while offline, it keeps the last
   // what happens during an offline refetch, not an initial load.
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => 'offline-read-cache-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'offline-read-cache-session',
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'offline-read-cache-session',
-          config: { network: network.config },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
   });
 
@@ -125,17 +124,16 @@ test('when a document mounts offline with no cached snapshot, it returns the nor
 
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => 'offline-read-empty-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'offline-read-empty-session',
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'idle',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'offline-read-empty-session',
-          config: { network: network.config },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
   });
 
@@ -178,16 +176,15 @@ test('when the app starts offline, startup cleanup keeps an expired document cac
   const env = createDocumentStoreTestEnv(2, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
   });
 
@@ -228,18 +225,17 @@ test('when a loaded collection item refetches while offline, it keeps the last s
     { 'users||1': { name: 'Ada' } },
     {
       getSessionKey: () => 'offline-collection-cache-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-collection-cache-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-collection-cache-session',
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
@@ -288,19 +284,18 @@ test('when a loaded list query refetches while offline, it keeps the last succes
     { users: [{ id: 1, name: 'Ada' }] },
     {
       getSessionKey: () => 'offline-list-query-cache-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-list-query-cache-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-list-query-cache-session',
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
@@ -363,19 +358,18 @@ test('when a loaded list-query item refetches while offline, it keeps the last s
     { users: [{ id: 1, name: 'Ada' }] },
     {
       getSessionKey: () => 'offline-list-item-cache-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-list-item-cache-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-list-item-cache-session',
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
@@ -429,19 +423,18 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
     { users: [{ id: 1, name: 'Ada', age: 30, city: 'London' }] },
     {
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       partialResources: partialUserResourcesConfig,
       persistentStorage: {
         adapter: 'local-sync',
         schema: partialUserRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
@@ -581,18 +574,17 @@ test('when the app starts offline, startup cleanup keeps an expired list-query c
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       persistentStorage: {
         adapter: 'local-sync',
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
@@ -656,18 +648,17 @@ test('when a list query mounts offline with no cached snapshot, it returns the n
     { users: [{ id: 1, name: 'Ada' }] },
     {
       getSessionKey: () => 'offline-list-query-empty-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-list-query-empty-session',
+        offlineSession: { network: network.config },
+      }),
       persistentStorage: {
         adapter: 'local-sync',
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-list-query-empty-session',
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
