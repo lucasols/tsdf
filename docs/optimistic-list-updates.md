@@ -37,10 +37,7 @@ const taskStore = createListQueryStore<Task, TaskFilter, string>({
     {
       // Sort a specific query by priority
       queries: { projectId: 'proj-1', status: 'active' },
-      sort: {
-        sortBy: (item) => item.priority,
-        order: 'desc',
-      },
+      sort: { sortBy: (item) => item.priority, order: 'desc' },
     },
   ],
 });
@@ -137,10 +134,16 @@ They are **not** triggered by:
 ## Example: Task Board
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const taskStore = createListQueryStore<Task, { status: string }, string>({
+  id: 'tasks',
+  storeManager,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
   fetchItemFn: (id, { signal }) => api.getTask(id, signal),
-  errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
   backgroundCoalescingWindowMultiplier: 3,

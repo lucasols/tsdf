@@ -7,7 +7,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { StoreMutationError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';

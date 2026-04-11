@@ -1,5 +1,4 @@
 import type { Store } from 't-state';
-
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
 import type { AnyOfflineOperationDefinition } from './offline/types';

@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   buildFileName,
@@ -151,7 +151,7 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
         storeName: withoutPrefix.slice(lastSeparatorIndex + 1),
         kind: 'document',
       },
-      key: 'document',
+      key: DOCUMENT_PERSISTED_ENTRY_KEY,
     };
   }
 
@@ -1250,7 +1250,7 @@ export function createOpfsPersistentStorageTestStore(
     } satisfies AsyncStorageNamespaceScope;
     const documentStorageKey = getLogicalStorageKey(
       documentNamespace,
-      'document',
+      DOCUMENT_PERSISTED_ENTRY_KEY,
     );
 
     function collectionItemStorageKey(payload: string): string {

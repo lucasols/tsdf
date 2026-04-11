@@ -4,7 +4,6 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useCallback, useMemo } from 'react';
 import { rc_object, rc_parse } from 'runcheck';
 import { Store } from 't-state';
-
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,
@@ -676,7 +675,6 @@ export class SessionOfflineCoordinator {
     if (this.#hydrated) return;
     this.#hydrated = true;
     const hydrationToken = this.#hydrationToken;
-
     let persistedLocalSnapshot: PersistedLocalSessionSnapshot | null = null;
 
     try {
@@ -1881,7 +1879,11 @@ export class SessionOfflineCoordinator {
     );
     void this.#persistSessionSnapshot();
     this.#publishSnapshot();
-    if (this.#uploadsConfig && this.#uploads.size > 0) {
+    if (
+      this.#uploadsConfig &&
+      this.#uploads.size > 0 &&
+      this.#storeContributions.size === this.#registrations.size
+    ) {
       void this.#cleanupUnusedMutationUploads();
     }
   }
@@ -2237,11 +2239,12 @@ export function getOfflineSessionUploadsConfig<TUploadRef extends ValidPayload>(
 export function createOfflineSession<
   TUploadRef extends ValidPayload = ValidPayload,
 >(args: {
-  getSessionKey: () => string | false;
   config: OfflineSessionConfig;
+  getSessionKey?: () => string | false;
   uploads?: OfflineSessionUploadsConfig<TUploadRef>;
 }): OfflineSession<TUploadRef> {
-  const { getSessionKey, config, uploads } = args;
+  const getSessionKey = args.getSessionKey ?? (() => false);
+  const { config, uploads } = args;
   const inactiveScope = `offline-session:${Math.random().toString(36).slice(2)}`;
   const baseRuntimeConfig: OfflineRuntimeConfig = {
     network: { enabled: config.network?.enabled ?? false },

@@ -20,7 +20,7 @@ Exported from `tsdf`:
 | `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                   |
 | `StorageBackend`                                                                                             | `'localStorage' \| 'opfs'`                                  |
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                        |
-| `createOfflineSession({ getSessionKey, config })`                                                            | Creates a shared offline session for multiple stores        |
+| `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores         |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                            |
 | `clearSessionStorage(sessionKey, backend)`                                                                   | Clears all TSDF entries for one session/backend             |
 | `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across all backends |
@@ -51,9 +51,9 @@ Store-specific options:
 | Collection Store | `maxItems`, `pinnedItems`, `ignoreItems`                                                |
 | List Query Store | `maxItems`, `maxQueries`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
 
-> `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store's existing `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
+> `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
-If `persistentStorage.offline` is configured, create one shared offline session with `createOfflineSession(...)` and pass that session to every store that should share connectivity policy and runtime controls. Store-local offline behavior stays in `persistentStorage.offline.operations`.
+If `persistentStorage.offline` is configured, pass one shared offline session config to `createStoreManager(...)` and keep store-local offline behavior in `persistentStorage.offline.operations`. `createStoreManager(...)` owns that session internally and expects config, not an existing `OfflineSession` object.
 
 Each offline operation now requires a `kind`:
 
@@ -87,15 +87,16 @@ Session-level `mutationQueueing` can allow or disallow durable offline mutation 
 
 ```ts
 import { rc_object, rc_string } from 'runcheck';
-import { createDocumentStore, createOfflineSession } from 'tsdf';
+import { createDocumentStore, createStoreManager } from 'tsdf';
 
 type Settings = { id: string; theme: 'light' | 'dark' };
 
 const getSessionKey = () => (userId ? `tenant:${userId}` : false);
 
-const offlineSession = createOfflineSession({
+const storeManager = createStoreManager({
   getSessionKey,
-  config: {
+  errorNormalizer: normalizeError,
+  offlineSession: {
     network: { enabled: true },
     mutationQueueing: { network: 'allow', outage: 'allow' },
   },
@@ -103,9 +104,8 @@ const offlineSession = createOfflineSession({
 
 const settingsStore = createDocumentStore<Settings>({
   id: 'document-settings',
-  getSessionKey,
+  storeManager,
   fetchFn: (signal) => api.getSettings(signal),
-  errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
   backgroundCoalescingWindowMultiplier: 2,
@@ -119,7 +119,7 @@ const settingsStore = createDocumentStore<Settings>({
     onPersistentStorageError: (error) => {
       console.error('Settings persistence failed', error);
     },
-    offline: { session: offlineSession, operations: {} },
+    offline: {},
   },
 });
 ```
@@ -128,6 +128,7 @@ const settingsStore = createDocumentStore<Settings>({
 
 - On successful fetch, stores save to persistence after debounce (approximately 1s).
 - On startup/reload, stores attempt restore and set `refetchOnMount: 'lowPriority'` so stale data is revalidated.
+- When a store instance is permanently discarded, call `store.dispose()` to release listeners, browser-tab coordination, and store-manager registration.
 - Invalid or incompatible cache entries are removed automatically.
 - Expired entries are removed by a periodic scan:
   - `localStorage`: ~1 week old entries

@@ -3,7 +3,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import {
   createOfflineSession,
   getGlobalOfflineEntities,
@@ -431,7 +430,7 @@ test('a global offline view sees the same blocked temp item as the store after r
     'queue a temp create and then edit the same temp item while still offline',
   ]);
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',

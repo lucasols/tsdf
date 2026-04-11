@@ -2,7 +2,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import type { ListQueryOfflineOperationDefinition } from '../../src/main';
 import { createOfflineSession } from '../../src/main';
 import {
@@ -241,7 +240,7 @@ test('nested descendants cascade into blocked resolutions and discard together',
   // Queue the root temp create while offline so the replay chain starts from
   // a realistic pending parent entity.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Parent offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Parent offline',
@@ -260,7 +259,7 @@ test('nested descendants cascade into blocked resolutions and discard together',
 
   // Queue the dependent child temp create using the parent's temp id.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Child offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Child offline',
@@ -558,7 +557,7 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
   // Queue the parent temp create while offline so it becomes the root replay
   // dependency when the app reconnects.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Parent offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Parent offline',
@@ -577,7 +576,7 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
 
   // Queue the child temp create against the parent temp id.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Child offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Child offline',
@@ -838,7 +837,7 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
   // Queue the temp create while offline so later retries must remap the temp
   // id before replaying the dependent patch.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',
@@ -1082,7 +1081,7 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
 
   // Queue the temp create that the child resolution will depend on.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',
@@ -1372,7 +1371,7 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
 
   // Queue a failing temp create so the session has one real dependency root.
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',

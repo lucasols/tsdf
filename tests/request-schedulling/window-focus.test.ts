@@ -1,6 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -737,6 +736,48 @@ test('document store: reset() cleans up pending onTransportReconnect listener an
 
   // The leading reconnect may already have started, but reset must prevent any
   // additional trailing/background reconnect fetches.
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+});
+
+test('document store: dispose() cleans up focus listeners and reconnect timers', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    revalidateOnWindowFocus: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    transportReconnectCooldownMs: TRANSPORT_RECONNECT_COOLDOWN_MS,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
+  });
+
+  await advanceTime(100);
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(20);
+  await tabs.blur();
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  act(() => {
+    env.apiStore.dispose();
+  });
+
+  await advanceTime(TRANSPORT_RECONNECT_COOLDOWN_MS);
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 });
 

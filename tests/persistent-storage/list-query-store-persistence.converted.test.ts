@@ -11,7 +11,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import type {
   ListQueryPersistentStorageConfig,

@@ -4,7 +4,6 @@ import {
   type __LEGIT_ANY__,
 } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
-
 import type {
   TestOfflineTimelineEvent,
   TestSessionKeyChangedEvent,
@@ -22,6 +21,7 @@ import type {
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
+  OfflineSession,
 } from '../../src/persistentStorage/offline/types';
 import type {
   ListQueryPersistentStorageConfig,
@@ -32,6 +32,7 @@ import type {
   RequestSchedulerEventData,
   RequestSchedulerEvents,
 } from '../../src/requestScheduler';
+import { createStoreManager, type StoreManager } from '../../src/storeManager';
 import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
@@ -82,6 +83,31 @@ type TestListQueryOfflineOperationsConfig<TRow extends Row> =
   TestListQueryOfflineOperationsRegistry<TRow> | null;
 
 export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
+
+type TestListQueryPersistentStorageConfig<
+  TRow extends Row,
+  StorageState,
+  TOfflineOperations extends TestListQueryOfflineOperationsConfig<TRow>,
+> = Omit<
+  ListQueryPersistentStorageConfig<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload,
+    StorageState,
+    TOfflineOperations
+  >,
+  'offline'
+> & {
+  offline?: NonNullable<
+    ListQueryPersistentStorageConfig<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      StorageState,
+      TOfflineOperations
+    >['offline']
+  > & { session?: OfflineSession };
+};
 
 type ListQuerySnapshotConfig = {
   tables?: string[];
@@ -138,7 +164,8 @@ export function createListQueryStoreTestEnv<
   serverInitialData: Tables<TRow>,
   {
     id = getNextStoreId('list-query'),
-    getSessionKey = () => 'test-session',
+    getSessionKey: getSessionKeyOption = () => 'test-session',
+    storeManager,
     sharedServerTableState,
     browserTabsTransportFactory,
     testBrowserTabId,
@@ -220,15 +247,14 @@ export function createListQueryStoreTestEnv<
     >;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
-    persistentStorage?: ListQueryPersistentStorageConfig<
+    persistentStorage?: TestListQueryPersistentStorageConfig<
       TRow,
-      ListQueryParams,
-      ListQueryItemPayload,
       StorageState,
       TOfflineOperations
     >;
     storageAdapter?: StorageAdapter;
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
+    storeManager?: StoreManager;
   } = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
@@ -247,6 +273,21 @@ export function createListQueryStoreTestEnv<
     getRelativeTime,
     clearTimeline: clearActionTimeline,
   } = createActionTracker();
+  const persistentStorageWithResolvedAdapter =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
+  const resolvedStoreManager =
+    storeManager ??
+    createStoreManager({
+      getSessionKey: getSessionKeyOption,
+      errorNormalizer: normalizeError,
+      offlineSession:
+        persistentStorageWithResolvedAdapter?.offline?.session?.getConfig() ??
+        undefined,
+    });
+  const getSessionKey = resolvedStoreManager.getSessionKey;
+  const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
   const { getMutationEmoji } = createEmojiCyclers();
   const offlineTimelineLogger = createOfflineTimelineTestLogger({
     addAction,
@@ -307,10 +348,26 @@ export function createListQueryStoreTestEnv<
   };
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
-  const resolvedPersistentStorage =
-    persistentStorage && storageAdapter
-      ? { ...persistentStorage, adapter: storageAdapter }
-      : persistentStorage;
+  const resolvedPersistentStorage = persistentStorageWithResolvedAdapter
+    ? __LEGIT_CAST__<
+        ListQueryPersistentStorageConfig<
+          TRow,
+          ListQueryParams,
+          ListQueryItemPayload,
+          StorageState,
+          TOfflineOperations
+        >,
+        unknown
+      >({
+        ...persistentStorageWithResolvedAdapter,
+        offline: persistentStorageWithResolvedAdapter.offline
+          ? {
+              operations:
+                persistentStorageWithResolvedAdapter.offline.operations,
+            }
+          : undefined,
+      })
+    : persistentStorageWithResolvedAdapter;
 
   async function fetchFromServer(
     { tableId, filters }: ListQueryParams,
@@ -341,8 +398,7 @@ export function createListQueryStoreTestEnv<
 
   const baseOptions = {
     id,
-    getSessionKey,
-    errorNormalizer: normalizeError,
+    storeManager: resolvedStoreManager,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
@@ -414,7 +470,7 @@ export function createListQueryStoreTestEnv<
                   operation,
                 })),
             adapter: resolvedPersistentStorage.adapter,
-            config: resolvedPersistentStorage.offline.session.getConfig(),
+            config: resolvedOfflineSession!.getConfig(),
           });
         }
       },
@@ -531,61 +587,97 @@ export function createListQueryStoreTestEnv<
     unknown
   >(listQueryStore.scheduleItemFetch);
 
-  if (usesRealTimeUpdates) {
-    serverTable.wsEvents.on('data_changed', ({ payload }) => {
-      addAction('received-ws-data-change-event', { itemId: payload.itemId });
+  const disposeTestEnvResources = (() => {
+    const cleanupCallbacks: Array<() => void> = [
+      unregisterMockStoreInstance,
+      () => {
+        offlineTimelineLogger.dispose();
+      },
+    ];
 
-      const [tableId] = payload.itemId.split('||');
+    if (usesRealTimeUpdates) {
+      cleanupCallbacks.push(
+        serverTable.wsEvents.on('data_changed', ({ payload }) => {
+          addAction('received-ws-data-change-event', {
+            itemId: payload.itemId,
+          });
 
-      listQueryStore.invalidateQueryAndItems({
-        queryPayload: (qp) => qp.tableId === tableId,
-        itemPayload: payload.itemId,
-        type: 'realtimeUpdate',
+          const [tableId] = payload.itemId.split('||');
+
+          listQueryStore.invalidateQueryAndItems({
+            queryPayload: (qp) => qp.tableId === tableId,
+            itemPayload: payload.itemId,
+            type: 'realtimeUpdate',
+          });
+        }),
+      );
+
+      cleanupCallbacks.push(
+        serverTable.wsEvents.on('item_added', ({ payload }) => {
+          addAction('received-ws-item-added-event', { itemId: payload.itemId });
+
+          const [tableId] = payload.itemId.split('||');
+
+          listQueryStore.invalidateQueryAndItems({
+            queryPayload: (qp) => qp.tableId === tableId,
+            itemPayload: false,
+            type: 'realtimeUpdate',
+          });
+        }),
+      );
+
+      cleanupCallbacks.push(
+        serverTable.wsEvents.on('item_deleted', ({ payload }) => {
+          addAction('received-ws-item-deleted-event', {
+            itemId: payload.itemId,
+          });
+
+          const [tableId] = payload.itemId.split('||');
+
+          listQueryStore.invalidateQueryAndItems({
+            queryPayload: (qp) => qp.tableId === tableId,
+            itemPayload: payload.itemId,
+            type: 'realtimeUpdate',
+          });
+        }),
+      );
+
+      cleanupCallbacks.push(
+        serverTable.wsEvents.on('list_changed', () => {
+          addAction('received-ws-list-change-event');
+        }),
+      );
+    }
+
+    if (resolvedPersistentStorage?.offline) {
+      offlineTimelineLogger.attachResolutionObserver({
+        getOfflineResolutions: () =>
+          listQueryStore
+            .getOfflineResolutions()
+            .map(({ id: resolutionId, operation }) => ({
+              id: resolutionId,
+              operation,
+            })),
+        adapter: resolvedPersistentStorage.adapter,
+        config: resolvedOfflineSession!.getConfig(),
       });
-    });
+    }
 
-    serverTable.wsEvents.on('item_added', ({ payload }) => {
-      addAction('received-ws-item-added-event', { itemId: payload.itemId });
+    let isDisposed = false;
+    return () => {
+      if (isDisposed) return;
+      isDisposed = true;
 
-      const [tableId] = payload.itemId.split('||');
-
-      listQueryStore.invalidateQueryAndItems({
-        queryPayload: (qp) => qp.tableId === tableId,
-        itemPayload: false,
-        type: 'realtimeUpdate',
-      });
-    });
-
-    serverTable.wsEvents.on('item_deleted', ({ payload }) => {
-      addAction('received-ws-item-deleted-event', { itemId: payload.itemId });
-
-      const [tableId] = payload.itemId.split('||');
-
-      listQueryStore.invalidateQueryAndItems({
-        queryPayload: (qp) => qp.tableId === tableId,
-        itemPayload: payload.itemId,
-        type: 'realtimeUpdate',
-      });
-    });
-
-    serverTable.wsEvents.on('list_changed', () => {
-      addAction('received-ws-list-change-event');
-    });
-  }
-
-  if (resolvedPersistentStorage?.offline) {
-    offlineTimelineLogger.attachResolutionObserver({
-      getOfflineResolutions: () =>
-        listQueryStore
-          .getOfflineResolutions()
-          .map(({ id: resolutionId, operation }) => ({
-            id: resolutionId,
-            operation,
-          })),
-      adapter: resolvedPersistentStorage.adapter,
-      config: resolvedPersistentStorage.offline.session.getConfig(),
-    });
-  }
+      for (const cleanup of cleanupCallbacks) {
+        cleanup();
+      }
+    };
+  })();
+  const disposeListQueryStore = listQueryStore.dispose.bind(listQueryStore);
+  listQueryStore.dispose = () => {
+    disposeTestEnvResources();
+    disposeListQueryStore();
+  };
 
   // Hide wsEvents from the public type to prevent direct usage in tests,
   // while keeping the runtime object intact (preserves getters).
@@ -718,8 +810,9 @@ export function createListQueryStoreTestEnv<
               mutationId,
             });
           },
-          revalidateOnSuccess: withRevalidation,
-          getRelatedQueries: (payload) => payload.tableId === tableId,
+          revalidateOnSuccess: withRevalidation
+            ? { queries: (payload) => payload.tableId === tableId }
+            : false,
         });
       });
 

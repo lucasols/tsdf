@@ -10,7 +10,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type { StorageCacheEntry } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';

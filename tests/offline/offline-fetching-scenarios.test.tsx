@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-
 import { createOfflineSession } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -247,10 +246,10 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this cold-boot hydration test also
     // protects the persisted document shape it depends on.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.33 kb)
-      └ offline-fetching-document-async-storage-only (0.32 kb)
-        └ offline-fetching-document-async-storage-only (0.23 kb)
-          ├ d._i.r.json (0.10 kb)
+      "tsdf (0.31 kb)
+      └ offline-fetching-document-async-storage-only (0.31 kb)
+        └ offline-fetching-document-async-storage-only (0.22 kb)
+          ├ d._i.r.json (0.08 kb)
           └ d.e.p.json (0.05 kb)"
     `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d._i.r.json`))

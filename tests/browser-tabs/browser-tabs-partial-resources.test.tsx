@@ -1,6 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-
 import {
   createInspectableInMemoryBrowserTabsTransportFactory,
   getNextStoreId,

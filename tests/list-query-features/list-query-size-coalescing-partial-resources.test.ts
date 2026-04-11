@@ -8,7 +8,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   createListQueryStoreTestEnv,
@@ -189,9 +188,7 @@ describe('query coalescing with partial resources', () => {
 
     expect(() =>
       apiStore.scheduleListQueryFetch('highPriority', { tableId: 'table1' }, 4),
-    ).toThrowError(
-      'fields option is required when partialResources is enabled',
-    );
+    ).toThrow('fields option is required when partialResources is enabled');
   });
 });
 

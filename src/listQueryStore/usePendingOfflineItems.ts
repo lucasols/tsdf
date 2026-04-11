@@ -8,7 +8,6 @@ import {
   useState,
 } from 'react';
 import { Store } from 't-state';
-
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { shouldApplyOfflineOverlay } from '../persistentStorage/offline/entityMetadata';
 import type { InternalGlobalOfflineEntity } from '../persistentStorage/offline/types';

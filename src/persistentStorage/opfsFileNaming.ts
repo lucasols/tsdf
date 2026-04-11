@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
-
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import type { AsyncStorageNamespaceScope } from './types';
 
 export const OPFS_ROOT_DIR = 'tsdf';
@@ -123,7 +123,7 @@ export function getEntryToken(
   scope: AsyncStorageNamespaceScope,
   userKey: string,
 ): string {
-  if (scope.kind === 'document' && userKey === 'document') {
+  if (scope.kind === 'document' && userKey === DOCUMENT_PERSISTED_ENTRY_KEY) {
     return OPFS_SINGLETON_ENTRY_TOKEN;
   }
 
@@ -135,7 +135,7 @@ export function parseEntryToken(
   token: string,
 ): string {
   if (scopeKind === 'document' && token === OPFS_SINGLETON_ENTRY_TOKEN) {
-    return 'document';
+    return DOCUMENT_PERSISTED_ENTRY_KEY;
   }
 
   return decodePathSegment(token);

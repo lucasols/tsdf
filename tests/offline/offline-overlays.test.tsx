@@ -2,7 +2,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-
 import type {
   CollectionOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
@@ -1057,7 +1056,7 @@ describe('list-query overlays', () => {
       'add a temp row optimistically to the end of the list',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',
@@ -1194,7 +1193,7 @@ describe('list-query overlays', () => {
       'add a temp row that will fail during replay',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus blocked', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus blocked',

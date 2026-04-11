@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createInspectableInMemoryBrowserTabsTransportFactory } from '../mocks/browserTabsTestUtils';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';

@@ -1,6 +1,5 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
-
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   DEFAULT_FETCH_DURATION_MS,

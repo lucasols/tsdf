@@ -1,6 +1,5 @@
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
-  rc_array,
   rc_number,
   rc_object,
   rc_parse,
@@ -8,7 +7,6 @@ import {
   rc_unknown,
   type RcType,
 } from 'runcheck';
-
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from './asyncStorageAdapter';
 import {
   type CompactListQueryLocalStorageEntry,
@@ -17,6 +15,7 @@ import {
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
 import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import { isOfflineModeStatusValue } from './offline/types';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
@@ -91,9 +90,7 @@ export function setManagedLocalStorageRuntimeConfigForTests(
   };
 }
 
-const managedLocalStorageManifestSchema = rc_object({
-  e: rc_array(rc_unknown),
-});
+const managedLocalStorageManifestSchema = rc_object({ e: rc_unknown });
 
 const managedLocalStorageGlobalMaintenanceSchema = rc_object({
   lca: rc_number.orNull(),
@@ -302,7 +299,7 @@ function readStoredManifestEntryMeta(entry: Record<string, unknown>): unknown {
     return entry.m;
   }
 
-  const { a: _lastAccessAt, k: _entryKey, ...meta } = entry;
+  const { a: _lastAccessAt, ...meta } = entry;
   return Object.keys(meta).length === 0 ? undefined : meta;
 }
 
@@ -317,16 +314,7 @@ function serializeStoredManifestEntry(
 ): Record<string, unknown> {
   const serializedEntry: Record<string, unknown> = { a: entry.lastAccessAt };
 
-  if (entry.entryKey !== undefined) {
-    serializedEntry.k = entry.entryKey;
-  }
-
-  if (
-    isObject(entry.meta) &&
-    !('a' in entry.meta) &&
-    !('k' in entry.meta) &&
-    !('m' in entry.meta)
-  ) {
+  if (isObject(entry.meta) && !('a' in entry.meta) && !('m' in entry.meta)) {
     return { ...serializedEntry, ...entry.meta };
   }
 
@@ -338,7 +326,7 @@ function serializeStoredManifestEntry(
 }
 
 type ManagedLocalStorageManifest = {
-  entries: StoredManagedLocalStorageManifestEntry[];
+  entries: Map<string | undefined, StoredManagedLocalStorageManifestEntry>;
 };
 
 function readParsedManifest(
@@ -352,23 +340,32 @@ function readParsedManifest(
   );
   if (!parsedManifest) return null;
 
-  const entries: StoredManagedLocalStorageManifestEntry[] = [];
+  const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
+  const rawEntries = parsedManifest.e;
+  if (!manifestLocation || !isObject(rawEntries)) {
+    return null;
+  }
 
-  for (const rawEntry of parsedManifest.e) {
+  const entries = new Map<
+    string | undefined,
+    StoredManagedLocalStorageManifestEntry
+  >();
+
+  for (const [storedEntryKey, rawEntry] of Object.entries(rawEntries)) {
     if (!isObject(rawEntry) || typeof rawEntry.a !== 'number') {
       return null;
     }
 
-    if (
-      'k' in rawEntry &&
-      rawEntry.k !== undefined &&
-      typeof rawEntry.k !== 'string'
-    ) {
-      return null;
-    }
+    const entryKey =
+      manifestLocation.kind === 'single'
+        ? storedEntryKey === DOCUMENT_PERSISTED_ENTRY_KEY
+          ? undefined
+          : null
+        : storedEntryKey;
+    if (entryKey === null) return null;
 
-    entries.push({
-      entryKey: typeof rawEntry.k === 'string' ? rawEntry.k : undefined,
+    entries.set(entryKey, {
+      entryKey,
       lastAccessAt: rawEntry.a,
       meta: readStoredManifestEntryMeta(rawEntry),
     });
@@ -381,7 +378,7 @@ function readManifest(
   manifestKey: string,
   io: ManagedLocalStorageIo,
 ): ManagedLocalStorageManifest {
-  return readParsedManifest(manifestKey, io) ?? { entries: [] };
+  return readParsedManifest(manifestKey, io) ?? { entries: new Map() };
 }
 
 function writeManifest(
@@ -389,16 +386,37 @@ function writeManifest(
   manifest: ManagedLocalStorageManifest,
   io: ManagedLocalStorageIo,
 ): void {
-  if (manifest.entries.length === 0) {
+  if (manifest.entries.size === 0) {
     removeManifestJson(manifestKey, io);
     return;
   }
 
-  writeManifestJson(
-    manifestKey,
-    { e: manifest.entries.map(serializeStoredManifestEntry) },
-    io,
+  const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
+  if (!manifestLocation) {
+    removeManifestJson(manifestKey, io);
+    return;
+  }
+
+  const serializedEntries = Object.fromEntries(
+    [...manifest.entries.values()].map((entry) => {
+      const storedEntryKey =
+        manifestLocation.kind === 'single'
+          ? entry.entryKey === undefined
+            ? DOCUMENT_PERSISTED_ENTRY_KEY
+            : null
+          : entry.entryKey;
+
+      if (storedEntryKey === null) {
+        throw new Error(
+          `[TSDF] Invalid sync manifest entry key for "${manifestKey}".`,
+        );
+      }
+
+      return [storedEntryKey, serializeStoredManifestEntry(entry)];
+    }),
   );
+
+  writeManifestJson(manifestKey, { e: serializedEntries }, io);
 }
 
 function getPayloadKeyForManifestEntry(
@@ -439,10 +457,7 @@ function readSingleManifestEntryByPayload(
   io: ManagedLocalStorageIo,
 ): { entry: ManagedLocalStorageManifestEntry; manifestKey: string } | null {
   const manifestKey = getManagedLocalStorageManifestKeyForSingle(payloadKey);
-  const storedEntry =
-    readManifest(manifestKey, io).entries.find(
-      (candidate) => candidate.entryKey === undefined,
-    ) ?? null;
+  const storedEntry = readManifest(manifestKey, io).entries.get(undefined);
   if (!storedEntry) return null;
 
   const entry = toManagedLocalStorageManifestEntry(
@@ -471,10 +486,7 @@ function readNamespaceManifestEntryByPayload(
   if (entryKey === null) return null;
 
   const manifestKey = getManagedLocalStorageManifestKeyForPrefix(storagePrefix);
-  const storedEntry =
-    readManifest(manifestKey, io).entries.find(
-      (candidate) => candidate.entryKey === entryKey,
-    ) ?? null;
+  const storedEntry = readManifest(manifestKey, io).entries.get(entryKey);
   if (!storedEntry) return null;
 
   const entry = toManagedLocalStorageManifestEntry(
@@ -496,7 +508,7 @@ export function listManagedLocalStorageKeysSync(
   );
   if (!manifest) return null;
 
-  return manifest.entries.flatMap((entry) =>
+  return [...manifest.entries.values()].flatMap((entry) =>
     entry.entryKey === undefined ? [] : [`${prefix}${entry.entryKey}`],
   );
 }
@@ -508,10 +520,12 @@ export function readManagedLocalStorageManifestEntriesByPrefix(
   prefix: string,
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
 ): ManagedLocalStorageNamespaceManifestEntry[] {
-  return readManifest(
-    getManagedLocalStorageManifestKeyForPrefix(prefix),
-    io,
-  ).entries.flatMap((entry) => {
+  return [
+    ...readManifest(
+      getManagedLocalStorageManifestKeyForPrefix(prefix),
+      io,
+    ).entries.values(),
+  ].flatMap((entry) => {
     if (entry.entryKey === undefined) return [];
 
     return [
@@ -592,7 +606,7 @@ export function readManagedLocalStorageProtectedKeys(
     const manifest = readParsedManifest(manifestKey, io);
     if (!manifestLocation || !manifest) continue;
 
-    for (const entry of manifest.entries) {
+    for (const entry of manifest.entries.values()) {
       if (!isManagedLocalStorageEntryOfflineProtected(entry.meta)) continue;
 
       const payloadKey = getPayloadKeyForManifestEntry(
@@ -640,29 +654,25 @@ export function syncManagedLocalStorageSessionProtection(
     if (!manifestLocation || !manifest) continue;
 
     let manifestChanged = false;
-    const nextEntries: StoredManagedLocalStorageManifestEntry[] = [];
+    const nextEntries = new Map(manifest.entries);
 
-    for (const entry of manifest.entries) {
+    for (const entry of manifest.entries.values()) {
       const payloadKey = getPayloadKeyForManifestEntry(
         manifestLocation,
         entry.entryKey,
       );
-      if (payloadKey === null) {
-        nextEntries.push(entry);
-        continue;
-      }
+      if (payloadKey === null) continue;
 
       const shouldProtect =
         !isOfflinePayloadKey(payloadKey) && nextProtectedKeys.has(payloadKey);
       if (
         isManagedLocalStorageEntryOfflineProtected(entry.meta) === shouldProtect
       ) {
-        nextEntries.push(entry);
         continue;
       }
 
       manifestChanged = true;
-      nextEntries.push({
+      nextEntries.set(entry.entryKey, {
         ...entry,
         meta: setManagedLocalStorageEntryOfflineProtected(
           entry.meta,
@@ -703,17 +713,9 @@ function upsertManifestEntry(
   io: ManagedLocalStorageIo,
 ): void {
   const manifest = readManifest(manifestKey, io);
-  const existingIndex = manifest.entries.findIndex(
-    (candidate) => candidate.entryKey === entry.entryKey,
-  );
-
-  if (existingIndex === -1) {
-    manifest.entries.push(entry);
-  } else {
-    manifest.entries[existingIndex] = entry;
-  }
-
-  writeManifest(manifestKey, manifest, io);
+  const nextEntries = new Map(manifest.entries);
+  nextEntries.set(entry.entryKey, entry);
+  writeManifest(manifestKey, { entries: nextEntries }, io);
 }
 
 function removeManifestEntry(
@@ -722,12 +724,10 @@ function removeManifestEntry(
   io: ManagedLocalStorageIo,
 ): void {
   const manifest = readManifest(manifestKey, io);
-  const nextEntries = manifest.entries.filter(
-    (entry) => entry.entryKey !== entryKey,
-  );
+  if (!manifest.entries.has(entryKey)) return;
 
-  if (nextEntries.length === manifest.entries.length) return;
-
+  const nextEntries = new Map(manifest.entries);
+  nextEntries.delete(entryKey);
   writeManifest(manifestKey, { entries: nextEntries }, io);
 }
 
@@ -866,7 +866,7 @@ export function clearManagedLocalStorageManifest(
   const manifest = readParsedManifest(manifestKey, io);
 
   if (manifestLocation && manifest) {
-    for (const entry of manifest.entries) {
+    for (const entry of manifest.entries.values()) {
       const payloadKey = getPayloadKeyForManifestEntry(
         manifestLocation,
         entry.entryKey,
@@ -1059,7 +1059,7 @@ function runStrictTsdfLocalStorageCleanup(io: ManagedLocalStorageIo): void {
           break;
         }
 
-        for (const entry of manifest.entries) {
+        for (const entry of manifest.entries.values()) {
           const payloadKey = getPayloadKeyForManifestEntry(
             classification.manifestLocation,
             entry.entryKey,
@@ -1161,9 +1161,12 @@ function runGenericCleanupForManifest(
     knownKeys !== null &&
     knownKeys.has(offlineStatusKey) &&
     getCachedOfflineStatus(sessionKey, io, offlineSessionCache);
-  const nextEntries: StoredManagedLocalStorageManifestEntry[] = [];
+  const nextEntries = new Map<
+    string | undefined,
+    StoredManagedLocalStorageManifestEntry
+  >();
 
-  for (const entry of manifest.entries) {
+  for (const entry of manifest.entries.values()) {
     const payloadKey = getPayloadKeyForManifestEntry(
       manifestLocation,
       entry.entryKey,
@@ -1182,10 +1185,10 @@ function runGenericCleanupForManifest(
       continue;
     }
 
-    nextEntries.push(entry);
+    nextEntries.set(entry.entryKey, entry);
   }
 
-  if (nextEntries.length === manifest.entries.length) return;
+  if (nextEntries.size === manifest.entries.size) return;
 
   writeManifest(manifestKey, { entries: nextEntries }, io);
 }

@@ -1,7 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import {
   advanceTime,

@@ -1,7 +1,6 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { type RcType } from 'runcheck';
-
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
   AnyOfflineOperationDefinition,
@@ -291,19 +290,17 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
 type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
   InternalDocumentOfflineOperations<State> | null;
 
-type StoreOfflineConfig<
+type PublicStoreOfflineConfig<
   TOperations extends Record<
     string,
     AnyOfflineOperationDefinition<__LEGIT_ANY__>
   > = Record<never, never>,
 > = {
-  /** Shared session-level offline policy and runtime controls. */
-  session: OfflineSession;
   /** Store-local offline operation definitions. Optional when only session-level offline controls are used. */
   operations?: TOperations;
 };
 
-type StoreOfflineConfigField<
+type PublicStoreOfflineConfigField<
   TOfflineOperations extends Record<
     string,
     AnyOfflineOperationDefinition<__LEGIT_ANY__>
@@ -311,8 +308,30 @@ type StoreOfflineConfigField<
 > = {
   /** Optional offline sync/replay configuration for mutations. */
   offline?: TOfflineOperations extends null
-    ? StoreOfflineConfig
-    : StoreOfflineConfig<Exclude<TOfflineOperations, null>>;
+    ? PublicStoreOfflineConfig
+    : PublicStoreOfflineConfig<Exclude<TOfflineOperations, null>>;
+};
+
+type ResolvedStoreOfflineConfig<
+  TOperations extends Record<string, AnyOfflineOperationDefinition> = Record<
+    never,
+    never
+  >,
+> = PublicStoreOfflineConfig<TOperations> & {
+  /** Shared session-level offline policy and runtime controls. */
+  session: OfflineSession;
+};
+
+type ResolvedStoreOfflineConfigField<
+  TOfflineOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition
+  > | null,
+> = {
+  /** Internal resolved offline config with the manager-owned session attached. */
+  offline?: TOfflineOperations extends null
+    ? ResolvedStoreOfflineConfig
+    : ResolvedStoreOfflineConfig<Exclude<TOfflineOperations, null>>;
 };
 
 /** Persistent storage config for DocumentStore. */
@@ -321,7 +340,7 @@ export type DocumentPersistentStorageConfig<
   StorageState = unknown,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
 > = StorePersistentStorageBaseConfig<State, StorageState> &
-  StoreOfflineConfigField<TOfflineOperations>;
+  PublicStoreOfflineConfigField<TOfflineOperations>;
 
 type ResolvedStorePersistentStorageBaseConfig<
   TFinal,
@@ -338,7 +357,7 @@ export type ResolvedDocumentPersistentStorageConfig<
   StorageState = unknown,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
 > = ResolvedStorePersistentStorageBaseConfig<State, StorageState> &
-  StoreOfflineConfigField<TOfflineOperations>;
+  ResolvedStoreOfflineConfigField<TOfflineOperations>;
 
 type InternalCollectionOfflineOperations<
   ItemState extends ValidStoreState,
@@ -386,7 +405,7 @@ export type CollectionPersistentStorageConfig<
     ItemPayload
   > = null,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> &
-  StoreOfflineConfigField<TOfflineOperations> &
+  PublicStoreOfflineConfigField<TOfflineOperations> &
   CollectionPersistentStorageFields<ItemPayload>;
 
 export type ResolvedCollectionPersistentStorageConfig<
@@ -398,7 +417,7 @@ export type ResolvedCollectionPersistentStorageConfig<
     ItemPayload
   > = null,
 > = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> &
-  StoreOfflineConfigField<TOfflineOperations> &
+  ResolvedStoreOfflineConfigField<TOfflineOperations> &
   CollectionPersistentStorageFields<ItemPayload>;
 
 export type InternalListQueryOfflineOperations<
@@ -466,7 +485,7 @@ export type ListQueryPersistentStorageConfig<
     ItemPayload
   > = null,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> &
-  StoreOfflineConfigField<TOfflineOperations> &
+  PublicStoreOfflineConfigField<TOfflineOperations> &
   ListQueryPersistentStorageFields<QueryPayload, ItemPayload>;
 
 export type ResolvedListQueryPersistentStorageConfig<
@@ -480,7 +499,7 @@ export type ResolvedListQueryPersistentStorageConfig<
     ItemPayload
   > = null,
 > = ResolvedStorePersistentStorageBaseConfig<ItemState, StorageState> &
-  StoreOfflineConfigField<TOfflineOperations> &
+  ResolvedStoreOfflineConfigField<TOfflineOperations> &
   ListQueryPersistentStorageFields<QueryPayload, ItemPayload>;
 
 // --- Persisted Data Shapes ---

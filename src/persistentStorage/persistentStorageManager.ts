@@ -1,11 +1,11 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-
 import { serializeProtectedRef } from './asyncStorageAdapter';
 import {
   createCompactLocalStorageEntry,
   parseCompactLocalStorageEntry,
   type CompactLocalStorageEntryValue,
 } from './compactLocalStorageEntry';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import {
   getManagedLocalStorageRuntimeConfig,
   isManagedLocalStorageEntryOfflineProtected,
@@ -354,7 +354,8 @@ export function createPersistentStorageHandle<T>(
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
-  const asyncEntryKey = asyncNamespace?.entryKey ?? 'document';
+  const asyncEntryKey =
+    asyncNamespace?.entryKey ?? DOCUMENT_PERSISTED_ENTRY_KEY;
   const localCodec = toLocalStorageValueCodec(valueCodec);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1093,7 +1094,7 @@ export function createProtectedStorageKey(args: {
   key: string;
 }): string {
   if ((args.backend ?? 'localStorage') === 'localStorage') {
-    if (args.kind === 'document' && args.key === 'document') {
+    if (args.kind === 'document' && args.key === DOCUMENT_PERSISTED_ENTRY_KEY) {
       return getStorageKeyForStore(args.sessionKey, args.storeName);
     }
 

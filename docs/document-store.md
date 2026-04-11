@@ -7,16 +7,19 @@ See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./i
 ## Creating a Document Store
 
 ```ts
-import { createDocumentStore } from 'tsdf';
+import { createDocumentStore, createStoreManager } from 'tsdf';
 
 type User = { id: string; name: string; email: string };
+const storeManager = createStoreManager({
+  getSessionKey: () =>
+    authState.userId ? `tenant:${authState.tenantId}` : false,
+  errorNormalizer: normalizeError,
+});
 
 const userStore = createDocumentStore<User>({
   id: 'document-user',
-  getSessionKey: () =>
-    authState.userId ? `tenant:${authState.tenantId}` : false,
+  storeManager,
   fetchFn: (signal) => api.getUser(signal),
-  errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
   backgroundCoalescingWindowMultiplier: 3,
@@ -26,24 +29,23 @@ const userStore = createDocumentStore<User>({
 
 ## Options
 
-| Option                                 | Type                                                                             | Required | Description                                                                               |
-| -------------------------------------- | -------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `id`                                   | `string`                                                                         | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                   |
-| `getSessionKey`                        | `() => string \| false`                                                          | Yes      | Return session key for [Browser Tabs Sync](./browser-tabs-sync.md), or `false` to disable |
-| `fetchFn`                              | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                                 |
-| `errorNormalizer`                      | `(exception: Error) => StoreError`                                               | Yes      | Normalizes errors into [StoreError](./shared-types.md#storeerror)                         |
-| `lowPriorityThrottleMs`                | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
-| `baseCoalescingWindowMs`               | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                | Yes      | See [Mutations](./mutations.md)                                                           |
-| `debugName`                            | `string`                                                                         | No       | Debug name for logging                                                                    |
-| `dynamicRealtimeThrottleMs`            | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                           |
-| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                   |
-| `mediumPriorityDelayMs`                | `number`                                                                         | No       | Delay for medium-priority fetches                                                         |
-| `usesRealTimeUpdates`                  | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                  |
-| `persistentStorage`                    | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)            |
-| `onSchedulerEvent`                     | `(event) => void`                                                                | No       | Scheduler event listener                                                                  |
-| `onMutationError`                      | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                             |
+| Option                                 | Type                                                                             | Required | Description                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `id`                                   | `string`                                                                         | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |
+| `storeManager`                         | `StoreManager`                                                                   | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
+| `fetchFn`                              | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                               |
+| `lowPriorityThrottleMs`                | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `baseCoalescingWindowMs`               | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                | Yes      | See [Mutations](./mutations.md)                                                         |
+| `debugName`                            | `string`                                                                         | No       | Debug name for logging                                                                  |
+| `dynamicRealtimeThrottleMs`            | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
+| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                 |
+| `mediumPriorityDelayMs`                | `number`                                                                         | No       | Delay for medium-priority fetches                                                       |
+| `usesRealTimeUpdates`                  | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                |
+| `persistentStorage`                    | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)          |
+| `onSchedulerEvent`                     | `(event) => void`                                                                | No       | Scheduler event listener                                                                |
+| `onMutationError`                      | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                           |
 
 ## State Shape
 
@@ -96,9 +98,16 @@ type DocumentStoreState<State> = {
 ## Usage Example
 
 ```tsx
-const settingsStore = createDocumentStore<AppSettings>({
-  fetchFn: (signal) => api.getSettings(signal),
+const storeManager = createStoreManager({
+  getSessionKey: () =>
+    authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
+});
+
+const settingsStore = createDocumentStore<AppSettings>({
+  id: 'document-settings',
+  storeManager,
+  fetchFn: (signal) => api.getSettings(signal),
   lowPriorityThrottleMs: 5000,
   baseCoalescingWindowMs: 200,
   backgroundCoalescingWindowMultiplier: 3,

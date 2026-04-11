@@ -11,6 +11,11 @@ export {
   StoreMutationError,
 } from './utils/storeShared';
 export { IsOffScreenContext } from './isOffScreenContext';
+export {
+  createStoreManager,
+  type CreateStoreManagerOptions,
+  type StoreManager,
+} from './storeManager';
 
 // Document Store types
 export * from './documentStore';

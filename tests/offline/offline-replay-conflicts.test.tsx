@@ -3,7 +3,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import {
   type CollectionOfflineOperationDefinition,
   createOfflineSession,
@@ -1098,7 +1097,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
     'queue the temp create and a dependent edit while offline',
   ]);
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',

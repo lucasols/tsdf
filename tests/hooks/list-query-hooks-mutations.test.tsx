@@ -10,7 +10,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import {
   createListQueryStoreTestEnv,
   type Row,
@@ -72,8 +71,9 @@ async function addItemWithIdGeneratedByServer(
     onSuccess: ({ itemId, data }: { itemId: string; data: TestRow }) => {
       env.apiStore.addItemToState(itemId, data);
     },
-    revalidateOnSuccess: revalidate ? 'queries' : false,
-    getRelatedQueries: (payload) => payload.tableId === tableId,
+    revalidateOnSuccess: revalidate
+      ? { queries: (payload) => payload.tableId === tableId, items: false }
+      : false,
   });
 }
 
@@ -103,8 +103,9 @@ async function addItemWithIdGeneratedByClient(
 
       return newRow;
     },
-    revalidateOnSuccess: revalidate,
-    getRelatedQueries: (payload) => payload.tableId === tableId,
+    revalidateOnSuccess: revalidate
+      ? { queries: (payload) => payload.tableId === tableId }
+      : false,
   });
 }
 
@@ -140,8 +141,9 @@ async function deleteItem(
 
       return { deletedItemId: id };
     },
-    revalidateOnSuccess: revalidate ? 'queries' : false,
-    getRelatedQueries: (payload) => payload.tableId === tableId,
+    revalidateOnSuccess: revalidate
+      ? { queries: (payload) => payload.tableId === tableId, items: false }
+      : false,
   });
 }
 

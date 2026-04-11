@@ -12,7 +12,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import type { ListQueryStore } from '../../src/listQueryStore/listQueryStore';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
@@ -1512,23 +1511,19 @@ describe('await* preload with partial resources', () => {
 
     expect(() =>
       apiStore.scheduleItemFetch('highPriority', 'users||1'),
-    ).toThrowError(
-      'fields option is required when partialResources is enabled',
-    );
+    ).toThrow('fields option is required when partialResources is enabled');
 
     expect(() =>
       apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' }),
-    ).toThrowError(
-      'fields option is required when partialResources is enabled',
-    );
+    ).toThrow('fields option is required when partialResources is enabled');
 
-    await expect(apiStore.awaitItemFetch('users||1')).rejects.toThrowError(
+    await expect(apiStore.awaitItemFetch('users||1')).rejects.toThrow(
       'fields option is required when partialResources is enabled',
     );
 
     await expect(
       apiStore.awaitListQueryFetch({ tableId: 'users' }),
-    ).rejects.toThrowError(
+    ).rejects.toThrow(
       'fields option is required when partialResources is enabled',
     );
 
@@ -1540,7 +1535,7 @@ describe('await* preload with partial resources', () => {
     );
     await flushAllTimers();
 
-    expect(() => apiStore.loadMore({ tableId: 'users' })).toThrowError(
+    expect(() => apiStore.loadMore({ tableId: 'users' })).toThrow(
       'fields option is required when partialResources is enabled',
     );
   });

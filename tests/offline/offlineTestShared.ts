@@ -7,7 +7,6 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
-
 import type { OfflineResolutionRecord } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';

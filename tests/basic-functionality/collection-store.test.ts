@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-
 import { createCollectionStore } from '../../src/collectionStore/collectionStore';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -657,13 +657,16 @@ describe('update state functions', () => {
 });
 
 test('mutating a obj passed as payload does not break the store', async () => {
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+  });
   const collectionStore = createCollectionStore<
     { value: TodoItem },
     { id: { id: string } }
   >({
     id: 'test-payload-mutation',
-    getSessionKey: () => 'test-session',
-    errorNormalizer: normalizeError,
+    storeManager,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,

@@ -1,6 +1,5 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isPromise } from '@ls-stack/utils/typeGuards';
-
 import type { AnyOfflineOperationDefinition } from '../persistentStorage/offline/types';
 import type {
   TestOfflineTimelineEvent,

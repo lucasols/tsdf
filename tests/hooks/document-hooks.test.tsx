@@ -10,7 +10,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -441,7 +440,6 @@ test('rollback on error', async () => {
   expect(renders).toMatchInlineSnapshot(`
     - ['world', 'success', null]
     - ['was updated', 'success', null]
-    - ['was updated', 'refetching', null]
     - ['world', 'success', null]
   `);
 });

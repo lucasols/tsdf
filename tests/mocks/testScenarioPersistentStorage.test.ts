@@ -1,7 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-
 import type {
   ConvertedPersistentStorageDataSchema,
   PersistentStorageSchema,

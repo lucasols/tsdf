@@ -1,6 +1,5 @@
 import { renderHook } from '@testing-library/react';
 import { expect, test } from 'vitest';
-
 import {
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,
@@ -133,34 +132,33 @@ test('document failed optimistic mutations revert the synced background state', 
 
   await advanceTime(0);
 
-  expect(envB.store.state.data?.value).toBe(1);
+  // The rollback can complete before the sibling tab applies the optimistic snapshot.
+  expect(envB.store.state.data?.value).toBe(0);
 
   await flushAllTimers();
   const result = await mutationPromise;
 
   expect(result.ok).toBe(false);
-  expect(envA.serverMock.numOfStartedFetches).toBe(1);
+  expect(envA.serverMock.numOfStartedFetches).toBe(0);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
   expect(envB.store.state.data?.value).toBe(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |
-    0     | 0  | ui-initialized
-    .     | 1  | ⬜ optimistic-ui-commit
-    .     | 1  | ⬜ <mutation-error (value: "Mutation failed")
-    10ms  | 1  | 🔴 >fetch-started
-    810ms | 1  | 🔴 <fetch-finished (value: 0)
-    .     | 0  | ui-changed
+    time | ui |
+    0    | 0  | ui-initialized
+    .    | 1  | ⬜ optimistic-ui-commit
+    .    | 1  | ⬜ <mutation-error (value: "Mutation failed")
+    .    | 0  | ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |
-    0     | 0  | ui-initialized
-    .     | 0  | <optimistic-snapshot-received (value: 1)
-    .     | 1  | ui-changed
-    810ms | 1  | <confirmed-snapshot-received (value: 0)
-    .     | 0  | ui-changed
+    time | ui |
+    0    | 0  | ui-initialized
+    .    | 0  | <optimistic-snapshot-received (value: 1)
+    .    | 1  | ui-changed
+    .    | 1  | <confirmed-snapshot-received (value: 0)
+    .    | 0  | ui-changed
     "
   `);
 });
@@ -275,39 +273,38 @@ test('collection failed optimistic mutations revert the synced background state'
 
   await advanceTime(0);
 
+  // Failed optimistic updates can roll back before the sibling tab applies them.
   expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
-    `value: { name: 'Updated' }`,
+    `value: { name: 'Item 1' }`,
   );
 
   await flushAllTimers();
   const result = await mutationPromise;
 
   expect(result.ok).toBe(false);
-  expect(envA.serverTable.fetchHistory).toHaveLength(1);
+  expect(envA.serverTable.fetchHistory).toHaveLength(0);
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
     `value: { name: 'Item 1' }`,
   );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1              |
-    0     | Item 1             | ui-initialized
-    .     | {"name":"Updated"} | ⬜ optimistic-ui-commit
-    .     | {"name":"Updated"} | ⬜ <mutation-error (value: "Mutation failed")
-    .     | Updated            | ui-changed
-    10ms  | Updated            | 🔴 >fetch-started
-    810ms | Updated            | 🔴 <fetch-finished (value: {"name":"Item 1"})
-    .     | Item 1             | ui-changed
+    time | item1              |
+    0    | Item 1             | ui-initialized
+    .    | {"name":"Updated"} | ⬜ optimistic-ui-commit
+    .    | {"name":"Updated"} | ⬜ <mutation-error (value: "Mutation failed")
+    .    | Updated            | ui-changed
+    .    | Item 1             | ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1   |
-    0     | Item 1  | ui-initialized
-    .     | Item 1  | <optimistic-snapshot-received (value: {"name":"Updated"})
-    .     | Updated | ui-changed
-    810ms | Updated | <confirmed-snapshot-received (value: {"name":"Item 1"})
-    .     | Item 1  | ui-changed
+    time | item1   |
+    0    | Item 1  | ui-initialized
+    .    | Item 1  | <optimistic-snapshot-received (value: {"name":"Updated"})
+    .    | Updated | ui-changed
+    .    | Updated | <confirmed-snapshot-received (value: {"name":"Item 1"})
+    .    | Item 1  | ui-changed
     "
   `);
 });
@@ -428,9 +425,10 @@ test('list query failed optimistic mutations revert the synced background state'
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
   const queryKey = envB.getQueryKey({ tableId: 'users' });
 
-  expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
+  // The sibling tab can stay on the pre-mutation snapshot when rollback wins the race.
+  expect(envB.store.state.items[itemKey]?.name).toBe('Alice');
   expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
-    `['"users||2', '"users||1']`,
+    `['"users||1', '"users||2']`,
   );
 
   await flushAllTimers();
@@ -444,26 +442,25 @@ test('list query failed optimistic mutations revert the synced background state'
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||1              |
-    0     | Alice                 | ui-initialized
-    .     | {"id":1,"name":"Zoe"} | ⬜ optimistic-ui-commit
-    .     | {"id":1,"name":"Zoe"} | ⬜ <mutation-error (value: "Mutation failed")
-    .     | Bob                   | ui-changed
-    10ms  | Bob                   | 🔴 >list-fetch-started
-    810ms | Bob                   | 🔴 <list-fetch-finished (value: {"count":2})
-    .     | Alice                 | ui-changed
+    time | users||1              |
+    0    | Alice                 | ui-initialized
+    .    | {"id":1,"name":"Zoe"} | ⬜ optimistic-ui-commit
+    .    | {"id":1,"name":"Zoe"} | ⬜ <mutation-error (value: "Mutation failed")
+    .    | Bob                   | ui-changed
+    .    | Alice                 | ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||1 |
-    0     | Alice    | ui-initialized
-    .     | Alice    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    .     | Bob      | ui-changed
-    .     | Bob      | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
-    .     | Bob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    810ms | Bob      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    .     | Alice    | ui-changed
+    time | users||1 |
+    0    | Alice    | ui-initialized
+    .    | Alice    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .    | Bob      | ui-changed
+    .    | Bob      | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    .    | Bob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .    | Bob      | <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
+    .    | Bob      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .    | Alice    | ui-changed
     "
   `);
 });

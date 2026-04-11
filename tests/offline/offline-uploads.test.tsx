@@ -3,7 +3,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
   clearSessionStorage,
@@ -363,10 +362,10 @@ test('manual uploads expire only after one week in the current online session', 
   );
   expect(pick(retentionResetMetadataRecord, ['i', 'o', 't']))
     .toMatchInlineSnapshot(`
-    i: 'stale-manual-upload'
-    o: 'manual'
-    t: 'pending'
-  `);
+      i: 'stale-manual-upload'
+      o: 'manual'
+      t: 'pending'
+    `);
 
   await advanceTime(8 * dayMs);
   await flushAllTimers();
@@ -412,6 +411,7 @@ test('document direct uploads survive restart and replay with restored files eve
       upload: ({ id }) => Promise.resolve(`server:${id}`),
     },
   });
+  session.getOfflineStatus();
 
   const env = createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(
     1,
@@ -471,6 +471,9 @@ test('document direct uploads survive restart and replay with restored files eve
       },
     }),
   );
+  // The queued mutation persists its direct upload through the mocked OPFS
+  // adapter, so settle those storage latencies before simulating a restart.
+  await flushAllTimers();
 
   const queuedUpload = uploadHook.result.current[0];
   expect(queuedUpload?.id).toMatch(DIRECT_UPLOAD_ID_PATTERN);
@@ -495,6 +498,7 @@ test('document direct uploads survive restart and replay with restored files eve
       upload: ({ id }) => Promise.resolve(`server:${id}`),
     },
   });
+  restartedSession.getOfflineStatus();
 
   const restartedEnv = createDocumentStoreTestEnv<
     number,
@@ -544,9 +548,9 @@ test('document direct uploads survive restart and replay with restored files eve
   }
   expect(pick(restartedQueuedUpload, ['state', 'source']))
     .toMatchInlineSnapshot(`
-    source: 'mutation'
-    state: 'pending'
-  `);
+      source: 'mutation'
+      state: 'pending'
+    `);
   expect(getOpfsDirTree(mockBrowserOpfs)).toContain(queuedUpload.id);
   expect(getOpfsDirTree(mockBrowserOpfs)).toContain('binary.blob');
   expect(getOpfsDirTree(mockBrowserOpfs)).toContain('metadata.json');
@@ -640,6 +644,7 @@ test('queued direct uploads keep same logical field names isolated per mutation'
       upload: ({ id }) => Promise.resolve(`server:${id}`),
     },
   });
+  session.getOfflineStatus();
 
   const env = createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(
     1,
@@ -688,6 +693,9 @@ test('queued direct uploads keep same logical field names isolated per mutation'
       },
     }),
   );
+  // Flush mocked OPFS write latency so the first queued upload is durably
+  // visible before queueing another mutation that reuses the same field name.
+  await flushAllTimers();
   await resolveAfterAllTimers(
     env.apiStore.performMutation({
       optimisticUpdate: () => {},
@@ -701,6 +709,7 @@ test('queued direct uploads keep same logical field names isolated per mutation'
       },
     }),
   );
+  await flushAllTimers();
 
   // Reconnecting should replay each mutation with its own original file.
   await act(async () => {

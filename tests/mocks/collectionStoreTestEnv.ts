@@ -1,6 +1,6 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
-
 import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,
@@ -10,12 +10,14 @@ import {
 import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
+  OfflineSession,
 } from '../../src/persistentStorage/offline/types';
 import type {
   CollectionPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
+import { createStoreManager, type StoreManager } from '../../src/storeManager';
 import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
@@ -69,6 +71,29 @@ type TestCollectionOfflineOperationsRegistry<
 type TestCollectionOfflineOperationsConfig<D extends Record<string, unknown>> =
   TestCollectionOfflineOperationsRegistry<D> | null;
 
+type TestCollectionPersistentStorageConfig<
+  D extends Record<string, unknown>,
+  StorageState,
+  TOfflineOperations extends TestCollectionOfflineOperationsConfig<D>,
+> = Omit<
+  CollectionPersistentStorageConfig<
+    CollectionTestItem<D>,
+    string,
+    StorageState,
+    TOfflineOperations
+  >,
+  'offline'
+> & {
+  offline?: NonNullable<
+    CollectionPersistentStorageConfig<
+      CollectionTestItem<D>,
+      string,
+      StorageState,
+      TOfflineOperations
+    >['offline']
+  > & { session?: OfflineSession };
+};
+
 export type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,
   TOfflineOperations extends TestCollectionOfflineOperationsConfig<D> = null,
@@ -76,6 +101,7 @@ export type CollectionStoreTestEnvOptions<
 > = {
   id?: string;
   getSessionKey?: () => string | false;
+  storeManager?: StoreManager;
   sharedServerTableState?: ServerTableSharedState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
   testBrowserTabId?: string;
@@ -109,9 +135,8 @@ export type CollectionStoreTestEnvOptions<
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  persistentStorage?: CollectionPersistentStorageConfig<
-    CollectionTestItem<D>,
-    string,
+  persistentStorage?: TestCollectionPersistentStorageConfig<
+    D,
     StorageState,
     TOfflineOperations
   >;
@@ -127,7 +152,8 @@ export function createCollectionStoreTestEnv<
   serverInitialData: Record<string, D>,
   {
     id = getNextStoreId('collection'),
-    getSessionKey = () => 'test-session',
+    getSessionKey: getSessionKeyOption = () => 'test-session',
+    storeManager,
     sharedServerTableState,
     browserTabsTransportFactory,
     testBrowserTabId,
@@ -168,6 +194,22 @@ export function createCollectionStoreTestEnv<
     getRelativeTime,
     clearTimeline: clearActionTimeline,
   } = createActionTracker();
+
+  const persistentStorageWithResolvedAdapter =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
+  const resolvedStoreManager =
+    storeManager ??
+    createStoreManager({
+      getSessionKey: getSessionKeyOption,
+      errorNormalizer: normalizeError,
+      offlineSession:
+        persistentStorageWithResolvedAdapter?.offline?.session?.getConfig() ??
+        undefined,
+    });
+  const getSessionKey = resolvedStoreManager.getSessionKey;
+  const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
 
   const { getMutationEmoji } = createEmojiCyclers();
   const offlineTimelineLogger = createOfflineTimelineTestLogger({
@@ -226,10 +268,25 @@ export function createCollectionStoreTestEnv<
   };
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
-  const resolvedPersistentStorage =
-    persistentStorage && storageAdapter
-      ? { ...persistentStorage, adapter: storageAdapter }
-      : persistentStorage;
+  const resolvedPersistentStorage = persistentStorageWithResolvedAdapter
+    ? __LEGIT_CAST__<
+        CollectionPersistentStorageConfig<
+          CollectionTestItem<D>,
+          string,
+          StorageState,
+          TOfflineOperations
+        >,
+        unknown
+      >({
+        ...persistentStorageWithResolvedAdapter,
+        offline: persistentStorageWithResolvedAdapter.offline
+          ? {
+              operations:
+                persistentStorageWithResolvedAdapter.offline.operations,
+            }
+          : undefined,
+      })
+    : persistentStorageWithResolvedAdapter;
 
   const unregisterMockStoreInstance =
     testBrowserTabId === undefined
@@ -257,8 +314,7 @@ export function createCollectionStoreTestEnv<
       StorageState
     >({
       id,
-      getSessionKey,
-      errorNormalizer: normalizeError,
+      storeManager: resolvedStoreManager,
       lowPriorityThrottleMs,
       baseCoalescingWindowMs,
       maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
@@ -320,7 +376,7 @@ export function createCollectionStoreTestEnv<
                     operation,
                   })),
               adapter: resolvedPersistentStorage.adapter,
-              config: resolvedPersistentStorage.offline.session.getConfig(),
+              config: resolvedOfflineSession!.getConfig(),
             });
           }
         },
@@ -344,34 +400,64 @@ export function createCollectionStoreTestEnv<
     initialData: testOptions?.initialData,
     timestamp: testOptions?.initialLastFetchStartTime,
   });
+  const disposeTestEnvResources = (() => {
+    const cleanupCallbacks: Array<() => void> = [
+      unregisterMockStoreInstance,
+      () => {
+        offlineTimelineLogger.dispose();
+      },
+    ];
 
-  if (usesRealTimeUpdates) {
-    serverTable.wsEvents.on('data_changed', (event) => {
-      addAction('received-ws-data-change-event', {
-        itemId: event.payload.itemId,
+    if (usesRealTimeUpdates) {
+      cleanupCallbacks.push(
+        serverTable.wsEvents.on('data_changed', (event) => {
+          addAction('received-ws-data-change-event', {
+            itemId: event.payload.itemId,
+          });
+          collectionStore.invalidateItem(
+            event.payload.itemId,
+            'realtimeUpdate',
+          );
+        }),
+      );
+
+      cleanupCallbacks.push(
+        serverTable.wsEvents.on('list_changed', () => {
+          addAction('received-ws-data-change-event');
+          collectionStore.invalidateItem(() => true, 'realtimeUpdate');
+        }),
+      );
+    }
+
+    if (resolvedPersistentStorage?.offline) {
+      offlineTimelineLogger.attachResolutionObserver({
+        getOfflineResolutions: () =>
+          collectionStore
+            .getOfflineResolutions()
+            .map(({ id: resolutionId, operation }) => ({
+              id: resolutionId,
+              operation,
+            })),
+        adapter: resolvedPersistentStorage.adapter,
+        config: resolvedOfflineSession!.getConfig(),
       });
-      collectionStore.invalidateItem(event.payload.itemId, 'realtimeUpdate');
-    });
+    }
 
-    serverTable.wsEvents.on('list_changed', () => {
-      addAction('received-ws-data-change-event');
-      collectionStore.invalidateItem(() => true, 'realtimeUpdate');
-    });
-  }
+    let isDisposed = false;
+    return () => {
+      if (isDisposed) return;
+      isDisposed = true;
 
-  if (resolvedPersistentStorage?.offline) {
-    offlineTimelineLogger.attachResolutionObserver({
-      getOfflineResolutions: () =>
-        collectionStore
-          .getOfflineResolutions()
-          .map(({ id: resolutionId, operation }) => ({
-            id: resolutionId,
-            operation,
-          })),
-      adapter: resolvedPersistentStorage.adapter,
-      config: resolvedPersistentStorage.offline.session.getConfig(),
-    });
-  }
+      for (const cleanup of cleanupCallbacks) {
+        cleanup();
+      }
+    };
+  })();
+  const disposeCollectionStore = collectionStore.dispose.bind(collectionStore);
+  collectionStore.dispose = () => {
+    disposeTestEnvResources();
+    disposeCollectionStore();
+  };
 
   const env = {
     apiStore: collectionStore,

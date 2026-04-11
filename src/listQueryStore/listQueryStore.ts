@@ -10,7 +10,6 @@ import { klona } from 'klona/json';
 import { useCallback } from 'react';
 import { Result } from 't-result';
 import { Store } from 't-state';
-
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
 import {
   CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
@@ -57,6 +56,7 @@ import type {
   ListQueryOfflineOperationsConfig,
   ListQueryPersistentStorageConfig,
   PersistentStoragePreloadResult,
+  ResolvedListQueryPersistentStorageConfig,
 } from '../persistentStorage/types';
 import {
   FetchType,
@@ -65,6 +65,12 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from '../requestScheduler';
+import {
+  registerStoreWithManager,
+  resolveStoreManagerOfflineSession,
+  type StoreManager,
+  validateStoreManagerSessionConsistency,
+} from '../storeManager';
 import {
   createBrowserTabsPriority,
   type BrowserTabsPriorityTimings,
@@ -84,7 +90,6 @@ import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
-  StoreError,
   StoreFetchError,
   ValidPayload,
   ValidStoreState,
@@ -260,12 +265,8 @@ type ListQueryStoreOptionsBase<
   debugName?: string;
   /** Stable id shared by the same logical list-query store across browser tabs. */
   id: string;
-  /**
-   * Returns the current authenticated session / tenant key used to scope
-   * browser-tabs sync. Return `false` to disable browser-tabs sync when no
-   * account is loaded.
-   */
-  getSessionKey: () => string | false;
+  /** Shared global store manager providing session scoping and error normalization. */
+  storeManager: StoreManager;
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
@@ -275,7 +276,6 @@ type ListQueryStoreOptionsBase<
     options: { signal: AbortSignal; batchKey: string },
   ) => Promise<Map<ItemPayload, ItemState | Error>>;
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
-  errorNormalizer: (exception: Error) => StoreError;
   defaultQuerySize?: number;
   maxItemBatchSize?: number;
   /** Maximum number of cached items kept in memory. Defaults to 5,000. Item pressure may evict whole inactive queries to avoid leaving cached queries partially loaded. */
@@ -345,7 +345,7 @@ type ListQueryStoreOptionsBase<
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Opt-in persistent storage configuration. When provided, cached items and queries
    * are loaded from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`, and the
+   * Session scoping always reuses this store manager's `getSessionKey`, and the
    * persisted namespace always reuses this store's `id`. */
   persistentStorage?: ListQueryPersistentStorageConfig<
     ItemState,
@@ -418,11 +418,10 @@ export function createListQueryStore<
   const {
     debugName,
     id,
-    getSessionKey,
+    storeManager,
     fetchItemFn,
     batchFetchItemFn,
     getItemsBatchKey,
-    errorNormalizer,
     defaultQuerySize = 50,
     maxItemBatchSize,
     maxItems = 5_000,
@@ -621,18 +620,73 @@ export function createListQueryStore<
     ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload>;
   };
 
-  const getSessionKeyForRuntime =
+  const resolvedOfflineSession = resolveStoreManagerOfflineSession({
+    storeManager,
+    storeName: id,
+    usesOfflineStorage: persistentStorageConfig?.offline !== undefined,
+  });
+  const getSessionKeyBase =
     import.meta.env.TEST && testOptions
-      ? wrapGetSessionKeyForTest(getSessionKey, testOptions.onSessionKeyChanged)
-      : getSessionKey;
+      ? wrapGetSessionKeyForTest(
+          storeManager.getSessionKey,
+          testOptions.onSessionKeyChanged,
+        )
+      : storeManager.getSessionKey;
+  const getSessionKeyForRuntime =
+    resolvedOfflineSession === null
+      ? getSessionKeyBase
+      : () =>
+          validateStoreManagerSessionConsistency({
+            storeManager,
+            storeName: id,
+            offlineSession: resolvedOfflineSession,
+            getSessionKey: getSessionKeyBase,
+          });
+  const errorNormalizer = storeManager.errorNormalizer;
+  const resolvedOfflineSessionForPersistentStorage =
+    persistentStorageConfig?.offline === undefined
+      ? undefined
+      : (() => {
+          if (resolvedOfflineSession === null) {
+            throw new Error(
+              `[tsdf] Store "${id}" requires an offline session but none was configured on the store manager`,
+            );
+          }
+
+          return resolvedOfflineSession;
+        })();
 
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
-  const resolvedPersistentStorageConfig = persistentStorageConfig
-    ? {
+  // WORKAROUND: The public persistent-storage config intentionally omits the
+  // manager-owned offline session, so stores reattach that resolved session at
+  // runtime before passing the config to persistence internals.
+  const resolvedPersistentStorageConfig: ResolvedListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    StorageState,
+    TOfflineOperations
+  > | null = persistentStorageConfig
+    ? __LEGIT_CAST__<
+        ResolvedListQueryPersistentStorageConfig<
+          ItemState,
+          QueryPayload,
+          ItemPayload,
+          StorageState,
+          TOfflineOperations
+        >,
+        unknown
+      >({
         ...persistentStorageConfig,
+        offline: persistentStorageConfig.offline
+          ? {
+              ...persistentStorageConfig.offline,
+              session: resolvedOfflineSessionForPersistentStorage,
+            }
+          : undefined,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
-      }
+      })
     : null;
 
   // Persistent storage setup
@@ -2191,10 +2245,12 @@ export function createListQueryStore<
    *   next window focus event.
    */
   function onTransportReconnect(): void {
+    if (isDisposed) return;
     focusLifecycle.onTransportReconnect();
   }
 
   function reset() {
+    if (isDisposed) return;
     resetSchedulers();
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
@@ -2225,6 +2281,27 @@ export function createListQueryStore<
     );
     focusLifecycle.reset();
     persistence?.attach(store);
+  }
+
+  /** Releases store resources and unregisters the store from its manager. */
+  function dispose(): void {
+    if (isDisposed) return;
+
+    isDisposed = true;
+    unregisterStoreFromManager();
+    resetSchedulers();
+    resetInvalidationTracking();
+    lastQuerySyncVersions.clear();
+    lastItemSyncVersions.clear();
+    clearOfflineOverlays();
+    queryCacheRuntime.clearAll();
+    itemCacheRuntime.clearAll();
+    cacheLimitEnforcementScheduler.cancel();
+    browserTabsSync?.close();
+    browserTabsPriority?.close();
+    focusLifecycle.dispose();
+    persistence?.dispose();
+    offlineController?.dispose();
   }
 
   function scheduleListQueryFetchApiImpl(
@@ -2410,6 +2487,12 @@ export function createListQueryStore<
     touchQueries(relatedQueryKeys);
   }
 
+  let isDisposed = false;
+  const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
+    id,
+    reset,
+  });
+
   return {
     store,
     events,
@@ -2421,6 +2504,7 @@ export function createListQueryStore<
       return itemInvalidationWasTriggered;
     },
     reset,
+    dispose,
     scheduleListQueryFetch: scheduleListQueryFetchApi,
     getQueryState,
     getQueryKey,

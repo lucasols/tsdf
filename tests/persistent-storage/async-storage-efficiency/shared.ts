@@ -3,9 +3,9 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
-
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
@@ -277,7 +277,7 @@ function serializeProtectedStorageKey(storageKey: string): string {
   return serializeProtectedRef({
     sessionKey: storageKey.slice(prefix.length, lastSeparatorIndex),
     storeName: storageKey.slice(lastSeparatorIndex + 1),
-    key: 'document',
+    key: DOCUMENT_PERSISTED_ENTRY_KEY,
     kind: 'document',
   });
 }

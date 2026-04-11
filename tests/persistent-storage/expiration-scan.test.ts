@@ -8,7 +8,6 @@ import {
   test,
   vi,
 } from 'vitest';
-
 import {
   getManagedLocalStorageManifestKeyForSingle,
   resetManagedLocalStorageState,

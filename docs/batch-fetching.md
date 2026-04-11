@@ -11,7 +11,13 @@ Without batch fetching, each item triggers its own `fetchFn` call. With batch fe
 ## Collection Store
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const store = createCollectionStore<Product, string>({
+  storeManager,
   // Individual fetch (fallback when batch is not used)
   fetchFn: (productId, signal) => api.getProduct(productId, signal),
 
@@ -35,7 +41,13 @@ Items that return an `Error` in the map are handled individually with the error 
 ## List Query Store
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const store = createListQueryStore<Task, TaskFilter, string>({
+  storeManager,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
 
   // Individual item fetch
@@ -59,7 +71,13 @@ In List Query Store, `batchFetchItemFn` receives an array of `{ payload, fields?
 By default, all items share a single batch scheduler (batch key `'__default__'`). Use `getItemsBatchKey` to group items into separate batches:
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const store = createCollectionStore<Resource, { type: string; id: string }>({
+  storeManager,
   fetchFn: (params, signal) => api.getResource(params, signal),
   batchFetchFn: (payloads, signal, batchKey) => {
     // batchKey is the type — batch requests by resource type

@@ -149,29 +149,27 @@ During the debounce period, the window close is blocked to prevent data loss.
 
 ## Revalidation on Success
 
-| Option                                 | Behavior                                                         |
-| -------------------------------------- | ---------------------------------------------------------------- |
-| `revalidateOnSuccess: true`            | Invalidates all affected items and queries                       |
-| `revalidateOnSuccess: 'queries'`       | (List Query only) Invalidates only queries, not individual items |
-| `revalidateOnSuccess: false` (default) | No automatic revalidation                                        |
+| Option                                           | Behavior                                                          |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| `revalidateOnSuccess: true`                      | Invalidates all affected items and queries                        |
+| `revalidateOnSuccess: 'queries'`                 | (List Query only) Invalidates only queries, not individual items  |
+| `revalidateOnSuccess: (query) => ...`            | (List Query only) Invalidates affected items and matching queries |
+| `revalidateOnSuccess: { queries, items: false }` | (List Query only) Invalidates matching queries only               |
+| `revalidateOnSuccess: false` (default)           | No automatic revalidation                                         |
 
-### Error Revalidation
+### Error Handling
 
-On error, TSDF **always** invalidates affected data (to revert optimistic updates), unless `dontRevalidateOnError: true` is set (List Query Store only).
+On error, TSDF **rolls back** optimistic updates to their pre-mutation state. Non-optimistic mutations leave state untouched on error.
 
 ## List Query Store Specific Options
 
 ```ts
 await store.performMutation(payload, {
-  // Control which queries are affected by this mutation
-  getRelatedQueries: (queryPayload) => queryPayload.projectId === 'proj-1',
-
-  // Control which queries are revalidated on success (defaults to getRelatedQueries)
-  getRevalidateOnSuccessQueries: (queryPayload) =>
-    queryPayload.status === 'active',
-
-  // Don't revalidate data on error (keeps optimistic state)
-  dontRevalidateOnError: true,
+  // Revalidate only active queries, without invalidating individual items
+  revalidateOnSuccess: {
+    queries: (queryPayload) => queryPayload.status === 'active',
+    items: false,
+  },
 
   // Suppress the global onMutationError handler
   silentErrors: true,
@@ -213,7 +211,14 @@ While a mutation lock is held, the scheduler defers any fetch requests for the l
 The `blockWindowClose` option prevents the user from accidentally closing the browser during a mutation:
 
 ```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+});
+
 const store = createDocumentStore({
+  id: 'document-store',
+  storeManager,
   blockWindowClose: () => {
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
