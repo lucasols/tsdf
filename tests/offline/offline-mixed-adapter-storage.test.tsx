@@ -2,16 +2,16 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
-  createOfflineSession,
   getGlobalOfflineEntities,
   type GlobalOfflineEntity,
   useGlobalOfflineEntities,
 } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   flushAllTimers,
   pick,
@@ -31,10 +31,11 @@ const opfsOptimisticValue = 3;
 let network = createOfflineNetworkMock();
 let didCreateOpfsPersistentStore = false;
 
-function createSharedOfflineSession(sessionKey: string) {
-  return createOfflineSession({
+function createSharedStoreManager(sessionKey: string) {
+  return createStoreManager({
+    errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
+    offlineSession: { network: network.config },
   });
 }
 
@@ -50,14 +51,14 @@ type MixedAdapter = 'local-sync' | typeof opfsPersistentStorage;
 function createMixedOfflineDocumentEnv({
   adapter,
   initialValue,
-  session,
+  storeManager,
   sessionKey,
   storeName,
   testScenario,
 }: {
   adapter: MixedAdapter;
   initialValue: number;
-  session: ReturnType<typeof createOfflineSession>;
+  storeManager: ReturnType<typeof createSharedStoreManager>;
   sessionKey: string;
   storeName: string;
   testScenario: 'idle' | 'loaded';
@@ -77,12 +78,12 @@ function createMixedOfflineDocumentEnv({
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager,
       testScenario,
       persistentStorage: {
         adapter,
         schema: docSchema,
         offline: {
-          session,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -109,7 +110,7 @@ function createMixedOfflineDocumentEnv({
 }
 
 async function seedMixedOfflineSession() {
-  const session = createSharedOfflineSession(mixedSessionKey);
+  const storeManager = createSharedStoreManager(mixedSessionKey);
 
   // The first app run starts disconnected so both stores persist queued work
   // through their real offline storage adapters instead of reaching the server.
@@ -118,7 +119,7 @@ async function seedMixedOfflineSession() {
   const localEnv = createMixedOfflineDocumentEnv({
     adapter: 'local-sync',
     initialValue: 1,
-    session,
+    storeManager,
     sessionKey: mixedSessionKey,
     storeName: localStoreName,
     testScenario: 'loaded',
@@ -126,7 +127,7 @@ async function seedMixedOfflineSession() {
   const opfsEnv = createMixedOfflineDocumentEnv({
     adapter: opfsPersistentStorage,
     initialValue: 1,
-    session,
+    storeManager,
     sessionKey: mixedSessionKey,
     storeName: opfsStoreName,
     testScenario: 'loaded',
@@ -173,7 +174,7 @@ async function seedMixedOfflineSession() {
 
   await flushAllTimers();
 
-  return { localEnv, opfsEnv, session };
+  return { localEnv, opfsEnv };
 }
 
 function summarizeOfflineEntities(
@@ -285,11 +286,11 @@ test('mixed adapters rehydrate cached values from their own backends and replay 
   // Simulate the next browser session starting from persisted storage only.
   __resetSessionOfflineCoordinatorRegistryForTests();
 
-  const restartedSession = createSharedOfflineSession(mixedSessionKey);
+  const restartedStoreManager = createSharedStoreManager(mixedSessionKey);
   const restartedLocalEnv = createMixedOfflineDocumentEnv({
     adapter: 'local-sync',
     initialValue: 1,
-    session: restartedSession,
+    storeManager: restartedStoreManager,
     sessionKey: mixedSessionKey,
     storeName: localStoreName,
     testScenario: 'idle',
@@ -297,7 +298,7 @@ test('mixed adapters rehydrate cached values from their own backends and replay 
   const restartedOpfsEnv = createMixedOfflineDocumentEnv({
     adapter: opfsPersistentStorage,
     initialValue: 1,
-    session: restartedSession,
+    storeManager: restartedStoreManager,
     sessionKey: mixedSessionKey,
     storeName: opfsStoreName,
     testScenario: 'idle',

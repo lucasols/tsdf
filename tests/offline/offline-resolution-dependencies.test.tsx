@@ -3,12 +3,12 @@ import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ListQueryOfflineOperationDefinition } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
@@ -149,6 +149,15 @@ test('nested descendants cascade into blocked resolutions and discard together',
     {
       id: 'offline-resolution-dependency-chain-store',
       getSessionKey: () => 'offline-resolution-dependency-chain-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-resolution-dependency-chain-session',
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -156,14 +165,6 @@ test('nested descendants cascade into blocked resolutions and discard together',
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-resolution-dependency-chain-session',
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -459,6 +460,16 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     {
       id: 'offline-resolution-nested-retry-store',
       getSessionKey: () => 'offline-resolution-nested-retry-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-resolution-nested-retry-session',
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+          replayRetry: { maxFailures: 1, intervalMs: 1 },
+        },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -466,15 +477,6 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-resolution-nested-retry-session',
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-              replayRetry: { maxFailures: 1, intervalMs: 1 },
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -765,6 +767,15 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
     {
       id: 'offline-resolution-remap-store',
       getSessionKey: () => 'offline-resolution-remap-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-resolution-remap-session',
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -772,14 +783,6 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-resolution-remap-session',
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -1008,6 +1011,15 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     {
       id: 'offline-resolution-dependency-self-scope-store',
       getSessionKey: () => 'offline-resolution-dependency-self-scope-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-resolution-dependency-self-scope-session',
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -1015,15 +1027,6 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () =>
-              'offline-resolution-dependency-self-scope-session',
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -1300,6 +1303,15 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
     {
       id: 'offline-resolution-explicit-dep-store',
       getSessionKey: () => 'offline-resolution-explicit-dep-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-resolution-explicit-dep-session',
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -1307,14 +1319,6 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-resolution-explicit-dep-session',
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,

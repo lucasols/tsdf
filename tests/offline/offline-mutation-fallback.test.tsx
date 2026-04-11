@@ -4,12 +4,12 @@ import { act } from 'react';
 import { rc_array, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -89,18 +89,19 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          mutationQueueing: { network: 'disallow' },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              mutationQueueing: { network: 'disallow' },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -154,15 +155,16 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -211,15 +213,16 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -268,24 +271,25 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: quickRecoveryProbe,
-              },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -345,27 +349,28 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure: () => 'network' as const,
+          network: {
+            ...network.config,
+            recoveryCheck: () => false,
+            recoveryProbe: {
+              initialIntervalMs: 100,
+              maxIntervalMs: 100,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure: () => 'network' as const,
-              network: {
-                ...network.config,
-                recoveryCheck: () => false,
-                recoveryProbe: {
-                  initialIntervalMs: 100,
-                  maxIntervalMs: 100,
-                  backoffMultiplier: 1,
-                  jitterRatio: 0,
-                },
-              },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -440,27 +445,28 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure: () => 'outage' as const,
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: {
+              initialIntervalMs: 100,
+              maxIntervalMs: 100,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure: () => 'outage' as const,
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: {
-                  initialIntervalMs: 100,
-                  maxIntervalMs: 100,
-                  backoffMultiplier: 1,
-                  jitterRatio: 0,
-                },
-              },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -535,28 +541,29 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure: () => 'network' as const,
+          network: {
+            ...network.config,
+            recoveryCheck: () => false,
+            recoveryProbe: {
+              initialIntervalMs: 100,
+              maxIntervalMs: 100,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
+          mutationQueueing: { network: 'disallow' },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure: () => 'network' as const,
-              network: {
-                ...network.config,
-                recoveryCheck: () => false,
-                recoveryProbe: {
-                  initialIntervalMs: 100,
-                  maxIntervalMs: 100,
-                  backoffMultiplier: 1,
-                  jitterRatio: 0,
-                },
-              },
-              mutationQueueing: { network: 'disallow' },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -617,28 +624,29 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure: () => 'network' as const,
+          network: {
+            ...network.config,
+            recoveryCheck: () => false,
+            recoveryProbe: {
+              initialIntervalMs: 100,
+              maxIntervalMs: 100,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
+          mutationQueueing: { network: 'disallow' },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure: () => 'network' as const,
-              network: {
-                ...network.config,
-                recoveryCheck: () => false,
-                recoveryProbe: {
-                  initialIntervalMs: 100,
-                  maxIntervalMs: 100,
-                  backoffMultiplier: 1,
-                  jitterRatio: 0,
-                },
-              },
-              mutationQueueing: { network: 'disallow' },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -691,23 +699,24 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure: () => 'outage' as const,
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          mutationQueueing: { outage: 'disallow' },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure: () => 'outage' as const,
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: quickRecoveryProbe,
-              },
-              mutationQueueing: { outage: 'disallow' },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -768,23 +777,24 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure: () => 'outage' as const,
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          mutationQueueing: { outage: 'disallow' },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure: () => 'outage' as const,
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: quickRecoveryProbe,
-              },
-              mutationQueueing: { outage: 'disallow' },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -837,25 +847,26 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          mutationQueueing: { network: 'disallow', outage: 'allow' },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: quickRecoveryProbe,
-              },
-              mutationQueueing: { network: 'disallow', outage: 'allow' },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -923,23 +934,24 @@ describe('document', () => {
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
         id,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            classifyFailure,
+            outage: {
+              enabled: true,
+              recoveryCheck,
+              recoveryProbe: quickRecoveryProbe,
+            },
+            mutationQueueing: { outage: 'allow' },
+          },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: docSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                classifyFailure,
-                outage: {
-                  enabled: true,
-                  recoveryCheck,
-                  recoveryProbe: quickRecoveryProbe,
-                },
-                mutationQueueing: { outage: 'allow' },
-              },
-            }),
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
@@ -1042,24 +1054,25 @@ describe('document', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          outage: {
+            enabled: true,
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              outage: {
-                enabled: true,
-                recoveryCheck: () => false,
-                recoveryProbe: quickRecoveryProbe,
-              },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1094,15 +1107,16 @@ describe('document', () => {
   test('online direct mutations that return undefined still revalidate', async () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       getSessionKey: () => 'hybrid-doc-void-online-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'hybrid-doc-void-online-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'hybrid-doc-void-online-session',
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1187,16 +1201,17 @@ describe('collection', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1291,16 +1306,17 @@ describe('collection', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1461,16 +1477,17 @@ describe('collection', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
             operations: {
               createItems: {
                 inputSchema: batchCollectionCreateInputSchema,
@@ -1578,16 +1595,17 @@ describe('collection', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1656,27 +1674,26 @@ describe('collection', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck: () => false,
+              recoveryProbe: quickRecoveryProbe,
+            },
+          },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyFailure: (error, ctx) =>
-                  classifyMutationOutage(error, ctx.phase)
-                    ? 'outage'
-                    : 'ignore',
-                outage: {
-                  enabled: true,
-                  recoveryCheck: () => false,
-                  recoveryProbe: quickRecoveryProbe,
-                },
-              },
-            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1753,27 +1770,26 @@ describe('collection', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck: () => false,
+              recoveryProbe: quickRecoveryProbe,
+            },
+          },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyFailure: (error, ctx) =>
-                  classifyMutationOutage(error, ctx.phase)
-                    ? 'outage'
-                    : 'ignore',
-                outage: {
-                  enabled: true,
-                  recoveryCheck: () => false,
-                  recoveryProbe: quickRecoveryProbe,
-                },
-              },
-            }),
             operations: {
               renameItem: {
                 inputSchema: renameCollectionInputSchema,
@@ -1842,6 +1858,11 @@ describe('list-query', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1849,10 +1870,6 @@ describe('list-query', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1925,6 +1942,11 @@ describe('list-query', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1932,10 +1954,6 @@ describe('list-query', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -2003,6 +2021,11 @@ describe('list-query', () => {
       { users: [{ id: 1, name: 'Ada' }] },
       {
         getSessionKey: () => 'hybrid-list-void-online-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'hybrid-list-void-online-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -2010,10 +2033,6 @@ describe('list-query', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'hybrid-list-void-online-session',
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -2087,6 +2106,20 @@ describe('list-query', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck: () => false,
+              recoveryProbe: quickRecoveryProbe,
+            },
+          },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -2094,21 +2127,6 @@ describe('list-query', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyFailure: (error, ctx) =>
-                  classifyMutationOutage(error, ctx.phase)
-                    ? 'outage'
-                    : 'ignore',
-                outage: {
-                  enabled: true,
-                  recoveryCheck: () => false,
-                  recoveryProbe: quickRecoveryProbe,
-                },
-              },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -2190,6 +2208,20 @@ describe('list-query', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            outage: {
+              enabled: true,
+              recoveryCheck: () => false,
+              recoveryProbe: quickRecoveryProbe,
+            },
+          },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -2197,21 +2229,6 @@ describe('list-query', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyFailure: (error, ctx) =>
-                  classifyMutationOutage(error, ctx.phase)
-                    ? 'outage'
-                    : 'ignore',
-                outage: {
-                  enabled: true,
-                  recoveryCheck: () => false,
-                  recoveryProbe: quickRecoveryProbe,
-                },
-              },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -2257,24 +2274,25 @@ describe('list-query', () => {
 test('fallback queueing does not reapply the optimistic update', async () => {
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'hybrid-doc-optimistic-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'hybrid-doc-optimistic-session',
+      offlineSession: {
+        network: network.config,
+        classifyFailure: (error, ctx) =>
+          classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+        outage: {
+          enabled: true,
+          recoveryCheck: () => false,
+          recoveryProbe: quickRecoveryProbe,
+        },
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'hybrid-doc-optimistic-session',
-          config: {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => false,
-              recoveryProbe: quickRecoveryProbe,
-            },
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2366,25 +2384,26 @@ test('fallback queueing still creates and reconciles temp entities', async () =>
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          outage: {
+            enabled: true,
+            recoveryCheck: () => true,
+            recoveryProbe: quickRecoveryProbe,
+          },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              outage: {
-                enabled: true,
-                recoveryCheck: () => true,
-                recoveryProbe: quickRecoveryProbe,
-              },
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,

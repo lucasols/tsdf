@@ -17,7 +17,7 @@ import type {
   DefineListQueryOfflineOperations,
   DefineOfflineOperation,
 } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -26,7 +26,7 @@ import {
   type ListQueryParams,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   deleteItemInputSchema,
   userPatchSchema,
@@ -420,16 +420,17 @@ describe('collection hook memoization', () => {
       { '1': { name: 'Ada' }, '2': { name: 'Grace' } },
       {
         getSessionKey: () => 'collection-pending-sync-memoization',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'collection-pending-sync-memoization',
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'collection-pending-sync-memoization',
-              config: { network: network.config },
-            }),
             operations: {
               patchName: {
                 inputSchema: userPatchSchema,
@@ -1028,6 +1029,11 @@ describe('list-query hook memoization', () => {
       },
       {
         getSessionKey: () => 'list-query-item-pending-sync-memoization',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'list-query-item-pending-sync-memoization',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { tables: ['users'] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1035,10 +1041,6 @@ describe('list-query hook memoization', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'list-query-item-pending-sync-memoization',
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1118,6 +1120,11 @@ describe('list-query hook memoization', () => {
       },
       {
         getSessionKey: () => 'list-query-query-pending-sync-memoization',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'list-query-query-pending-sync-memoization',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { tables: ['users', 'products'] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1125,10 +1132,6 @@ describe('list-query hook memoization', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'list-query-query-pending-sync-memoization',
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -1210,6 +1213,11 @@ describe('list-query hook memoization', () => {
       },
       {
         getSessionKey: () => 'list-query-pending-offline-items-memoization',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'list-query-pending-offline-items-memoization',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { tables: ['users'] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1217,11 +1225,6 @@ describe('list-query hook memoization', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () =>
-                'list-query-pending-offline-items-memoization',
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,

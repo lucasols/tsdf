@@ -1,12 +1,9 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import {
-  getGlobalOfflineStatus,
-  useGlobalOfflineStatus,
-  createOfflineSession,
-} from '../../src/main';
+import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { docSchema } from './offlineTestShared';
@@ -50,15 +47,18 @@ test('async outage classification promotes the session into outage mode after a 
 
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure,
+        outage: { enabled: true, recoveryCheck },
+      },
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { classifyFailure, outage: { enabled: true, recoveryCheck } },
-        }),
-      },
+      offline: {},
     },
   });
 
@@ -114,27 +114,27 @@ test('recovery probes back off and stop after a successful recovery check', asyn
 
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure: () => 'outage' as const,
+        outage: {
+          enabled: true,
+          recoveryCheck,
+          recoveryProbe: {
+            initialIntervalMs: 100,
+            maxIntervalMs: 400,
+            backoffMultiplier: 2,
+            jitterRatio: 0,
+          },
+        },
+      },
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: {
-            classifyFailure: () => 'outage' as const,
-            outage: {
-              enabled: true,
-              recoveryCheck,
-              recoveryProbe: {
-                initialIntervalMs: 100,
-                maxIntervalMs: 400,
-                backoffMultiplier: 2,
-                jitterRatio: 0,
-              },
-            },
-          },
-        }),
-      },
+      offline: {},
     },
   });
   const statusHook = renderHook(() => {
@@ -229,19 +229,18 @@ test('default outage recovery probes use the slower backend-friendly cadence', a
 
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure: () => 'outage' as const,
+        outage: { enabled: true, recoveryCheck },
+      },
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: {
-            classifyFailure: () => 'outage' as const,
-            outage: { enabled: true, recoveryCheck },
-          },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
   });
 
@@ -335,28 +334,27 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
 
   const env = createDocumentStoreTestEnv(1, {
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure: () => 'outage' as const,
+        outage: {
+          enabled: true,
+          recoveryCheck,
+          recoveryProbe: {
+            initialIntervalMs: 50,
+            maxIntervalMs: 50,
+            backoffMultiplier: 1,
+            jitterRatio: 0,
+          },
+        },
+      },
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: {
-            classifyFailure: () => 'outage' as const,
-            outage: {
-              enabled: true,
-              recoveryCheck,
-              recoveryProbe: {
-                initialIntervalMs: 50,
-                maxIntervalMs: 50,
-                backoffMultiplier: 1,
-                jitterRatio: 0,
-              },
-            },
-          },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
   });
   const statusHook = renderHook(() => {
@@ -482,19 +480,18 @@ test('stale async outage classifications are ignored after a newer failure settl
     createDocumentStoreTestEnv(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          classifyFailure,
+          outage: { enabled: true, recoveryCheck },
+        },
+      }),
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              classifyFailure,
-              outage: { enabled: true, recoveryCheck },
-            },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     });
 

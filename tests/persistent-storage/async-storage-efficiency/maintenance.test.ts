@@ -1,13 +1,14 @@
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
-import { createOfflineSession } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
 import { clearSessionProtectedKeysSnapshot } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { createStoreManager } from '../../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import { normalizeError } from '../../mocks/testEnvUtils';
 import {
   advanceTime,
   resolveAfterAllTimers,
@@ -774,16 +775,17 @@ describe('async storage efficiency: maintenance', () => {
       {
         id: 'protected-doc',
         getSessionKey: () => dottedSessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => dottedSessionKey,
+          offlineSession: { network: offlineNetwork.config },
+        }),
         testScenario: 'loaded',
         __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         persistentStorage: {
           adapter: opfsPersistentStorage,
           schema: wrappedDocumentSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => dottedSessionKey,
-              config: { network: offlineNetwork.config },
-            }),
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),

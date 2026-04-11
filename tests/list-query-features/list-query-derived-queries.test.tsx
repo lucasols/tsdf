@@ -14,9 +14,9 @@ import {
 } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { DerivedQueriesConfig } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -24,7 +24,7 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { listQueryQueryPayloadSchema } from '../offline/offlineTestShared';
 import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -757,15 +757,14 @@ test('offline derived queries stay sticky across reconnect until the query is in
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: { loaded: { tables: ['users'] } },
   });
 
@@ -897,15 +896,14 @@ test('sticky offline-derived queries keep following local updates and deletes un
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: { loaded: { tables: ['users'] } },
   });
 
@@ -1137,17 +1135,16 @@ test('offline derived query hydration only loads the requested group from persis
     schema: rowSchema,
     itemPayloadSchema: rc_string,
     queryPayloadSchema: listQueryQueryPayloadSchema,
-    offline: {
-      session: createOfflineSession({
-        getSessionKey: () => sessionKey,
-        config: { network: network.config },
-      }),
-      operations: {},
-    },
+    offline: { operations: {} },
   };
 
   // First persist multiple groups so the restart has more data available than the new hook asks for.
   const firstEnv = createListQueryStoreTestEnv(initialServerData, {
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
@@ -1207,6 +1204,11 @@ test('offline derived query hydration only loads the requested group from persis
   await flushAllTimers();
 
   const restartedEnv = createListQueryStoreTestEnv(initialServerData, {
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
@@ -1316,17 +1318,16 @@ test('offline derived query hydration with opfs preloads only the requested grou
     schema: rowSchema,
     itemPayloadSchema: rc_string,
     queryPayloadSchema: listQueryQueryPayloadSchema,
-    offline: {
-      session: createOfflineSession({
-        getSessionKey: () => sessionKey,
-        config: { network: network.config },
-      }),
-      operations: {},
-    },
+    offline: { operations: {} },
   };
 
   // First persist multiple groups through the real store so OPFS records derived-group metadata.
   const firstEnv = createListQueryStoreTestEnv(initialServerData, {
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
@@ -1387,6 +1388,11 @@ test('offline derived query hydration with opfs preloads only the requested grou
   await flushAllTimers();
 
   const restartedEnv = createListQueryStoreTestEnv(initialServerData, {
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     derivedQueries: {
       getQueryGroup,
       getItemGroup,
