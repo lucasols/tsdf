@@ -15,6 +15,7 @@ import {
   parseRecordKindAlias,
 } from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
+import type { MockBrowserOpfsEnvironment } from '../mocks/mockBrowserOpfs';
 import { readMockBrowserOpfsFileForTests } from '../mocks/mockBrowserOpfs';
 import {
   createOpfsPersistentStorageTestStore,
@@ -1017,24 +1018,44 @@ export function getLocalStorageTree(): string {
 }
 
 export function getOpfsDirTree(
-  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
+  source:
+    | ReturnType<typeof createOpfsPersistentStorageTestStore>
+    | MockBrowserOpfsEnvironment,
 ): string {
   const root = createStorageTreeNode();
-  const rootEntries = mockAdapter.mockBrowserOpfs.listEntries(OPFS_ROOT_DIR);
+  const storage = 'mockBrowserOpfs' in source ? source.mockBrowserOpfs : source;
+  const rootEntries = storage.listEntries('');
   const asyncGlobalMaintenance = localStorage.getItem(
     ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
   );
 
-  if (rootEntries.length === 0 && asyncGlobalMaintenance === null)
+  if (rootEntries.length === 0 && asyncGlobalMaintenance === null) {
     return 'empty';
+  }
 
   if (rootEntries.length > 0) {
-    addOpfsDirectoryToTree({
-      dirPath: OPFS_ROOT_DIR,
-      pathSegments: [OPFS_ROOT_DIR],
-      root,
-      storage: mockAdapter.mockBrowserOpfs,
-    });
+    for (const entry of rootEntries) {
+      if (entry.startsWith('dir:')) {
+        const rawName = entry.slice('dir:'.length);
+        const decodedName = decodePathSegment(rawName);
+
+        addOpfsDirectoryToTree({
+          dirPath: rawName,
+          pathSegments: [decodedName],
+          root,
+          storage,
+        });
+        continue;
+      }
+
+      if (!entry.startsWith('file:')) continue;
+
+      const fileName = entry.slice('file:'.length);
+      const raw = storage.readFile(fileName);
+      if (raw === null) continue;
+
+      addTreePath(root, [fileName], getStringByteSize(raw));
+    }
   }
 
   if (asyncGlobalMaintenance !== null) {

@@ -38,6 +38,8 @@ import {
   runOfflineAwareFetch,
 } from './persistentStorage/offline/fetchRuntime';
 import {
+  EMPTY_DIRECT_MUTATION_CONTEXT,
+  type OfflineDirectMutationContext,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
@@ -59,6 +61,7 @@ import {
   type OfflineResolutionRecordForOperation,
   type ParsedOfflineResolutionConflictResultForOperation,
 } from './persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from './persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
@@ -916,6 +919,7 @@ export function createDocumentStore<
     mutation: (ctx: {
       updateState: typeof updateState;
       currentState: State | null;
+      uploads: OfflineDirectMutationContext['uploads'];
     }) => Promise<T>;
     debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
     dontShowErrorToast?: boolean;
@@ -924,6 +928,7 @@ export function createDocumentStore<
 
   type DocumentOnlineMutationArgs<T> = DocumentMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type DocumentOfflineMutationArgs<T> = DocumentMutationArgs<T> & {
@@ -936,6 +941,7 @@ export function createDocumentStore<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -974,6 +980,7 @@ export function createDocumentStore<
     dontShowErrorToast,
     revalidateOnSuccess,
     offline,
+    upload,
   }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
@@ -989,8 +996,12 @@ export function createDocumentStore<
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
 
-    const directMutation = () =>
-      mutation({ updateState, currentState: store.state.data });
+    const directMutation = (ctx: OfflineDirectMutationContext) =>
+      mutation({
+        updateState,
+        currentState: store.state.data,
+        uploads: ctx.uploads,
+      });
 
     const result = await performMutationWithLifecycle({
       startMutation,
@@ -1013,11 +1024,12 @@ export function createDocumentStore<
                 unknown
               >(offlineController),
               offline,
+              upload,
               directMutation,
             })
         : async () => ({
             kind: 'online' as const,
-            data: await directMutation(),
+            data: await directMutation(EMPTY_DIRECT_MUTATION_CONTEXT),
           }),
       onSuccess: (result) => {
         if (revalidateOnSuccess && result.kind === 'online') {

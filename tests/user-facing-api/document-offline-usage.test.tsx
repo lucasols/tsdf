@@ -5,8 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
-  createOfflineSession,
   createDocumentStore,
+  createOfflineSession,
   type DefineDocumentOfflineOperations,
   type DefineOfflineOperation,
   getGlobalOfflineEntities,
@@ -71,6 +71,35 @@ const invalidDocumentTempEntityOperation: DirectDocumentOfflineOperations['setVa
 void invalidDocumentTempEntityOperation;
 
 type DocState = { value: number; label: string };
+
+type UploadedDocumentRef = { assetId: string };
+
+type UploadAwareDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  { updateWithUpload: DefineOfflineOperation<{ attachmentId: string }> },
+  UploadedDocumentRef
+>;
+
+const uploadAwareDocumentOperation: UploadAwareDocumentOfflineOperations['updateWithUpload'] =
+  {
+    inputSchema: rc_object({ attachmentId: rc_string }),
+    kind: 'update',
+    dependsOnUploads: ({ input }) => [input.attachmentId],
+    execute: ({ input, uploads }) => {
+      const resolvedRef = uploads.resolvedRefsById[input.attachmentId];
+      if (!resolvedRef) {
+        throw new Error('Missing upload ref');
+      }
+      const assetId: string = resolvedRef.assetId;
+      void assetId;
+      // @ts-expect-error - upload refs keep the configured object shape
+      const invalidString: string = resolvedRef;
+      void invalidString;
+    },
+    onSuccessExecute: () => {},
+  };
+
+void uploadAwareDocumentOperation;
 
 type RuntimeOnlyDocumentOfflineOperations = DefineDocumentOfflineOperations<
   DocState,

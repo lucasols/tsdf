@@ -29,6 +29,8 @@ import type {
 } from '../internal/testTimelineTypes';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import {
+  EMPTY_DIRECT_MUTATION_CONTEXT,
+  type OfflineDirectMutationContext,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
   runHybridOfflineMutation,
@@ -56,6 +58,7 @@ import {
   type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
 } from '../persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionPersistentStorageConfig,
@@ -1659,7 +1662,10 @@ export function createCollectionStore<
     optimisticUpdate?: (
       payload: CollectionMutationPayloadToUse,
     ) => void | boolean;
-    mutation: (payload: CollectionMutationPayloadToUse) => Promise<T>;
+    mutation: (
+      payload: CollectionMutationPayloadToUse,
+      ctx: { uploads: OfflineDirectMutationContext['uploads'] },
+    ) => Promise<T>;
     onSuccess?: (
       response: Awaited<T>,
       payload: CollectionMutationPayloadToUse,
@@ -1671,6 +1677,7 @@ export function createCollectionStore<
 
   type CollectionOnlineMutationArgs<T> = CollectionMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type CollectionOfflineMutationArgs<T> = CollectionMutationArgs<T> & {
@@ -1683,6 +1690,7 @@ export function createCollectionStore<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -1729,6 +1737,7 @@ export function createCollectionStore<
       onSuccess,
       debounce: _debounce,
       offline,
+      upload,
     }: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
@@ -1751,7 +1760,8 @@ export function createCollectionStore<
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    const directMutation = () => mutation(payloadToUse);
+    const directMutation = (ctx: OfflineDirectMutationContext) =>
+      mutation(payloadToUse, { uploads: ctx.uploads });
 
     const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payloadToUse),
@@ -1774,11 +1784,12 @@ export function createCollectionStore<
                 unknown
               >(offlineController),
               offline,
+              upload,
               directMutation,
             })
         : async () => ({
             kind: 'online' as const,
-            data: await directMutation(),
+            data: await directMutation(EMPTY_DIRECT_MUTATION_CONTEXT),
           }),
       onSuccess: (result) => {
         if (revalidateOnSuccess && affectedItems.length > 0) {

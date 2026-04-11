@@ -1,6 +1,6 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import {
   rc_array,
@@ -8,12 +8,17 @@ import {
   rc_number,
   rc_object,
   rc_parse,
+  rc_record,
   rc_string,
   rc_unknown,
 } from 'runcheck';
 import { Result } from 't-result';
 
 import type { ValidPayload } from '../../utils/storeShared';
+import type {
+  OfflineAttachedUploadIds,
+  OfflineMutationUploadsInput,
+} from '../offlineUploadTypes';
 import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
 import {
   OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
@@ -23,7 +28,10 @@ import {
 import type { StorageAdapter } from '../types';
 import { parseWithSchema, validateWithSchema } from '../validateWithSchema';
 import type { PreparedOfflineMutation } from './mutationRuntime';
-import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
+import {
+  getOfflineSessionUploadsConfig,
+  getOrCreateSessionOfflineCoordinator,
+} from './sessionCoordinator';
 import {
   isModeEffectivelyActive,
   OfflineResolutionConflictParseError,
@@ -95,7 +103,10 @@ type OfflineStoreAdapter = {
 };
 
 type CreateOfflineStoreControllerOptions<
-  TOperations extends Record<string, AnyOfflineOperationDefinition>,
+  TOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition<__LEGIT_ANY__>
+  >,
 > = {
   storeName: string;
   storeType: OfflineStoreType;
@@ -153,6 +164,8 @@ const compactOfflineQueueEntrySchema = rc_object({
   l: rc_number.optionalKey(),
   s: rc_literals('p', 's', 'n'),
   x: rc_array(rc_unknown).optionalKey(),
+  z: rc_record(rc_string).optionalKey(),
+  k: rc_array(rc_string).optionalKey(),
   m: rc_string.optionalKey(),
   y: rc_literals(0, 1).optionalKey(),
   f: rc_unknown.optionalKey(),
@@ -432,12 +445,14 @@ export type OfflineStoreController<
 > = {
   hydrateIfNeeded: () => Promise<void>;
   canQueueMutation: () => boolean;
-  prepareForMutation: <TName extends keyof TOperations & string>(
-    args: OfflineMutationInput<TOperations, TName>,
-  ) => Promise<PreparedOfflineMutation>;
-  queueMutation: <TName extends keyof TOperations & string>(
-    args: OfflineMutationInput<TOperations, TName>,
-  ) => Promise<void>;
+  prepareForMutation: <TName extends keyof TOperations & string>(args: {
+    offline: OfflineMutationInput<TOperations, TName>;
+    upload?: OfflineMutationUploadsInput;
+  }) => Promise<PreparedOfflineMutation>;
+  queueMutation: <TName extends keyof TOperations & string>(args: {
+    offline: OfflineMutationInput<TOperations, TName>;
+    upload?: OfflineMutationUploadsInput;
+  }) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
   getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
   parseOfflineResolutionConflict: <TName extends keyof TOperations & string>(
@@ -473,7 +488,10 @@ export function initializeOfflineStoreController(
 }
 
 export function createOfflineStoreController<
-  TOperations extends Record<string, AnyOfflineOperationDefinition>,
+  TOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition<__LEGIT_ANY__>
+  >,
 >({
   storeName,
   storeType,
@@ -504,6 +522,7 @@ export function createOfflineStoreController<
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
     input: unknown;
+    upload?: OfflineMutationUploadsInput;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -515,6 +534,8 @@ export function createOfflineStoreController<
     operationName: string;
     operation: AnyOfflineOperationDefinition;
     validatedInput: unknown;
+    dependencyUploadIds: string[];
+    upload?: OfflineMutationUploadsInput;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -727,6 +748,7 @@ export function createOfflineStoreController<
       adapter,
       onPersistentStorageError,
       config: sessionConfig,
+      uploads: getOfflineSessionUploadsConfig(offlineSession),
     });
 
     const queueNamespace =
@@ -758,6 +780,12 @@ export function createOfflineStoreController<
                   : {}),
                 s: toCompactOfflineQueueSyncState(entry.syncState),
                 ...(entry.tempIds !== undefined ? { x: entry.tempIds } : {}),
+                ...(entry.attachedUploadIds !== undefined
+                  ? { z: entry.attachedUploadIds }
+                  : {}),
+                ...(entry.dependencyUploadIds !== undefined
+                  ? { k: entry.dependencyUploadIds }
+                  : {}),
                 ...(entry.lastError ? { m: entry.lastError.message } : {}),
                 ...(entry.allowReplayRetry !== undefined
                   ? { y: entry.allowReplayRetry ? 1 : 0 }
@@ -800,6 +828,12 @@ export function createOfflineStoreController<
                         compactEntry.x,
                       ),
                     }
+                  : {}),
+                ...(compactEntry.z !== undefined
+                  ? { attachedUploadIds: compactEntry.z }
+                  : {}),
+                ...(compactEntry.k !== undefined
+                  ? { dependencyUploadIds: compactEntry.k }
                   : {}),
                 ...(compactEntry.m !== undefined
                   ? { lastError: { message: compactEntry.m } }
@@ -1118,6 +1152,18 @@ export function createOfflineStoreController<
     );
   }
 
+  function getDependencyUploadIds(args: {
+    operationName: string;
+    input: unknown;
+  }): string[] {
+    const operation = operations[args.operationName];
+    if (!operation?.dependsOnUploads) return [];
+
+    return [...new Set(operation.dependsOnUploads({ input: args.input }))].sort(
+      (left, right) => left.localeCompare(right),
+    );
+  }
+
   function getTempIdForEntityRef(args: {
     entityRefs: OfflineEntityRef[];
     tempIds?: ValidPayload[];
@@ -1384,6 +1430,14 @@ export function createOfflineStoreController<
     );
     const derivedResolutions =
       buildDerivedResolutionRecords(dependencySnapshot);
+    const referencedUploadIds = [
+      ...new Set(
+        [...queueEntries.values(), ...resolutions.values()].flatMap((entry) => [
+          ...Object.values(entry.attachedUploadIds ?? {}),
+          ...(entry.dependencyUploadIds ?? []),
+        ]),
+      ),
+    ].sort((left, right) => left.localeCompare(right));
     const protectedKeys = storeAdapter.getProtectedCacheKeys(
       entities.map((entity) => ({
         entityKey: entity.entityKey,
@@ -1396,6 +1450,7 @@ export function createOfflineStoreController<
       adapter,
       entities,
       resolutions: derivedResolutions,
+      referencedUploadIds,
       protectedKeys,
       replayHead:
         nextReplayEntry === null
@@ -1461,18 +1516,38 @@ export function createOfflineStoreController<
     return { queueOrders, nextQueueOrderValue: baseQueueOrder + count };
   }
 
+  function buildAttachedUploadIds(
+    entryId: string,
+    upload: OfflineMutationUploadsInput | undefined,
+  ): OfflineAttachedUploadIds | undefined {
+    if (!upload) return undefined;
+
+    return Object.fromEntries(
+      Object.keys(upload)
+        .sort((left, right) => left.localeCompare(right))
+        .map((uploadId) => [uploadId, `${entryId}:${uploadId}`]),
+    );
+  }
+
   function buildFreshQueueEntry(args: {
     current: ActiveSessionState;
     operation: string;
     input: unknown;
     entityRefs: OfflineEntityRef[];
     queueOrder: number;
+    attachedUploads?: OfflineMutationUploadsInput;
+    attachedUploadIds?: OfflineAttachedUploadIds;
+    dependencyUploadIds?: string[];
     tempIds?: ValidPayload[];
   }): OfflineQueueEntry {
     const now = Date.now();
+    const entryId = `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`;
+    const attachedUploadIds =
+      args.attachedUploadIds ??
+      buildAttachedUploadIds(entryId, args.attachedUploads);
 
     return {
-      id: `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`,
+      id: entryId,
       sessionKey: args.current.sessionKey,
       storeName,
       storeType,
@@ -1485,6 +1560,8 @@ export function createOfflineStoreController<
       updatedAt: now,
       lastAttemptAt: null,
       syncState: 'pending',
+      attachedUploadIds,
+      dependencyUploadIds: args.dependencyUploadIds,
       tempIds: args.tempIds,
     };
   }
@@ -1636,6 +1713,8 @@ export function createOfflineStoreController<
       createdAt: now,
       updatedAt: now,
       tempIds: entry.tempIds,
+      attachedUploadIds: entry.attachedUploadIds,
+      dependencyUploadIds: entry.dependencyUploadIds,
     };
   }
 
@@ -1800,6 +1879,45 @@ export function createOfflineStoreController<
       enqueuedAt: args.enqueuedAt,
       updatedAt: args.updatedAt,
       resolveEntityRef,
+    };
+  }
+
+  async function buildOperationExecuteContext(args: {
+    current: ActiveSessionState;
+    entry: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      | 'input'
+      | 'createdAt'
+      | 'updatedAt'
+      | 'attachedUploadIds'
+      | 'dependencyUploadIds'
+    >;
+  }) {
+    const [fileEntries, resolvedRefsById] = await Promise.all([
+      Promise.all(
+        Object.entries(args.entry.attachedUploadIds ?? {}).map(
+          async ([uploadId, storedUploadId]) => {
+            const file = await args.current.session.loadUpload(storedUploadId);
+            if (!file) {
+              throw new Error(`Missing offline upload "${storedUploadId}"`);
+            }
+            return [uploadId, file] as const;
+          },
+        ),
+      ),
+      args.current.session.resolveUploadIds(
+        args.entry.dependencyUploadIds ?? [],
+      ),
+    ]);
+    const filesById: Record<string, File> = Object.fromEntries(fileEntries);
+
+    return {
+      ...buildOperationBaseContext({
+        input: args.entry.input,
+        enqueuedAt: args.entry.createdAt,
+        updatedAt: args.entry.updatedAt,
+      }),
+      uploads: { filesById, resolvedRefsById },
     };
   }
 
@@ -2435,6 +2553,11 @@ export function createOfflineStoreController<
       operationName,
       operation,
       validatedInput,
+      dependencyUploadIds: getDependencyUploadIds({
+        operationName,
+        input: validatedInput,
+      }),
+      upload: args.upload,
       tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
@@ -2496,6 +2619,8 @@ export function createOfflineStoreController<
         operation,
         operationName,
         validatedInput,
+        dependencyUploadIds,
+        upload,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
       },
@@ -2523,6 +2648,11 @@ export function createOfflineStoreController<
     if ((tempEntity || tempEntities) && 'onSuccessExecute' in operation) {
       throw new Error(
         `Offline operation "${operationName}" cannot configure onSuccessExecute when tempEntity or tempEntities is present`,
+      );
+    }
+    if (operation.accumulation && upload !== undefined) {
+      throw new Error(
+        `Offline operation "${operationName}" cannot configure direct uploads together with accumulation`,
       );
     }
 
@@ -2715,6 +2845,9 @@ export function createOfflineStoreController<
       input: validatedInput,
       queueOrder,
       entityRefs,
+      attachedUploads: upload,
+      dependencyUploadIds:
+        dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
       tempIds,
     });
     workingQueue.set(nextEntry.id, nextEntry);
@@ -2751,6 +2884,7 @@ export function createOfflineStoreController<
     });
 
     const persistedMutations: AppliedQueuedMutation[] = [];
+    const persistedUploadIds: string[] = [];
     const appliedPendingMutations: Array<{
       operationName: string;
       validatedInput: unknown;
@@ -2765,6 +2899,29 @@ export function createOfflineStoreController<
         touchedNextEntry: false,
       };
       persistedMutations.push(appliedMutation);
+
+      if (preparedMutation.upload && plannedMutation.nextEntry) {
+        const uploadPayload = preparedMutation.upload;
+        const uploadEntries = Object.entries(
+          plannedMutation.nextEntry.attachedUploadIds ?? {},
+        );
+        await Promise.all(
+          uploadEntries.map(([uploadId, storedUploadId]) => {
+            const file = uploadPayload[uploadId];
+            if (!file) {
+              throw new Error(
+                `Missing direct upload payload "${uploadId}" for queued mutation`,
+              );
+            }
+            persistedUploadIds.push(storedUploadId);
+            return current.session.saveUpload({
+              id: storedUploadId,
+              file,
+              source: 'mutation',
+            });
+          }),
+        );
+      }
 
       for (const removedEntry of plannedMutation.removedEntries) {
         if (plannedMutation.nextEntry?.id === removedEntry.id) {
@@ -2817,6 +2974,14 @@ export function createOfflineStoreController<
             tempId: pendingEntity.tempId,
             pendingEntity: pendingEntity.pendingEntity,
           });
+        }
+      }
+
+      for (const uploadId of persistedUploadIds.reverse()) {
+        try {
+          await current.session.deleteUpload(uploadId);
+        } catch {
+          // Best-effort cleanup; the original error takes priority.
         }
       }
 
@@ -2998,13 +3163,14 @@ export function createOfflineStoreController<
           continue;
         }
 
-        const result = await operation.execute(
-          buildOperationBaseContext({
-            input: entryToUse.input,
-            enqueuedAt: entryToUse.createdAt,
-            updatedAt: entryToUse.updatedAt,
-          }),
-        );
+        // WORKAROUND: The shared replay builder returns the runtime upload-ref
+        // shape, and each operation rebinds that same value to its own
+        // compile-time execute-context generic at the call boundary.
+        const executeContext = __LEGIT_CAST__<
+          Parameters<typeof operation.execute>[0],
+          Awaited<ReturnType<typeof buildOperationExecuteContext>>
+        >(await buildOperationExecuteContext({ current, entry: entryToUse }));
+        const result = await operation.execute(executeContext);
 
         if (entryToUse.tempIds) {
           await reconcileTempEntitiesFromResult({
@@ -3104,9 +3270,10 @@ export function createOfflineStoreController<
     }
   }
 
-  async function queueMutation<TName extends keyof TOperations & string>(
-    args: OfflineMutationInput<TOperations, TName>,
-  ): Promise<void> {
+  async function queueMutation<TName extends keyof TOperations & string>(args: {
+    offline: OfflineMutationInput<TOperations, TName>;
+    upload?: OfflineMutationUploadsInput;
+  }): Promise<void> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) {
@@ -3115,15 +3282,19 @@ export function createOfflineStoreController<
 
     await queuePreparedMutations(
       prepareMutationWithSession(current, {
-        operation: args.operation,
-        input: args.input,
+        operation: args.offline.operation,
+        input: args.offline.input,
+        upload: args.upload,
       }),
     );
   }
 
-  async function prepareForMutation<TName extends keyof TOperations & string>(
-    args: OfflineMutationInput<TOperations, TName>,
-  ): Promise<PreparedOfflineMutation> {
+  async function prepareForMutation<
+    TName extends keyof TOperations & string,
+  >(args: {
+    offline: OfflineMutationInput<TOperations, TName>;
+    upload?: OfflineMutationUploadsInput;
+  }): Promise<PreparedOfflineMutation> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) {
@@ -3131,14 +3302,35 @@ export function createOfflineStoreController<
     }
 
     const prepared = prepareMutationWithSession(current, {
-      operation: args.operation,
-      input: args.input,
+      operation: args.offline.operation,
+      input: args.offline.input,
+      upload: args.upload,
     });
     await current.session.refreshNetworkState();
 
     return {
       initialAction: getInitialOfflineMutationAction(current),
       queueMutation: () => queuePreparedMutations(prepared),
+      getDirectMutationContext: async () => {
+        const preparedCurrent = ensureActiveSession();
+        if (
+          !preparedCurrent ||
+          preparedCurrent.sessionKey !== prepared.currentSessionKey
+        ) {
+          throw offlineSessionUnavailableError;
+        }
+
+        return {
+          uploads: {
+            resolvedRefsById:
+              prepared.dependencyUploadIds.length === 0
+                ? {}
+                : await preparedCurrent.session.resolveUploadIds(
+                    prepared.dependencyUploadIds,
+                  ),
+          },
+        };
+      },
       handleDirectSuccess: () =>
         clearOfflineStatusOnSuccess(prepared.currentSessionKey),
       classifyError: async (error) => {
@@ -3257,6 +3449,8 @@ export function createOfflineStoreController<
               input: retryResolution.input,
               entityRefs: retryResolution.entityRefs,
               queueOrder,
+              attachedUploadIds: retryResolution.attachedUploadIds,
+              dependencyUploadIds: retryResolution.dependencyUploadIds,
               tempIds: retryResolution.tempIds,
             })
           : null;

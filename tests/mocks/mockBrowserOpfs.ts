@@ -55,6 +55,7 @@ type MockBrowserOpfsDeleteDirOperation = MockBrowserOpfsBaseOperation & {
 };
 
 type MockFileNode = {
+  bytes: Uint8Array;
   kind: 'file';
   name: string;
   raw: string;
@@ -98,6 +99,35 @@ function joinPath(pathSegments: string[], name?: string): string {
 
 function getStringByteSize(value: string): number {
   return value.length * 2;
+}
+
+function bytesToString(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes);
+}
+
+function stringToBytes(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+async function normalizeWritableData(
+  data: Blob | BufferSource | string,
+): Promise<{ bytes: Uint8Array; raw: string }> {
+  if (typeof data === 'string') {
+    return { bytes: stringToBytes(data), raw: data };
+  }
+
+  let bytes: Uint8Array;
+  if (data instanceof Blob) {
+    bytes = new Uint8Array(await data.arrayBuffer());
+  } else if (data instanceof ArrayBuffer) {
+    bytes = new Uint8Array(data.slice(0));
+  } else {
+    bytes = new Uint8Array(
+      data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+    );
+  }
+
+  return { bytes, raw: bytesToString(bytes) };
 }
 
 function createDomException(name: string, message: string): DOMException {
@@ -253,6 +283,7 @@ export class MockBrowserOpfsEnvironment {
     }
 
     directory.files.set(fileName, {
+      bytes: stringToBytes(raw),
       kind: 'file',
       name: fileName,
       raw,
@@ -539,6 +570,7 @@ export class MockBrowserOpfsEnvironment {
           existing ??
           (() => {
             const createdNode: MockFileNode = {
+              bytes: stringToBytes(''),
               kind: 'file',
               name,
               raw: '',
@@ -731,6 +763,7 @@ export class MockBrowserOpfsEnvironment {
         const path = joinPath(pathSegments, node.name);
         const currentNode = getCurrentFileNode();
         const fileReadyAtRef: ReadyAtRef = { value: completionTime };
+        const snapshotBytes = currentNode.bytes.slice();
         const snapshotRaw = currentNode.raw;
         const snapshotVersion = currentNode.version;
 
@@ -749,6 +782,38 @@ export class MockBrowserOpfsEnvironment {
         }
 
         return __LEGIT_CAST__<File, unknown>({
+          name: node.name,
+          lastModified: Date.now(),
+          size: snapshotBytes.byteLength,
+          type: '',
+          async arrayBuffer(): Promise<ArrayBuffer> {
+            let { completionTime: arrayBufferCompletionTime } =
+              await waitLatency({
+                delayMs: MOCK_OPFS_LATENCY_MS.textRead,
+                readyAtRef: fileReadyAtRef,
+              });
+            const readDelay = getReadDelay(path);
+            if (readDelay > 0) {
+              const delayedRead = await waitLatency({
+                delayMs: readDelay,
+                readyAtRef: fileReadyAtRef,
+              });
+              arrayBufferCompletionTime = delayedRead.completionTime;
+            }
+
+            assertSnapshotIsReadable();
+
+            operations.push({
+              readRaw: snapshotRaw,
+              startedTime: getFileStartedTime,
+              time: arrayBufferCompletionTime,
+              type: 'readFile',
+              path,
+              valueByteSize: getStringByteSize(snapshotRaw),
+            });
+
+            return snapshotBytes.slice().buffer;
+          },
           async text(): Promise<string> {
             let { completionTime: textCompletionTime } = await waitLatency({
               delayMs: MOCK_OPFS_LATENCY_MS.textRead,
@@ -803,17 +868,20 @@ export class MockBrowserOpfsEnvironment {
           });
           throw error;
         }
+        let pendingBytes = currentNode.bytes.slice();
         let pendingRaw = currentNode.raw;
         const streamReadyAtRef: ReadyAtRef = { value: completionTime };
 
         return __LEGIT_CAST__<FileSystemWritableFileStream, unknown>({
-          async write(data: string): Promise<void> {
+          async write(data: Blob | BufferSource | string): Promise<void> {
             await waitLatency({
               delayMs: MOCK_OPFS_LATENCY_MS.writableWrite,
               readyAtRef: streamReadyAtRef,
             });
             readyAtRef.value = streamReadyAtRef.value;
-            pendingRaw = data;
+            const normalizedData = await normalizeWritableData(data);
+            pendingBytes = new Uint8Array(normalizedData.bytes);
+            pendingRaw = normalizedData.raw;
           },
           async close(): Promise<void> {
             const {
@@ -843,6 +911,7 @@ export class MockBrowserOpfsEnvironment {
             }
             const valueChanged = liveNode.raw !== pendingRaw;
             const valueByteSizeBefore = getStringByteSize(liveNode.raw);
+            liveNode.bytes = pendingBytes;
             liveNode.raw = pendingRaw;
             liveNode.version += 1;
             operations.push({
