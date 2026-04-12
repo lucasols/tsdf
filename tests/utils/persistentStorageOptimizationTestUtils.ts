@@ -1419,6 +1419,7 @@ function buildOpfsOperationCaptureResult(
   const verboseTimelineEntries: Array<{
     endTime: number;
     operation: MockOpfsOperation;
+    openedHandle: boolean;
     openKey: string | null;
     readSnapshot: ReadTimelineSnapshot | null;
     time: number;
@@ -1444,6 +1445,11 @@ function buildOpfsOperationCaptureResult(
 
     verboseTimelineEntries.push({
       endTime: Math.max(0, operation.time - captureStartedAt),
+      openedHandle:
+        operation.type === 'ensureDir' ||
+        operation.type === 'ensureFile' ||
+        ((operation.type === 'openDir' || operation.type === 'openFile') &&
+          operation.exists),
       openKey:
         operation.type === 'openDir' || operation.type === 'ensureDir'
           ? `dir:${stripOpfsRootPrefix(operation.path)}`
@@ -1480,7 +1486,7 @@ function buildOpfsOperationCaptureResult(
 
   for (const entry of sortedVerboseTimelineEntries) {
     const warning =
-      entry.openKey !== null
+      entry.openKey !== null && entry.openedHandle
         ? seenOpenKeys.has(entry.openKey)
           ? DUPLICATE_OPEN_WARNING
           : undefined
@@ -1496,7 +1502,7 @@ function buildOpfsOperationCaptureResult(
       time: entry.time,
     });
 
-    if (entry.openKey !== null) {
+    if (entry.openKey !== null && entry.openedHandle) {
       seenOpenKeys.add(entry.openKey);
     }
     if (entry.readSnapshot !== null) {
