@@ -1,4 +1,5 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { isObject } from '@ls-stack/utils/typeGuards';
 import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
@@ -7,6 +8,7 @@ import {
   getPayloadRecordKey,
   normalizeStaticPolicy,
   parseAsyncStorageRecordKey,
+  serializeProtectedRef,
 } from './asyncStorageShared';
 import type {
   AsyncStorageAdapter,
@@ -324,10 +326,6 @@ const INDEXED_DB_ENTRY_RECORD_KEYS = new Set([
 
 const INDEXED_DB_NAMESPACE_POLICY_RECORD_KEYS = new Set(['p', 's']);
 
-function isRecord(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function toRecordValue(value: unknown): Record<string, unknown> {
   // WORKAROUND: IndexedDB returns untyped object payloads, and callers only use
   // this after confirming the value is a non-array object.
@@ -365,7 +363,7 @@ function toStaticPolicyCandidate(
 }
 
 function isValidEntryRecord(record: unknown): boolean {
-  if (!isRecord(record)) return false;
+  if (!isObject(record)) return false;
   const recordValue = toRecordValue(record);
 
   if (
@@ -382,7 +380,7 @@ function isValidEntryRecord(record: unknown): boolean {
     typeof recordValue.a === 'number' &&
     'd' in recordValue &&
     (recordValue.v === undefined || typeof recordValue.v === 'number') &&
-    (recordValue.m === undefined || isRecord(recordValue.m)) &&
+    (recordValue.m === undefined || isObject(recordValue.m)) &&
     (recordValue.g === undefined || typeof recordValue.g === 'string') &&
     (recordValue.o === undefined || recordValue.o === 1) &&
     (loadedFields === undefined ||
@@ -393,7 +391,7 @@ function isValidEntryRecord(record: unknown): boolean {
 }
 
 function isValidNamespacePolicyRecord(record: unknown): boolean {
-  if (!isRecord(record)) return false;
+  if (!isObject(record)) return false;
   const recordValue = toRecordValue(record);
   if (
     Object.keys(recordValue).some(
@@ -523,7 +521,7 @@ async function getMaintenanceState(
   await transactionDone(transaction);
 
   const recordValue = value?.v;
-  if (!isRecord(recordValue)) {
+  if (!isObject(recordValue)) {
     return { lastSuccessfulCleanupAt: null };
   }
   const metadataRecord = toRecordValue(recordValue);
@@ -1345,14 +1343,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
           const record = entryCursor.value;
           if (!isValidEntryRecord(record) || entryKey === null) return;
-          values.push(
-            JSON.stringify([
-              scope.sessionKey,
-              scope.storeName,
-              scope.kind,
-              entryKey,
-            ]),
-          );
+          values.push(serializeProtectedRef({ ...scope, key: entryKey }));
         },
       );
     });
@@ -1397,12 +1388,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
             if (!isValidEntryRecord(record) || entryKey === null) return;
             const entryRecord = toEntryRecordValue(record);
 
-            const ref = JSON.stringify([
-              scope.sessionKey,
-              scope.storeName,
-              scope.kind,
-              entryKey,
-            ]);
+            const ref = serializeProtectedRef({ ...scope, key: entryKey });
             const shouldProtect = nextProtectedKeys.has(ref);
             if ((entryRecord.o === 1) === shouldProtect) return;
 
@@ -1564,15 +1550,15 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     entries: Map<string, IndexedDbManagedMetadataRecord>;
     staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   } | null {
-    if (!isRecord(value)) return null;
+    if (!isObject(value)) return null;
     const recordValue = toRecordValue(value);
     const rawEntries = recordValue.e;
-    if (!isRecord(rawEntries)) return null;
+    if (!isObject(rawEntries)) return null;
     const rawEntriesRecord = toRecordValue(rawEntries);
 
     const entries = new Map<string, IndexedDbManagedMetadataRecord>();
     for (const [key, rawMetadata] of Object.entries(rawEntriesRecord)) {
-      if (!isRecord(rawMetadata)) return null;
+      if (!isObject(rawMetadata)) return null;
       const rawMetadataRecord = toRecordValue(rawMetadata);
       if (typeof rawMetadataRecord.a !== 'number') return null;
 
