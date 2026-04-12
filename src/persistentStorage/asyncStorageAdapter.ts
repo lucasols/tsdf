@@ -433,16 +433,11 @@ type AsyncStoragePayloadReadState = { value: unknown };
 function cloneStaticPolicy(
   policy: AsyncStorageNamespaceStaticPolicy | null,
 ): AsyncStorageNamespaceStaticPolicy | null {
-  return policy === null
-    ? null
-    : {
-        ...(policy.maxEntries !== undefined
-          ? { maxEntries: policy.maxEntries }
-          : {}),
-        ...(policy.pinnedKeys !== undefined
-          ? { pinnedKeys: [...policy.pinnedKeys] }
-          : {}),
-      };
+  if (policy === null) return null;
+  return {
+    maxEntries: policy.maxEntries,
+    pinnedKeys: policy.pinnedKeys ? [...policy.pinnedKeys] : undefined,
+  };
 }
 
 function cloneManagedMetadataRecord(
@@ -451,9 +446,9 @@ function cloneManagedMetadataRecord(
   return {
     lastAccessAt: metadata.lastAccessAt,
     version: metadata.version,
-    ...(metadata.customMetadata !== undefined
-      ? { customMetadata: { ...metadata.customMetadata } }
-      : {}),
+    customMetadata: metadata.customMetadata
+      ? { ...metadata.customMetadata }
+      : undefined,
   };
 }
 
