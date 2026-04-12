@@ -466,44 +466,39 @@ type AsyncStorageNamespaceIndexReadState = Awaited<
 function cloneNamespaceIndexReadState(
   state: AsyncStorageNamespaceIndexReadState,
 ): AsyncStorageNamespaceIndexReadState {
+  let entries: Map<string, AsyncStorageManagedMetadataRecord> | null = null;
+  if (state.entries !== null) {
+    entries = new Map();
+    for (const [key, metadata] of state.entries) {
+      entries.set(key, cloneManagedMetadataRecord(metadata));
+    }
+  }
   return {
-    entries:
-      state.entries === null
-        ? null
-        : new Map(
-            [...state.entries.entries()].map(([key, metadata]) => [
-              key,
-              cloneManagedMetadataRecord(metadata),
-            ]),
-          ),
+    entries,
     exists: state.exists,
     staticPolicy: cloneStaticPolicy(state.staticPolicy),
     valid: state.valid,
   };
 }
 
-function clonePayloadValue<TValue>(value: TValue): TValue {
-  return klona(value);
-}
+const CACHE_INVALIDATION_REASONS = [
+  'clear',
+  'commit',
+  'remove',
+  'startup-cleanup',
+] as const;
+
+const CACHE_INVALIDATION_REASONS_SET: ReadonlySet<string> = new Set(
+  CACHE_INVALIDATION_REASONS,
+);
 
 type AsyncStorageCacheInvalidationReason =
-  | 'clear'
-  | 'commit'
-  | 'remove'
-  | 'startup-cleanup';
+  (typeof CACHE_INVALIDATION_REASONS)[number];
 
-function parseAsyncStorageCacheInvalidationReason(
+function isCacheInvalidationReason(
   value: unknown,
-): AsyncStorageCacheInvalidationReason | null {
-  switch (value) {
-    case 'clear':
-    case 'commit':
-    case 'remove':
-    case 'startup-cleanup':
-      return value;
-    default:
-      return null;
-  }
+): value is AsyncStorageCacheInvalidationReason {
+  return typeof value === 'string' && CACHE_INVALIDATION_REASONS_SET.has(value);
 }
 
 type AsyncStorageCacheInvalidationMessage = {
@@ -536,13 +531,15 @@ function parseAsyncStorageCacheInvalidationMessage(
   }
 
   const kind = parseAsyncStorageNamespaceKind(scopeRecord.kind);
-  const reason = parseAsyncStorageCacheInvalidationReason(record.reason);
-  if (kind === null || reason === null) return null;
+  if (kind === null) return null;
+
+  const rawReason = record.reason;
+  if (!isCacheInvalidationReason(rawReason)) return null;
 
   return {
     kind: 'namespace-invalidated',
     protocolVersion: 1,
-    reason,
+    reason: rawReason,
     scope: {
       kind,
       sessionKey: scopeRecord.sessionKey,
@@ -1434,9 +1431,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     state: InternalManagedIndexState,
-    args: { advanceGeneration?: boolean } = {},
+    advanceGeneration = true,
   ): Promise<void> {
-    if (args.advanceGeneration !== false) {
+    if (advanceGeneration) {
       this.#advanceNamespaceReadCacheGeneration(scope);
     }
 
@@ -1725,7 +1722,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         this.driver,
         scope,
         { entries: indexEntries, staticPolicy: nextStaticPolicy },
-        { advanceGeneration: false },
+        false,
       );
     } else {
       this.#setCachedNamespaceIndexState(scope, {
@@ -1805,7 +1802,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           entries: indexState.entries,
           staticPolicy: normalizeStaticPolicy(indexState.staticPolicy),
         },
-        { advanceGeneration: false },
+        false,
       );
     }
 
@@ -1914,8 +1911,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           payloadCacheKey,
           async ({ skipCaching }) => {
             const value = (await readPromise)[index] ?? null;
-            const nextState =
-              value === null ? null : { value: clonePayloadValue(value) };
+            const nextState = value === null ? null : { value: klona(value) };
             if (!this.#isReadCacheGenerationSnapshotCurrent(cacheGeneration)) {
               return skipCaching(nextState);
             }
@@ -1932,7 +1928,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         const state = await promisesByKey.get(key);
         return state === null || state === undefined
           ? null
-          : clonePayloadValue(state.value);
+          : klona(state.value);
       }),
     );
   }
@@ -1958,7 +1954,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     state: AsyncStoragePayloadReadState,
   ): void {
     this.#cachedPayloadReads.set(this.#getPayloadCacheKey(scope, key), {
-      value: clonePayloadValue(state.value),
+      value: klona(state.value),
     });
   }
 
