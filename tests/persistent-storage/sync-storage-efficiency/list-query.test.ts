@@ -378,10 +378,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ #5 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item data, <"fourth||2>) | ❌ -> 0.09 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.11 kb -> 0.21 kb
+            |    └ (items index) | 0.11 kb -> 0.27 kb
             ·
       3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.21 kb
+            |    └ (items index) | 0.27 kb
       .     | 🔑[0] #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
       .     | 🔑[1] #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
@@ -526,7 +526,10 @@ describe('sync storage efficiency: list-query', () => {
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(
       `
         e:
-          "users||1: { a: 1735689605910, p: 'users||1' }
+          "users||1:
+            a: 1735689605910
+            f: ['age', 'email', 'id', 'name']
+            p: 'users||1'
       `,
     );
     expect(
@@ -561,7 +564,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.11 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.11 kb -> 0.11 kb
+            |    └ (items index) | 0.11 kb -> 0.17 kb
       "
     `);
   });
@@ -858,7 +861,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-delete-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
       .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
-           |    └ (items index) | 0.20 kb -> 0.11 kb
+           |    └ (items index) | 0.20 kb -> 0.17 kb
       "
     `);
   });
@@ -1115,7 +1118,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.11 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.11 kb -> 0.11 kb
+            |    └ (items index) | 0.11 kb -> 0.17 kb
       "
     `);
   });
@@ -1202,7 +1205,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.11 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.11 kb -> 0.11 kb
+            |    └ (items index) | 0.11 kb -> 0.17 kb
       "
     `);
   });
@@ -1303,12 +1306,17 @@ describe('sync storage efficiency: list-query', () => {
         `tsdf.${sessionKey}.${storeName}.li.`,
       )?.meta,
     ).toMatchInlineSnapshot(`
+      f: ['age', 'email', 'id', 'name']
       o: '✅'
       p: 'users||1'
     `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689605910, o: '✅', p: 'users||1' }
+        "users||1:
+          a: 1735689605910
+          f: ['age', 'email', 'id', 'name']
+          o: '✅'
+          p: 'users||1'
         "users||2: { a: 1735689605910, p: 'users||2' }
     `);
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
@@ -1521,7 +1529,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.11 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.11 kb -> 0.11 kb
+            |    └ (items index) | 0.11 kb -> 0.17 kb
       "
     `);
   });
@@ -1817,7 +1825,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.11 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.11 kb -> 0.11 kb
+           |    └ (items index) | 0.11 kb -> 0.17 kb
       "
     `);
   });

@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { getPayloadRecordKey } from '../../src/persistentStorage/asyncStorageShared';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
-import {
-  buildFileName,
-  getPayloadRecordKey,
-} from '../../src/persistentStorage/opfsFileNaming';
+import { buildFileName } from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { resolveAfterAllTimers } from './genericTestUtils';
@@ -88,7 +86,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       5ms  | 👁️ #1 file-open ✅ tsdf/sess1/docs/d.e.p.json (entry data)
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/docs/d._i.r.json (namespace index)
-      7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.10 kb
+      7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.09 kb
       12ms | ✍️ #2 tsdf/sess1/docs/d._i.r.json
            |    └ (namespace index) | 0.04 kb -> 0.04 kb
       14ms | 🗑️ #1 ✅ tsdf/sess1/docs/d.e.p.json (entry data)
@@ -130,7 +128,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 👁️ #1 file-open ✅ tsdf/sess1/docs/d.e.p.json (entry data)
-      5ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.10 kb
+      5ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.09 kb
       8ms  | end
       "
     `);
@@ -727,11 +725,9 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
         e:
           - a: 0
       `);
-    expect(getParsedOpfsFileData('tsdf/sess1/docs/d.e.p.json'))
-      .toMatchInlineSnapshot(`
-        d:
-          value: { name: 'Cached document', value: 1 }
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/docs/d.e.p.json'),
+    ).toMatchInlineSnapshot(`value: { name: 'Cached document', value: 1 }`);
     expect(
       getParsedOpfsNamespaceValue(
         mockAdapter,
@@ -775,7 +771,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
 
     // Exact hashed file paths should still work as-is.
     expect(getParsedOpfsFileData(exactHashedQueryPath)).toMatchInlineSnapshot(
-      `i: ['"users||1']`,
+      `['"users||1']`,
     );
 
     // Encoded logical file paths should keep resolving to the hashed files.
@@ -784,30 +780,30 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
         'tsdf/sess1/placeholder-paths/li.%22users%7C%7C1.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      d: { id: 1, name: 'Alice' }
-      p: 'users||1'
+      id: 1
+      name: 'Alice'
     `);
 
     // Placeholder file paths should resolve to the same hashed payload files.
     expect(
       getParsedOpfsFileData('tsdf/sess1/placeholder-paths/ci.<"user.1>.p.json'),
     ).toMatchInlineSnapshot(`
-      d: { id: 'user.1', name: 'Collection item' }
-      p: 'user.1'
+      id: 'user.1'
+      name: 'Collection item'
     `);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/placeholder-paths/li.<"users||1>.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      d: { id: 1, name: 'Alice' }
-      p: 'users||1'
+      id: 1
+      name: 'Alice'
     `);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/placeholder-paths/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||1']`);
+    ).toMatchInlineSnapshot(`['"users||1']`);
     expect(listItem.itemKey).toBe('"users||1');
   });
 });

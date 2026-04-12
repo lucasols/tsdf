@@ -2,15 +2,17 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
-import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+  parsePersistedAsyncNamespaceKind,
+} from '../../src/persistentStorage/asyncStorageShared';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
+import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getPayloadRecordKey,
   OPFS_ROOT_DIR,
-  parseFileNameKindAlias,
   parseRecordKey,
   parseRecordKindAlias,
 } from '../../src/persistentStorage/opfsFileNaming';
@@ -694,7 +696,9 @@ function resolvePlaceholderHashedOpfsFilePath(filePath: string): string {
   const parsedFileName = OPFS_FILE_NAME_REGEX.exec(fileName);
   if (parsedFileName?.groups === undefined) return filePath;
 
-  const kind = parseFileNameKindAlias(parsedFileName.groups.kindPart ?? '');
+  const kind = parsePersistedAsyncNamespaceKind(
+    parsedFileName.groups.kindPart ?? '',
+  );
   const recordKind = parseRecordKindAlias(
     parsedFileName.groups.recordPart ?? '',
   );

@@ -1,33 +1,47 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
+import { advanceTime } from '../../utils/genericTestUtils';
 import {
-  advanceTime,
-  flushAllTimers,
-  resolveAfterAllTimers,
-} from '../../utils/genericTestUtils';
-import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
-import {
-  getOpfsDirTree,
-  getParsedOpfsFileData,
-  startOpfsPersistentStorageOperationCapture,
-} from '../../utils/persistentStorageOptimizationTestUtils';
+  getIndexedDbStructureSnapshot,
+  getParsedIndexedDbRecordData,
+  startIndexedDbPersistentStorageOperationCapture,
+} from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
+import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import {
   captureHookRemount,
   createDocumentEnv,
   flushInvalidationPersistence,
-  markEntryOfflineProtected,
+  setProtectedKeysSnapshot,
+  settleIndexedDbStorage,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
 } from './shared';
 
 setupAsyncStorageEfficiencyTestSuite();
 
-describe('async storage efficiency: document', () => {
+async function readDocumentEntryRow(args: {
+  mockAdapter: ReturnType<typeof createIndexedDbPersistentStorageTestStore>;
+  sessionKey: string;
+  storeName: string;
+}) {
+  return getParsedIndexedDbRecordData(args.mockAdapter, {
+    key: [
+      args.sessionKey,
+      args.storeName,
+      'document',
+      DOCUMENT_PERSISTED_ENTRY_KEY,
+    ],
+    storeName: 'entries',
+  });
+}
+
+describe('indexeddb async storage efficiency: document', () => {
   test('document hook remount skips the touch write when the cached document is still in the current recency bucket', async () => {
     const storeName = 'doc-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed with the current fake time so hydration should treat the entry as fresh
@@ -38,7 +52,7 @@ describe('async storage efficiency: document', () => {
 
     // Store creation should only queue the startup maintenance pass.
     const startupCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter);
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     const env = createDocumentEnv({ storeName, sessionKey });
     const startupOperations = startupCapture.finish().timelineString;
 
@@ -66,46 +80,69 @@ describe('async storage efficiency: document', () => {
     // The snapshot ends after the initial entry data+metadata reads, which makes the
     // skipped touch explicit.
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      "
-      time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/doc-remount-flow/d._i.r.json
-           |    └ (namespace index)
-      3ms  | 📖 #1 tsdf/sess1/doc-remount-flow/d._i.r.json
-           |    └ (namespace index) | 0.06 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.p.json
-           |    └ (entry data)
-      7ms  | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.p.json (entry data) | 0.09 kb
-      10ms | end
-      "
+      ""
+      1ms | 📖 entries.getMany scope=["sess1","doc-remount-flow","document"] keys=["d"] -> ["d"]
+      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-flow","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
 
-    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.30 kb)
-      ├ sess1 (0.23 kb)
-      │ └ doc-remount-flow (0.22 kb)
-      │   ├ d._i.r.json (0.08 kb)
-      │   └ d.e.p.json (0.11 kb)
-      └ tsdf._am.g* (0.06 kb)"
-    `);
-
-    expect(
-      getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.p.json'),
-    ).toMatchInlineSnapshot(`value: { name: 'Cached document', value: 7 }`);
-
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d._i.r.json'))
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-        e:
-          - a: 1735689600000
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['i', 'g']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['i', 'a']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - keyPath: ['i', 'o']
+                multiEntry: '❌'
+                name: 'byScopeOfflineProtected'
+                unique: '❌'
+            keyPath: null
+            name: 'entries'
+            rowCount: 1
+            rows:
+              - key: ['["sess1","doc-remount-flow","d"]', 'd']
+                value: 'JSON object | 0.2 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: null
+            name: 'namespacePolicies'
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'doc-remount-flow', 'd']
+                value: 'JSON object | 0.0 kb'
+        version: 1
+      `);
+
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
+        a: 1735689600000
+
+        d:
+          value: { name: 'Cached document', value: 7 }
+
+        i: '["sess1","doc-remount-flow","d"]'
       `);
   });
 
   test('document hook hydration does not skip the touch write once the cached document falls outside the current recency bucket', async () => {
     const storeName = 'doc-remount-stale-touch';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed(
@@ -134,25 +171,11 @@ describe('async storage efficiency: document', () => {
       `value: { name: 'Cached document', value: 9 }`,
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      "
-      time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d._i.r.json
-           |    └ (namespace index)
-      3ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
-           |    └ (namespace index) | 0.06 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d.e.p.json
-           |    └ (entry data)
-      7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
-           |    └ (entry data) | 0.09 kb
-           ·
-      50ms | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
-           |    └ (namespace index) | 0.06 kb
-      55ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
-           |    └ (namespace index) | 0.06 kb -> 0.06 kb
-      57ms | end
-      "
+      ""
+      1ms | 📖 entries.getMany scope=["sess1","doc-remount-stale-touch","document"] keys=["d"] -> ["d"]
+      47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=[] delete=[] touch=["d"]
+      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
@@ -160,7 +183,7 @@ describe('async storage efficiency: document', () => {
   test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {
     const storeName = 'doc-remount-no-cache';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
 
     const env = createDocumentEnv({ storeName, sessionKey });
 
@@ -184,24 +207,10 @@ describe('async storage efficiency: document', () => {
       `value: { name: 'test', value: 42 }`,
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      "
-      time   |
-      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
-             ·
-      1.851s | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
-             |    └ (store directory)
-      1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
-             |    └ (entry data)
-      1.857s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
-             |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
-             |    └ (namespace index)
-      1.862s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
-             |    └ (namespace index) | 0.00 kb -> 0.06 kb
-      1.864s | end
-      "
+      ""
+      1ms | 📖 entries.getMany scope=["sess1","doc-remount-no-cache","document"] keys=["d"] -> []
+      1.851s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-no-cache","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
@@ -209,7 +218,7 @@ describe('async storage efficiency: document', () => {
   test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -226,7 +235,8 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
     hook.unmount();
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
 
     // Repeated direct reads with small gaps should stay fully in memory.
     expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
@@ -248,14 +258,9 @@ describe('async storage efficiency: document', () => {
   test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = documentScope.document.storageKey();
-
-    const metadataPath =
-      'tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json';
-    const payloadPath =
-      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json';
 
     documentScope.document.seed(
       { value: { name: 'Cached document', value: 8 } },
@@ -264,51 +269,48 @@ describe('async storage efficiency: document', () => {
 
     const env = createDocumentEnv({ storeName, sessionKey });
 
-    // Preload the cached document so the async adapter schedules a timestamp touch.
-    await settleStartupBackgroundScan(mockAdapter);
-    const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await resolveAfterAllTimers(preloadPromise);
-
     // Simulate another tab marking the document as offline-protected before the touch runs.
-    markEntryOfflineProtected(mockAdapter, storageKey);
-    expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
-      e:
-        - { a: 1735664400000, o: '✅' }
-    `);
+    setProtectedKeysSnapshot(sessionKey, [storageKey]);
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-    await advanceTime(40);
-    await flushAllTimers();
-    const operationsBreakdown = readCapture.finish().timelineString;
+    // Mount the stale cached document so hydration schedules a metadata touch.
+    await settleStartupBackgroundScan(mockAdapter);
+    const touchCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const hook = renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await advanceTime(250);
+    await settleIndexedDbStorage();
+    const operationsBreakdown = touchCapture.finish().timelineString;
 
-    expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
-      e:
-        - { a: 1735689603010, o: '✅' }
-    `);
-    expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(
+    expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 8 }`,
     );
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
+        a: 1735689603001
+
+        d:
+          value: { name: 'Cached document', value: 8 }
+
+        i: '["sess1","doc-startup-touch-offline-marker","d"]'
+      `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      "
-      time   |
-      40ms   | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      45ms   | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
-             |    └ (namespace index) | 0.08 kb -> 0.08 kb
-             ·
-      1.04s  | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.045s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
-             |    └ (entry data) | 0.09 kb -> 0.09 kb ⚠️ UNCHANGED
-      1.047s | end
-      "
+      ""
+      1ms | 📖 entries.getMany scope=["sess1","doc-startup-touch-offline-marker","document"] keys=["d"] -> ["d"]
+      47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=[] delete=[] touch=["d"]
+      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
   });
 
   test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
     const storeName = 'doc-mutation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -324,7 +326,7 @@ describe('async storage efficiency: document', () => {
 
     // Mutating the already-hydrated document should only need writes.
     const mutationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter);
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.updateState((draft) => {
         draft.value = { name: 'Edited document', value: 99 };
@@ -333,30 +335,26 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(
-      getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.p.json'),
-    ).toMatchInlineSnapshot(`value: { name: 'Edited document', value: 99 }`);
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d._i.r.json'))
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-        e:
-          - a: 1735689600000
+        a: 1735689600000
+
+        d:
+          value: { name: 'Edited document', value: 99 }
+
+        i: '["sess1","doc-mutation-flow","d"]'
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
-      "
-      time   |
-      1.04s  | 📖 #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
-             |    └ (namespace index) | 0.06 kb
-      1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
-             |    └ (entry data) | 0.09 kb -> 0.09 kb
-      1.047s | end
-      "
+      ""
+      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-mutation-flow","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
   });
 
   test('useDocument invalidation snapshots the full persistence timeline through the refetch save', async () => {
     const storeName = 'doc-invalidation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const mockAdapter = createIndexedDbPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -377,7 +375,7 @@ describe('async storage efficiency: document', () => {
 
     // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
     const invalidationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter);
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document', value: 42 });
       env.apiStore.invalidateData('highPriority');
@@ -388,25 +386,26 @@ describe('async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(
-      getParsedOpfsFileData('tsdf/sess1/doc-invalidation-flow/d.e.p.json'),
-    ).toMatchInlineSnapshot(`value: { name: 'Fresh document', value: 42 }`);
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
+        a: 1735689600000
+
+        d:
+          value: { name: 'Fresh document', value: 42 }
+
+        i: '["sess1","doc-invalidation-flow","d"]'
+      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
-      "
-      time   |
-      1.85s  | 📖 #1 tsdf/sess1/doc-invalidation-flow/d._i.r.json
-             |    └ (namespace index) | 0.06 kb
-      1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
-             |    └ (entry data) | 0.09 kb -> 0.09 kb
-      1.857s | end
-      "
+      ""
+      1.855s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
   });
 
   test('repeated invalidations within the debounce window coalesce document persistence writes', async () => {
     const storeName = 'doc-coalesced-invalidations';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const mockAdapter = createIndexedDbPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -427,7 +426,7 @@ describe('async storage efficiency: document', () => {
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
     const firstInvalidationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter);
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document 1', value: 41 });
       env.apiStore.invalidateData('highPriority');
@@ -443,40 +442,39 @@ describe('async storage efficiency: document', () => {
 
     // A second invalidation before the first debounce flush should replace the pending save.
     const secondInvalidationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter);
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document 2', value: 42 });
       env.apiStore.invalidateData('highPriority');
     });
     await advanceTime(1900);
-    await flushAllTimers();
+    await settleIndexedDbStorage();
     const secondInvalidationOperations =
       secondInvalidationCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 2', value: 42 }`,
     );
-    expect(
-      getParsedOpfsFileData(
-        'tsdf/sess1/doc-coalesced-invalidations/d.e.p.json',
-      ),
-    ).toMatchInlineSnapshot(`value: { name: 'Fresh document 2', value: 42 }`);
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
+        a: 1735689600000
+
+        d:
+          value: { name: 'Fresh document 2', value: 42 }
+
+        i: '["sess1","doc-coalesced-invalidations","d"]'
+      `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
-      "
-      time   |
-      1.85s  | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
-             |    └ (namespace index) | 0.06 kb
-      1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
-             |    └ (entry data) | 0.09 kb -> 0.09 kb
-      1.857s | end
-      "
+      ""
+      1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-coalesced-invalidations","document"] put=["d"] delete=[] touch=[]
+      ""
     `);
   });
 
   test('document invalidation preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-offline-marker-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const mockAdapter = createIndexedDbPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = documentScope.document.storageKey();
 
@@ -497,7 +495,7 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
 
     // Simulate another tab marking this document as offline-protected.
-    markEntryOfflineProtected(mockAdapter, storageKey);
+    setProtectedKeysSnapshot(sessionKey, [storageKey]);
 
     // A normal invalidation save should keep the externally-added offline marker.
     act(() => {
@@ -509,14 +507,15 @@ describe('async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(
-      getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d._i.r.json'),
-    ).toMatchInlineSnapshot(`
-      e:
-        - { a: 1735689600000, o: '✅' }
-    `);
-    expect(
-      getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d.e.p.json'),
-    ).toMatchInlineSnapshot(`value: { name: 'Fresh document', value: 42 }`);
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
+        a: 1735689600000
+
+        d:
+          value: { name: 'Fresh document', value: 42 }
+
+        i: '["sess1","doc-offline-marker-flow","d"]'
+        o: 1
+      `);
   });
 });

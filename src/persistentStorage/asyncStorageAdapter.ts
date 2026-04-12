@@ -4,25 +4,21 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import { klona } from 'klona/json';
+import { rc_array, rc_number, rc_object, rc_parse, rc_string } from 'runcheck';
 import {
-  rc_array,
-  rc_number,
-  rc_object,
-  rc_parse,
-  rc_parse_json,
-  rc_string,
-  rc_tuple,
-} from 'runcheck';
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  compareMetadata,
+  getNamespaceId,
+  getPayloadRecordKey,
+  normalizeStaticPolicy,
+  parseProtectedRef,
+  PAYLOAD_RECORD_PREFIX,
+  serializeProtectedRef as serializeProtectedRefInternal,
+} from './asyncStorageShared';
 import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { isOfflineModeStatusValue } from './offline/types';
-import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getNamespaceId,
-  getPayloadRecordKey,
-  PAYLOAD_RECORD_PREFIX,
-} from './opfsFileNaming';
 import { createEvictionComparator } from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
@@ -37,9 +33,9 @@ import type {
   AsyncStorageNamespaceCommitUpsert,
   AsyncStorageNamespaceGetResult,
   AsyncStorageNamespaceHandle,
+  AsyncStorageProtectedEntryRef,
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
-  AsyncStorageProtectedEntryRef,
   AsyncStorageReadOptions,
 } from './types';
 import { parseAsyncStorageNamespaceKind } from './types';
@@ -114,22 +110,6 @@ function setOfflineProtectionMetadata(
   return Object.keys(withoutOfflineMarker).length > 0
     ? withoutOfflineMarker
     : undefined;
-}
-
-function parseProtectedRef(
-  value: string,
-): AsyncStorageProtectedEntryRef | null {
-  const parsed = rc_parse_json(
-    value,
-    rc_tuple([rc_string, rc_string, rc_string, rc_string]),
-  ).unwrapOrNull();
-  if (parsed === null) return null;
-
-  const [sessionKey, storeName, rawKind, key] = parsed;
-  const kind = parseAsyncStorageNamespaceKind(rawKind);
-  if (kind === null) return null;
-
-  return { sessionKey, storeName, kind, key };
 }
 
 const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
@@ -224,33 +204,6 @@ function parseIndexEntries(
   }
 
   return entries;
-}
-
-function normalizeStaticPolicy(
-  policy: AsyncStorageNamespaceStaticPolicy | null | undefined,
-): AsyncStorageNamespaceStaticPolicy | null {
-  if (policy === undefined || policy === null) return null;
-
-  const maxEntries =
-    typeof policy.maxEntries === 'number' &&
-    Number.isInteger(policy.maxEntries) &&
-    policy.maxEntries >= 0
-      ? policy.maxEntries
-      : undefined;
-  const pinnedKeys = Array.isArray(policy.pinnedKeys)
-    ? [...new Set(policy.pinnedKeys)].sort((left, right) =>
-        left.localeCompare(right),
-      )
-    : [];
-
-  if (maxEntries === undefined && pinnedKeys.length === 0) {
-    return null;
-  }
-
-  return {
-    ...(maxEntries !== undefined ? { maxEntries } : {}),
-    ...(pinnedKeys.length > 0 ? { pinnedKeys } : {}),
-  };
 }
 
 /**
@@ -388,6 +341,80 @@ export async function driverGetManyFrom(
 
 export type AsyncStorageManagedMetadataRecord = InternalManagedMetadataRecord;
 
+type AsyncStorageManagedMetadataFilter = { equals: unknown; key: string };
+
+type AsyncStorageManagedMetadataListArgs = {
+  filter?: AsyncStorageManagedMetadataFilter;
+  knownRecordKeys?: string[] | null;
+  order?: AsyncStorageMetadataOrder;
+};
+
+type AsyncStorageManagedDriverCapabilities = {
+  applyManagedCommit?: (
+    scope: AsyncStorageNamespaceScope,
+    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+    helpers: {
+      mergeOfflineProtectionMetadata: (
+        key: string,
+        nextCustomMetadata: Record<string, unknown> | undefined,
+        currentCustomMetadata: Record<string, unknown> | undefined,
+      ) => Record<string, unknown> | undefined;
+    },
+  ) => Promise<void>;
+  clearManagedNamespace?: (scope: AsyncStorageNamespaceScope) => Promise<void>;
+  listManagedKeys?: (scope: AsyncStorageNamespaceScope) => Promise<string[]>;
+  listManagedMetadata?: (
+    scope: AsyncStorageNamespaceScope,
+    args?: AsyncStorageManagedMetadataListArgs,
+  ) => Promise<AsyncStorageEntryMetadata<Record<string, unknown>>[]>;
+  readProtectedStorageKeys?: (sessionKey: string) => Promise<string[]>;
+  readManagedEntries?: <TValue>(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ) => Promise<
+    Map<
+      string,
+      AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
+    >
+  >;
+  readNamespaceIndexState?: (
+    scope: AsyncStorageNamespaceScope,
+    knownRecordKeys?: string[] | null,
+  ) => Promise<{
+    entries: Map<string, AsyncStorageManagedMetadataRecord> | null;
+    exists: boolean;
+    staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
+    valid: boolean;
+  }>;
+  persistNamespaceIndexState?: (
+    scope: AsyncStorageNamespaceScope,
+    state: {
+      entries: Map<string, AsyncStorageManagedMetadataRecord>;
+      staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
+    },
+  ) => Promise<void>;
+  syncSessionProtectedKeys?: (
+    sessionKey: string,
+    protectedKeys: Iterable<string>,
+  ) => Promise<void>;
+};
+
+type AsyncStorageManagedDriver = AsyncStorageDriver & {
+  __tsdfManagedStorage?: AsyncStorageManagedDriverCapabilities;
+};
+
+function getManagedDriverCapabilities(
+  driver: AsyncStorageDriver,
+): AsyncStorageManagedDriverCapabilities | null {
+  // WORKAROUND: Managed-driver capabilities live on an internal optional property
+  // so custom raw drivers can keep the minimal public AsyncStorageDriver shape.
+  const managedDriver = __LEGIT_CAST__<
+    AsyncStorageManagedDriver,
+    AsyncStorageDriver
+  >(driver);
+  return managedDriver.__tsdfManagedStorage ?? null;
+}
+
 export async function readAsyncStorageNamespaceIndexStateUsingDriver(
   driver: AsyncStorageDriver,
   scope: AsyncStorageNamespaceScope,
@@ -398,6 +425,11 @@ export async function readAsyncStorageNamespaceIndexStateUsingDriver(
   staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   valid: boolean;
 }> {
+  const managedCapabilities = getManagedDriverCapabilities(driver);
+  if (managedCapabilities?.readNamespaceIndexState !== undefined) {
+    return managedCapabilities.readNamespaceIndexState(scope, knownRecordKeys);
+  }
+
   if (
     knownRecordKeys != null &&
     !knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)
@@ -664,24 +696,6 @@ function createDefaultMaintenanceState(): AsyncStorageMaintenanceState {
   return { lastSuccessfulCleanupAt: null };
 }
 
-function compareMetadata(
-  left: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  right: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  order: AsyncStorageMetadataOrder,
-): number {
-  if (order === 'key') {
-    return left.key.localeCompare(right.key);
-  }
-
-  if (left.lastAccessAt !== right.lastAccessAt) {
-    return order === 'lru-asc'
-      ? left.lastAccessAt - right.lastAccessAt
-      : right.lastAccessAt - left.lastAccessAt;
-  }
-
-  return left.key.localeCompare(right.key);
-}
-
 class ManagedAsyncStorageNamespaceHandle<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, never>,
@@ -785,6 +799,14 @@ class ManagedAsyncStorageNamespaceHandle<
   async listMetadata(
     args: { order?: AsyncStorageMetadataOrder } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
+    await this.adapter.flushPendingNamespaceCommit(this.scope);
+    return this.adapter.listManagedMetadata<TCustomMetadata>(this.scope, args);
+  }
+
+  async listMetadataByFilter(args: {
+    filter: AsyncStorageManagedMetadataFilter;
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
     await this.adapter.flushPendingNamespaceCommit(this.scope);
     return this.adapter.listManagedMetadata<TCustomMetadata>(this.scope, args);
   }
@@ -984,6 +1006,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       return new Set(protectedKeysSnapshot);
     }
 
+    const managedCapabilities = getManagedDriverCapabilities(driver);
+    if (managedCapabilities?.readProtectedStorageKeys !== undefined) {
+      return new Set(
+        await managedCapabilities.readProtectedStorageKeys(sessionKey),
+      );
+    }
+
     const discovered = await this.#listDiscoveredCleanupScopes(
       driver,
       sessionKey,
@@ -1028,6 +1057,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     ];
 
     if (changedProtectedRefs.length === 0) return;
+
+    const managedCapabilities = getManagedDriverCapabilities(this.driver);
+    if (managedCapabilities?.syncSessionProtectedKeys !== undefined) {
+      await managedCapabilities.syncSessionProtectedKeys(
+        sessionKey,
+        nextProtectedRefSet,
+      );
+      return;
+    }
 
     const updatesByScope = new Map<
       string,
@@ -1131,7 +1169,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     this.#pendingNamespaceCommits.clear();
     this.#recentTouchedBuckets.clear();
     this.#startupCleanupScheduled = false;
-    this.driver.__resetForTests?.();
+    void this.driver.__resetForTests?.();
   }
 
   shouldEnqueueTouch(
@@ -1437,6 +1475,22 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       this.#advanceNamespaceReadCacheGeneration(scope);
     }
 
+    const managedCapabilities = getManagedDriverCapabilities(driver);
+    if (managedCapabilities?.persistNamespaceIndexState !== undefined) {
+      await managedCapabilities.persistNamespaceIndexState(scope, state);
+      if (state.entries.size === 0) {
+        this.#invalidateCachedNamespaceIndexState(scope);
+      } else {
+        this.#setCachedNamespaceIndexState(scope, {
+          entries: state.entries,
+          exists: true,
+          staticPolicy: state.staticPolicy,
+          valid: true,
+        });
+      }
+      return;
+    }
+
     if (state.entries.size === 0) {
       await this.#driverRemoveManyFrom(driver, scope, [
         ASYNC_NAMESPACE_INDEX_RECORD_KEY,
@@ -1468,6 +1522,22 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<
     Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   > {
+    const managedCapabilities = getManagedDriverCapabilities(this.driver);
+    if (managedCapabilities?.readManagedEntries !== undefined) {
+      // WORKAROUND: Fast-path drivers already normalize metadata to the shared
+      // record-based shape; this cast only rebinds the caller's metadata generic.
+      return __LEGIT_CAST__<
+        Map<
+          string,
+          AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null
+        >,
+        Map<
+          string,
+          AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
+        >
+      >(await managedCapabilities.readManagedEntries<TValue>(scope, keys));
+    }
+
     const metadataByKey = await this.#readNamespaceIndexEntriesUsingDriver(
       this.driver,
       scope,
@@ -1527,7 +1597,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async listManagedMetadata<TCustomMetadata extends Record<string, unknown>>(
     scope: AsyncStorageNamespaceScope,
-    args: { order?: AsyncStorageMetadataOrder } = {},
+    args: {
+      filter?: AsyncStorageManagedMetadataFilter;
+      order?: AsyncStorageMetadataOrder;
+    } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
     return this.#listManagedMetadataUsingDriver(this.driver, scope, args);
   }
@@ -1537,11 +1610,18 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   >(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
-    args: {
-      knownRecordKeys?: string[] | null;
-      order?: AsyncStorageMetadataOrder;
-    } = {},
+    args: AsyncStorageManagedMetadataListArgs = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
+    const managedCapabilities = getManagedDriverCapabilities(driver);
+    if (managedCapabilities?.listManagedMetadata !== undefined) {
+      // WORKAROUND: Fast-path drivers already return the shared public metadata
+      // shape, and this cast only rebinds the caller's metadata generic.
+      return __LEGIT_CAST__<
+        AsyncStorageEntryMetadata<TCustomMetadata>[],
+        AsyncStorageEntryMetadata<Record<string, unknown>>[]
+      >(await managedCapabilities.listManagedMetadata(scope, args));
+    }
+
     const metadataEntries = await this.#readNamespaceIndexEntriesUsingDriver(
       driver,
       scope,
@@ -1551,6 +1631,22 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       [];
     for (const [key, metadata] of metadataEntries.entries()) {
       validEntries.push(this.#toPublicMetadata(key, metadata));
+    }
+
+    if (args.filter !== undefined) {
+      const { filter } = args;
+      // WORKAROUND: Entries in this fallback path are already normalized to the
+      // public metadata shape, and this cast only narrows the public generic.
+      return __LEGIT_CAST__<
+        AsyncStorageEntryMetadata<TCustomMetadata>[],
+        AsyncStorageEntryMetadata<Record<string, unknown>>[]
+      >(
+        validEntries
+          .filter((entry) => entry.customMetadata[filter.key] === filter.equals)
+          .sort((left, right) =>
+            compareMetadata(left, right, args.order ?? 'key'),
+          ),
+      );
     }
 
     validEntries.sort((left, right) =>
@@ -1565,6 +1661,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   async listManagedKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
+    const managedCapabilities = getManagedDriverCapabilities(this.driver);
+    if (managedCapabilities?.listManagedKeys !== undefined) {
+      return managedCapabilities.listManagedKeys(scope);
+    }
+
     const indexEntries = await this.#readNamespaceIndexEntriesUsingDriver(
       this.driver,
       scope,
@@ -1578,7 +1679,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   async clearManagedNamespace(
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
-    await this.driver.clear(scope);
+    const managedCapabilities = getManagedDriverCapabilities(this.driver);
+    if (managedCapabilities?.clearManagedNamespace !== undefined) {
+      await managedCapabilities.clearManagedNamespace(scope);
+    } else {
+      await this.driver.clear(scope);
+    }
     this.#invalidateCachedNamespace(scope);
     this.#broadcastNamespaceInvalidation(scope, 'clear');
     const namespaceKey = getNamespaceId(scope);
@@ -1605,6 +1711,42 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
   ): Promise<void> {
+    const upserts = args.upserts ?? [];
+    const removes = [...new Set(args.removes ?? [])];
+    const touches = args.touches ?? [];
+    const touchedKeys = [...new Set(touches.map((touch) => touch.key))];
+
+    const managedCapabilities = getManagedDriverCapabilities(this.driver);
+    if (managedCapabilities?.applyManagedCommit !== undefined) {
+      await managedCapabilities.applyManagedCommit(scope, args, {
+        mergeOfflineProtectionMetadata: (
+          key,
+          nextCustomMetadata,
+          currentCustomMetadata,
+        ) =>
+          this.#mergeOfflineProtectionMetadata(
+            scope,
+            key,
+            nextCustomMetadata,
+            currentCustomMetadata,
+            getSessionProtectedKeysSnapshot(scope.sessionKey),
+          ),
+      });
+      this.#advanceNamespaceReadCacheGeneration(scope);
+      this.#invalidateCachedNamespaceIndexState(scope);
+
+      for (const key of removes) {
+        this.#invalidateCachedPayloadValue(scope, key);
+      }
+
+      for (const upsert of upserts) {
+        this.#setCachedPayloadValue(scope, upsert.key, { value: upsert.value });
+      }
+
+      this.#broadcastNamespaceInvalidation(scope, 'commit');
+      return;
+    }
+
     const currentIndexState = await this.#readNamespaceIndexStateUsingDriver(
       this.driver,
       scope,
@@ -1614,10 +1756,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       currentIndexState.valid && currentIndexState.entries !== null
         ? currentIndexState.entries
         : new Map<string, InternalManagedMetadataRecord>();
-    const upserts = args.upserts ?? [];
-    const removes = [...new Set(args.removes ?? [])];
-    const touches = args.touches ?? [];
-    const touchedKeys = [...new Set(touches.map((touch) => touch.key))];
 
     const now = Date.now();
     const touchesByKey = new Map(
@@ -2876,9 +3014,8 @@ export function createAsyncStorageAdapter(
 ): AsyncStorageAdapter {
   return new ManagedAsyncStorageAdapter(driver);
 }
-
 export function serializeProtectedRef(
   ref: AsyncStorageProtectedEntryRef,
 ): string {
-  return JSON.stringify([ref.sessionKey, ref.storeName, ref.kind, ref.key]);
+  return serializeProtectedRefInternal(ref);
 }

@@ -83,9 +83,15 @@ export function setupDocumentPersistence<
   const storageAdapter = config.adapter;
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
+  const asyncDocumentStorageValueCodec = {
+    serialize: (data: PersistedDocumentData<State | StorageState>) => data.data,
+    deserialize: (value: unknown) =>
+      parsePersistedDocumentData({ data: value }, dataSchema),
+  };
   const handle = createPersistentStorageHandle<
     PersistedDocumentData<State | StorageState>
   >(config, {
+    asyncValueCodec: asyncDocumentStorageValueCodec,
     valueCodec: {
       serialize: (data) => ({ d: data.data }),
       deserialize: (value) =>

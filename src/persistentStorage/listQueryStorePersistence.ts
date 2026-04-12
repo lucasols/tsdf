@@ -19,6 +19,10 @@ import {
   type AsyncStartupCleanupStoreDeletePlan,
 } from './asyncStorageAdapter';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from './asyncStorageShared';
+import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
@@ -28,10 +32,6 @@ import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
 } from './offline/types';
-import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from './opfsFileNaming';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -54,6 +54,7 @@ import {
   isOfflineNetworkModeActiveSync,
   getStoragePrefixForStoreNamespace,
   listAllPersistentStorageNamespaceMetadata,
+  listPersistentStorageNamespaceMetadataByFilter,
   mergeLocalStorageOfflineProtection,
   readManifestPayloadMeta,
   readStorageEntryFromLocalStorageSync,
@@ -111,8 +112,11 @@ type ManagedQueryEntry = {
 };
 
 type ManagedQueryEntriesByKey = Map<string, ManagedQueryEntry>;
-type EntryNamespaceMetadata = { p?: unknown };
-type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & { g?: unknown };
+type EntryNamespaceMetadata = { h?: true; p?: unknown };
+type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & {
+  f?: string[];
+  g?: unknown;
+};
 
 function toItemState<
   ItemState extends ValidStoreState,
@@ -286,17 +290,35 @@ export function setupListQueryPersistence<
       p: data.payload,
       ...(data.loadedFields !== undefined ? { lf: data.loadedFields } : {}),
     }),
-    deserialize: (value: unknown) =>
+    deserialize: (value: unknown, metadata?: EntryNamespaceMetadata) =>
       typeof value === 'object' &&
       value !== null &&
       'd' in value &&
-      'p' in value
+      ('p' in value || metadata?.p !== undefined)
         ? parsePersistedListQueryItemData(
             {
               data: value.d,
-              payload: value.p,
+              payload: 'p' in value ? value.p : metadata?.p,
               ...('lf' in value && Array.isArray(value.lf)
                 ? { loadedFields: value.lf }
+                : {}),
+            },
+            config.itemPayloadSchema,
+            dataSchema,
+          )
+        : null,
+  };
+  const asyncItemStorageValueCodec = {
+    serialize: (data: PersistedListQueryItemData<ItemState | StorageState>) =>
+      data.data,
+    deserialize: (value: unknown, metadata?: ItemEntryNamespaceMetadata) =>
+      metadata?.p !== undefined
+        ? parsePersistedListQueryItemData(
+            {
+              data: value,
+              payload: metadata.p,
+              ...(Array.isArray(metadata.f)
+                ? { loadedFields: metadata.f }
                 : {}),
             },
             config.itemPayloadSchema,
@@ -324,6 +346,20 @@ export function setupListQueryPersistence<
           )
         : null,
   };
+  const asyncQueryStorageValueCodec = {
+    serialize: (data: PersistedListQueryData) => data.items,
+    deserialize: (value: unknown, metadata?: EntryNamespaceMetadata) =>
+      Array.isArray(value)
+        ? parsePersistedListQueryData(
+            {
+              payload: metadata?.p,
+              items: value,
+              hasMore: metadata?.h === true,
+            },
+            config.queryPayloadSchema,
+          )
+        : null,
+  };
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState | StorageState>,
@@ -331,7 +367,11 @@ export function setupListQueryPersistence<
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX },
     {
-      getManifestMeta: (data) => ({ p: data.payload }),
+      asyncValueCodec: asyncItemStorageValueCodec,
+      getManifestMeta: (data) => ({
+        ...(Array.isArray(data.loadedFields) ? { f: data.loadedFields } : {}),
+        p: data.payload,
+      }),
       valueCodec: itemStorageValueCodec,
     },
   );
@@ -341,8 +381,12 @@ export function setupListQueryPersistence<
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX },
     {
+      asyncValueCodec: asyncQueryStorageValueCodec,
       valueCodec: queryStorageValueCodec,
-      getManifestMeta: (data) => ({ p: data.payload }),
+      getManifestMeta: (data) => ({
+        ...(data.hasMore ? { h: true as const } : {}),
+        p: data.payload,
+      }),
     },
   );
 
@@ -1363,9 +1407,10 @@ export function setupListQueryPersistence<
               });
           } else {
             const metadataEntries =
-              await listAllPersistentStorageNamespaceMetadata(itemNamespace, {
-                order: 'key',
-              });
+              await listPersistentStorageNamespaceMetadataByFilter(
+                itemNamespace,
+                { equals: groupKey, key: 'g', order: 'key' },
+              );
             itemKeys = metadataEntries.flatMap((entry) => {
               const payload = validateWithSchema(
                 config.itemPayloadSchema,
@@ -1375,9 +1420,7 @@ export function setupListQueryPersistence<
                 return [];
               }
 
-              return readManifestGroupMeta(entry.customMetadata) === groupKey
-                ? [entry.key]
-                : [];
+              return [entry.key];
             });
           }
 
@@ -2324,6 +2367,7 @@ export function setupListQueryPersistence<
       };
       finalItemDataByKey.set(itemKey, {
         metadata: {
+          ...(Array.isArray(loadedFields) ? { f: loadedFields } : {}),
           p: itemQuery.payload,
           ...(getItemDerivedGroup
             ? { g: getItemDerivedGroup(item, itemQuery.payload) }

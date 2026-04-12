@@ -18,7 +18,7 @@ Exported from `tsdf`:
 | Export                                                                                                       | Description                                                 |
 | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
 | `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                   |
-| `StorageBackend`                                                                                             | `'localStorage' \| 'opfs'`                                  |
+| `StorageBackend`                                                                                             | `'localStorage' \| 'opfs' \| 'indexedDb'`                   |
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                        |
 | `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores         |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                            |
@@ -37,12 +37,12 @@ Each store accepts `persistentStorage` in options:
 
 Common options (applies to all store configs):
 
-| Option                            | Required | Description                                             |
-| --------------------------------- | -------- | ------------------------------------------------------- |
-| `schema`                          | Yes      | Schema used to validate restored data.                  |
-| `adapter`                         | Yes      | `'local-sync'` or a custom async adapter.               |
-| `version`                         | No       | Cache version; bump to invalidate old entries.          |
-| `onPersistentStorageError(error)` | No       | Callback for write/read failures (quota, decode, etc.). |
+| Option                            | Required | Description                                                                                       |
+| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `schema`                          | Yes      | Schema used to validate restored data.                                                            |
+| `adapter`                         | Yes      | `'local-sync'`, `opfsPersistentStorage`, `indexedDbPersistentStorage`, or a custom async adapter. |
+| `version`                         | No       | Cache version; bump to invalidate old entries.                                                    |
+| `onPersistentStorageError(error)` | No       | Callback for write/read failures (quota, decode, etc.).                                           |
 
 Store-specific options:
 
@@ -81,6 +81,12 @@ Session-level `mutationQueueing` can allow or disallow durable offline mutation 
 
 - Default behavior for all stores.
 - Uses `FileSystemAccess`-backed persistent storage.
+- Hydration is asynchronous, and can be triggered explicitly with preload APIs.
+
+### `indexedDb`
+
+- Alternative built-in async backend for browsers where IndexedDB is preferred.
+- Stores one logical row per entry and uses native indexes for recency ordering, group lookups, and protected-key scans.
 - Hydration is asynchronous, and can be triggered explicitly with preload APIs.
 
 ## Example configuration
@@ -133,6 +139,7 @@ const settingsStore = createDocumentStore<Settings>({
 - Expired entries are removed by a periodic scan:
   - `localStorage`: ~1 week old entries
   - `opfs`: ~2 weeks old entries
+  - `indexedDb`: ~2 weeks old entries
 
 ## Preload APIs
 
@@ -177,6 +184,6 @@ When the selected backend does not support async preload, preload methods report
 - `clearSessionStorage(sessionKey, backend)`:
   remove all TSDF entries for one session/backend.
 - `clearAllSessionStorage(sessionKey)`:
-  remove TSDF entries for one session across both backends.
+  remove TSDF entries for one session across localStorage, OPFS, and IndexedDB.
 
 Use these on logout, user switch, or explicit privacy actions.

@@ -3,11 +3,13 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getNamespaceId,
+  getPayloadRecordKey,
+} from './asyncStorageShared';
+import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getNamespaceId,
-  getPayloadRecordKey,
   joinPath,
   OPFS_ROOT_DIR,
   parseFileNameInfo,

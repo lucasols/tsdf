@@ -3,6 +3,7 @@ import {
   createCollectionStore,
   createDocumentStore,
   createListQueryStore,
+  indexedDbPersistentStorage,
   localPersistentStorage,
   opfsPersistentStorage,
   type StoreError,
@@ -53,7 +54,7 @@ function getQueryParams(): {
   scenario: ScenarioName;
   storeId: string | null;
   sessionKey: string | null;
-  adapterKey: 'localStorage' | 'opfs';
+  adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -63,16 +64,24 @@ function getQueryParams(): {
   const storeId = searchParams.get('storeId');
   const sessionKey = searchParams.get('sessionKey');
   const adapterKey = (searchParams.get('adapter') ?? 'opfs') as
+    | 'indexedDb'
     | 'localStorage'
     | 'opfs';
 
   return { pageId, scenario, storeId, sessionKey, adapterKey };
 }
 
-function getPersistentStorageAdapter(adapterKey: 'localStorage' | 'opfs') {
-  return adapterKey === 'localStorage'
-    ? localPersistentStorage
-    : opfsPersistentStorage;
+function getPersistentStorageAdapter(
+  adapterKey: 'indexedDb' | 'localStorage' | 'opfs',
+) {
+  switch (adapterKey) {
+    case 'indexedDb':
+      return indexedDbPersistentStorage;
+    case 'localStorage':
+      return localPersistentStorage;
+    case 'opfs':
+      return opfsPersistentStorage;
+  }
 }
 
 function FocusControls({
@@ -454,7 +463,7 @@ function PersistDocumentScenario({
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  adapterKey: 'localStorage' | 'opfs';
+  adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
@@ -529,7 +538,7 @@ function PersistCollectionScenario({
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  adapterKey: 'localStorage' | 'opfs';
+  adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
@@ -601,7 +610,7 @@ function PersistListScenario({
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  adapterKey: 'localStorage' | 'opfs';
+  adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>

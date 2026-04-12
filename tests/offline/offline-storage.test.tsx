@@ -1047,11 +1047,11 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     await flushAllTimers();
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (1.21 kb)
-      ├ offline-opfs-format-session (1.14 kb)
-      │ └ offline-opfs-format-doc (1.09 kb)
+      "tsdf (1.20 kb)
+      ├ offline-opfs-format-session (1.13 kb)
+      │ └ offline-opfs-format-doc (1.08 kb)
       │   ├ d._i.r.json (0.10 kb)
-      │   ├ d.e.p.json (0.05 kb)
+      │   ├ d.e.p.json (0.04 kb)
       │   ├ oe._i.r.json (0.10 kb)
       │   ├ oe.document.p.json (0.20 kb)
       │   ├ oq._i.r.json (0.17 kb)
@@ -1085,9 +1085,7 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       getParsedOpfsFileData(
         'tsdf/offline-opfs-format-session/offline-opfs-format-doc/d.e.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d: { value: 2 }
-    `);
+    ).toMatchInlineSnapshot(`value: 2`);
     expect(
       getParsedOpfsFileData(
         'tsdf/offline-opfs-format-session/offline-opfs-format-doc/oe._i.r.json',

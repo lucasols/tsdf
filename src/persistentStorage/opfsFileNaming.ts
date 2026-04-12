@@ -1,17 +1,17 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
+import {
+  encodePersistedAsyncNamespaceKind,
+  getPayloadRecordKey,
+  parsePersistedAsyncNamespaceKind,
+  parseAsyncStorageRecordKey,
+} from './asyncStorageShared';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import type { AsyncStorageNamespaceScope } from './types';
 
 export const OPFS_ROOT_DIR = 'tsdf';
-
-export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
-  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
-}
 export const JSON_FILE_EXTENSION = '.json';
-export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
-export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
 
 const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
 const HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX = 'h~';
@@ -43,58 +43,6 @@ export function encodeFileNameSegment(value: string): string {
 
 export function joinPath(...segments: string[]): string {
   return segments.filter((segment) => segment.length > 0).join('/');
-}
-
-export function getPayloadRecordKey(key: string): string {
-  return `${PAYLOAD_RECORD_PREFIX}${key}`;
-}
-
-export function getFileNameKindAlias(
-  kind: AsyncStorageNamespaceScope['kind'],
-): string {
-  switch (kind) {
-    case 'document':
-      return 'd';
-    case 'collection.item':
-      return 'ci';
-    case 'listQuery.item':
-      return 'li';
-    case 'listQuery.query':
-      return 'lq';
-    case 'offline.queue':
-      return 'oq';
-    case 'offline.conflict':
-      return 'oc';
-    case 'offline.entity':
-      return 'oe';
-    case '__internal.protected':
-      return 'ip';
-  }
-}
-
-export function parseFileNameKindAlias(
-  value: string,
-): AsyncStorageNamespaceScope['kind'] | null {
-  switch (value) {
-    case 'd':
-      return 'document';
-    case 'ci':
-      return 'collection.item';
-    case 'li':
-      return 'listQuery.item';
-    case 'lq':
-      return 'listQuery.query';
-    case 'oq':
-      return 'offline.queue';
-    case 'oc':
-      return 'offline.conflict';
-    case 'oe':
-      return 'offline.entity';
-    case 'ip':
-      return '__internal.protected';
-    default:
-      return null;
-  }
 }
 
 export type OpfsRecordKind = 'payload' | 'raw';
@@ -146,14 +94,7 @@ export function parseRecordKey(
 ):
   | { recordKind: 'payload'; userKey: string }
   | { rawKey: string; recordKind: 'raw' } {
-  if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
-    return {
-      recordKind: 'payload',
-      userKey: key.slice(PAYLOAD_RECORD_PREFIX.length),
-    };
-  }
-
-  return { rawKey: key, recordKind: 'raw' };
+  return parseAsyncStorageRecordKey(key);
 }
 
 export function toRecordKey(
@@ -173,7 +114,7 @@ export function buildFileName(
   key: string,
 ): string {
   const parsedRecordKey = parseRecordKey(key);
-  const kindAlias = getFileNameKindAlias(scope.kind);
+  const kindAlias = encodePersistedAsyncNamespaceKind(scope.kind);
 
   if (parsedRecordKey.recordKind === 'raw') {
     return (
@@ -233,7 +174,7 @@ export function parseFileNameInfo(fileName: string): ParsedOpfsFileName | null {
   const entryPart = parts[1] ?? '';
   const recordPart = parts[2] ?? '';
 
-  const kind = parseFileNameKindAlias(kindPart);
+  const kind = parsePersistedAsyncNamespaceKind(kindPart);
   if (kind === null) return null;
 
   const recordKind = parseRecordKindAlias(recordPart);

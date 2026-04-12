@@ -242,21 +242,20 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this cold-boot hydration test also
     // protects the persisted document shape it depends on.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.31 kb)
-      └ offline-fetching-document-async-storage-only (0.31 kb)
-        └ offline-fetching-document-async-storage-only (0.22 kb)
+      "tsdf (0.30 kb)
+      └ offline-fetching-document-async-storage-only (0.29 kb)
+        └ offline-fetching-document-async-storage-only (0.21 kb)
           ├ d._i.r.json (0.08 kb)
-          └ d.e.p.json (0.05 kb)"
+          └ d.e.p.json (0.04 kb)"
     `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d._i.r.json`))
       .toMatchInlineSnapshot(`
         e:
           - a: 1735689600000
       `);
-    expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d.e.p.json`))
-      .toMatchInlineSnapshot(`
-        d: { value: 8 }
-      `);
+    expect(
+      getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d.e.p.json`),
+    ).toMatchInlineSnapshot(`value: 8`);
 
     const env = createDocumentStoreTestEnv(1, {
       id: storeName,
@@ -487,11 +486,11 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this offline hydration flow also
     // protects the exact stored collection payload it consumes.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.48 kb)
-      └ offline-fetching-collection-async-storage-only (0.48 kb)
-        └ offline-fetching-collection-async-storage-only (0.39 kb)
+      "tsdf (0.44 kb)
+      └ offline-fetching-collection-async-storage-only (0.44 kb)
+        └ offline-fetching-collection-async-storage-only (0.35 kb)
           ├ ci._i.r.json (0.13 kb)
-          └ ci.h~228010772.p.json (0.17 kb)"
+          └ ci.h~228010772.p.json (0.13 kb)"
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/ci._i.r.json`),
@@ -503,12 +502,7 @@ describe('offline fetching scenarios', () => {
       getParsedOpfsFileData(
         `tsdf/${sessionKey}/${storeName}/ci.<"users||1>.p.json`,
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { name: 'Ada from async storage' }
-
-      p: 'users||1'
-    `);
+    ).toMatchInlineSnapshot(`value: { name: 'Ada from async storage' }`);
 
     const env = createCollectionStoreTestEnv(
       { 'users||1': { name: 'Ada from server' } },
@@ -738,13 +732,13 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS contents so the cold list-query hydration test
     // protects both the cached item and the exact persisted query membership.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.73 kb)
-      └ offline-fetching-list-query-async-storage-only (0.72 kb)
-        └ offline-fetching-list-query-async-storage-only (0.63 kb)
+      "tsdf (0.67 kb)
+      └ offline-fetching-list-query-async-storage-only (0.67 kb)
+        └ offline-fetching-list-query-async-storage-only (0.58 kb)
           ├ li._i.r.json (0.13 kb)
-          ├ li.h~228010772.p.json (0.16 kb)
+          ├ li.h~228010772.p.json (0.12 kb)
           ├ lq._i.r.json (0.17 kb)
-          └ lq.h~2902406637.p.json (0.08 kb)"
+          └ lq.h~2902406637.p.json (0.07 kb)"
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/li._i.r.json`),
@@ -765,16 +759,14 @@ describe('offline fetching scenarios', () => {
         `tsdf/${sessionKey}/${storeName}/li.<"users||1>.p.json`,
       ),
     ).toMatchInlineSnapshot(`
-      d: { id: 1, name: 'Ada from async storage' }
-      p: 'users||1'
+      id: 1
+      name: 'Ada from async storage'
     `);
     expect(
       getParsedOpfsFileData(
         `tsdf/${sessionKey}/${storeName}/lq.<{tableId:"users"}>.p.json`,
       ),
-    ).toMatchInlineSnapshot(`
-      i: ['"users||1']
-    `);
+    ).toMatchInlineSnapshot(`['"users||1']`);
 
     const env = createListQueryStoreTestEnv(
       { users: [{ id: 1, name: 'Ada from server' }] },

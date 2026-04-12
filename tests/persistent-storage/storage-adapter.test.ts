@@ -13,11 +13,11 @@ import {
 } from 'vitest';
 import { clearSessionStorage } from '../../src/main';
 import { createAsyncStorageAdapter } from '../../src/persistentStorage/asyncStorageAdapter';
-import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getPayloadRecordKey,
-} from '../../src/persistentStorage/opfsFileNaming';
+} from '../../src/persistentStorage/asyncStorageShared';
+import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';
 import type {
   AsyncStorageDiscoveredScope,
   AsyncStorageDriver,

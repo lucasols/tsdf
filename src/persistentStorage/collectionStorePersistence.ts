@@ -18,16 +18,16 @@ import {
   type AsyncStartupCleanupScopePlan,
   type AsyncStartupCleanupStoreDeletePlan,
 } from './asyncStorageAdapter';
+import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from './asyncStorageShared';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from './offline/types';
-import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from './opfsFileNaming';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -175,13 +175,25 @@ export function setupCollectionPersistence<
     serialize: (
       data: PersistedCollectionItemData<ItemState | StorageState>,
     ) => ({ d: data.data, p: data.payload }),
-    deserialize: (value: unknown) =>
+    deserialize: (value: unknown, metadata?: { p?: unknown }) =>
       typeof value === 'object' &&
       value !== null &&
       'd' in value &&
-      'p' in value
+      ('p' in value || metadata?.p !== undefined)
         ? parsePersistedCollectionItemData(
-            { data: value.d, payload: value.p },
+            { data: value.d, payload: 'p' in value ? value.p : metadata?.p },
+            config.payloadSchema,
+            dataSchema,
+          )
+        : null,
+  };
+  const asyncItemStorageValueCodec = {
+    serialize: (data: PersistedCollectionItemData<ItemState | StorageState>) =>
+      data.data,
+    deserialize: (value: unknown, metadata?: { p?: unknown }) =>
+      metadata?.p !== undefined
+        ? parsePersistedCollectionItemData(
+            { data: value, payload: metadata.p },
             config.payloadSchema,
             dataSchema,
           )
@@ -194,6 +206,7 @@ export function setupCollectionPersistence<
   >(
     { ...persistentConfig, entryPrefix: COLLECTION_STORAGE_ENTRY_PREFIX },
     {
+      asyncValueCodec: asyncItemStorageValueCodec,
       getManifestMeta: (data) => ({ p: data.payload }),
       valueCodec: itemStorageValueCodec,
     },
@@ -287,6 +300,9 @@ export function setupCollectionPersistence<
     const deleteKeys = new Set<string>();
     const nextEntries = new Map(indexState.entries);
     let indexChanged = false;
+    const staticPolicyChanged =
+      JSON.stringify(indexState.staticPolicy) !==
+      JSON.stringify(persistedStaticPolicy);
 
     for (const [key, metadata] of indexState.entries) {
       const payload = validateWithSchema(
@@ -300,7 +316,42 @@ export function setupCollectionPersistence<
       }
     }
 
-    if (!indexChanged) {
+    const effectiveStaticPolicy =
+      persistedStaticPolicy ?? indexState.staticPolicy;
+    if (
+      effectiveStaticPolicy?.maxEntries !== undefined &&
+      nextEntries.size > effectiveStaticPolicy.maxEntries
+    ) {
+      const candidateEntries = [...nextEntries.entries()].map(
+        ([itemKey, metadata]) => ({
+          itemKey,
+          lastAccessAt: metadata.lastAccessAt,
+          pinned: pinnedItemKeys.has(itemKey),
+        }),
+      );
+
+      candidateEntries.sort(
+        createEvictionComparator(
+          [(entry) => entry.pinned],
+          (entry) => entry.lastAccessAt,
+        ),
+      );
+
+      const keptKeys = new Set(
+        candidateEntries
+          .slice(0, effectiveStaticPolicy.maxEntries)
+          .map(({ itemKey }) => itemKey),
+      );
+
+      for (const { itemKey } of candidateEntries) {
+        if (keptKeys.has(itemKey)) continue;
+        deleteKeys.add(getPayloadRecordKey(itemKey));
+        nextEntries.delete(itemKey);
+        indexChanged = true;
+      }
+    }
+
+    if (!indexChanged && !staticPolicyChanged) {
       return { scopePlans: [], storeDeletePlans: [] };
     }
 
@@ -314,7 +365,7 @@ export function setupCollectionPersistence<
           deleteKeys: [...deleteKeys],
           persistEntries: nextEntries.size > 0 ? nextEntries : null,
           persistStaticPolicy:
-            nextEntries.size > 0 ? indexState.staticPolicy : undefined,
+            nextEntries.size > 0 ? persistedStaticPolicy : undefined,
           scope,
         } satisfies AsyncStartupCleanupScopePlan,
       ],
