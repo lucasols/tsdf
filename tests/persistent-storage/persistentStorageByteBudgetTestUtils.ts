@@ -1,12 +1,7 @@
 import { createCompactListQueryLocalStorageEntry } from '../../src/persistentStorage/compactListQueryLocalStorageEntry';
 import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
+import { getUtf8ByteSize } from '../../src/persistentStorage/persistenceUtils';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-
-const utf8Encoder = new TextEncoder();
-
-function getUtf8ByteSize(value: string): number {
-  return utf8Encoder.encode(value).byteLength;
-}
 
 function getDefaultTimestamp(): number {
   return TEST_INITIAL_TIME.valueOf();

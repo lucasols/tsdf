@@ -14,6 +14,7 @@ import {
   PAYLOAD_RECORD_PREFIX,
   resolveHashedPayloadRecordKeyFromValue,
 } from '../../src/persistentStorage/opfsFileNaming';
+import { getUtf8ByteSize } from '../../src/persistentStorage/persistenceUtils';
 import type {
   AsyncStorageNamespaceScope,
   StorageCacheEntry,
@@ -42,12 +43,6 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
-}
-
-const utf8Encoder = new TextEncoder();
-
-function getUtf8ByteSize(value: string): number {
-  return utf8Encoder.encode(value).byteLength;
 }
 
 function createStorageCacheEntry<T>(

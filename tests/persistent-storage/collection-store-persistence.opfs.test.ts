@@ -544,8 +544,8 @@ describe('opfs: collection store persistence', () => {
 
     expect(collectionScope.collection.listStoredPayloads())
       .toMatchInlineSnapshot(`
-      ['2']
-    `);
+        ['2']
+      `);
 
     env.apiStore.deleteItemState('2');
     await advanceTime(1100);
