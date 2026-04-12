@@ -23,7 +23,6 @@ import {
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
-import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { listQueryQueryPayloadSchema } from '../offline/offlineTestShared';
 import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
@@ -35,6 +34,7 @@ import {
   startOpfsPersistentStorageOperationCapture,
   startPersistentStorageOperationCapture,
 } from '../utils/persistentStorageOptimizationTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
@@ -107,16 +107,12 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterAll(() => {
@@ -1182,8 +1178,10 @@ test('offline derived query hydration only loads the requested group from persis
   // Snapshot the persisted local-sync state so the restart coverage also
   // protects the stored query membership and item index shape.
   expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-    "tsdf (2.08 kb)
-    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.76 kb)
+    "tsdf (2.13 kb)
+    ├ _m (0.81 kb)
+    │ ├ g (0.04 kb)
+    │ └ r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.76 kb)
     └ derived-queries-persisted-groups.derived-queries-persisted-groups-store (1.31 kb)
       ├ li (0.73 kb)
       │ ├ "products||1 (0.12 kb)
@@ -1419,6 +1417,9 @@ test('offline derived query hydration with opfs preloads only the requested grou
   // derived-group preload reads for this restart path.
   await advanceTime(3000);
   await flushAllTimers();
+  // Simulate the memory boundary of a real app restart. Persisted OPFS data
+  // stays on disk, but the per-tab async adapter cache should not survive.
+  resetSessionForTests();
   mockAdapter.clearInstrumentation();
   restartedEnv.clearTimeline();
   restartedEnv.addTimelineComments('beforeNextAction', [
@@ -1454,21 +1455,35 @@ test('offline derived query hydration with opfs preloads only the requested grou
   expect(hydrationOperations).toMatchInlineSnapshot(`
     "
     time |
-    0    | 📖 #1 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq._i.r.json
+    1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
+    2ms  | 📂 dir-open ✅ tsdf/derived-queries-opfs-groups (session directory)
+    3ms  | 📂 dir-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store
+         |    └ (store directory)
+    4ms  | 👁️ #1 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq._i.r.json
+         |    └ (queries index)
+    .    | 👁️ #2 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
+         |    └ (items index)
+    5ms  | 📖 #1 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq._i.r.json
          |    └ (queries index) | 0.28 kb
     .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
          |    └ (items index) | 0.77 kb
-    3ms  | 📖 #3 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq.h~2902406637.p.json
+    8ms  | 👁️ #3 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq.h~2902406637.p.json
+         |    └ (query data, <{tableId:"users"}>)
+    .    | 👁️ #4 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~228010772.p.json
+         |    └ (item data, <"users||1>)
+    .    | 👁️ #5 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~1937155452.p.json
+         |    └ (item data, <"users||2>)
+    .    | 👁️ #6 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~3224064498.p.json
+         |    └ (item data, <"users||3>)
+    9ms  | 📖 #3 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq.h~2902406637.p.json
          |    └ (query data, <{tableId:"users"}>) | 0.09 kb
-    .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
-         |    └ (items index) | 0.77 kb ⚠️ REPEATED READ <10ms UNCHANGED
-    6ms  | 📖 #4 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~228010772.p.json
+    .    | 📖 #4 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~228010772.p.json
          |    └ (item data, <"users||1>) | 0.10 kb
     .    | 📖 #5 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~1937155452.p.json
          |    └ (item data, <"users||2>) | 0.10 kb
     .    | 📖 #6 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~3224064498.p.json
          |    └ (item data, <"users||3>) | 0.10 kb
-    9ms  | end
+    12ms | end
     "
   `);
   expect(hydrationOperations).not.toContain('products');
@@ -1478,7 +1493,7 @@ test('offline derived query hydration with opfs preloads only the requested grou
     3s     | -          | -                | -            | -- timeline-cleared
     .      | -          | -                | -            | -- mount only the users query after restart; products should stay cold
     .      | no         |                  | loading      | [query-status, query-items, is-derived] ui-initialized
-    3.009s | yes        | Ada, Alan, Grace | success      | [query-status, query-items, is-derived] ui-changed
+    3.012s | yes        | Ada, Alan, Grace | success      | [query-status, query-items, is-derived] ui-changed
     "
   `);
   // Only the requested users group should be hydrated into state; unrelated persisted groups stay cold.

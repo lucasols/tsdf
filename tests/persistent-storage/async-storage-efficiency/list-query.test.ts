@@ -518,30 +518,27 @@ describe('async storage efficiency: list-query', () => {
       1.866s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.28 kb -> 0.30 kb
              ·
-      3.62s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
-             |    └ (queries index) | 0.30 kb
-             ·
-      3.663s | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      3.66s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.30 kb
       .      | 📖 #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.11 kb
-      3.666s | 🗑️ #6 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~2817177027.p.json
+      3.663s | 🗑️ #6 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~2817177027.p.json
              |    └ (query data)
       .      | 👁️ #7 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
              |    └ (query data, <{tableId:"fourth"}>)
       .      | 👁️ #8 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
              |    └ (item data, <"fourth||2>)
-      3.668s | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
+      3.665s | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.09 kb -> 0.15 kb
-      3.669s | ✍️ #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
+      3.666s | ✍️ #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
              |    └ (query data, <{tableId:"fourth"}>) | 0.00 kb -> 0.04 kb
       .      | ✍️ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
              |    └ (item data, <"fourth||2>) | 0.00 kb -> 0.09 kb
-      3.673s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      3.67s  | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.30 kb -> 0.30 kb
       .      | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.11 kb -> 0.21 kb
-      3.675s | end
+      3.672s | end
       "
     `);
   });
@@ -851,8 +848,8 @@ describe('async storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "admins||4: { a: 1735689610121, p: 'admins||4' }
-        "standalone||1: { a: 1735689610121, p: 'standalone||1' }
+        "admins||4: { a: 1735689610115, p: 'admins||4' }
+        "standalone||1: { a: 1735689610115, p: 'standalone||1' }
 
       s: { m: 2 }
     `);
@@ -863,23 +860,20 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         {tableId:"admins"}:
-          a: 1735689610121
+          a: 1735689610115
           p: { tableId: 'admins' }
         {tableId:"users"}:
-          a: 1735689607154
+          a: 1735689607151
           p: { tableId: 'users' }
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📖 #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.24 kb
-             ·
-      1.853s | 📖 #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+      1.85s  | 📖 #1 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb
-      .      | 📖 #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+      .      | 📖 #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
              |    └ (items index) | 0.24 kb
-      1.856s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
+      1.853s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data)
       .      | 🗑️ #4 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
              |    └ (item data, <"users||3>)
@@ -889,17 +883,17 @@ describe('async storage efficiency: list-query', () => {
              |    └ (item data, <"standalone||1>)
       .      | 👁️ #7 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data, <"admins||4>)
-      1.859s | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
+      1.856s | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
       .      | ✍️ #6 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
              |    └ (item data, <"standalone||1>) | 0.00 kb -> 0.11 kb
       .      | ✍️ #7 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data, <"admins||4>) | 0.00 kb -> 0.12 kb
-      1.863s | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+      1.86s  | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb -> 0.28 kb
-      .      | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+      .      | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
              |    └ (items index) | 0.24 kb -> 0.25 kb
-      1.865s | end
+      1.862s | end
       "
     `);
 
@@ -1402,13 +1396,11 @@ describe('async storage efficiency: list-query', () => {
            |    └ (item data, <"users||1>)
       7ms  | 📖 #2 tsdf/sess1/lq-preload-item-state/li.h~228010772.p.json
            |    └ (item data, <"users||1>) | 0.10 kb
-      10ms | 📖 #1 tsdf/sess1/lq-preload-item-state/li._i.r.json
-           |    └ (items index) | 0.20 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      13ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
+      10ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
            |    └ (item data, <"users||2>)
-      14ms | 📖 #3 tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
+      11ms | 📖 #3 tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
            |    └ (item data, <"users||2>) | 0.11 kb
-      17ms | end
+      14ms | end
       "
     `);
 
@@ -2129,8 +2121,6 @@ describe('async storage efficiency: list-query', () => {
            |    └ (queries index)
       3ms  | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
            |    └ (queries index) | 0.28 kb
-      .    | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
-           |    └ (queries index) | 0.28 kb ⚠️ REPEATED READ <10ms UNCHANGED
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2044383828.p.json
@@ -2143,8 +2133,6 @@ describe('async storage efficiency: list-query', () => {
            |    └ (items index)
       11ms | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
            |    └ (items index) | 0.21 kb
-      .    | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
-           |    └ (items index) | 0.21 kb ⚠️ REPEATED READ <10ms UNCHANGED
       14ms | 👁️ #5 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
       .    | 👁️ #6 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~2924752681.p.json
@@ -2361,14 +2349,11 @@ describe('async storage efficiency: list-query', () => {
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📖 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq._i.r.json
-             |    └ (queries index) | 0.31 kb
-             ·
-      1.853s | 📖 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
+      1.85s  | 📖 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
              |    └ (items index) | 0.24 kb
-      1.858s | ✍️ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~2924752681.p.json
+      1.855s | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~2924752681.p.json
              |    └ (item data, <"projects||1>) | 0.10 kb -> 0.16 kb
-      1.86s  | end
+      1.857s | end
       "
     `);
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);

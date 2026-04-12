@@ -27,3 +27,18 @@ export async function clearRegisteredOfflineUploadStorage(
     throw firstFailure.reason;
   }
 }
+
+/**
+ * Test-only primitive for resetting the session-to-upload-adapter registry.
+ *
+ * Prefer calling `resetSessionForTests()` from
+ * `tests/utils/resetSessionForTests.ts` so restart-style tests reset the full
+ * session/runtime boundary instead of invoking this low-level reset directly.
+ */
+export function __resetOfflineUploadRegistryForTests(): void {
+  if (!import.meta.env.TEST) {
+    throw new Error('[tsdf] __resetOfflineUploadRegistryForTests is test-only');
+  }
+
+  uploadAdaptersBySession.clear();
+}

@@ -2224,6 +2224,14 @@ export function getGlobalOfflineResolutions(
   return registry.get(sessionKey)?.getResolutions() ?? [];
 }
 
+/**
+ * Test-only primitive for resetting just the offline session coordinator
+ * registry.
+ *
+ * Prefer calling `resetSessionForTests()` from
+ * `tests/utils/resetSessionForTests.ts` so restart-style tests reset the full
+ * session/runtime boundary instead of invoking this low-level reset directly.
+ */
 export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   if (!import.meta.env.TEST) {
     throw new Error(

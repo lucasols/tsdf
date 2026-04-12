@@ -1164,7 +1164,13 @@ export function refreshLocalStorageTimestamp(
   });
 }
 
-/** Resets expiration scan tracking. Exported for test cleanup. */
+/**
+ * Resets persistent-storage maintenance and expiration-tracking state.
+ *
+ * Exported for test cleanup, but restart-style tests should prefer
+ * `resetSessionForTests()` from `tests/utils/resetSessionForTests.ts` so this
+ * low-level reset stays coordinated with the other session/runtime resets.
+ */
 export function resetExpirationScanTracking(): void {
   cancelScheduledLocalStorageMaintenance?.();
   cancelScheduledLocalStorageMaintenance = null;
