@@ -5,11 +5,11 @@ import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../../src/persistentStorage/offline/sessionCoordinator';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../../src/persistentStorage/offline/sessionCoordinator';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
@@ -23,13 +23,13 @@ import {
   type Tables,
 } from '../../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
+import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
+import { startIndexedDbPersistentStorageOperationCapture } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
 import {
   createIndexedDbPersistentStorageTestStore,
   getCurrentIndexedDbPersistentStorageTestStore,
   resetCurrentIndexedDbPersistentStorageTestStore,
 } from '../../utils/indexedDbPersistentStorageTestStore';
-import { startIndexedDbPersistentStorageOperationCapture } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
-import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 
 export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -50,8 +50,8 @@ export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
 
 export const listQueryParamsSchema = rc_object({ tableId: rc_string });
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
-const INDEXED_DB_REAL_TASK_SETTLE_PASSES = 20;
-let pendingTestEnvDisposers: Array<() => void> = [];
+const INDEXED_DB_REAL_TASK_SETTLE_PASSES = 3;
+const pendingTestEnvDisposers: Array<() => void> = [];
 
 async function waitForRealTaskTick(): Promise<void> {
   await new Promise<void>((resolve) => {
@@ -59,14 +59,29 @@ async function waitForRealTaskTick(): Promise<void> {
   });
 }
 
+async function flushIndexedDbTimers(): Promise<void> {
+  await flushAllTimers();
+}
+
 export type MockIndexedDbAdapter = ReturnType<
   typeof createIndexedDbPersistentStorageTestStore
 >;
 
 async function settleIndexedDbAsyncPhase(
-  _mockAdapter?: MockIndexedDbAdapter,
+  mockAdapter?: MockIndexedDbAdapter,
 ): Promise<void> {
+  const activeAdapter =
+    mockAdapter ??
+    (() => {
+      try {
+        return getCurrentIndexedDbPersistentStorageTestStore();
+      } catch {
+        return null;
+      }
+    })();
+
   for (let pass = 0; pass < INDEXED_DB_REAL_TASK_SETTLE_PASSES; pass++) {
+    await activeAdapter?.flushPendingWrites();
     await Promise.resolve();
     await waitForRealTaskTick();
   }
@@ -87,11 +102,11 @@ async function waitForCapturedOperationsToSettle(
       operationCount === previousOperationCount ? stablePasses + 1 : 0;
     previousOperationCount = operationCount;
 
-    if (operationCount > 0 && stablePasses >= 4) {
+    if (operationCount > 0 && stablePasses >= 2) {
       return;
     }
 
-    if (pass >= 12 && operationCount === 0 && stablePasses >= 4) {
+    if (pass >= 8 && operationCount === 0 && stablePasses >= 2) {
       return;
     }
   }
@@ -140,10 +155,9 @@ export function createMockIndexedDbAdapter() {
   return createIndexedDbPersistentStorageTestStore();
 }
 
-export async function waitForScheduledCleanup(
-  delayMs = 3000,
-): Promise<void> {
+export async function waitForScheduledCleanup(delayMs = 3000): Promise<void> {
   await advanceTime(delayMs);
+  await settleIndexedDbStorage();
   await settleIndexedDbStorage();
 }
 
@@ -167,10 +181,10 @@ export async function flushInvalidationPersistence(
 
 export async function settleIndexedDbStorage(): Promise<void> {
   await advanceTime(0);
-  await flushAllTimers();
+  await flushIndexedDbTimers();
   await settleIndexedDbAsyncPhase();
   await advanceTime(0);
-  await flushAllTimers();
+  await flushIndexedDbTimers();
   await settleIndexedDbAsyncPhase();
   await act(async () => {
     await Promise.resolve();
@@ -215,7 +229,9 @@ export async function resolveAfterIndexedDbStorage<T>(
   ]);
 
   if (settledResult === pendingResult) {
-    throw new Error('IndexedDB promise did not settle while draining storage work.');
+    throw new Error(
+      'IndexedDB promise did not settle while draining storage work.',
+    );
   }
 
   if (settledResult.status === 'rejected') {
@@ -231,6 +247,19 @@ export async function captureHookRemount<Result>(args: {
   render: () => Result;
   settleTimeMs?: number;
 }) {
+  const defaultIsReady = (result: Result) => result !== null;
+  const waitUntilReady = async (hook: { result: { current: Result } }) => {
+    const current = hook.result.current;
+    if (args.isReady !== undefined) {
+      await waitForHookValue(() => hook.result.current, args.isReady);
+      return;
+    }
+
+    if (current === null) {
+      await waitForHookValue(() => hook.result.current, defaultIsReady);
+    }
+  };
+
   const firstMountCapture = startIndexedDbPersistentStorageOperationCapture(
     args.mockAdapter,
   );
@@ -247,9 +276,7 @@ export async function captureHookRemount<Result>(args: {
   const secondHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);
   await settleIndexedDbStorageCapture(args.mockAdapter);
-  if (args.isReady !== undefined) {
-    await waitForHookValue(() => secondHook.result.current, args.isReady);
-  }
+  await waitUntilReady(secondHook);
   const remountOperations = remountCapture.finish().timelineString;
 
   return { firstMountOperations, remountOperations, secondHook };
@@ -263,6 +290,8 @@ export async function waitForHookValue<Result>(
 
   for (let pass = 0; pass < 80; pass++) {
     if (isReady(current)) return current;
+    await flushIndexedDbTimers();
+    await settleIndexedDbAsyncPhase();
     await Promise.resolve();
     await waitForRealTaskTick();
     await act(async () => {
@@ -283,6 +312,8 @@ export async function waitForIndexedDbCondition(
 ): Promise<void> {
   for (let pass = 0; pass < 80; pass++) {
     if (isReady()) return;
+    await flushIndexedDbTimers();
+    await settleIndexedDbAsyncPhase();
     await Promise.resolve();
     await waitForRealTaskTick();
     await act(async () => {

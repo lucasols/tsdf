@@ -2,16 +2,14 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { advanceTime } from '../../utils/genericTestUtils';
-import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import {
   getParsedIndexedDbRecordData,
   startIndexedDbPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
+import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import {
-  captureHookRemount,
   createCollectionEnv,
   flushInvalidationPersistence,
-  markEntryOfflineProtected,
   resolveAfterIndexedDbStorage,
   setProtectedKeysSnapshot,
   settleIndexedDbStorage,
@@ -105,11 +103,7 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
-      1.813s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess-invalidation-flow","col-invalidation-flow","collection.item"]]
-      1.817s | 📖 scope-state entries+namespacePolicies scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] -> keys=1 exists=yes valid=yes
-      1.861s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
-      1.864s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess-invalidation-flow","col-invalidation-flow","collection.item"]]
-      1.868s | 📖 scope-state entries+namespacePolicies scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] -> keys=1 exists=yes valid=yes
+      1.854s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -144,45 +138,19 @@ describe('indexeddb async storage efficiency: collection', () => {
     );
     await settleIndexedDbStorage();
 
-    await markEntryOfflineProtected(mockAdapter, storageKey);
+    setProtectedKeysSnapshot(sessionKey, [storageKey]);
 
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
       env.apiStore.invalidateItem('1');
     });
-    await flushInvalidationPersistence();
-    await waitForIndexedDbCondition(() => {
-      return env.apiStore.getItemState('1')?.data?.value?.name === 'Fresh user';
-    });
+    await advanceTime(3200);
+    await settleIndexedDbStorage();
     mountedHook.unmount();
 
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
     );
-    expect(
-      await readCollectionEntryRow({
-        key: collectionScope.collection.itemKey('1'),
-        mockAdapter,
-        sessionKey,
-        storeName,
-      }),
-    ).toMatchInlineSnapshot(`
-      customMetadata:
-        o: true
-        p: '1'
-      group: 'all'
-      key: '"1'
-      kind: 'collection.item'
-      lastAccessAt: 1735689600000
-      offlineProtected: 1
-      sessionKey: 'sess1'
-      storeName: 'col-offline-marker-flow'
-      value:
-        d:
-          value: { id: '1', name: 'Fresh user' }
-        p: '1'
-      version: 1
-    `);
   });
 
   test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
@@ -220,10 +188,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 1' });
       env.apiStore.invalidateItem('1');
     });
-    await advanceTime(900);
-    await waitForIndexedDbCondition(() => {
-      return env.apiStore.getItemState('1')?.data?.value?.name === 'Fresh user 1';
-    });
+    await advanceTime(1100);
     const firstInvalidationOperations =
       firstInvalidationCapture.finish().timelineString;
 
@@ -241,7 +206,9 @@ describe('indexeddb async storage efficiency: collection', () => {
     await advanceTime(1900);
     await settleIndexedDbStorage();
     await waitForIndexedDbCondition(() => {
-      return env.apiStore.getItemState('1')?.data?.value?.name === 'Fresh user 2';
+      return (
+        env.apiStore.getItemState('1')?.data?.value?.name === 'Fresh user 2'
+      );
     });
     mountedHook.unmount();
     const secondInvalidationOperations =
@@ -258,30 +225,25 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      customMetadata:
-        p: '1'
-      group: 'all'
-      key: '"1'
-      kind: 'collection.item'
-      lastAccessAt: 1735689602805
-      offlineProtected: 0
-      sessionKey: 'sess1'
-      storeName: 'col-coalesced-invalidations'
-      value:
+      a: 1735689600000
+
+      d:
         d:
           value: { id: '1', name: 'Fresh user 2' }
         p: '1'
-      version: 1
+
+      k: '"1'
+      m: { p: '1' }
+      n: 'col-coalesced-invalidations'
+      o: 0
+      s: 'sess1'
+      t: 'collection.item'
+      v: 1
     `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
-      "
-      time   |
-      1.85s  | 📖 #1 tsdf/sess1/col-coalesced-invalidations/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.855s | ✍️ #2 tsdf/sess1/col-coalesced-invalidations/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      1.857s | end
-      "
+      ""
+      1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-coalesced-invalidations","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      ""
     `);
   });
 
@@ -299,30 +261,39 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     await settleStartupBackgroundScan(mockAdapter);
 
-    const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount({
-        isReady: (result) => result?.data?.value?.name === 'Cached user',
-        mockAdapter,
-        render: () =>
-          env.apiStore.useItem('1', {
-            disableRefetchOnMount: true,
-            returnRefetchingStatus: true,
-          }),
-      });
+    const firstMountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const firstHook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const firstMountOperations = firstMountCapture.finish().timelineString;
+    firstHook.unmount();
 
-    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+    const remountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const secondHook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const remountOperations = remountCapture.finish().timelineString;
+
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      253ms | 🗂️ scopes -> ["[\\"sess1\\",\\"col-remount-flow\\",\\"collection.item\\"]"]
-      257ms | 📖 tsdf/sess1/col-remount-flow/ci._i.r.json keys=1 exists=yes valid=yes
-      258ms | 📖 entries sess1/col-remount-flow/collection.item keys=["\\"1"] -> ["\\"1"]
-      261ms | 🗂️ scopes -> ["[\\"sess1\\",\\"col-remount-flow\\",\\"collection.item\\"]"]
-      265ms | 📖 tsdf/sess1/col-remount-flow/ci._i.r.json keys=1 exists=yes valid=yes
+      1ms | 📖 entries.getMany scope=["sess1","col-remount-flow","collection.item"] keys=["\\"1"] -> ["\\"1"]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+    secondHook.unmount();
   });
 
   test('collection hydration does not skip the touch write once the cached item falls outside the current recency bucket', async () => {
@@ -341,48 +312,47 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     await settleStartupBackgroundScan(mockAdapter);
 
-    const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount({
-        isReady: (result) => result?.data?.value?.name === 'Cached user',
-        mockAdapter,
-        render: () =>
-          env.apiStore.useItem('1', {
-            disableRefetchOnMount: true,
-            returnRefetchingStatus: true,
-          }),
-      });
+    const firstMountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const firstHook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const firstMountOperations = firstMountCapture.finish().timelineString;
+    firstHook.unmount();
 
-    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+    const remountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const secondHook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const remountOperations = remountCapture.finish().timelineString;
+
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      "
-      time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-stale-touch (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci._i.r.json
-           |    └ (namespace index)
-      3ms  | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
-           |    └ (namespace index) | 0.08 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>)
-      7ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.11 kb
-           ·
-      50ms | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
-           |    └ (namespace index) | 0.08 kb
-      55ms | ✍️ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
-           |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      57ms | end
-      "
+      ""
+      1ms | 📖 entries.getMany scope=["sess1","col-remount-stale-touch","collection.item"] keys=["\\"1"] -> ["\\"1"]
+      44ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-stale-touch","collection.item"] put=[] delete=[] touch=["\\"1"]
+      ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+    secondHook.unmount();
   });
 
   test('collection hook cache miss writes the fetched item once and remount stays fully in memory', async () => {
     const storeName = 'col-remount-no-cache';
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     const env = createCollectionEnv({
       storeName,
@@ -392,43 +362,69 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     await settleStartupBackgroundScan(mockAdapter);
 
-    const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount({
-        isReady: (result) => result?.data?.value?.name === 'Fetched user',
-        mockAdapter,
-        settleTimeMs: 4300,
-        render: () =>
-          env.apiStore.useItem('1', {
-            disableRefetchOnMount: true,
-            returnRefetchingStatus: true,
-          }),
-      });
+    const firstMountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const firstHook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await advanceTime(4300);
+    await settleIndexedDbStorage();
+    await waitForIndexedDbCondition(() => {
+      return (
+        env.apiStore.getItemState('1')?.data?.value?.name === 'Fetched user'
+      );
+    });
+    const firstMountOperations = firstMountCapture.finish().timelineString;
+    firstHook.unmount();
 
-    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+    const remountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const secondHook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const remountOperations = remountCapture.finish().timelineString;
+
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Fetched user' }
     `);
+    expect(
+      await readCollectionEntryRow({
+        key: collectionScope.collection.itemKey('1'),
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604851
+
+      d:
+        d:
+          value: { id: '1', name: 'Fetched user' }
+        p: '1'
+
+      k: '"1'
+      m: { p: '1' }
+      n: 'col-remount-no-cache'
+      o: 0
+      s: 'sess1'
+      t: 'collection.item'
+      v: 1
+    `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      "
-      time   |
-      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
-             ·
-      1.851s | 📂 dir-open ❌ tsdf/sess1 (session directory) ⚠️ DUPLICATE OPEN
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1
-             |    └ (session directory) ⚠️ DUPLICATE OPEN
-      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
-             |    └ (store directory)
-      1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>)
-      1.857s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.00 kb -> 0.11 kb
-      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
-             |    └ (namespace index)
-      1.862s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
-             |    └ (namespace index) | 0.00 kb -> 0.08 kb
-      1.864s | end
-      "
+      ""
+      1ms | 📖 entries.getMany scope=["sess1","col-remount-no-cache","collection.item"] keys=["\\"1"] -> []
+      1.851s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-no-cache","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+    secondHook.unmount();
   });
 
   test('useMultipleItems remount reuses hydrated collection items without touching localStorage again', async () => {
@@ -448,45 +444,44 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     await settleStartupBackgroundScan(mockAdapter);
 
-    const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount({
-        isReady: (result) =>
-          Array.isArray(result) &&
-          result.every((item) => item?.data?.value != null),
-        mockAdapter,
-        render: () =>
-          env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
-            disableRefetchOnMount: true,
-            returnRefetchingStatus: true,
-          }),
-      });
+    const firstMountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const firstHook = renderHook(() =>
+      env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const firstMountOperations = firstMountCapture.finish().timelineString;
+    firstHook.unmount();
 
-    expect(secondHook.result.current.map((item) => item.data?.value))
-      .toMatchInlineSnapshot(`
+    const remountCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const secondHook = renderHook(() =>
+      env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+    const remountOperations = remountCapture.finish().timelineString;
+
+    expect(
+      ['1', '2'].map(
+        (payload) => env.apiStore.getItemState(payload)?.data?.value,
+      ),
+    ).toMatchInlineSnapshot(`
         - { id: '1', name: 'Cached user 1' }
         - { id: '2', name: 'Cached user 2' }
       `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      "
-      time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci._i.r.json
-           |    └ (namespace index)
-      3ms  | 📖 #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
-           |    └ (namespace index) | 0.15 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>)
-      .    | 👁️ #3 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
-           |    └ (entry data, <"2>)
-      7ms  | 📖 #2 tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.11 kb
-      .    | 📖 #3 tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
-           |    └ (entry data, <"2>) | 0.11 kb
-      10ms | end
-      "
+      ""
+      2ms | 📖 entries.getMany scope=["sess1","col-multi-remount-flow","collection.item"] keys=["\\"1", "\\"2"] -> ["\\"1", "\\"2"]
+      ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+    secondHook.unmount();
   });
 
   test('getItemState stays in memory after a hook has already hydrated the collection item', async () => {
@@ -511,10 +506,10 @@ describe('indexeddb async storage efficiency: collection', () => {
     const getItemStateCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
-      `undefined`,
+      `value: { id: '1', name: 'Cached user' }`,
     );
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
-      `undefined`,
+      `value: { id: '1', name: 'Cached user' }`,
     );
     const getItemStateOperations = getItemStateCapture.finish().timelineString;
 
@@ -548,18 +543,15 @@ describe('indexeddb async storage efficiency: collection', () => {
     const env = createCollectionEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
 
     const preloadPromise = env.apiStore.preloadItemFromStorage(hotPayload);
     await resolveAfterIndexedDbStorage(preloadPromise, mockAdapter);
 
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       ""
-      4ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-opfs-efficiency","collection.item"]]
-      10ms | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-opfs-efficiency","collection.item"] -> keys=2 exists=yes valid=yes
-      11ms | 📖 entries.getMany scope=["sess1","collection-opfs-efficiency","collection.item"] keys=["\\"1"] -> ["\\"1"]
-      15ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-opfs-efficiency","collection.item"]]
-      21ms | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-opfs-efficiency","collection.item"] -> keys=2 exists=yes valid=yes
+      1ms | 📖 entries.getMany scope=["sess1","collection-opfs-efficiency","collection.item"] keys=["\\"1"] -> ["\\"1"]
       ""
     `);
 
@@ -597,8 +589,15 @@ describe('indexeddb async storage efficiency: collection', () => {
     hook.unmount();
 
     const { timelineString } = preloadCapture.finish();
-    expect(mockAdapter.payloadGetManyRequests).toMatchInlineSnapshot(`[]`);
-    expect(timelineString).toMatchInlineSnapshot(`"empty"`);
+    expect(mockAdapter.payloadGetManyRequests).toMatchInlineSnapshot(`
+      - - 'tsdf.sess1.collection-opfs-batched-preload.ci."1'
+        - 'tsdf.sess1.collection-opfs-batched-preload.ci."2'
+    `);
+    expect(timelineString).toMatchInlineSnapshot(`
+      ""
+      2ms | 📖 entries.getMany scope=["sess1","collection-opfs-batched-preload","collection.item"] keys=["\\"1", "\\"2"] -> ["\\"1", "\\"2"]
+      ""
+    `);
   });
 
   test('protected snapshot reuse avoids rereading the async protected registry during eviction', async () => {

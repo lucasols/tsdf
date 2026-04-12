@@ -1,35 +1,22 @@
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { parseAsyncStorageRecordKey } from '../../src/persistentStorage/asyncStorageShared';
-import {
-  buildFileName,
-  decodePathSegment,
-  encodePathSegment,
-  getPayloadRecordKey,
-  OPFS_ROOT_DIR,
-  parseFileNameKindAlias,
-  parseRecordKindAlias,
-} from '../../src/persistentStorage/opfsFileNaming';
-import {
-  type IndexedDbPersistentStorageOperation,
-} from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
-import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
+import { type IndexedDbPersistentStorageOperation } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
+import type {
+  AsyncStorageNamespaceScope,
+  AsyncStorageNamespaceStaticPolicy,
+} from '../../src/persistentStorage/types';
 import {
   type IndexedDbPersistentStorageTestStore,
+  type ManagedMetadataRecord,
   getCurrentIndexedDbPersistentStorageTestStore,
+  serializeManagedMetadataRecord,
+  serializeTestStaticPolicy,
 } from './indexedDbPersistentStorageTestStore';
 import {
   getParsedLocalStorageValue as baseGetParsedLocalStorageValue,
   startPersistentStorageOperationCapture as baseStartPersistentStorageOperationCapture,
 } from './persistentStorageOptimizationTestUtils';
-const OPFS_FILE_NAME_REGEX =
-  /^(?<kindPart>[^.]+)\.(?<entryPart>.+)\.(?<recordPart>[^.]+)\.json$/u;
-const OPFS_PATH_PLACEHOLDER_REGEX = /<([^<>]*)>/gu;
-const HASHED_OPFS_SCOPE_KINDS = new Set<AsyncStorageNamespaceScope['kind']>([
-  'collection.item',
-  'listQuery.item',
-  'listQuery.query',
-]);
 
 function getStringByteSize(value: string): number {
   return value.length * 2;
@@ -145,31 +132,6 @@ function formatOperation(
   }
 }
 
-type IndexedDbStructureSnapshot = {
-  stores: Array<{
-    autoIncrement: boolean;
-    indexes: Array<{
-      keyPath: string | string[] | null;
-      multiEntry: boolean;
-      name: string;
-      unique: boolean;
-    }>;
-    keyPath: string | string[] | null;
-    name: string;
-    rowCount: number;
-    rows: Array<{
-      key: unknown;
-      value: unknown;
-    }>;
-  }>;
-  version: number;
-};
-
-export type IndexedDbRowReference = {
-  key: unknown;
-  storeName: string;
-};
-
 function formatCompactByteSize(byteSize: number): string {
   return `${(byteSize / 1024).toFixed(1)} kb`;
 }
@@ -225,19 +187,13 @@ function summarizeIndexedDbValue(value: unknown): unknown {
     return `binary | ${formatCompactByteSize(getApproximateValueSize(value) ?? 0)}`;
   }
 
-  if (Array.isArray(value)) {
-    return `JSON array | ${formatCompactByteSize(
-      getApproximateValueSize(value) ?? 0,
-    )}`;
-  }
-
   if (typeof value === 'object') {
     return `JSON object | ${formatCompactByteSize(
       getApproximateValueSize(value) ?? 0,
     )}`;
   }
 
-  return String(value);
+  return Object.prototype.toString.call(value);
 }
 
 function compareUnknownValues(left: unknown, right: unknown): number {
@@ -266,33 +222,67 @@ async function flushIndexedDbWrites(
   }
 }
 
+function getObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+}
+
+type IndexedDbStructureSnapshot = {
+  stores: Array<{
+    autoIncrement: boolean;
+    indexes: Array<{
+      keyPath: string | string[] | null;
+      multiEntry: boolean;
+      name: string;
+      unique: boolean;
+    }>;
+    keyPath: string | string[] | null;
+    name: string;
+    rowCount: number;
+    rows: Array<{ key: unknown; value: unknown }>;
+  }>;
+  version: number;
+};
+
 export async function getIndexedDbStructureSnapshot(
   mockAdapter: IndexedDbPersistentStorageTestStore,
 ): Promise<IndexedDbStructureSnapshot> {
   await flushIndexedDbWrites(mockAdapter);
-  const inspection = await mockAdapter.driver.__inspectStructureForTests();
-  const stores = inspection.stores.map((store) => ({
-    autoIncrement: store.autoIncrement,
-    indexes: store.indexes,
-    keyPath: store.keyPath,
-    name: store.name,
-    rowCount: store.rows.length,
-    rows: store.rows
-      .map((row) => ({
-        key: row.key,
-        value: summarizeIndexedDbValue(row.value),
-      }))
-      .sort((left, right) => compareUnknownValues(left.key, right.key)),
-  }));
+  const rawStructure = await mockAdapter.indexedDb.inspectStructure();
 
   return {
-    stores,
-    version: inspection.version,
+    stores: rawStructure.stores
+      .slice()
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((store) => ({
+        autoIncrement: store.autoIncrement,
+        indexes: store.indexes
+          .slice()
+          .sort((left, right) => left.name.localeCompare(right.name)),
+        keyPath: store.keyPath,
+        name: store.name,
+        rowCount: store.rows.length,
+        rows: store.rows
+          .slice()
+          .sort((left, right) => compareUnknownValues(left.key, right.key))
+          .map((row) => ({
+            key: row.key,
+            value: summarizeIndexedDbValue(row.value),
+          })),
+      })),
+    version: rawStructure.version,
   };
 }
 
+export type IndexedDbRowReference = { key: unknown; storeName: string };
+
 export async function getParsedIndexedDbRecordData<T = unknown>(
-  mockAdapterOrReference: IndexedDbPersistentStorageTestStore | IndexedDbRowReference,
+  mockAdapterOrReference:
+    | IndexedDbPersistentStorageTestStore
+    | IndexedDbRowReference,
   maybeReference?: IndexedDbRowReference,
 ): Promise<T | null> {
   const mockAdapter =
@@ -307,115 +297,125 @@ export async function getParsedIndexedDbRecordData<T = unknown>(
       : maybeReference;
 
   await flushIndexedDbWrites(mockAdapter);
-  const inspection = await mockAdapter.driver.__inspectStructureForTests();
-  const store = inspection.stores.find(
-    (entry) => entry.name === reference.storeName,
-  );
-  const row = store?.rows.find((entry) =>
-    areIndexedDbKeysEqual(entry.key, reference.key)
+  const row = await mockAdapter.indexedDb.getRow(
+    reference.storeName,
+    reference.key,
   );
 
-  return __LEGIT_CAST__<T | null, unknown>(row?.value ?? null);
+  return __LEGIT_CAST__<T | null, unknown>(row === null ? null : row);
 }
 
-export function getParsedTsdfIndexedDbRecordData<T = unknown>(
-  mockAdapterOrPath: IndexedDbPersistentStorageTestStore | string,
-  maybePath?: string,
-): T | null {
-  const mockAdapter =
-    typeof mockAdapterOrPath === 'string'
-      ? getCurrentIndexedDbPersistentStorageTestStore()
-      : mockAdapterOrPath;
-  const path =
-    typeof mockAdapterOrPath === 'string' ? mockAdapterOrPath : maybePath;
-  if (path === undefined) {
-    throw new Error('Expected IndexedDB record path.');
-  }
-
-  const resolvedPath = resolvePlaceholderHashedOpfsFilePath(path);
-  const raw =
-    mockAdapter.getCachedPseudoFileMap().get(path) ??
-    mockAdapter.getCachedPseudoFileMap().get(resolvedPath);
-  if (raw === undefined) return null;
-  return __LEGIT_CAST__<T | null, unknown>(
-    compactDocumentOpfsIndexSnapshotValue(path, safeJsonParse(raw) ?? raw),
-  );
-}
-
-function compactDocumentOpfsIndexSnapshotValue(
-  filePath: string,
-  value: unknown,
-): unknown {
-  if (!filePath.endsWith('/d._i.r.json') || typeof value !== 'object' || value === null) {
-    return value;
-  }
-
-  const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
-  const entries = record.e;
-  if (typeof entries !== 'object' || entries === null || Array.isArray(entries)) {
-    return value;
-  }
-
-  const entriesRecord = __LEGIT_CAST__<Record<string, unknown>, unknown>(entries);
-  const keys = Object.keys(entriesRecord);
-  if (keys.length !== 1 || keys[0] !== 'document') return value;
-
-  return { ...record, e: [entriesRecord.document] };
-}
-
-function resolvePlaceholderHashedOpfsFilePath(filePath: string): string {
-  const pathSegments = filePath.split('/');
-  const fileName = pathSegments.pop();
-  const storeName = pathSegments.pop();
-  const sessionKey = pathSegments.pop();
-  const rootDir = pathSegments.pop();
+function toManagedMetadataRecord(value: unknown): ManagedMetadataRecord | null {
+  const record = getObjectRecord(value);
   if (
-    fileName === undefined ||
-    storeName === undefined ||
-    sessionKey === undefined ||
-    rootDir !== OPFS_ROOT_DIR
+    record === null ||
+    typeof record.k !== 'string' ||
+    typeof record.a !== 'number' ||
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
   ) {
-    return filePath;
+    return null;
   }
 
-  const parsedFileName = OPFS_FILE_NAME_REGEX.exec(fileName);
-  if (parsedFileName?.groups === undefined) return filePath;
+  return {
+    customMetadata: getObjectRecord(record.m) ?? {},
+    key: record.k,
+    lastAccessAt: record.a,
+    version: typeof record.v === 'number' ? record.v : 1,
+    writtenAt: record.a,
+  };
+}
 
-  const kind = parseFileNameKindAlias(parsedFileName.groups.kindPart ?? '');
-  const recordKind = parseRecordKindAlias(
-    parsedFileName.groups.recordPart ?? '',
+export async function getIndexedDbNamespaceSnapshot(
+  mockAdapter: IndexedDbPersistentStorageTestStore,
+  scope: AsyncStorageNamespaceScope,
+): Promise<{
+  entries: Record<string, Record<string, unknown>>;
+  staticPolicy?: Record<string, unknown>;
+} | null> {
+  await flushIndexedDbWrites(mockAdapter);
+  const [entryRows, namespacePolicy] = await Promise.all([
+    mockAdapter.indexedDb.listRows('entries'),
+    mockAdapter.indexedDb.getRow('namespacePolicies', [
+      scope.sessionKey,
+      scope.storeName,
+      scope.kind,
+    ]),
+  ]);
+
+  const serializedEntries: Array<[string, Record<string, unknown>]> = entryRows
+    .filter(
+      (row) =>
+        Array.isArray(row.key) &&
+        row.key[0] === scope.sessionKey &&
+        row.key[1] === scope.storeName &&
+        row.key[2] === scope.kind,
+    )
+    .flatMap((row) => {
+      const metadata = toManagedMetadataRecord(row.value);
+      return metadata === null
+        ? []
+        : ([
+            [metadata.key, serializeManagedMetadataRecord(metadata)],
+          ] satisfies Array<[string, Record<string, unknown>]>);
+    })
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  const entries = Object.fromEntries(serializedEntries);
+
+  const policyRecord = getObjectRecord(namespacePolicy);
+  const serializedPolicy = serializeTestStaticPolicy(
+    policyRecord?.p === null
+      ? null
+      : __LEGIT_CAST__<
+          AsyncStorageNamespaceStaticPolicy | null | undefined,
+          unknown
+        >(policyRecord?.p),
   );
-  if (
-    kind === null ||
-    recordKind !== 'payload' ||
-    !HASHED_OPFS_SCOPE_KINDS.has(kind)
-  ) {
-    return filePath;
+
+  if (Object.keys(entries).length === 0 && serializedPolicy === null) {
+    return null;
   }
 
-  const entryPart = parsedFileName.groups.entryPart ?? '';
-  if (entryPart.startsWith('h~')) return filePath;
+  return {
+    entries,
+    ...(serializedPolicy === null ? {} : { staticPolicy: serializedPolicy }),
+  };
+}
 
-  const userKey = entryPart.includes('<')
-    ? entryPart.replace(
-        OPFS_PATH_PLACEHOLDER_REGEX,
-        (_match, value: string) => value,
-      )
-    : decodePathSegment(entryPart);
+export async function getIndexedDbPayloadSnapshot<T = unknown>(
+  mockAdapter: IndexedDbPersistentStorageTestStore,
+  args: { key: string; scope: AsyncStorageNamespaceScope },
+): Promise<T | null> {
+  const row = await getParsedIndexedDbRecordData<Record<string, unknown>>(
+    mockAdapter,
+    {
+      key: [
+        args.scope.sessionKey,
+        args.scope.storeName,
+        args.scope.kind,
+        args.key,
+      ],
+      storeName: 'entries',
+    },
+  );
 
-  return [
-    OPFS_ROOT_DIR,
-    encodePathSegment(decodePathSegment(sessionKey)),
-    encodePathSegment(decodePathSegment(storeName)),
-    buildFileName(
-      {
-        sessionKey: decodePathSegment(sessionKey),
-        storeName: decodePathSegment(storeName),
-        kind,
-      },
-      getPayloadRecordKey(userKey),
-    ),
-  ].join('/');
+  return __LEGIT_CAST__<T | null, unknown>(row?.d ?? null);
+}
+
+export async function getIndexedDbStoredValueSnapshot<T = unknown>(
+  mockAdapter: IndexedDbPersistentStorageTestStore,
+  storageKey: string,
+): Promise<T | null> {
+  const raw = await mockAdapter.getRaw(storageKey);
+  if (raw === null) return null;
+
+  const parsed = safeJsonParse(raw);
+  const record = getObjectRecord(parsed);
+  if (record === null || !('data' in record)) {
+    return __LEGIT_CAST__<T, unknown>(parsed);
+  }
+
+  return __LEGIT_CAST__<T, unknown>(record.data);
 }
 
 export type IndexedDbPersistentStorageOperationCaptureResult = {
@@ -432,13 +432,11 @@ export function startIndexedDbPersistentStorageOperationCapture(
   return {
     finish() {
       const operations = mockAdapter.operations
-        .map((operation, index) => ({
-          index,
-          operation,
-        }))
+        .map((operation, index) => ({ index, operation }))
         .sort(
           (left, right) =>
-            left.operation.time - right.operation.time || left.index - right.index,
+            left.operation.time - right.operation.time ||
+            left.index - right.index,
         )
         .map(({ operation }) => formatOperation(operation, captureStartedAt));
 
@@ -451,9 +449,7 @@ export function startIndexedDbPersistentStorageOperationCapture(
   };
 }
 
-export function getParsedLocalStorageValue<T = unknown>(
-  key: string,
-): T | null {
+export function getParsedLocalStorageValue<T = unknown>(key: string): T | null {
   return baseGetParsedLocalStorageValue(key);
 }
 

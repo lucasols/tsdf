@@ -4,14 +4,8 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  buildFileName,
-  decodePathSegment,
-  encodePathSegment,
   getPayloadRecordKey,
-  joinPath,
-  OPFS_ROOT_DIR,
-  parseFileNameInfo,
-} from '../../src/persistentStorage/opfsFileNaming';
+} from '../../src/persistentStorage/asyncStorageShared';
 import {
   createIndexedDbPersistentStorageForTests,
   type IndexedDbPersistentStorageOperation,
@@ -19,6 +13,8 @@ import {
 } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
 import type {
   AsyncStorageAdapter,
+  AsyncStorageDriver,
+  AsyncStorageNamespaceHandle,
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
   StorageCacheEntry,
@@ -28,19 +24,6 @@ const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
 const INDEXED_DB_META_STORE = 'meta';
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
-
-type IndexedDbEntryRecord = {
-  a: number;
-  d: unknown;
-  g?: string;
-  k: string;
-  m?: Record<string, unknown>;
-  n: string;
-  o: 0 | 1;
-  s: string;
-  t: AsyncStorageNamespaceScope['kind'];
-  v: number;
-};
 
 type IndexedDbNamespacePolicyRecord = {
   n: string;
@@ -56,10 +39,6 @@ type ListQuerySeedItemOptions = StorageSeedOptions & {
 };
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
-
-
-
-
 
 type IndexedDbPersistentStorageTestStoreOptions = {
   databaseName?: string;
@@ -94,7 +73,62 @@ type IndexedDbPersistentStorageTestStoreOptions = {
   persistentStorageOptions?: IndexedDbPersistentStorageOptions;
 };
 
-type IndexedDbPersistentStorageTestStoreScope = {
+type IndexedDbStructureInspection = {
+  stores: Array<{
+    autoIncrement: boolean;
+    indexes: Array<{
+      keyPath: string | string[] | null;
+      multiEntry: boolean;
+      name: string;
+      unique: boolean;
+    }>;
+    keyPath: string | string[] | null;
+    name: string;
+    rows: Array<{ key: unknown; value: unknown }>;
+  }>;
+  version: number;
+};
+
+type FakeIndexedDbRawRecord = { key: unknown; value: unknown };
+
+type FakeIndexedDbRawIndex = {
+  keyPath: string | string[] | null;
+  multiEntry: boolean;
+  name: string;
+  unique: boolean;
+};
+
+type IndexedDbStoreKey = IDBKeyRange | IDBValidKey;
+
+type FakeIndexedDbRawObjectStore = {
+  autoIncrement: boolean;
+  keyPath: string | string[] | null;
+  rawIndexes: Map<string, FakeIndexedDbRawIndex>;
+  deleteRecord: (key: unknown, rollbackLog?: Array<() => void>) => void;
+  records: {
+    get: (key: unknown) => FakeIndexedDbRawRecord | undefined;
+    values: (
+      range?: unknown,
+      direction?: 'next' | 'nextunique' | 'prev' | 'prevunique',
+    ) => Iterable<FakeIndexedDbRawRecord>;
+  };
+  storeRecord: (
+    newRecord: { key: unknown; value: unknown },
+    noOverwrite?: boolean,
+    rollbackLog?: Array<() => void>,
+  ) => unknown;
+};
+
+type FakeIndexedDbRawDatabase = {
+  rawObjectStores: Map<string, FakeIndexedDbRawObjectStore>;
+  version: number;
+};
+
+type FakeIndexedDbFactory = IDBFactory & {
+  _databases?: Map<string, FakeIndexedDbRawDatabase>;
+};
+
+export type IndexedDbPersistentStorageTestStoreScope = {
   document: {
     namespace: AsyncStorageNamespaceScope;
     storageKey: () => string;
@@ -108,7 +142,7 @@ type IndexedDbPersistentStorageTestStoreScope = {
     namespace: AsyncStorageNamespaceScope;
     itemKey: (payload: string) => string;
     itemStorageKey: (payload: string) => string;
-    listStoredPayloads: () => string[];
+    listStoredPayloads: () => Promise<string[]>;
     setStaticPolicy: (policy: Record<string, unknown>) => void;
     seedItem: <T>(
       payload: string,
@@ -123,8 +157,8 @@ type IndexedDbPersistentStorageTestStoreScope = {
     itemStorageKey: (tableId: string, id: number | string) => string;
     queryKey: (params: unknown) => string;
     queryStorageKey: (params: unknown) => string;
-    listStoredItemKeys: () => string[];
-    listStoredQueryKeys: () => string[];
+    listStoredItemKeys: () => Promise<string[]>;
+    listStoredQueryKeys: () => Promise<string[]>;
     setItemStaticPolicy: (policy: Record<string, unknown>) => void;
     setQueryStaticPolicy: (policy: Record<string, unknown>) => void;
     seedItem: <T>(
@@ -159,6 +193,36 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+}
+
+type IndexedDbEntryRecord = {
+  a: number;
+  d: unknown;
+  g?: string;
+  k: string;
+  m?: Record<string, unknown>;
+  n: string;
+  o: 0 | 1;
+  s: string;
+  t: AsyncStorageNamespaceScope['kind'];
+  v: number;
+};
+
+function isValidEntryRecord(value: unknown): value is IndexedDbEntryRecord {
+  const record = getRecord(value);
+  if (record === null) return false;
+
+  return (
+    typeof record.s === 'string' &&
+    typeof record.n === 'string' &&
+    typeof record.t === 'string' &&
+    typeof record.k === 'string' &&
+    typeof record.a === 'number' &&
+    typeof record.v === 'number' &&
+    (record.m === undefined || getRecord(record.m) !== null) &&
+    (record.g === undefined || typeof record.g === 'string') &&
+    (record.o === 0 || record.o === 1)
+  );
 }
 
 function createStorageCacheEntry<T>(
@@ -313,7 +377,7 @@ function normalizeTestStaticPolicy(
   };
 }
 
-function serializeTestStaticPolicy(
+export function serializeTestStaticPolicy(
   policy: AsyncStorageNamespaceStaticPolicy | null | undefined,
 ): Record<string, unknown> | null {
   if (policy === undefined || policy === null) return null;
@@ -324,7 +388,7 @@ function serializeTestStaticPolicy(
   };
 }
 
-type ManagedMetadataRecord = {
+export type ManagedMetadataRecord = {
   customMetadata: Record<string, unknown>;
   key: string;
   lastAccessAt: number;
@@ -332,12 +396,7 @@ type ManagedMetadataRecord = {
   writtenAt: number;
 };
 
-type ManagedIndexRecord = {
-  entries: Map<string, ManagedMetadataRecord>;
-  staticPolicy: Record<string, unknown> | null;
-};
-
-function serializeManagedMetadataRecord(
+export function serializeManagedMetadataRecord(
   metadata: ManagedMetadataRecord,
 ): Record<string, unknown> {
   return {
@@ -372,24 +431,6 @@ function parseManagedMetadataRecord(
     lastAccessAt: record.a,
     version: typeof record.v === 'number' ? record.v : 1,
     writtenAt: record.a,
-  };
-}
-
-function parseManagedIndexRecord(value: unknown): ManagedIndexRecord | null {
-  const record = getRecord(value);
-  const rawEntries = getRecord(record?.e);
-  if (rawEntries === null) return null;
-
-  const entries = new Map<string, ManagedMetadataRecord>();
-  for (const [key, rawEntry] of Object.entries(rawEntries)) {
-    const parsed = parseManagedMetadataRecord(rawEntry, key);
-    if (parsed === null) return null;
-    entries.set(key, parsed);
-  }
-
-  return {
-    entries,
-    staticPolicy: getRecord(record?.s),
   };
 }
 
@@ -460,28 +501,9 @@ function normalizeLogicalPayload(
   }
 }
 
-function storeDirPath(
-  scope: Pick<AsyncStorageNamespaceScope, 'sessionKey' | 'storeName'>,
-): string {
-  return joinPath(
-    OPFS_ROOT_DIR,
-    encodePathSegment(scope.sessionKey),
-    encodePathSegment(scope.storeName),
-  );
-}
-
-function filePathForRecord(
-  scope: AsyncStorageNamespaceScope,
-  key: string,
-): string {
-  return joinPath(storeDirPath(scope), buildFileName(scope, key));
-}
-
 function openRequestAsPromise<T>(request: IDBRequest): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     request.onsuccess = () =>
-      // WORKAROUND: IndexedDB DOM requests expose `result` as `unknown`/`any`,
-      // and test helpers choose the expected shape at each callsite.
       resolve(__LEGIT_CAST__<T, unknown>(request.result));
     request.onerror = () =>
       reject(request.error ?? new Error('IndexedDB request failed.'));
@@ -532,9 +554,9 @@ async function iterateCursor<T>(
   });
 }
 
-let currentIndexedDbPersistentStorageTestStore:
-  | ReturnType<typeof createIndexedDbPersistentStorageTestStore>
-  | null = null;
+let currentIndexedDbPersistentStorageTestStore: ReturnType<
+  typeof createIndexedDbPersistentStorageTestStore
+> | null = null;
 
 export function getCurrentIndexedDbPersistentStorageTestStore() {
   if (currentIndexedDbPersistentStorageTestStore === null) {
@@ -550,10 +572,11 @@ export function clearCurrentIndexedDbPersistentStorageTestStore(): void {
   currentIndexedDbPersistentStorageTestStore = null;
 }
 
-export async function resetCurrentIndexedDbPersistentStorageTestStore(): Promise<void> {
+export function resetCurrentIndexedDbPersistentStorageTestStore(): Promise<void> {
   const currentStore = currentIndexedDbPersistentStorageTestStore;
   currentIndexedDbPersistentStorageTestStore = null;
-  await currentStore?.adapter.resetForTests?.();
+  currentStore?.adapter.resetForTests?.();
+  return Promise.resolve();
 }
 
 export function createIndexedDbPersistentStorageTestStore(
@@ -563,258 +586,100 @@ export function createIndexedDbPersistentStorageTestStore(
   const databaseName =
     options.databaseName ??
     `tsdf-persistent-storage-test-${Math.random().toString(36).slice(2, 10)}`;
-  const { adapter: baseAdapter, driver } = createIndexedDbPersistentStorageForTests(
-    {
-    ...(options.persistentStorageOptions ?? {}),
-    databaseName,
-    instrumentation: {
-      onApplyManagedCommit(scope, args) {
-        applyCachedManagedCommit(scope, args);
+  const { adapter: baseAdapter, driver } =
+    createIndexedDbPersistentStorageForTests({
+      ...(options.persistentStorageOptions ?? {}),
+      databaseName,
+      instrumentation: {
+        operations: instrumentationOperations,
+        record(operation) {
+          instrumentationOperations.push(operation);
+        },
+        reset() {
+          instrumentationOperations.length = 0;
+        },
       },
-      onClearManagedNamespace(scope) {
-        clearCachedNamespace(scope);
-      },
-      onPersistNamespaceIndexState(scope, state) {
-        syncCachedIndexState(scope, state);
-      },
-      onRemoveMany(scope, keys) {
-        removeCachedRecords(scope, keys);
-      },
-      operations: instrumentationOperations,
-      record(operation) {
-        instrumentationOperations.push(operation);
-      },
-      reset() {
-        instrumentationOperations.length = 0;
-      },
-    },
-    },
-  );
+    });
 
   let pendingWrites = Promise.resolve();
   let instrumentationStartIndex = 0;
   let readStartIndex = 0;
-  let cachedPseudoFileMap = new Map<string, string>();
-  const extraPseudoFiles = new Map<string, string>();
-  const removeEntryFailures = new Map<string, number>();
+  const cleanupRemoveKnownRecordsFailures = new Map<string, number>();
+
+  type CleanupCapableDriver = AsyncStorageDriver & {
+    cleanupRemoveKnownRecords?: (
+      scope: AsyncStorageNamespaceScope,
+      keys: string[],
+    ) => Promise<string[]>;
+    withIsolatedCleanupDriver?: <T>(
+      callback: (driver: AsyncStorageDriver) => Promise<T>,
+    ) => Promise<T>;
+  };
+
+  const cleanupCapableDriver = __LEGIT_CAST__<
+    CleanupCapableDriver,
+    AsyncStorageDriver
+  >(driver);
+
+  cleanupCapableDriver.withIsolatedCleanupDriver = async (callback) =>
+    callback(driver);
+  cleanupCapableDriver.cleanupRemoveKnownRecords = async (scope, keys) => {
+    const scopeId = JSON.stringify([
+      scope.sessionKey,
+      scope.storeName,
+      scope.kind,
+    ]);
+    const pendingFailures = cleanupRemoveKnownRecordsFailures.get(scopeId) ?? 0;
+
+    if (pendingFailures > 0) {
+      if (pendingFailures === 1) {
+        cleanupRemoveKnownRecordsFailures.delete(scopeId);
+      } else {
+        cleanupRemoveKnownRecordsFailures.set(scopeId, pendingFailures - 1);
+      }
+
+      return [];
+    }
+
+    await driver.removeMany(scope, keys);
+    return [...keys];
+  };
 
   function enqueueWrite(callback: () => Promise<void>): void {
     pendingWrites = pendingWrites.then(callback);
   }
 
-  function trackWrite(promise: Promise<void>): void {
-    pendingWrites = pendingWrites.then(() => promise);
-  }
-
   async function waitForPendingWritesOnly(): Promise<void> {
     for (let attempt = 0; attempt < 5; attempt++) {
       const currentPendingWrites = pendingWrites;
-      await Promise.resolve();
-      await waitForRealTaskTick();
       await currentPendingWrites;
-      if (currentPendingWrites === pendingWrites) break;
+      await Promise.resolve();
+      if (currentPendingWrites === pendingWrites) return;
+      await waitForRealTaskTick();
     }
   }
 
   async function settlePendingWrites(): Promise<void> {
     await waitForPendingWritesOnly();
-    await refreshCache();
   }
 
   async function flushWrites(): Promise<void> {
     for (let attempt = 0; attempt < 5; attempt++) {
       await vi.advanceTimersByTimeAsync(0);
-      await Promise.resolve();
-      await waitForRealTaskTick();
       const currentPendingWrites = pendingWrites;
       await currentPendingWrites;
-      if (currentPendingWrites === pendingWrites) break;
+      await Promise.resolve();
+
+      if (currentPendingWrites === pendingWrites && vi.getTimerCount() === 0) {
+        break;
+      }
+
+      if (currentPendingWrites !== pendingWrites) continue;
+
+      await waitForRealTaskTick();
     }
 
     await settlePendingWrites();
-  }
-
-  async function refreshCache(): Promise<void> {
-    cachedPseudoFileMap = await buildPseudoFileMap();
-  }
-
-  function removeCachedRecords(
-    scope: AsyncStorageNamespaceScope,
-    keys: string[],
-  ): void {
-    for (const key of keys) {
-      cachedPseudoFileMap.delete(filePathForRecord(scope, key));
-    }
-  }
-
-  function syncCachedIndexState(
-    scope: AsyncStorageNamespaceScope,
-    state: {
-      entries: Map<
-        string,
-        {
-          customMetadata?: Record<string, unknown>;
-          lastAccessAt: number;
-          version: number;
-        }
-      >;
-      staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
-    },
-  ): void {
-    const indexPath = filePathForRecord(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-    if (state.entries.size === 0 && state.staticPolicy === null) {
-      cachedPseudoFileMap.delete(indexPath);
-      return;
-    }
-
-    const serializedEntries = Object.fromEntries(
-      [...state.entries.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, metadata]) => [
-          key,
-          serializeManagedMetadataRecord({
-            customMetadata: metadata.customMetadata ?? {},
-            key,
-            lastAccessAt: metadata.lastAccessAt,
-            version: metadata.version,
-            writtenAt: metadata.lastAccessAt,
-          }),
-        ]),
-    );
-    cachedPseudoFileMap.set(
-      indexPath,
-      JSON.stringify({
-        e: serializedEntries,
-        ...(state.staticPolicy !== null ? { s: state.staticPolicy } : {}),
-      }),
-    );
-  }
-
-  function writeCachedIndexState(
-    scope: AsyncStorageNamespaceScope,
-    args: {
-      entries: Map<string, ManagedMetadataRecord>;
-      staticPolicy: Record<string, unknown> | null;
-    },
-  ): void {
-    syncCachedIndexState(scope, {
-      entries: new Map(
-        [...args.entries.entries()].map(([key, metadata]) => [
-          key,
-          {
-            customMetadata: metadata.customMetadata,
-            lastAccessAt: metadata.lastAccessAt,
-            version: metadata.version,
-          },
-        ]),
-      ),
-      staticPolicy: __LEGIT_CAST__<
-        AsyncStorageNamespaceStaticPolicy | null,
-        Record<string, unknown> | null
-      >(args.staticPolicy),
-    });
-  }
-
-  function upsertCachedLogicalEntry(args: {
-    key: string;
-    metadata: ManagedMetadataRecord;
-    payload: unknown;
-    scope: AsyncStorageNamespaceScope;
-  }): void {
-    const entries = readNamespaceIndexFromCache(args.scope);
-    entries.set(args.key, args.metadata);
-    cachedPseudoFileMap.set(
-      filePathForRecord(args.scope, getPayloadRecordKey(args.key)),
-      JSON.stringify(args.payload),
-    );
-    writeCachedIndexState(args.scope, {
-      entries,
-      staticPolicy: readManagedIndexRecordFromCache(args.scope)?.staticPolicy ?? null,
-    });
-  }
-
-  function removeCachedLogicalEntry(
-    scope: AsyncStorageNamespaceScope,
-    key: string,
-  ): void {
-    cachedPseudoFileMap.delete(filePathForRecord(scope, getPayloadRecordKey(key)));
-    const entries = readNamespaceIndexFromCache(scope);
-    entries.delete(key);
-    writeCachedIndexState(scope, {
-      entries,
-      staticPolicy: readManagedIndexRecordFromCache(scope)?.staticPolicy ?? null,
-    });
-  }
-
-  function clearCachedNamespace(scope: AsyncStorageNamespaceScope): void {
-    const storePrefix = `${storeDirPath(scope)}/`;
-    for (const path of [...cachedPseudoFileMap.keys()]) {
-      if (path.startsWith(storePrefix)) {
-        cachedPseudoFileMap.delete(path);
-      }
-    }
-  }
-
-  function applyCachedManagedCommit(
-    scope: AsyncStorageNamespaceScope,
-    args: {
-      removes?: string[];
-      staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
-      touches?: Array<{ key: string; lastAccessAt?: number }>;
-      upserts?: Array<{
-        key: string;
-        metadata?: Record<string, unknown>;
-        value: unknown;
-        version: number;
-      }>;
-    },
-  ): void {
-    const indexRecord = readManagedIndexRecordFromCache(scope);
-    const entries = indexRecord?.entries ?? new Map<string, ManagedMetadataRecord>();
-    let staticPolicy = indexRecord?.staticPolicy ?? null;
-
-    for (const key of args.removes ?? []) {
-      cachedPseudoFileMap.delete(filePathForRecord(scope, getPayloadRecordKey(key)));
-      entries.delete(key);
-    }
-
-    for (const touch of args.touches ?? []) {
-      const existing = entries.get(touch.key);
-      if (existing === undefined) continue;
-      const nextLastAccessAt = touch.lastAccessAt ?? existing.lastAccessAt;
-      entries.set(touch.key, {
-        ...existing,
-        lastAccessAt: nextLastAccessAt,
-        writtenAt: nextLastAccessAt,
-      });
-    }
-
-    for (const upsert of args.upserts ?? []) {
-      const existing = entries.get(upsert.key);
-      const nextLastAccessAt =
-        existing?.lastAccessAt ?? Date.now();
-      const metadata: ManagedMetadataRecord = {
-        customMetadata: upsert.metadata ?? existing?.customMetadata ?? {},
-        key: upsert.key,
-        lastAccessAt: nextLastAccessAt,
-        version: upsert.version,
-        writtenAt: nextLastAccessAt,
-      };
-      entries.set(upsert.key, metadata);
-      cachedPseudoFileMap.set(
-        filePathForRecord(scope, getPayloadRecordKey(upsert.key)),
-        JSON.stringify(upsert.value),
-      );
-    }
-
-    if ('staticPolicy' in args) {
-      staticPolicy = serializeTestStaticPolicy(args.staticPolicy) ?? null;
-    }
-
-    writeCachedIndexState(scope, {
-      entries,
-      staticPolicy,
-    });
   }
 
   async function openDatabase(): Promise<IDBDatabase> {
@@ -826,16 +691,12 @@ export function createIndexedDbPersistentStorageTestStore(
           keyPath: ['s', 'n', 't', 'k'],
         });
         store.createIndex('bySession', 's', { unique: false });
-        store.createIndex(
-          'byScopeLastAccessAt',
-          ['s', 'n', 't', 'a', 'k'],
-          { unique: false },
-        );
-        store.createIndex(
-          'byScopeGroup',
-          ['s', 'n', 't', 'g', 'k'],
-          { unique: false },
-        );
+        store.createIndex('byScopeLastAccessAt', ['s', 'n', 't', 'a', 'k'], {
+          unique: false,
+        });
+        store.createIndex('byScopeGroup', ['s', 'n', 't', 'g', 'k'], {
+          unique: false,
+        });
         store.createIndex(
           'bySessionOfflineProtected',
           ['s', 'o', 'n', 't', 'k'],
@@ -843,7 +704,9 @@ export function createIndexedDbPersistentStorageTestStore(
         );
       }
 
-      if (!database.objectStoreNames.contains(INDEXED_DB_NAMESPACE_POLICY_STORE)) {
+      if (
+        !database.objectStoreNames.contains(INDEXED_DB_NAMESPACE_POLICY_STORE)
+      ) {
         const store = database.createObjectStore(
           INDEXED_DB_NAMESPACE_POLICY_STORE,
           { keyPath: ['s', 'n', 't'] },
@@ -856,6 +719,58 @@ export function createIndexedDbPersistentStorageTestStore(
       }
     };
     return openRequestAsPromise(request);
+  }
+
+  function getRawFakeIndexedDbDatabase(): FakeIndexedDbRawDatabase | null {
+    return (
+      __LEGIT_CAST__<FakeIndexedDbFactory, IDBFactory>(
+        indexedDB,
+      )._databases?.get(databaseName) ?? null
+    );
+  }
+
+  function getRawFakeIndexedDbStore(
+    storeName: string,
+  ): FakeIndexedDbRawObjectStore | null {
+    return (
+      getRawFakeIndexedDbDatabase()?.rawObjectStores.get(storeName) ?? null
+    );
+  }
+
+  function listRawFakeIndexedDbStoreRows(
+    storeName: string,
+  ): Array<{ key: unknown; value: unknown }> {
+    const rawStore = getRawFakeIndexedDbStore(storeName);
+    if (rawStore === null) return [];
+
+    return [...rawStore.records.values()]
+      .map((record) => ({
+        key: structuredClone(record.key),
+        value: structuredClone(record.value),
+      }))
+      .sort((left, right) =>
+        JSON.stringify(left.key).localeCompare(JSON.stringify(right.key)),
+      );
+  }
+
+  function mutateRawFakeIndexedDbStoreRow(
+    storeName: string,
+    key: unknown,
+    update: (current: unknown) => unknown,
+  ): void {
+    const rawStore = getRawFakeIndexedDbStore(storeName);
+    if (rawStore === null) {
+      throw new Error(`Expected raw IndexedDB store "${storeName}" to exist.`);
+    }
+
+    const record = rawStore.records.get(key);
+    if (record === undefined) {
+      throw new Error(
+        `Expected raw IndexedDB row ${JSON.stringify(key)} in "${storeName}".`,
+      );
+    }
+
+    record.value = structuredClone(update(structuredClone(record.value)));
   }
 
   async function withReadonlyStores<T>(
@@ -890,18 +805,24 @@ export function createIndexedDbPersistentStorageTestStore(
     }
   }
 
-  async function getEntryRecord(
+  function getEntryRecord(
     scope: AsyncStorageNamespaceScope,
     key: string,
-  ): Promise<IndexedDbEntryRecord | null> {
-    return withReadonlyStores([INDEXED_DB_ENTRY_STORE], async (transaction) => {
-      const result = await openRequestAsPromise<IndexedDbEntryRecord | undefined>(
-        transaction
-          .objectStore(INDEXED_DB_ENTRY_STORE)
-          .get([scope.sessionKey, scope.storeName, scope.kind, key]),
-      );
-      return result ?? null;
-    });
+  ): IndexedDbEntryRecord | null {
+    const row = listRawFakeIndexedDbStoreRows(INDEXED_DB_ENTRY_STORE).find(
+      (entry) =>
+        JSON.stringify(entry.key) ===
+          JSON.stringify([
+            scope.sessionKey,
+            scope.storeName,
+            scope.kind,
+            key,
+          ]) && isValidEntryRecord(entry.value),
+    );
+
+    return row === undefined
+      ? null
+      : __LEGIT_CAST__<IndexedDbEntryRecord, unknown>(row.value);
   }
 
   async function getPolicyRecord_(
@@ -910,12 +831,13 @@ export function createIndexedDbPersistentStorageTestStore(
     return withReadonlyStores(
       [INDEXED_DB_NAMESPACE_POLICY_STORE],
       async (transaction) => {
-        const result =
-          await openRequestAsPromise<IndexedDbNamespacePolicyRecord | undefined>(
-            transaction
-              .objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE)
-              .get([scope.sessionKey, scope.storeName, scope.kind]),
-          );
+        const result = await openRequestAsPromise<
+          IndexedDbNamespacePolicyRecord | undefined
+        >(
+          transaction
+            .objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE)
+            .get([scope.sessionKey, scope.storeName, scope.kind]),
+        );
         return result ?? null;
       },
     );
@@ -932,21 +854,23 @@ export function createIndexedDbPersistentStorageTestStore(
     },
   ): Promise<void> {
     await withReadwriteStores([INDEXED_DB_ENTRY_STORE], (transaction) => {
-      transaction.objectStore(INDEXED_DB_ENTRY_STORE).put({
-        a: args.lastAccessAt,
-        d: args.value,
-        g:
-          typeof args.customMetadata?.g === 'string'
-            ? args.customMetadata.g
-            : undefined,
-        k: args.key,
-        m: args.customMetadata,
-        n: scope.storeName,
-        o: args.customMetadata?.o === true ? 1 : 0,
-        s: scope.sessionKey,
-        t: scope.kind,
-        v: args.version,
-      } satisfies IndexedDbEntryRecord);
+      transaction
+        .objectStore(INDEXED_DB_ENTRY_STORE)
+        .put({
+          a: args.lastAccessAt,
+          d: args.value,
+          g:
+            typeof args.customMetadata?.g === 'string'
+              ? args.customMetadata.g
+              : undefined,
+          k: args.key,
+          m: args.customMetadata,
+          n: scope.storeName,
+          o: args.customMetadata?.o === true ? 1 : 0,
+          s: scope.sessionKey,
+          t: scope.kind,
+          v: args.version,
+        } satisfies IndexedDbEntryRecord);
     });
   }
 
@@ -968,7 +892,9 @@ export function createIndexedDbPersistentStorageTestStore(
     await withReadwriteStores(
       [INDEXED_DB_NAMESPACE_POLICY_STORE],
       (transaction) => {
-        const store = transaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
+        const store = transaction.objectStore(
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        );
         if (staticPolicy === null) {
           store.delete([scope.sessionKey, scope.storeName, scope.kind]);
         } else {
@@ -983,174 +909,125 @@ export function createIndexedDbPersistentStorageTestStore(
     );
   }
 
-  async function listEntryRecords(
+  function listEntryRecords(
     scope: AsyncStorageNamespaceScope,
-  ): Promise<IndexedDbEntryRecord[]> {
-    return withReadonlyStores([INDEXED_DB_ENTRY_STORE], async (transaction) => {
-      const entries: IndexedDbEntryRecord[] = [];
-      await iterateCursor(
-        transaction.objectStore(INDEXED_DB_ENTRY_STORE).openCursor(
-          IDBKeyRange.bound(
-            [scope.sessionKey, scope.storeName, scope.kind, ''],
-            [scope.sessionKey, scope.storeName, scope.kind, '\uffff'],
-          ),
-        ),
-        (cursor) => {
-          entries.push(__LEGIT_CAST__<IndexedDbEntryRecord, unknown>(cursor.value));
-        },
-      );
-      return entries.sort((left, right) => left.key.localeCompare(right.key));
-    });
+  ): IndexedDbEntryRecord[] {
+    return listRawFakeIndexedDbStoreRows(INDEXED_DB_ENTRY_STORE)
+      .filter(
+        (entry) =>
+          Array.isArray(entry.key) &&
+          entry.key[0] === scope.sessionKey &&
+          entry.key[1] === scope.storeName &&
+          entry.key[2] === scope.kind &&
+          isValidEntryRecord(entry.value),
+      )
+      .map((entry) =>
+        __LEGIT_CAST__<IndexedDbEntryRecord, unknown>(entry.value),
+      )
+      .sort((left, right) => left.k.localeCompare(right.k));
   }
 
-  async function readLogicalStorageEntry<T>(
-    flatKey: string,
-  ): Promise<StorageCacheEntry<T> | null> {
-    const parsed = parseFlatStorageKey(flatKey);
-    if (parsed === null) return null;
-
-    const record = await getEntryRecord(parsed.scope, parsed.key);
-    if (record === null) return null;
-
-    const metadata = toManagedMetadata(record);
-    return {
-      data: __LEGIT_CAST__<T, unknown>(
-        normalizeLogicalPayload(parsed.scope, record.d, metadata),
-      ),
-      timestamp: metadata.lastAccessAt,
-      version: metadata.version,
-    };
-  }
-
-  function writeLogicalStorageEntry(flatKey: string, value: unknown): void {
-    const parsed = parseFlatStorageKey(flatKey);
-    if (parsed === null) return;
-
-    const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(value);
-    upsertCachedLogicalEntry({
-      key: parsed.key,
-      metadata: {
-        customMetadata: buildCustomMetadata(parsed.scope, entry.data),
-        key: parsed.key,
-        lastAccessAt: entry.timestamp,
-        version: entry.version ?? 1,
-        writtenAt: entry.timestamp,
-      },
-      payload: entry.data,
-      scope: parsed.scope,
-    });
-    trackWrite(
-      putEntryRecord(parsed.scope, {
-        customMetadata: buildCustomMetadata(parsed.scope, entry.data),
-        key: parsed.key,
-        lastAccessAt: entry.timestamp,
-        value: entry.data,
-        version: entry.version ?? 1,
-      }),
+  function getStoreRow(storeName: string, key: unknown): unknown {
+    return (
+      listRawFakeIndexedDbStoreRows(storeName).find(
+        (row) => JSON.stringify(row.key) === JSON.stringify(key),
+      )?.value ?? null
     );
   }
 
-  function setPayloadValue(key: string, value: unknown): void {
-    const parsed = parseFlatStorageKey(key);
-    if (parsed === null) return;
-
-    const currentMetadata = readMetadataFromCache(key);
-    const nextTimestamp = currentMetadata?.lastAccessAt ?? Date.now();
-    upsertCachedLogicalEntry({
-      key: parsed.key,
-      metadata: {
-        customMetadata:
-          currentMetadata?.customMetadata ?? buildCustomMetadata(parsed.scope, value),
-        key: parsed.key,
-        lastAccessAt: nextTimestamp,
-        version: currentMetadata?.version ?? 1,
-        writtenAt: nextTimestamp,
-      },
-      payload: value,
-      scope: parsed.scope,
-    });
-
-    trackWrite(
-      (async () => {
-        const existing = await getEntryRecord(parsed.scope, parsed.key);
-        await putEntryRecord(parsed.scope, {
-          customMetadata:
-            existing?.m ?? buildCustomMetadata(parsed.scope, value),
-          key: parsed.key,
-          lastAccessAt: existing?.a ?? Date.now(),
-          value,
-          version: existing?.v ?? 1,
-        });
-      })(),
-    );
+  function listStoreRows(
+    storeName: string,
+  ): Array<{ key: unknown; value: unknown }> {
+    return listRawFakeIndexedDbStoreRows(storeName);
   }
 
-  function setMetadataValue(key: string, value: unknown): void {
-    const parsed = parseFlatStorageKey(key);
-    if (parsed === null) return;
-
-    const currentEntry = readLogicalStorageEntryFromCache<unknown>(key);
-    if (currentEntry !== null) {
-      const normalized = normalizeMetadataValue(parsed.key, value);
-      const metadata = parseManagedMetadataRecord(normalized, parsed.key);
-      if (metadata !== null) {
-        upsertCachedLogicalEntry({
-          key: parsed.key,
-          metadata,
-          payload: currentEntry.data,
-          scope: parsed.scope,
-        });
-      }
+  function inspectIndexedDbStructure(): IndexedDbStructureInspection {
+    const rawDatabase = getRawFakeIndexedDbDatabase();
+    if (rawDatabase === null) {
+      return { stores: [], version: 0 };
     }
 
-    trackWrite(
-      (async () => {
-        const existing = await getEntryRecord(parsed.scope, parsed.key);
-        if (existing === null) return;
+    const stores = [...rawDatabase.rawObjectStores.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([storeName, rawStore]) => ({
+        autoIncrement: rawStore.autoIncrement,
+        indexes: [...rawStore.rawIndexes.values()]
+          .map((index) => ({
+            keyPath: structuredClone(index.keyPath),
+            multiEntry: index.multiEntry,
+            name: index.name,
+            unique: index.unique,
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
+        keyPath: structuredClone(rawStore.keyPath),
+        name: storeName,
+        rows: listRawFakeIndexedDbStoreRows(storeName),
+      }));
 
-        const normalized = normalizeMetadataValue(parsed.key, value);
-        const metadata = parseManagedMetadataRecord(normalized, parsed.key);
-        if (metadata === null) return;
-
-        await putEntryRecord(parsed.scope, {
-          customMetadata: metadata.customMetadata,
-          key: parsed.key,
-          lastAccessAt: metadata.lastAccessAt,
-          value: existing.d,
-          version: metadata.version,
-        });
-      })(),
-    );
+    return { stores, version: rawDatabase.version };
   }
 
-  function removePayloadValue(key: string): void {
-    const parsed = parseFlatStorageKey(key);
-    if (parsed === null) return;
-    removeCachedLogicalEntry(parsed.scope, parsed.key);
-    trackWrite(deleteEntryRecord(parsed.scope, parsed.key));
-  }
+  async function putStoreRow(storeName: string, value: unknown): Promise<void> {
+    const rawStore = getRawFakeIndexedDbStore(storeName);
+    if (rawStore !== null) {
+      rawStore.storeRecord({ key: undefined, value: structuredClone(value) });
+      return;
+    }
 
-  function removeMetadataValue(key: string): void {
-    const parsed = parseFlatStorageKey(key);
-    if (parsed === null) return;
-    removeCachedLogicalEntry(parsed.scope, parsed.key);
-    trackWrite(deleteEntryRecord(parsed.scope, parsed.key));
-  }
-
-  function setNamespaceStaticPolicy(
-    scope: AsyncStorageNamespaceScope,
-    policy: Record<string, unknown>,
-  ): void {
-    writeCachedIndexState(scope, {
-      entries: readNamespaceIndexFromCache(scope),
-      staticPolicy: policy,
+    await withReadwriteStores([storeName], (transaction) => {
+      transaction.objectStore(storeName).put(value);
     });
-    trackWrite(
-      putPolicyRecord(scope, normalizeTestStaticPolicy(policy)),
-    );
   }
 
-  function toManagedMetadata(record: IndexedDbEntryRecord): ManagedMetadataRecord {
+  async function deleteStoreRow(
+    storeName: string,
+    key: unknown,
+  ): Promise<void> {
+    const rawStore = getRawFakeIndexedDbStore(storeName);
+    if (rawStore !== null) {
+      rawStore.deleteRecord(structuredClone(key));
+      return;
+    }
+
+    await withReadwriteStores([storeName], (transaction) => {
+      transaction
+        .objectStore(storeName)
+        .delete(__LEGIT_CAST__<IndexedDbStoreKey, unknown>(key));
+    });
+  }
+
+  async function updateStoreRow(
+    storeName: string,
+    key: unknown,
+    update: (current: unknown) => unknown,
+  ): Promise<void> {
+    const rawStore = getRawFakeIndexedDbStore(storeName);
+    if (rawStore !== null) {
+      const existingRecord = rawStore.records.get(key);
+      rawStore.deleteRecord(structuredClone(key));
+      rawStore.storeRecord({
+        key: structuredClone(key),
+        value: structuredClone(
+          update(
+            existingRecord === undefined ? undefined : existingRecord.value,
+          ),
+        ),
+      });
+      return;
+    }
+
+    await withReadwriteStores([storeName], async (transaction) => {
+      const store = transaction.objectStore(storeName);
+      const currentValue = await openRequestAsPromise(
+        store.get(__LEGIT_CAST__<IndexedDbStoreKey, unknown>(key)),
+      );
+      store.put(update(currentValue));
+    });
+  }
+
+  function toManagedMetadata(
+    record: IndexedDbEntryRecord,
+  ): ManagedMetadataRecord {
     return {
       customMetadata: record.m ?? {},
       key: record.k,
@@ -1158,6 +1035,114 @@ export function createIndexedDbPersistentStorageTestStore(
       version: record.v,
       writtenAt: record.a,
     };
+  }
+
+  function readLogicalStorageEntry<T>(
+    flatKey: string,
+  ): Promise<StorageCacheEntry<T> | null> {
+    const parsed = parseFlatStorageKey(flatKey);
+    if (parsed === null) return Promise.resolve(null);
+
+    const record = getEntryRecord(parsed.scope, parsed.key);
+    if (record === null) return Promise.resolve(null);
+
+    const metadata = toManagedMetadata(record);
+    return Promise.resolve({
+      data: __LEGIT_CAST__<T, unknown>(
+        normalizeLogicalPayload(parsed.scope, record.d, metadata),
+      ),
+      timestamp: metadata.lastAccessAt,
+      version: metadata.version,
+    });
+  }
+
+  function writeLogicalStorageEntry(flatKey: string, value: unknown): void {
+    const parsed = parseFlatStorageKey(flatKey);
+    if (parsed === null) return;
+
+    const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(value);
+    const customMetadata = buildCustomMetadata(parsed.scope, entry.data);
+    enqueueWrite(async () => {
+      await putEntryRecord(parsed.scope, {
+        customMetadata,
+        key: parsed.key,
+        lastAccessAt: entry.timestamp,
+        value: entry.data,
+        version: entry.version ?? 1,
+      });
+    });
+  }
+
+  function setPayloadValue(key: string, value: unknown): void {
+    const parsed = parseFlatStorageKey(key);
+    if (parsed === null) return;
+
+    enqueueWrite(async () => {
+      const existing = getEntryRecord(parsed.scope, parsed.key);
+      await putEntryRecord(parsed.scope, {
+        customMetadata: existing?.m ?? buildCustomMetadata(parsed.scope, value),
+        key: parsed.key,
+        lastAccessAt: existing?.a ?? Date.now(),
+        value,
+        version: existing?.v ?? 1,
+      });
+    });
+  }
+
+  function setMetadataValue(key: string, value: unknown): void {
+    const parsed = parseFlatStorageKey(key);
+    if (parsed === null) return;
+
+    enqueueWrite(async () => {
+      const existing = getEntryRecord(parsed.scope, parsed.key);
+      if (existing === null) return;
+
+      const normalized = normalizeMetadataValue(parsed.key, value);
+      const metadata = parseManagedMetadataRecord(normalized, parsed.key);
+      if (metadata === null) return;
+
+      await putEntryRecord(parsed.scope, {
+        customMetadata: metadata.customMetadata,
+        key: parsed.key,
+        lastAccessAt: metadata.lastAccessAt,
+        value: existing.d,
+        version: metadata.version,
+      });
+    });
+  }
+
+  function removePayloadValue(key: string): void {
+    const parsed = parseFlatStorageKey(key);
+    if (parsed === null) return;
+    enqueueWrite(() => deleteEntryRecord(parsed.scope, parsed.key));
+  }
+
+  function removeMetadataValue(key: string): void {
+    const parsed = parseFlatStorageKey(key);
+    if (parsed === null) return;
+    enqueueWrite(() => deleteEntryRecord(parsed.scope, parsed.key));
+  }
+
+  function setNamespaceStaticPolicy(
+    scope: AsyncStorageNamespaceScope,
+    policy: Record<string, unknown>,
+  ): void {
+    enqueueWrite(() =>
+      putPolicyRecord(scope, normalizeTestStaticPolicy(policy)),
+    );
+  }
+
+  function readMetadata(key: string): Promise<ManagedMetadataRecord | null> {
+    const parsed = parseFlatStorageKey(key);
+    if (parsed === null) return Promise.resolve(null);
+    const record = getEntryRecord(parsed.scope, parsed.key);
+    return Promise.resolve(record === null ? null : toManagedMetadata(record));
+  }
+
+  async function listRawNamespaceKeys(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<string[]> {
+    return driver.listKeys(scope);
   }
 
   function createScope(
@@ -1247,19 +1232,22 @@ export function createIndexedDbPersistentStorageTestStore(
       collection: {
         itemKey,
         itemStorageKey: collectionItemStorageKey,
-        listStoredPayloads: () =>
-          listStoredKeysForNamespaceFromCache(collectionNamespace).flatMap(
-            (key) => {
-              const metadata = readMetadataFromCache(
-                getLogicalStorageKey(collectionNamespace, key),
-              );
-              return typeof metadata?.customMetadata.p === 'string'
-                ? [metadata.customMetadata.p]
-                : [];
-            },
-          ),
+        listStoredPayloads() {
+          const entries = listEntryRecords(collectionNamespace);
+          return Promise.resolve(
+            entries
+              .flatMap((entry) =>
+                typeof entry.m?.p === 'string' ? [entry.m.p] : [],
+              )
+              .sort((left, right) => left.localeCompare(right)),
+          );
+        },
         namespace: collectionNamespace,
-        seedItem<T>(payload: string, data: T, seedOptions?: StorageSeedOptions) {
+        seedItem<T>(
+          payload: string,
+          data: T,
+          seedOptions?: StorageSeedOptions,
+        ) {
           const storageKey = collectionItemStorageKey(payload);
           writeLogicalStorageEntry(
             storageKey,
@@ -1280,10 +1268,22 @@ export function createIndexedDbPersistentStorageTestStore(
         itemKey: listQueryItemKey,
         itemNamespace: listQueryItemNamespace,
         itemStorageKey: listQueryItemStorageKey,
-        listStoredItemKeys: () =>
-          listStoredKeysForNamespaceFromCache(listQueryItemNamespace),
-        listStoredQueryKeys: () =>
-          listStoredKeysForNamespaceFromCache(listQueryQueryNamespace),
+        listStoredItemKeys() {
+          const entries = listEntryRecords(listQueryItemNamespace);
+          return Promise.resolve(
+            entries
+              .map((entry) => entry.k)
+              .sort((left, right) => left.localeCompare(right)),
+          );
+        },
+        listStoredQueryKeys() {
+          const entries = listEntryRecords(listQueryQueryNamespace);
+          return Promise.resolve(
+            entries
+              .map((entry) => entry.k)
+              .sort((left, right) => left.localeCompare(right)),
+          );
+        },
         queryKey: listQueryQueryKey,
         queryNamespace: listQueryQueryNamespace,
         queryStorageKey: listQueryStorageKey,
@@ -1348,296 +1348,55 @@ export function createIndexedDbPersistentStorageTestStore(
     };
   }
 
-  async function buildPseudoFileMap(): Promise<Map<string, string>> {
-    const files = new Map<string, string>();
-    const discoveredScopes = await driver.listScopesWithKnownRecordKeys();
-
-    for (const { knownRecordKeys, scope } of discoveredScopes.sort((left, right) =>
-      JSON.stringify(left.scope).localeCompare(JSON.stringify(right.scope)),
-    )) {
-      const recordKeys =
-        knownRecordKeys.length > 0
-          ? knownRecordKeys
-          : await driver.listKeys(scope);
-
-      for (const recordKey of recordKeys) {
-        const rawValue = await driver.get(scope, recordKey);
-        if (rawValue === null) continue;
-
-        files.set(filePathForRecord(scope, recordKey), JSON.stringify(rawValue));
-      }
-    }
-
-    for (const [path, raw] of extraPseudoFiles) {
-      files.set(path, raw);
-    }
-
-    return files;
-  }
-
-  function getPseudoFileEntries(path: string): string[] {
-    const normalizedPath = path.replace(/^\/+|\/+$/g, '');
-    const prefix = normalizedPath.length === 0 ? '' : `${normalizedPath}/`;
-    const childEntries = new Set<string>();
-
-    for (const filePath of cachedPseudoFileMap.keys()) {
-      if (normalizedPath.length > 0 && filePath === normalizedPath) {
-        continue;
-      }
-
-      if (!filePath.startsWith(prefix)) continue;
-      const remainder = filePath.slice(prefix.length);
-      if (remainder.length === 0) continue;
-
-      const nextSeparatorIndex = remainder.indexOf('/');
-      if (nextSeparatorIndex < 0) {
-        childEntries.add(`file:${remainder}`);
-        continue;
-      }
-
-      childEntries.add(`dir:${remainder.slice(0, nextSeparatorIndex)}`);
-    }
-
-    return [...childEntries].sort((left, right) => left.localeCompare(right));
-  }
-
-  function parsePseudoScopePath(
-    path: string,
-  ): { fileName: string; scope: AsyncStorageNamespaceScope } | null {
-    const normalizedPath = path.replace(/^\/+|\/+$/g, '');
-    const pathSegments = normalizedPath.split('/');
-    if (pathSegments.length !== 4 || pathSegments[0] !== OPFS_ROOT_DIR) {
-      return null;
-    }
-
-    const [, sessionKeySegment, storeNameSegment, fileName] = pathSegments;
-    if (
-      sessionKeySegment === undefined ||
-      storeNameSegment === undefined ||
-      fileName === undefined
-    ) {
-      return null;
-    }
-
-    const parsedFileName = parseFileNameInfo(fileName);
-    if (parsedFileName === null) return null;
-
-    return {
-      fileName,
-      scope: {
-        kind: parsedFileName.kind,
-        sessionKey: decodePathSegment(sessionKeySegment),
-        storeName: decodePathSegment(storeNameSegment),
-      },
-    };
-  }
-
-  async function resolveRawRecordPath(
-    path: string,
-  ): Promise<
-    | {
-        recordKey: string;
-        scope: AsyncStorageNamespaceScope;
-      }
-    | null
-  > {
-    const parsedPath = parsePseudoScopePath(path);
-    if (parsedPath === null) return null;
-
-    const parsedFileName = parseFileNameInfo(parsedPath.fileName);
-    if (parsedFileName === null) return null;
-
-    if (parsedFileName.key !== null) {
-      return { recordKey: parsedFileName.key, scope: parsedPath.scope };
-    }
-
-    const scopeEntries = await listEntryRecords(parsedPath.scope);
-    for (const entry of scopeEntries) {
-      const recordKey = getPayloadRecordKey(entry.k);
-      if (filePathForRecord(parsedPath.scope, recordKey) === path) {
-        return { recordKey, scope: parsedPath.scope };
-      }
-    }
-
-    return null;
-  }
-
-  async function writePseudoFile(path: string, raw: string): Promise<void> {
-    const parsedPath = await resolveRawRecordPath(path);
-    if (parsedPath === null) {
-      extraPseudoFiles.set(path, raw);
-      await refreshCache();
-      return;
-    }
-
-    const parsedValue = safeJsonParse(raw);
-    if (parsedValue === null) {
-      extraPseudoFiles.set(path, raw);
-      await refreshCache();
-      return;
-    }
-
-    extraPseudoFiles.delete(path);
-    await driver.set(parsedPath.scope, parsedPath.recordKey, parsedValue);
-    await refreshCache();
-  }
-
-  async function removePseudoEntry(path: string): Promise<void> {
-    const remainingFailures = removeEntryFailures.get(path) ?? 0;
-    if (remainingFailures > 0) {
-      if (remainingFailures === 1) {
-        removeEntryFailures.delete(path);
-      } else {
-        removeEntryFailures.set(path, remainingFailures - 1);
-      }
-
-      throw new DOMException(
-        'A requested file or directory could not be found at the time an operation was processed.',
-        'NotFoundError',
-      );
-    }
-
-    const parsedPath = await resolveRawRecordPath(path);
-    if (parsedPath === null) {
-      extraPseudoFiles.delete(path);
-      await refreshCache();
-      return;
-    }
-
-    extraPseudoFiles.delete(path);
-    await driver.remove(parsedPath.scope, parsedPath.recordKey);
-    await refreshCache();
-  }
-
-  async function readMetadata(
-    key: string,
-  ): Promise<ManagedMetadataRecord | null> {
-    const parsed = parseFlatStorageKey(key);
-    if (parsed === null) return null;
-    const record = await getEntryRecord(parsed.scope, parsed.key);
-    return record === null ? null : toManagedMetadata(record);
-  }
-
-  async function listRawNamespaceKeys(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<string[]> {
-    return driver.listKeys(scope);
-  }
-
-  function readNamespaceIndexFromCache(
-    scope: AsyncStorageNamespaceScope,
-  ): Map<string, ManagedMetadataRecord> {
-    return readManagedIndexRecordFromCache(scope)?.entries ?? new Map<string, ManagedMetadataRecord>();
-  }
-
-  function readManagedIndexRecordFromCache(
-    scope: AsyncStorageNamespaceScope,
-  ): ManagedIndexRecord | null {
-    const raw = cachedPseudoFileMap.get(
-      filePathForRecord(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY),
-    );
-    if (raw === undefined) return null;
-
-    return parseManagedIndexRecord(safeJsonParse(raw));
-  }
-
-  function readMetadataFromCache(key: string): ManagedMetadataRecord | null {
-    const parsed = parseFlatStorageKey(key);
-    if (parsed === null) return null;
-
-    return readNamespaceIndexFromCache(parsed.scope).get(parsed.key) ?? null;
-  }
-
-  function readLogicalStorageEntryFromCache<T>(
-    flatKey: string,
-  ): StorageCacheEntry<T> | null {
-    const parsed = parseFlatStorageKey(flatKey);
-    if (parsed === null) return null;
-
-    const payloadRaw = cachedPseudoFileMap.get(
-      filePathForRecord(parsed.scope, getPayloadRecordKey(parsed.key)),
-    );
-    const metadata = readNamespaceIndexFromCache(parsed.scope).get(parsed.key);
-    if (payloadRaw === undefined || metadata === undefined) return null;
-
-    const payload = safeJsonParse(payloadRaw);
-    if (payload === null) return null;
-
-    return {
-      data: __LEGIT_CAST__<T, unknown>(
-        normalizeLogicalPayload(parsed.scope, payload, metadata),
-      ),
-      timestamp: metadata.lastAccessAt,
-      version: metadata.version,
-    };
-  }
-
-  function listStoredKeysForNamespaceFromCache(
-    scope: AsyncStorageNamespaceScope,
-  ): string[] {
-    return [...readNamespaceIndexFromCache(scope).keys()].sort((left, right) =>
-      left.localeCompare(right),
-    );
-  }
-
   const adapter: AsyncStorageAdapter = {
     kind: 'async',
-    openNamespace(scope) {
-      const namespace = baseAdapter.openNamespace(scope);
+    openNamespace<
+      TValue,
+      TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+    >(
+      scope: AsyncStorageNamespaceScope,
+    ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
+      const namespace = baseAdapter.openNamespace<TValue, TCustomMetadata>(
+        scope,
+      );
       return {
         async get(key, options) {
           await flushWrites();
-          const result = await namespace.get(key, options);
-          cachedPseudoFileMap = await buildPseudoFileMap();
-          return result;
+          return namespace.get(key, options);
         },
         async getMany(keys, options) {
           await flushWrites();
-          const result = await namespace.getMany(keys, options);
-          cachedPseudoFileMap = await buildPseudoFileMap();
-          return result;
+          return namespace.getMany(keys, options);
         },
         async listKeys() {
           await flushWrites();
-          const result = await namespace.listKeys();
-          cachedPseudoFileMap = await buildPseudoFileMap();
-          return result;
+          return namespace.listKeys();
         },
         async commit(args) {
           await flushWrites();
-          const result = await namespace.commit(args);
-          cachedPseudoFileMap = await buildPseudoFileMap();
-          return result;
+          return namespace.commit(args);
         },
         async listMetadata(args) {
           await flushWrites();
-          const result = await namespace.listMetadata(args);
-          cachedPseudoFileMap = await buildPseudoFileMap();
-          return result;
+          return namespace.listMetadata(args);
         },
         ...(namespace.listMetadataByFilter === undefined
           ? {}
           : {
               async listMetadataByFilter(args) {
                 await flushWrites();
-                const result = (await namespace.listMetadataByFilter?.(args)) ?? [];
-                cachedPseudoFileMap = await buildPseudoFileMap();
-                return result;
+                return (await namespace.listMetadataByFilter?.(args)) ?? [];
               },
             }),
         async clear() {
           await flushWrites();
-          const result = await namespace.clear();
-          cachedPseudoFileMap = await buildPseudoFileMap();
-          return result;
+          return namespace.clear();
         },
-      };
+      } satisfies AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
     },
     async readProtectedStorageKeys(sessionKey) {
       await flushWrites();
-      const result = await baseAdapter.readProtectedStorageKeys(sessionKey);
-      cachedPseudoFileMap = await buildPseudoFileMap();
-      return result;
+      return baseAdapter.readProtectedStorageKeys(sessionKey);
     },
     async syncSessionProtectedKeys(
       sessionKey,
@@ -1645,21 +1404,18 @@ export function createIndexedDbPersistentStorageTestStore(
       previousProtectedKeys,
     ) {
       await flushWrites();
-      const result = await baseAdapter.syncSessionProtectedKeys(
+      return baseAdapter.syncSessionProtectedKeys(
         sessionKey,
         protectedKeys,
         previousProtectedKeys,
       );
-      cachedPseudoFileMap = await buildPseudoFileMap();
-      return result;
     },
     async clearSession(sessionKey) {
       await flushWrites();
-      const result = await baseAdapter.clearSession(sessionKey);
-      cachedPseudoFileMap = await buildPseudoFileMap();
-      return result;
+      return baseAdapter.clearSession(sessionKey);
     },
     resetForTests() {
+      cleanupRemoveKnownRecordsFailures.clear();
       baseAdapter.resetForTests?.();
     },
   };
@@ -1667,7 +1423,10 @@ export function createIndexedDbPersistentStorageTestStore(
   function seedInitialState(): void {
     const initialState = options.initialState;
     if (initialState !== undefined) {
-      const scope = createScope(initialState.storeName, initialState.sessionKey);
+      const scope = createScope(
+        initialState.storeName,
+        initialState.sessionKey,
+      );
       const documentState = initialState.document;
       if (documentState !== undefined) {
         scope.document.seed(documentState.data, {
@@ -1718,13 +1477,6 @@ export function createIndexedDbPersistentStorageTestStore(
 
   const store = {
     adapter,
-    buildPseudoFileMap,
-    async refreshCache() {
-      await refreshCache();
-    },
-    getCachedPseudoFileMap() {
-      return new Map(cachedPseudoFileMap);
-    },
     clearReadRequests() {
       readStartIndex = instrumentationOperations.length;
     },
@@ -1737,31 +1489,6 @@ export function createIndexedDbPersistentStorageTestStore(
     flushIndexedDbCommits: waitForPendingWritesOnly,
     flushPendingWrites: settlePendingWrites,
     flushWrites,
-    mockIndexedDbFileView: {
-      failRemoveEntry(path: string, times = 1) {
-        if (times <= 0) {
-          removeEntryFailures.delete(path);
-          return;
-        }
-
-        removeEntryFailures.set(path, times);
-      },
-      fileExists(path: string) {
-        return cachedPseudoFileMap.has(path);
-      },
-      listEntries(path: string) {
-        return getPseudoFileEntries(path);
-      },
-      removeFile(path: string) {
-        enqueueWrite(() => removePseudoEntry(path));
-      },
-      removeEntry(path: string) {
-        return removePseudoEntry(path);
-      },
-      writeFile(path: string, raw: string) {
-        enqueueWrite(() => writePseudoFile(path, raw));
-      },
-    },
     scopeReadRequests(args?: { storeName: string; sessionKey: string }) {
       const payloadGetRequests = store.payloadGetRequests;
       if (args === undefined) return payloadGetRequests;
@@ -1771,12 +1498,12 @@ export function createIndexedDbPersistentStorageTestStore(
         key.startsWith(scopePrefix) ? key.slice(scopePrefix.length) : key,
       );
     },
-    getRaw(key: string) {
-      const entry = readLogicalStorageEntryFromCache(key);
+    async getRaw(key: string) {
+      const entry = await readLogicalStorageEntry(key);
       return entry === null ? null : JSON.stringify(entry);
     },
-    has(key: string) {
-      return readLogicalStorageEntryFromCache(key) !== null;
+    async has(key: string) {
+      return (await readLogicalStorageEntry(key)) !== null;
     },
     get listKeysRequests() {
       return instrumentationOperations
@@ -1808,7 +1535,9 @@ export function createIndexedDbPersistentStorageTestStore(
         )
         .filter((operation) => operation.keys.length > 1)
         .map((operation) =>
-          operation.keys.map((key) => getLogicalStorageKey(operation.scope, key)),
+          operation.keys.map((key) =>
+            getLogicalStorageKey(operation.scope, key),
+          ),
         );
     },
     get payloadGetRequests() {
@@ -1824,14 +1553,16 @@ export function createIndexedDbPersistentStorageTestStore(
         )
         .filter((operation) => operation.keys.length === 1)
         .flatMap((operation) =>
-          operation.keys.map((key) => getLogicalStorageKey(operation.scope, key)),
+          operation.keys.map((key) =>
+            getLogicalStorageKey(operation.scope, key),
+          ),
         );
     },
     storage: {
-      getRaw(key: string) {
+      async getRaw(key: string) {
         return store.getRaw(key);
       },
-      has(key: string) {
+      async has(key: string) {
         return store.has(key);
       },
       writeRaw(key: string, raw: string) {
@@ -1853,13 +1584,73 @@ export function createIndexedDbPersistentStorageTestStore(
         store.removeMetadata(key);
       },
     },
+    indexedDb: {
+      getRow(storeName: string, key: unknown) {
+        return Promise.resolve(getStoreRow(storeName, key));
+      },
+      listRows(storeName: string) {
+        return Promise.resolve(listStoreRows(storeName));
+      },
+      async putRow(storeName: string, value: unknown) {
+        await settlePendingWrites();
+        return putStoreRow(storeName, value);
+      },
+      async updateRow(
+        storeName: string,
+        key: unknown,
+        update: (current: unknown) => unknown,
+      ) {
+        await settlePendingWrites();
+        return updateStoreRow(storeName, key, update);
+      },
+      async deleteRow(storeName: string, key: unknown) {
+        await settlePendingWrites();
+        return deleteStoreRow(storeName, key);
+      },
+      async inspectStructure() {
+        await settlePendingWrites();
+        return inspectIndexedDbStructure();
+      },
+      async mutateRawRow(
+        storeName: string,
+        key: unknown,
+        update: (current: unknown) => unknown,
+      ) {
+        await flushWrites();
+        mutateRawFakeIndexedDbStoreRow(storeName, key, update);
+      },
+      queueMutateRawRow(
+        storeName: string,
+        key: unknown,
+        update: (current: unknown) => unknown,
+      ) {
+        enqueueWrite(() => {
+          mutateRawFakeIndexedDbStoreRow(storeName, key, update);
+          return Promise.resolve();
+        });
+      },
+      failCleanupRemoveKnownRecords(
+        scope: AsyncStorageNamespaceScope,
+        times = 1,
+      ) {
+        const scopeId = JSON.stringify([
+          scope.sessionKey,
+          scope.storeName,
+          scope.kind,
+        ]);
+        if (times <= 0) {
+          cleanupRemoveKnownRecordsFailures.delete(scopeId);
+          return;
+        }
+
+        cleanupRemoveKnownRecordsFailures.set(scopeId, times);
+      },
+    },
     rawNamespace: {
       async get(scope: AsyncStorageNamespaceScope, key: string) {
-        await flushWrites();
         return driver.get(scope, key);
       },
       async listKeys(scope: AsyncStorageNamespaceScope) {
-        await flushWrites();
         return listRawNamespaceKeys(scope);
       },
       remove(scope: AsyncStorageNamespaceScope, key: string) {

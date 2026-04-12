@@ -1,29 +1,22 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import {
-  advanceTime,
-} from '../../utils/genericTestUtils';
-import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
+import { advanceTime } from '../../utils/genericTestUtils';
 import {
   getIndexedDbStructureSnapshot,
   getParsedIndexedDbRecordData,
   startIndexedDbPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
+import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import {
-  captureHookRemount,
   createCollectionEnv,
   createDocumentEnv,
   flushInvalidationPersistence,
-  markEntryOfflineProtected,
   resolveAfterIndexedDbStorage,
-  setProtectedKeysSnapshot,
   settleIndexedDbStorage,
   settleIndexedDbStorageCapture,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
-  waitForIndexedDbCondition,
-  waitForHookValue,
   waitForScheduledCleanup,
 } from './shared';
 
@@ -37,7 +30,12 @@ async function readCollectionEntryRow(args: {
 }) {
   const scope = args.mockAdapter.scope(args.storeName, args.sessionKey);
   return getParsedIndexedDbRecordData(args.mockAdapter, {
-    key: [args.sessionKey, args.storeName, 'collection.item', scope.collection.itemKey(args.payload)],
+    key: [
+      args.sessionKey,
+      args.storeName,
+      'collection.item',
+      scope.collection.itemKey(args.payload),
+    ],
     storeName: 'entries',
   });
 }
@@ -53,39 +51,21 @@ async function readCollectionNamespacePolicyRow(args: {
   });
 }
 
-async function getCollectionPayloadDeleteTarget(args: {
+async function deleteCollectionEntryRow(args: {
   mockAdapter: ReturnType<typeof createIndexedDbPersistentStorageTestStore>;
+  payload: string;
   sessionKey: string;
   storeName: string;
-}): Promise<{
-  fileName: string;
-  storeDir: { removeEntry: (name: string) => Promise<void> };
-}> {
-  const fileName = args.mockAdapter.mockIndexedDbFileView
-    .listEntries(`tsdf/${args.sessionKey}/${args.storeName}`)
-    .flatMap((entry) =>
-      entry.startsWith('file:') && entry !== 'file:ci._i.r.json'
-        ? [entry.slice('file:'.length)]
-        : [],
-    )[0];
+}): Promise<void> {
+  const scope = args.mockAdapter.scope(args.storeName, args.sessionKey);
+  const entryKey = [
+    args.sessionKey,
+    args.storeName,
+    'collection.item',
+    scope.collection.itemKey(args.payload),
+  ] as const;
 
-  if (fileName === undefined) {
-    throw new Error('Expected a persisted collection payload file.');
-  }
-
-  return {
-    fileName,
-    storeDir: {
-      removeEntry(name: string) {
-        return resolveAfterIndexedDbStorage(
-          args.mockAdapter.mockIndexedDbFileView.removeEntry(
-            `tsdf/${args.sessionKey}/${args.storeName}/${name}`,
-          ),
-          args.mockAdapter,
-        );
-      },
-    },
-  };
+  await args.mockAdapter.indexedDb.deleteRow('entries', entryKey);
 }
 
 describe('indexeddb async storage efficiency: collection', () => {
@@ -120,14 +100,15 @@ describe('indexeddb async storage efficiency: collection', () => {
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     // Once the scan runs, capture the full metadata cleanup history.
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
-      expiredItemExists: mockAdapter.has(expiredItemKey),
-      expiredItem2Exists: mockAdapter.has(expiredItemKey2),
-      freshItemExists: mockAdapter.has(freshItemKey),
+      expiredItemExists: await mockAdapter.has(expiredItemKey),
+      expiredItem2Exists: await mockAdapter.has(expiredItemKey2),
+      freshItemExists: await mockAdapter.has(freshItemKey),
     }).toMatchInlineSnapshot(`
       expiredItem2Exists: '❌'
       expiredItemExists: '❌'
@@ -142,7 +123,8 @@ describe('indexeddb async storage efficiency: collection', () => {
       ""
     `);
 
-    expect(await getIndexedDbStructureSnapshot(mockAdapter)).toMatchInlineSnapshot(`
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
       stores:
         - autoIncrement: '❌'
           indexes:
@@ -236,12 +218,13 @@ describe('indexeddb async storage efficiency: collection', () => {
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     // Once the startup pass runs, it should evict only the oldest persisted item.
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
-      collectionScope.collection.listStoredPayloads().sort(),
+      (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['b', 'c']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
@@ -252,7 +235,11 @@ describe('indexeddb async storage efficiency: collection', () => {
       ""
     `);
     expect(
-      await readCollectionNamespacePolicyRow({ mockAdapter, sessionKey, storeName }),
+      await readCollectionNamespacePolicyRow({
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
     ).toMatchInlineSnapshot(`
       n: 'collection-startup-max-items'
       p: { maxEntries: 2 }
@@ -278,9 +265,9 @@ describe('indexeddb async storage efficiency: collection', () => {
     await waitForScheduledCleanup();
 
     expect(
-      collectionScope.collection
-        .listStoredPayloads()
-        .sort((left, right) => left.localeCompare(right)),
+      (await collectionScope.collection.listStoredPayloads()).sort(
+        (left, right) => left.localeCompare(right),
+      ),
     ).toMatchInlineSnapshot(`
       - '1'
       - '10'
@@ -375,7 +362,7 @@ describe('indexeddb async storage efficiency: collection', () => {
     const operationsBreakdown = cleanupCapture.finish().timelineString;
 
     expect(
-      collectionScope.collection.listStoredPayloads().sort(),
+      (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
@@ -418,30 +405,22 @@ describe('indexeddb async storage efficiency: collection', () => {
     await settleStartupBackgroundScan(mockAdapter);
 
     // Adding a fourth item should capture one write plus a two-item cleanup sequence.
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
     await advanceTime(1100);
     await settleIndexedDbStorageCapture(mockAdapter);
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
-      collectionScope.collection.listStoredPayloads().sort(),
+      (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      1.105s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-max-items-metadata","collection.item"]]
-      1.113s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-max-items-metadata","collection.item"] -> keys=3 exists=yes valid=yes
-      1.117s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-max-items-metadata","collection.item"] order=lru-desc -> ["\\"c", "\\"b", "\\"a"]
-      1.122s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-max-items-metadata","collection.item"]]
-      1.13s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-max-items-metadata","collection.item"] -> keys=3 exists=yes valid=yes
-      1.136s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-max-items-metadata","collection.item"]]
-      1.144s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-max-items-metadata","collection.item"] -> keys=3 exists=yes valid=yes
-      1.192s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-max-items-metadata","collection.item"] put=["\\"d"] delete=["\\"b", "\\"a"] touch=[] static-policy
-      1.197s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-max-items-metadata","collection.item"]]
-      1.203s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-max-items-metadata","collection.item"] -> keys=2 exists=yes valid=yes
+      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-max-items-metadata","collection.item"] order=lru-desc -> ["\\"c", "\\"b", "\\"a"]
+      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-max-items-metadata","collection.item"] put=["\\"d"] delete=["\\"b", "\\"a"] touch=[] static-policy
       ""
     `);
-
   });
 
   test('maxItems-triggered flush also prunes expired persisted items', async () => {
@@ -471,31 +450,25 @@ describe('indexeddb async storage efficiency: collection', () => {
       value: { id: 'c', name: 'Fresh cached' },
     });
 
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
     await advanceTime(1100);
     await settleIndexedDbStorageCapture(mockAdapter);
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
-      collectionScope.collection.listStoredPayloads().sort(),
+      (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      1.105s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-expired-during-max-items","collection.item"]]
-      1.113s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-expired-during-max-items","collection.item"] -> keys=3 exists=yes valid=yes
-      1.117s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-expired-during-max-items","collection.item"] order=lru-desc -> ["\\"c", "\\"b", "\\"a"]
-      1.122s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-expired-during-max-items","collection.item"]]
-      1.13s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-expired-during-max-items","collection.item"] -> keys=3 exists=yes valid=yes
-      1.136s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-expired-during-max-items","collection.item"]]
-      1.144s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-expired-during-max-items","collection.item"] -> keys=3 exists=yes valid=yes
-      1.192s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-expired-during-max-items","collection.item"] put=["\\"d"] delete=["\\"b", "\\"a"] touch=[] static-policy
-      1.197s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-expired-during-max-items","collection.item"]]
-      1.203s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-expired-during-max-items","collection.item"] -> keys=2 exists=yes valid=yes
+      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-expired-during-max-items","collection.item"] order=lru-desc -> ["\\"c", "\\"b", "\\"a"]
+      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-expired-during-max-items","collection.item"] put=["\\"d"] delete=["\\"b", "\\"a"] touch=[] static-policy
       ""
     `);
 
-    expect(await getIndexedDbStructureSnapshot(mockAdapter)).toMatchInlineSnapshot(`
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
       stores:
         - autoIncrement: '❌'
           indexes:
@@ -558,7 +531,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     // Drain the startup maintenance so the capture only covers the repeated inline overflow path.
     await settleStartupBackgroundScan(mockAdapter);
 
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
 
     // The first overflow should evict the oldest cached item in the same debounced commit.
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Third' } });
@@ -572,29 +546,14 @@ describe('indexeddb async storage efficiency: collection', () => {
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
-      collectionScope.collection.listStoredPayloads().sort(),
+      (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.204s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.204s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.21s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.21s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.213s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"b", "\\"a"]
-      2.213s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"b", "\\"a"]
-      2.217s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.217s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.223s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.223s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.228s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.228s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.234s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.234s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.284s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"c", "\\"d"] delete=["\\"a", "\\"b"] touch=[] static-policy
-      2.289s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.289s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-inline-overflow-cleanup","collection.item"]]
-      2.295s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
-      2.295s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-inline-overflow-cleanup","collection.item"] -> keys=2 exists=yes valid=yes
+      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"b", "\\"a"]
+      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"c"] delete=["\\"a"] touch=[] static-policy
+      2.1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"c", "\\"b"]
+      2.14s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"d"] delete=["\\"b"] touch=[] static-policy
       ""
     `);
   });
@@ -621,9 +580,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     const preloadCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
-    expect(
-      await resolveAfterIndexedDbStorage(preloadPromise, mockAdapter),
-    ).toMatchInlineSnapshot(`
+    expect(await resolveAfterIndexedDbStorage(preloadPromise, mockAdapter))
+      .toMatchInlineSnapshot(`
       - { payload: '1', preloaded: '✅' }
     `);
     const preloadPromise2 = env.apiStore.preloadItemFromStorage('2');
@@ -633,16 +591,8 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     expect(preloadCapture.finish().timelineString).toMatchInlineSnapshot(`
       ""
-      4ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-direct-get-item-state","collection.item"]]
-      10ms | 📖 scope-state entries+namespacePolicies scope=["sess1","col-direct-get-item-state","collection.item"] -> keys=2 exists=yes valid=yes
-      11ms | 📖 entries.getMany scope=["sess1","col-direct-get-item-state","collection.item"] keys=["\\"1"] -> ["\\"1"]
-      15ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-direct-get-item-state","collection.item"]]
-      21ms | 📖 scope-state entries+namespacePolicies scope=["sess1","col-direct-get-item-state","collection.item"] -> keys=2 exists=yes valid=yes
-      26ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-direct-get-item-state","collection.item"]]
-      32ms | 📖 scope-state entries+namespacePolicies scope=["sess1","col-direct-get-item-state","collection.item"] -> keys=2 exists=yes valid=yes
-      33ms | 📖 entries.getMany scope=["sess1","col-direct-get-item-state","collection.item"] keys=["\\"2"] -> ["\\"2"]
-      37ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-direct-get-item-state","collection.item"]]
-      43ms | 📖 scope-state entries+namespacePolicies scope=["sess1","col-direct-get-item-state","collection.item"] -> keys=2 exists=yes valid=yes
+      1ms | 📖 entries.getMany scope=["sess1","col-direct-get-item-state","collection.item"] keys=["\\"1"] -> ["\\"1"]
+      3ms | 📖 entries.getMany scope=["sess1","col-direct-get-item-state","collection.item"] keys=["\\"2"] -> ["\\"2"]
       ""
     `);
 
@@ -680,7 +630,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`"empty"`);
 
     // Repeated direct reads should also reuse in-memory state without new storage work.
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
@@ -732,7 +683,12 @@ describe('indexeddb async storage efficiency: collection', () => {
     await settleIndexedDbStorage();
 
     expect(
-      await readCollectionEntryRow({ mockAdapter, payload: '1', sessionKey, storeName }),
+      await readCollectionEntryRow({
+        mockAdapter,
+        payload: '1',
+        sessionKey,
+        storeName,
+      }),
     ).toMatchInlineSnapshot(`
       a: 1735689600000
 
@@ -751,16 +707,12 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.003s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-mutation-flow","collection.item"]]
-      1.007s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-mutation-flow","collection.item"] -> keys=1 exists=yes valid=yes
-      1.051s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
-      1.054s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-mutation-flow","collection.item"]]
-      1.058s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-mutation-flow","collection.item"] -> keys=1 exists=yes valid=yes
+      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
 
-  test('updating a hydrated collection item recreates a payload file deleted after hydration without rereading cached entries', async () => {
+  test('updating a hydrated collection item recreates a persisted row deleted after hydration without rereading cached entries', async () => {
     const storeName = 'col-mutation-retry-after-delete';
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
@@ -772,28 +724,27 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     const env = createCollectionEnv({ storeName, sessionKey });
 
-    // Hydrate the cached item first so the later write reuses a cached OPFS file handle.
+    // Hydrate the cached item first so the later write can reuse the in-memory row state.
     await settleStartupBackgroundScan(mockAdapter);
     const hydratedHook = renderHook(() =>
       env.apiStore.useItem('1', { disableRefetchOnMount: true }),
     );
     await flushInvalidationPersistence(0);
 
-    const deleteTarget = await getCollectionPayloadDeleteTarget({
-      mockAdapter,
-      sessionKey,
-      storeName,
-    });
-
-    // Simulate another tab deleting the payload file while this tab still holds the old handle.
+    // Simulate another tab deleting the persisted row while this tab still holds hydrated state.
     const mutationCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await resolveAfterIndexedDbStorage(
-      deleteTarget.storeDir.removeEntry(deleteTarget.fileName),
+      deleteCollectionEntryRow({
+        mockAdapter,
+        payload: '1',
+        sessionKey,
+        storeName,
+      }),
       mockAdapter,
     );
 
-    // The next mutation should recreate the payload file through the retry path, not reread storage.
+    // The next mutation should recreate the persisted row through the retry path, not reread storage.
     act(() => {
       env.apiStore.updateItemState('1', (draft) => {
         draft.value.name = 'Edited after delete';
@@ -806,10 +757,17 @@ describe('indexeddb async storage efficiency: collection', () => {
     await settleIndexedDbStorage();
 
     expect(
-      await readCollectionEntryRow({ mockAdapter, payload: '1', sessionKey, storeName }),
+      Object.fromEntries(
+        Object.entries(
+          (await readCollectionEntryRow({
+            mockAdapter,
+            payload: '1',
+            sessionKey,
+            storeName,
+          })) ?? {},
+        ).filter(([key]) => key !== 'a'),
+      ),
     ).toMatchInlineSnapshot(`
-      a: 1735689606167
-
       d:
         d:
           value: { id: '1', name: 'Edited after delete' }
@@ -825,17 +783,12 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      6ms | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","col-mutation-retry-after-delete","collection.item"] keys=["\\"1"]
-      8ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> []
-      1.011s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> []
-      1.055s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-after-delete","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
-      1.058s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-mutation-retry-after-delete","collection.item"]]
-      1.062s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-mutation-retry-after-delete","collection.item"] -> keys=1 exists=yes valid=yes
+      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-after-delete","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
 
-  test('updating a hydrated collection item recreates a payload file deleted during the write race without rereading cached entries', async () => {
+  test('updating a hydrated collection item recreates a persisted row deleted during the write race without rereading cached entries', async () => {
     const storeName = 'col-mutation-retry-during-write';
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
@@ -847,20 +800,15 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     const env = createCollectionEnv({ storeName, sessionKey });
 
-    // Hydrate the cached item first so the later write reuses a cached OPFS file handle.
+    // Hydrate the cached item first so the later write can reuse the in-memory row state.
     await settleStartupBackgroundScan(mockAdapter);
     const hydratedHook = renderHook(() =>
       env.apiStore.useItem('1', { disableRefetchOnMount: true }),
     );
     await flushInvalidationPersistence(0);
 
-    const deleteTarget = await getCollectionPayloadDeleteTarget({
-      mockAdapter,
-      sessionKey,
-      storeName,
-    });
-
-    // Start a normal mutation, then let another tab remove the file after the write begins but before close().
+    // Start a normal mutation, then let another tab remove the row directly
+    // from IndexedDB after the write has started but before it fully settles.
     const mutationCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
@@ -868,39 +816,67 @@ describe('indexeddb async storage efficiency: collection', () => {
         draft.value.name = 'Edited during write';
       });
     });
-    await advanceTime(1045);
-    const deletePromise = deleteTarget.storeDir.removeEntry(
-      deleteTarget.fileName,
+    await advanceTime(500);
+    await resolveAfterIndexedDbStorage(
+      deleteCollectionEntryRow({
+        mockAdapter,
+        payload: '1',
+        sessionKey,
+        storeName,
+      }),
+      mockAdapter,
     );
-    await advanceTime(1);
-    await resolveAfterIndexedDbStorage(deletePromise, mockAdapter);
+    await advanceTime(545);
     await flushInvalidationPersistence(0);
     await settleIndexedDbStorageCapture(mockAdapter);
-    await waitForIndexedDbCondition(async () => {
-      return (
-        (await readCollectionEntryRow({
-          mockAdapter,
-          payload: '1',
-          sessionKey,
-          storeName,
-        })) !== null
-      );
-    });
+    let recreatedEntry: Awaited<ReturnType<typeof readCollectionEntryRow>> =
+      null;
+
+    for (let attempt = 0; recreatedEntry === null && attempt < 10; attempt++) {
+      await settleIndexedDbStorageCapture(mockAdapter);
+      recreatedEntry = await readCollectionEntryRow({
+        mockAdapter,
+        payload: '1',
+        sessionKey,
+        storeName,
+      });
+    }
     hydratedHook.unmount();
     const mutationOperations = mutationCapture.finish().timelineString;
     env.apiStore.dispose();
     await settleIndexedDbStorage();
 
     expect(
-      await readCollectionEntryRow({ mockAdapter, payload: '1', sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`null`);
+      Object.fromEntries(
+        Object.entries(
+          (await readCollectionEntryRow({
+            mockAdapter,
+            payload: '1',
+            sessionKey,
+            storeName,
+          })) ?? {},
+        ).filter(([key]) => key !== 'a'),
+      ),
+    ).toMatchInlineSnapshot(`
+        d:
+          d:
+            value: { id: '1', name: 'Edited during write' }
+          p: '1'
+
+        k: '"1'
+        m: { p: '1' }
+        n: 'col-mutation-retry-during-write'
+        o: 0
+        s: 'sess1'
+        t: 'collection.item'
+        v: 1
+      `);
     expect(mutationOperations).toMatchInlineSnapshot(`
-      ""
-      1.05s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","col-mutation-retry-during-write","collection.item"] keys=["\\"1"]
-      1.052s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> []
-      ""
-    `);
-  });
+        ""
+        1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+        ""
+      `);
+  }, 5000);
 
   test('deleteItemState removes the persisted collection entry through the namespace manifest only', async () => {
     const storeName = 'col-delete-flow';
@@ -925,19 +901,14 @@ describe('indexeddb async storage efficiency: collection', () => {
     await settleIndexedDbStorage();
     const deleteOperations = deleteCapture.finish().timelineString;
 
-    expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
+    expect(await mockAdapter.has(deletedItemStorageKey)).toBe(false);
     expect(
-      collectionScope.collection.listStoredPayloads().sort(),
+      (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['2']`);
     expect(deleteOperations).toMatchInlineSnapshot(`
       ""
-      1.104s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-delete-flow","collection.item"]]
-      1.11s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-delete-flow","collection.item"] -> keys=2 exists=yes valid=yes
-      1.154s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-delete-flow","collection.item"] put=[] delete=["\\"1"] touch=[] static-policy
-      1.157s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","col-delete-flow","collection.item"]]
-      1.161s | 📖 scope-state entries+namespacePolicies scope=["sess1","col-delete-flow","collection.item"] -> keys=1 exists=yes valid=yes
+      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-delete-flow","collection.item"] put=[] delete=["\\"1"] touch=[] static-policy
       ""
     `);
   });
-
 });

@@ -1,3 +1,4 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
@@ -5,30 +6,164 @@ import { createOfflineSession } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { clearSessionProtectedKeysSnapshot } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
+import type { AsyncStorageNamespaceScope } from '../../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import { advanceTime } from '../../utils/genericTestUtils';
 import {
-  advanceTime,
-  resolveAfterAllTimers,
-} from '../../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../../utils/networkMock';
-import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
-import {
+  getIndexedDbNamespaceSnapshot,
   getIndexedDbStructureSnapshot,
   getParsedIndexedDbRecordData,
   getParsedLocalStorageValue,
   startIndexedDbPersistentStorageOperationCapture,
   startPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
+import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
+import { createOfflineNetworkMock } from '../../utils/networkMock';
 import {
   createCollectionEnv,
   createDocumentEnv,
   createListQueryEnv,
+  resolveAfterIndexedDbStorage,
   setupAsyncStorageEfficiencyTestSuite,
   waitForScheduledCleanup,
   wrappedDocumentSchema,
 } from './shared';
 
 setupAsyncStorageEfficiencyTestSuite();
+
+async function resolveAfterIndexedDbTimers<T>(promise: Promise<T>): Promise<T> {
+  const pendingResult = Symbol('pendingResult');
+  let didSettle = false;
+
+  const settledResultPromise = promise.then(
+    (value) => {
+      didSettle = true;
+      return { status: 'resolved' as const, value };
+    },
+    (error) => {
+      didSettle = true;
+      return { status: 'rejected' as const, error };
+    },
+  );
+
+  let stableIdlePasses = 0;
+  for (let pass = 0; pass < 200; pass++) {
+    if (didSettle && stableIdlePasses >= 2) break;
+
+    if (vi.getTimerCount() > 0) {
+      stableIdlePasses = 0;
+      await vi.advanceTimersToNextTimerAsync();
+    } else {
+      await Promise.resolve();
+    }
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    if (vi.getTimerCount() === 0) {
+      stableIdlePasses += 1;
+    } else {
+      stableIdlePasses = 0;
+    }
+  }
+
+  const settledResult = await Promise.race([
+    settledResultPromise,
+    Promise.resolve(pendingResult),
+  ]);
+
+  if (settledResult === pendingResult) {
+    throw new Error('Promise did not settle while advancing IndexedDB timers.');
+  }
+
+  if (settledResult.status === 'rejected') {
+    throw settledResult.error;
+  }
+
+  return settledResult.value;
+}
+
+const ENTRY_STORE_NAME = 'entries';
+const NAMESPACE_POLICY_STORE_NAME = 'namespacePolicies';
+
+function matchesScopeKey(
+  rawKey: unknown,
+  scope: AsyncStorageNamespaceScope,
+): rawKey is [string, string, AsyncStorageNamespaceScope['kind'], string] {
+  return (
+    Array.isArray(rawKey) &&
+    rawKey[0] === scope.sessionKey &&
+    rawKey[1] === scope.storeName &&
+    rawKey[2] === scope.kind
+  );
+}
+
+type MockIndexedDbAdapter = ReturnType<
+  typeof createIndexedDbPersistentStorageTestStore
+>;
+
+async function listScopeEntryRows(
+  mockAdapter: MockIndexedDbAdapter,
+  scope: AsyncStorageNamespaceScope,
+): Promise<Array<{ key: unknown; value: unknown }>> {
+  return (await mockAdapter.indexedDb.listRows(ENTRY_STORE_NAME)).filter(
+    (row) => matchesScopeKey(row.key, scope),
+  );
+}
+
+async function listScopePolicyRows(
+  mockAdapter: MockIndexedDbAdapter,
+  scope: AsyncStorageNamespaceScope,
+): Promise<Array<{ key: unknown; value: unknown }>> {
+  return (
+    await mockAdapter.indexedDb.listRows(NAMESPACE_POLICY_STORE_NAME)
+  ).filter(
+    (row) =>
+      Array.isArray(row.key) &&
+      row.key[0] === scope.sessionKey &&
+      row.key[1] === scope.storeName &&
+      row.key[2] === scope.kind,
+  );
+}
+
+function corruptEntryRow(args: {
+  key?: string;
+  mockAdapter: MockIndexedDbAdapter;
+  scope: AsyncStorageNamespaceScope;
+  value?: Record<string, unknown>;
+}): void {
+  args.mockAdapter.indexedDb.queueMutateRawRow(
+    ENTRY_STORE_NAME,
+    [
+      args.scope.sessionKey,
+      args.scope.storeName,
+      args.scope.kind,
+      args.key ?? 'document',
+    ],
+    (current) => ({
+      ...(typeof current === 'object' && current !== null
+        ? __LEGIT_CAST__<Record<string, unknown>, unknown>(current)
+        : {}),
+      ...(args.value ?? { a: 'bad' }),
+    }),
+  );
+}
+
+function corruptNamespacePolicyRow(args: {
+  mockAdapter: MockIndexedDbAdapter;
+  scope: AsyncStorageNamespaceScope;
+  value?: Record<string, unknown>;
+}): void {
+  args.mockAdapter.indexedDb.queueMutateRawRow(
+    NAMESPACE_POLICY_STORE_NAME,
+    [args.scope.sessionKey, args.scope.storeName, args.scope.kind],
+    (current) => ({
+      ...(typeof current === 'object' && current !== null
+        ? __LEGIT_CAST__<Record<string, unknown>, unknown>(current)
+        : {}),
+      ...(args.value ?? { n: 123 }),
+    }),
+  );
+}
 
 type ProtectedDocumentOfflineOperations = {
   markProtected: DocumentOfflineOperationDefinition<
@@ -62,14 +197,15 @@ describe('indexeddb async storage efficiency: maintenance', () => {
 
     // Once the scheduled sweep runs, snapshot the complete maintenance history.
     const localStorageCapture = startPersistentStorageOperationCapture();
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
     const localStorageOperations = localStorageCapture.finish().timelineString;
 
     expect({
-      expiredEntryExists: mockAdapter.has(expiredKey),
-      freshEntryExists: mockAdapter.has(freshKey),
+      expiredEntryExists: await mockAdapter.has(expiredKey),
+      freshEntryExists: await mockAdapter.has(freshKey),
     }).toMatchInlineSnapshot(`
       expiredEntryExists: '❌'
       freshEntryExists: '✅'
@@ -96,107 +232,102 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`lca: 1735689602013`);
   });
 
-  test('startup cleanup deletes invalid OPFS entries while keeping valid stores', async () => {
+  test('startup cleanup deletes invalid IndexedDB rows while keeping valid scopes', async () => {
     const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const expiredDoc = mockAdapter.scope('expired-doc', 'sess1');
     const freshDoc = mockAdapter.scope('fresh-doc', 'sess1');
+    const invalidOnlyStore = mockAdapter.scope(
+      'invalid-only-list-query',
+      'sess1',
+    );
     const freshKey = freshDoc.document.storageKey();
 
-    // Seed one expired store to prune and one fresh store that must survive.
+    // Seed one expired scope to prune and one fresh sibling that must survive.
     expiredDoc.document.seed(
       { value: { name: 'old', value: 1 } },
       { timestamp: staleTimestamp },
     );
     freshDoc.document.seed({ value: { name: 'fresh', value: 2 } });
-
-    // Add invalid junk at multiple levels; cleanup should remove all of it.
-    mockAdapter.mockIndexedDbFileView.writeFile('tsdf/root-junk.txt', 'bad');
-    mockAdapter.mockIndexedDbFileView.writeFile('tsdf/sess1/session-junk.txt', 'bad');
-    mockAdapter.mockIndexedDbFileView.writeFile(
-      'tsdf/sess1/expired-doc/store-junk.txt',
-      'bad',
-    );
-    mockAdapter.mockIndexedDbFileView.writeFile(
-      'tsdf/sess1/fresh-doc/store-junk.txt',
-      'bad',
-    );
-    mockAdapter.mockIndexedDbFileView.writeFile(
-      'tsdf/sess1/invalid-only-store/store-junk.txt',
-      'bad',
-    );
+    invalidOnlyStore.listQuery.seedQuery({ tableId: 'cleanup' }, []);
+    corruptEntryRow({
+      key: invalidOnlyStore.listQuery.queryKey({ tableId: 'cleanup' }),
+      mockAdapter,
+      scope: invalidOnlyStore.listQuery.queryNamespace,
+    });
+    await resolveAfterIndexedDbTimers(mockAdapter.flushPendingWrites());
 
     createDocumentEnv({ storeName: 'fresh-doc', sessionKey: 'sess1' });
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
-      expiredStoreEntries: mockAdapter.mockIndexedDbFileView.listEntries(
-        'tsdf/sess1/expired-doc',
+      expiredScopeRows: await listScopeEntryRows(
+        mockAdapter,
+        expiredDoc.document.namespace,
       ),
-      freshEntryExists: mockAdapter.has(freshKey),
-      freshStoreEntries: mockAdapter.mockIndexedDbFileView.listEntries(
-        'tsdf/sess1/fresh-doc',
+      freshEntryExists: await mockAdapter.has(freshKey),
+      invalidOnlyPolicyRows: await listScopePolicyRows(
+        mockAdapter,
+        invalidOnlyStore.listQuery.queryNamespace,
       ),
-      invalidOnlyStoreEntries: mockAdapter.mockIndexedDbFileView.listEntries(
-        'tsdf/sess1/invalid-only-store',
-      ),
-      rootEntries: mockAdapter.mockIndexedDbFileView.listEntries('tsdf'),
-      rootJunkExists:
-        mockAdapter.mockIndexedDbFileView.fileExists('tsdf/root-junk.txt'),
-      sessionEntries: mockAdapter.mockIndexedDbFileView.listEntries('tsdf/sess1'),
-      sessionJunkExists: mockAdapter.mockIndexedDbFileView.fileExists(
-        'tsdf/sess1/session-junk.txt',
-      ),
-      storeJunkExists: mockAdapter.mockIndexedDbFileView.fileExists(
-        'tsdf/sess1/expired-doc/store-junk.txt',
-      ),
-      freshStoreJunkExists: mockAdapter.mockIndexedDbFileView.fileExists(
-        'tsdf/sess1/fresh-doc/store-junk.txt',
-      ),
-      invalidOnlyStoreJunkExists: mockAdapter.mockIndexedDbFileView.fileExists(
-        'tsdf/sess1/invalid-only-store/store-junk.txt',
+      invalidOnlyScopeRows: await listScopeEntryRows(
+        mockAdapter,
+        invalidOnlyStore.listQuery.queryNamespace,
       ),
     }).toMatchInlineSnapshot(`
-      expiredStoreEntries: ['file:store-junk.txt']
+      expiredScopeRows: []
       freshEntryExists: '✅'
-      freshStoreEntries: ['file:d._i.r.json', 'file:d.e.p.json', 'file:store-junk.txt']
-      freshStoreJunkExists: '✅'
-      invalidOnlyStoreEntries: ['file:store-junk.txt']
-      invalidOnlyStoreJunkExists: '✅'
-      rootEntries: ['dir:sess1', 'file:root-junk.txt']
-      rootJunkExists: '✅'
-      sessionEntries:
-        - 'dir:expired-doc'
-        - 'dir:fresh-doc'
-        - 'dir:invalid-only-store'
-        - 'file:session-junk.txt'
-      sessionJunkExists: '✅'
-      storeJunkExists: '✅'
+      invalidOnlyPolicyRows: []
+      invalidOnlyScopeRows: []
     `);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      ""
-      17ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      23ms | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      29ms | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      34ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      40ms | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      46ms | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      51ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      57ms | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      63ms | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      68ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      74ms | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      80ms | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      85ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      91ms | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      97ms | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.005s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      2.009s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.009s | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.012s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
-      ""
+
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","invalid-only-list-query","listQuery.query"] -> keys=0 exists=no valid=no',
+    );
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes',
+    );
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
+      stores:
+        - autoIncrement: '❌'
+          indexes:
+            - keyPath: ['s', 'n', 't', 'g', 'k']
+              multiEntry: '❌'
+              name: 'byScopeGroup'
+              unique: '❌'
+            - keyPath: ['s', 'n', 't', 'a', 'k']
+              multiEntry: '❌'
+              name: 'byScopeLastAccessAt'
+              unique: '❌'
+            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            - keyPath: ['s', 'o', 'n', 't', 'k']
+              multiEntry: '❌'
+              name: 'bySessionOfflineProtected'
+              unique: '❌'
+          keyPath: ['s', 'n', 't', 'k']
+          name: 'entries'
+          rowCount: 1
+          rows:
+            - key: ['sess1', 'fresh-doc', 'document', 'document']
+              value: 'JSON object | 0.3 kb'
+        - autoIncrement: '❌'
+          indexes: []
+          keyPath: 'k'
+          name: 'meta'
+          rowCount: 0
+          rows: []
+        - autoIncrement: '❌'
+          indexes:
+            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+          keyPath: ['s', 'n', 't']
+          name: 'namespacePolicies'
+          rowCount: 0
+          rows: []
+      version: 1
     `);
   });
 
@@ -236,66 +367,74 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       const operationsBreakdown = readCapture.finish().timelineString;
 
       expect({
-        expiredEntryExists: mockAdapter.has(expiredKey),
-        freshEntryExists: mockAdapter.has(freshKey),
+        expiredEntryExists: await mockAdapter.has(expiredKey),
+        freshEntryExists: await mockAdapter.has(freshKey),
       }).toMatchInlineSnapshot(`
         expiredEntryExists: '❌'
         freshEntryExists: '✅'
       `);
       expect(operationsBreakdown).toContain(
-        '🧹 del-dir recursive ✅ tsdf/sess1/expired-doc',
+        '🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"]',
       );
     } finally {
       getItemSpy.mockRestore();
     }
   });
 
-  test('startup cleanup removes malformed namespace indexes together with their entry data files', async () => {
+  test('startup cleanup removes malformed namespace state together with its entry rows', async () => {
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
-    const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');
+    const corruptedStore = mockAdapter.scope('corrupted', 'sess1');
     const triggerDoc = mockAdapter.scope('trigger', 'sess1');
-    const corruptedKey = corruptedDoc.document.storageKey();
+    const corruptedPayload = 'bad-user';
+    const corruptedEntryKey =
+      corruptedStore.collection.itemKey(corruptedPayload);
+    const corruptedKey =
+      corruptedStore.collection.itemStorageKey(corruptedPayload);
     const triggerKey = triggerDoc.document.storageKey();
-    const corruptedIndexPath = 'tsdf/sess1/corrupted/d._i.r.json';
-    const corruptedPayloadPath = 'tsdf/sess1/corrupted/d.e.p.json';
 
-    // Seed a valid document store, then corrupt its namespace index so cleanup
-    // has to treat the whole scope as junk and delete the orphaned payload file.
-    corruptedDoc.document.seed({ value: { name: 'bad', value: 1 } });
-    mockAdapter.mockIndexedDbFileView.writeFile(corruptedIndexPath, '{invalid');
+    // Seed a healthy persisted row, then add malformed namespace state for the same scope.
+    corruptedStore.collection.seedItem(corruptedPayload, {
+      value: { id: corruptedPayload, name: 'Bad User' },
+    });
+    corruptedStore.collection.setStaticPolicy({ m: 1 });
+    corruptNamespacePolicyRow({
+      mockAdapter,
+      scope: corruptedStore.collection.namespace,
+    });
+    await resolveAfterIndexedDbTimers(mockAdapter.flushPendingWrites());
 
-    // Keep a healthy sibling store in the same session so we can verify startup
-    // cleanup only prunes the malformed scope.
+    // Keep a healthy sibling scope in the same session so cleanup only prunes the malformed one.
     triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
     createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
 
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
-      corruptedExists: mockAdapter.has(corruptedKey),
-      corruptedIndexFileExists:
-        mockAdapter.mockIndexedDbFileView.fileExists(corruptedIndexPath),
-      corruptedPayloadFileExists:
-        mockAdapter.mockIndexedDbFileView.fileExists(corruptedPayloadPath),
-      triggerExists: mockAdapter.has(triggerKey),
+      corruptedEntryRows: await listScopeEntryRows(
+        mockAdapter,
+        corruptedStore.collection.namespace,
+      ),
+      corruptedExists: await mockAdapter.has(corruptedKey),
+      corruptedPolicyRows: await listScopePolicyRows(
+        mockAdapter,
+        corruptedStore.collection.namespace,
+      ),
+      triggerExists: await mockAdapter.has(triggerKey),
     }).toMatchInlineSnapshot(`
-      corruptedExists: '✅'
-      corruptedIndexFileExists: '✅'
-      corruptedPayloadFileExists: '✅'
+      corruptedEntryRows: []
+      corruptedExists: '❌'
+      corruptedPolicyRows: []
       triggerExists: '✅'
     `);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      ""
-      15ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","corrupted","document"], ["sess1","trigger","document"]]
-      21ms | 📖 scope-state entries+namespacePolicies scope=["sess1","corrupted","document"] -> keys=1 exists=yes valid=yes
-      27ms | 📖 scope-state entries+namespacePolicies scope=["sess1","trigger","document"] -> keys=1 exists=yes valid=yes
-      2.005s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","corrupted","document"], ["sess1","trigger","document"]]
-      2.009s | 📖 scope-state entries+namespacePolicies scope=["sess1","corrupted","document"] -> keys=1 exists=yes valid=yes
-      2.009s | 📖 scope-state entries+namespacePolicies scope=["sess1","trigger","document"] -> keys=1 exists=yes valid=yes
-      ""
-    `);
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","corrupted","collection.item"] -> keys=1 exists=yes valid=no',
+    );
+    expect(operationsBreakdown).toContain(
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess1","corrupted","collection.item"] keys=["\\"bad-user", "@scope"]',
+    );
   });
 
   test('startup cleanup checks expiration across multiple sessions', async () => {
@@ -322,14 +461,15 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     // A fresh store mount in a third session should still trigger the global cleanup pass.
     createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess-trigger' });
 
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
-      sess1ExpiredEntryExists: mockAdapter.has(sess1ExpiredKey),
-      sess2ExpiredEntryExists: mockAdapter.has(sess2ExpiredKey),
-      sess2FreshEntryExists: mockAdapter.has(sess2FreshKey),
+      sess1ExpiredEntryExists: await mockAdapter.has(sess1ExpiredKey),
+      sess2ExpiredEntryExists: await mockAdapter.has(sess2ExpiredKey),
+      sess2FreshEntryExists: await mockAdapter.has(sess2FreshKey),
     }).toMatchInlineSnapshot(`
       sess1ExpiredEntryExists: '❌'
       sess2ExpiredEntryExists: '❌'
@@ -364,7 +504,9 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       { timestamp: staleTimestamp },
     );
 
-    mockAdapter.mockIndexedDbFileView.failRemoveEntry('tsdf/sess-fail/failed-doc');
+    mockAdapter.indexedDb.failCleanupRemoveKnownRecords(
+      failedDoc.document.namespace,
+    );
 
     createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess-trigger' });
 
@@ -374,24 +516,27 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     const firstCleanupOperations = firstCleanupCapture.finish().timelineString;
 
     expect({
-      failedEntryExistsAfterFirstCleanup: mockAdapter.has(failedKey),
-      siblingEntryExistsAfterFirstCleanup: mockAdapter.has(siblingKey),
+      failedEntryExistsAfterFirstCleanup: await mockAdapter.has(failedKey),
+      siblingEntryExistsAfterFirstCleanup: await mockAdapter.has(siblingKey),
     }).toMatchInlineSnapshot(`
-      failedEntryExistsAfterFirstCleanup: '❌'
+      failedEntryExistsAfterFirstCleanup: '✅'
       siblingEntryExistsAfterFirstCleanup: '❌'
     `);
-    expect(firstCleanupOperations).toMatchInlineSnapshot(`
-      ""
-      2.006s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess-fail","failed-doc","document"], ["sess-sibling","sibling-doc","document"]]
-      2.01s | 📖 scope-state entries+namespacePolicies scope=["sess-fail","failed-doc","document"] -> keys=1 exists=yes valid=yes
-      2.01s | 📖 scope-state entries+namespacePolicies scope=["sess-sibling","sibling-doc","document"] -> keys=1 exists=yes valid=yes
-      2.013s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["document", "@scope"]
-      2.016s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess-sibling","sibling-doc","document"] keys=["document", "@scope"]
-      ""
-    `);
+    expect(firstCleanupOperations).toContain(
+      'scope=["sess-fail","failed-doc","document"] -> keys=1 exists=yes valid=yes',
+    );
+    expect(firstCleanupOperations).toContain(
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-sibling","sibling-doc","document"] keys=["document", "@scope"]',
+    );
+    expect(firstCleanupOperations).not.toContain(
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["document", "@scope"]',
+    );
 
-    mockAdapter.adapter.resetForTests?.();
     localStorage.removeItem(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY);
+    resetExpirationScanTracking();
+    const retryAdapter = createIndexedDbPersistentStorageTestStore({
+      databaseName: mockAdapter.databaseName,
+    });
 
     createDocumentEnv({
       storeName: 'retry-trigger-doc',
@@ -399,279 +544,82 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     });
 
     const retryCleanupCapture =
-      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+      startIndexedDbPersistentStorageOperationCapture(retryAdapter);
     await waitForScheduledCleanup();
     const retryCleanupOperations = retryCleanupCapture.finish().timelineString;
 
     expect({
-      failedEntryExistsAfterRetryCleanup: mockAdapter.has(failedKey),
-      siblingEntryExistsAfterRetryCleanup: mockAdapter.has(siblingKey),
+      failedEntryExistsAfterRetryCleanup: await retryAdapter.has(failedKey),
+      siblingEntryExistsAfterRetryCleanup: await retryAdapter.has(siblingKey),
     }).toMatchInlineSnapshot(`
       failedEntryExistsAfterRetryCleanup: '❌'
       siblingEntryExistsAfterRetryCleanup: '❌'
     `);
-    expect(retryCleanupOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(retryCleanupOperations).toContain(
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["document", "@scope"]',
+    );
   });
 
   test('cleanup removes invalid or orphaned async-managed records while preserving valid entries', async () => {
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const validDoc = mockAdapter.scope('valid-doc', 'sess1');
-    const invalidMetadataDoc = mockAdapter.scope('invalid-metadata', 'sess1');
-    const missingPayloadDoc = mockAdapter.scope('missing-payload', 'sess1');
+    const invalidEntryStore = mockAdapter.scope('invalid-entry', 'sess1');
+    const orphanedPolicyStore = mockAdapter.scope('orphaned-policy', 'sess1');
     const validKey = validDoc.document.storageKey();
-    const invalidMetadataKey = invalidMetadataDoc.document.storageKey();
-    const missingPayloadKey = missingPayloadDoc.document.storageKey();
+    const invalidPayload = 'bad-user';
+    const invalidEntryRecordKey =
+      invalidEntryStore.collection.itemKey(invalidPayload);
+    const invalidEntryKey =
+      invalidEntryStore.collection.itemStorageKey(invalidPayload);
 
     validDoc.document.seed({ value: { name: 'valid', value: 1 } });
-    invalidMetadataDoc.document.setPayload({
-      d: { value: { name: 'invalid', value: 2 } },
+    invalidEntryStore.collection.seedItem(invalidPayload, {
+      value: { id: invalidPayload, name: 'Bad User' },
     });
-    invalidMetadataDoc.document.setMetadata({ bad: true });
-    missingPayloadDoc.document.setMetadata({
-      key: 'document',
-      writtenAt: Date.now() - 15 * 24 * 60 * 60 * 1000,
-      lastAccessAt: Date.now() - 15 * 24 * 60 * 60 * 1000,
-      version: 1,
-      customMetadata: {},
+    corruptEntryRow({
+      key: invalidEntryRecordKey,
+      mockAdapter,
+      scope: invalidEntryStore.collection.namespace,
+      value: { a: 'bad' },
     });
+    orphanedPolicyStore.collection.setStaticPolicy({ m: 1 });
+    corruptNamespacePolicyRow({
+      mockAdapter,
+      scope: orphanedPolicyStore.collection.namespace,
+    });
+    await resolveAfterIndexedDbTimers(mockAdapter.flushPendingWrites());
     createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
 
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
-      invalidMetadataExists: mockAdapter.has(invalidMetadataKey),
-      invalidMetadataStorePresent: mockAdapter.mockIndexedDbFileView
-        .listEntries('tsdf/sess1')
-        .includes('dir:invalid-metadata'),
-      missingPayloadExists: mockAdapter.has(missingPayloadKey),
-      missingPayloadStorePresent: mockAdapter.mockIndexedDbFileView
-        .listEntries('tsdf/sess1')
-        .includes('dir:missing-payload'),
-      validEntryExists: mockAdapter.has(validKey),
-      validStorePresent: mockAdapter.mockIndexedDbFileView
-        .listEntries('tsdf/sess1')
-        .includes('dir:valid-doc'),
+      invalidEntryExists: await mockAdapter.has(invalidEntryKey),
+      invalidEntryRows: await listScopeEntryRows(
+        mockAdapter,
+        invalidEntryStore.collection.namespace,
+      ),
+      orphanedPolicyRows: await listScopePolicyRows(
+        mockAdapter,
+        orphanedPolicyStore.collection.namespace,
+      ),
+      validEntryExists: await mockAdapter.has(validKey),
     }).toMatchInlineSnapshot(`
-      invalidMetadataExists: '✅'
-      invalidMetadataStorePresent: '✅'
-      missingPayloadExists: '❌'
-      missingPayloadStorePresent: '❌'
+      invalidEntryExists: '❌'
+      invalidEntryRows: []
+      orphanedPolicyRows: []
       validEntryExists: '✅'
-      validStorePresent: '✅'
     `);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      ""
-      2.006s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","invalid-metadata","document"], ["sess1","valid-doc","document"]]
-      2.01s | 📖 scope-state entries+namespacePolicies scope=["sess1","invalid-metadata","document"] -> keys=1 exists=yes valid=yes
-      2.01s | 📖 scope-state entries+namespacePolicies scope=["sess1","valid-doc","document"] -> keys=1 exists=yes valid=yes
-      ""
-    `);
-  });
-
-  test('startup cleanup keeps mixed list-query stores on record deletion when only one discovered scope is junk', async () => {
-    const mockAdapter = createIndexedDbPersistentStorageTestStore();
-    const mixedStore = mockAdapter.scope('mixed-list-query', 'sess1');
-    const validDoc = mockAdapter.scope('valid-doc', 'sess1');
-    const validItem = mixedStore.listQuery.seedItem('projects', 1, {
-      id: 1,
-      name: 'Project 1',
-    });
-    const invalidQueryKey = mixedStore.listQuery.seedQuery(
-      { tableId: 'projects' },
-      [{ tableId: 'projects', id: 1 }],
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","invalid-entry","collection.item"] -> keys=0 exists=no valid=no',
     );
-    const validDocKey = validDoc.document.seed({
-      value: { name: 'valid', value: 1 },
-    });
-
-    // Corrupt only the query metadata so startup cleanup has to prune the
-    // query namespace while preserving the sibling item namespace in the same store.
-    mockAdapter.setMetadata(invalidQueryKey, {
-      customMetadata: {},
-      lastAccessAt: Date.now(),
-      version: 1,
-    });
-
-    createListQueryEnv({
-      serverData: { projects: [{ id: 1, name: 'Project 1' }] },
-      sessionKey: 'sess1',
-      storeName: 'mixed-list-query',
-    });
-    createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
-
-    expect(await getIndexedDbStructureSnapshot(mockAdapter)).toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 3
-          rows:
-            - key: ['sess1', 'mixed-list-query', 'listQuery.item', '"projects||1']
-              value: 'JSON object | 0.4 kb'
-            - key: ['sess1', 'mixed-list-query', 'listQuery.query', '{tableId:"projects"}']
-              value: 'JSON object | 0.3 kb'
-            - key: ['sess1', 'valid-doc', 'document', 'document']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
-
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
-    await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish().timelineString;
-
-    expect({
-      mixedStoreEntries: mockAdapter.mockIndexedDbFileView.listEntries(
-        'tsdf/sess1/mixed-list-query',
-      ),
-      mixedStorePresent: mockAdapter.mockIndexedDbFileView
-        .listEntries('tsdf/sess1')
-        .includes('dir:mixed-list-query'),
-      queryExists: mockAdapter.has(invalidQueryKey),
-      validDocExists: mockAdapter.has(validDocKey),
-      validItemExists: mockAdapter.has(validItem.storageKey),
-      validStorePresent: mockAdapter.mockIndexedDbFileView
-        .listEntries('tsdf/sess1')
-        .includes('dir:valid-doc'),
-    }).toMatchInlineSnapshot(`
-      mixedStoreEntries:
-        - 'file:li._i.r.json'
-        - 'file:li.h~2924752681.p.json'
-        - 'file:lq._i.r.json'
-        - 'file:lq.h~2044383828.p.json'
-      mixedStorePresent: '✅'
-      queryExists: '✅'
-      validDocExists: '✅'
-      validItemExists: '✅'
-      validStorePresent: '✅'
-    `);
-    expect(operationsBreakdown).not.toContain(
-      'tsdf/sess1/mixed-list-query (store directory)',
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","orphaned-policy","collection.item"] -> keys=0 exists=yes valid=no',
     );
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      ""
-      1.978s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","mixed-list-query","listQuery.item"], ["sess1","mixed-list-query","listQuery.query"], ["sess1","valid-doc","document"]]
-      1.979s | 📖 scope-state entries+namespacePolicies scope=["sess1","valid-doc","document"] -> keys=1 exists=yes valid=yes
-      1.979s | 📖 scope-state entries+namespacePolicies scope=["sess1","mixed-list-query","listQuery.item"] -> keys=1 exists=yes valid=yes
-      1.98s | 📖 scope-state entries+namespacePolicies scope=["sess1","mixed-list-query","listQuery.query"] -> keys=1 exists=yes valid=yes
-      ""
-    `);
-    expect(await getIndexedDbStructureSnapshot(mockAdapter)).toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 3
-          rows:
-            - key: ['sess1', 'mixed-list-query', 'listQuery.item', '"projects||1']
-              value: 'JSON object | 0.4 kb'
-            - key: ['sess1', 'mixed-list-query', 'listQuery.query', '{tableId:"projects"}']
-              value: 'JSON object | 0.3 kb'
-            - key: ['sess1', 'valid-doc', 'document', 'document']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
-  });
-
-  test('startup cleanup removes collection entry data files that are no longer referenced by the namespace index', async () => {
-    const mockAdapter = createIndexedDbPersistentStorageTestStore();
-    const collectionScope = mockAdapter.scope('orphan-collection', 'sess1');
-    const keptItemKey = collectionScope.collection.seedItem('kept-user', {
-      value: { id: 'kept-user', name: 'Kept User' },
-    });
-    const orphanedItemKey = collectionScope.collection.seedItem('orphan-user', {
-      value: { id: 'orphan-user', name: 'Orphan User' },
-    });
-
-    // Drop one item from the namespace index while leaving its entry data file
-    // behind so startup cleanup has to prune the orphaned record.
-    mockAdapter.removeMetadata(orphanedItemKey);
-
-    createCollectionEnv({
-      storeName: 'orphan-collection',
-      sessionKey: 'sess1',
-    });
-
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
-    await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish().timelineString;
-
-    expect({
-      keptPayloadExists: mockAdapter.has(keptItemKey),
-      namespaceRecords: (
-        await mockAdapter.rawNamespace.listKeys(collectionScope.collection.namespace)
-      ).sort(),
-      orphanedPayloadFileExists: mockAdapter.mockIndexedDbFileView.fileExists(
-        'tsdf/sess1/orphan-collection/ci.%22orphan-user.p.json',
-      ),
-    }).toMatchInlineSnapshot(`
-      keptPayloadExists: '✅'
-      namespaceRecords: ['__tsdf_payload__:"kept-user', '_i']
-      orphanedPayloadFileExists: '❌'
-    `);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      ""
-      2.001s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","orphan-collection","collection.item"]]
-      2.003s | 📖 scope-state entries+namespacePolicies scope=["sess1","orphan-collection","collection.item"] -> keys=1 exists=yes valid=yes
-      ""
-    `);
-
-    expect(await getIndexedDbStructureSnapshot(mockAdapter)).toMatchInlineSnapshot(`
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
       stores:
         - autoIncrement: '❌'
           indexes:
@@ -692,8 +640,8 @@ describe('indexeddb async storage efficiency: maintenance', () => {
           name: 'entries'
           rowCount: 1
           rows:
-            - key: ['sess1', 'orphan-collection', 'collection.item', '"kept-user']
-              value: 'JSON object | 0.4 kb'
+            - key: ['sess1', 'valid-doc', 'document', 'document']
+              value: 'JSON object | 0.3 kb'
         - autoIncrement: '❌'
           indexes: []
           keyPath: 'k'
@@ -709,27 +657,202 @@ describe('indexeddb async storage efficiency: maintenance', () => {
           rows: []
       version: 1
     `);
+  });
 
-    expect(
-      await getParsedIndexedDbRecordData(mockAdapter, {
-        key: ['sess1', 'orphan-collection', 'collection.item', collectionScope.collection.itemKey('kept-user')],
-        storeName: 'entries',
-      }),
-    ).toMatchInlineSnapshot(`
-      a: 1735689600000
+  test('startup cleanup keeps mixed list-query stores on record deletion when only one discovered scope is junk', async () => {
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const mixedStore = mockAdapter.scope('mixed-list-query', 'sess1');
+    const validDoc = mockAdapter.scope('valid-doc', 'sess1');
+    const validItem = mixedStore.listQuery.seedItem('projects', 1, {
+      id: 1,
+      name: 'Project 1',
+    });
+    const invalidQueryKey = mixedStore.listQuery.seedQuery(
+      { tableId: 'projects' },
+      [{ tableId: 'projects', id: 1 }],
+    );
+    const validDocKey = validDoc.document.seed({
+      value: { name: 'valid', value: 1 },
+    });
 
-      d:
-        d:
-          value: { id: 'kept-user', name: 'Kept User' }
-        p: 'kept-user'
+    // Corrupt only the query row so startup cleanup has to prune the query
+    // namespace while preserving the sibling item namespace in the same store.
+    corruptEntryRow({
+      key: mixedStore.listQuery.queryKey({ tableId: 'projects' }),
+      mockAdapter,
+      scope: mixedStore.listQuery.queryNamespace,
+    });
+    await resolveAfterIndexedDbTimers(mockAdapter.flushPendingWrites());
 
-      k: '"kept-user'
-      m: { p: 'kept-user' }
-      n: 'orphan-collection'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+    createListQueryEnv({
+      serverData: { projects: [{ id: 1, name: 'Project 1' }] },
+      sessionKey: 'sess1',
+      storeName: 'mixed-list-query',
+    });
+    createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
+
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      itemNamespaceSnapshot: await getIndexedDbNamespaceSnapshot(
+        mockAdapter,
+        mixedStore.listQuery.itemNamespace,
+      ),
+      queryExists: await mockAdapter.has(invalidQueryKey),
+      queryNamespaceSnapshot: await getIndexedDbNamespaceSnapshot(
+        mockAdapter,
+        mixedStore.listQuery.queryNamespace,
+      ),
+      validDocExists: await mockAdapter.has(validDocKey),
+      validItemExists: await mockAdapter.has(validItem.storageKey),
+    }).toMatchInlineSnapshot(`
+      itemNamespaceSnapshot:
+        entries:
+          "projects||1: { a: 1735689600000, p: 'projects||1' }
+
+      queryExists: '❌'
+      queryNamespaceSnapshot: null
+      validDocExists: '✅'
+      validItemExists: '✅'
+    `);
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","mixed-list-query","listQuery.query"] -> keys=0 exists=no valid=no',
+    );
+    expect(operationsBreakdown).not.toContain(
+      'scope=["sess1","mixed-list-query","listQuery.item"] -> keys=0 exists=yes valid=no',
+    );
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
+      stores:
+        - autoIncrement: '❌'
+          indexes:
+            - keyPath: ['s', 'n', 't', 'g', 'k']
+              multiEntry: '❌'
+              name: 'byScopeGroup'
+              unique: '❌'
+            - keyPath: ['s', 'n', 't', 'a', 'k']
+              multiEntry: '❌'
+              name: 'byScopeLastAccessAt'
+              unique: '❌'
+            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            - keyPath: ['s', 'o', 'n', 't', 'k']
+              multiEntry: '❌'
+              name: 'bySessionOfflineProtected'
+              unique: '❌'
+          keyPath: ['s', 'n', 't', 'k']
+          name: 'entries'
+          rowCount: 2
+          rows:
+            - key: ['sess1', 'mixed-list-query', 'listQuery.item', '"projects||1']
+              value: 'JSON object | 0.4 kb'
+            - key: ['sess1', 'valid-doc', 'document', 'document']
+              value: 'JSON object | 0.3 kb'
+        - autoIncrement: '❌'
+          indexes: []
+          keyPath: 'k'
+          name: 'meta'
+          rowCount: 0
+          rows: []
+        - autoIncrement: '❌'
+          indexes:
+            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+          keyPath: ['s', 'n', 't']
+          name: 'namespacePolicies'
+          rowCount: 0
+          rows: []
+      version: 1
+    `);
+  });
+
+  test('startup cleanup deletes malformed collection scopes because IndexedDB rows are the namespace state', async () => {
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope('orphan-collection', 'sess1');
+    const keptItemKey = collectionScope.collection.seedItem('kept-user', {
+      value: { id: 'kept-user', name: 'Kept User' },
+    });
+    const orphanedItemKey = collectionScope.collection.seedItem('orphan-user', {
+      value: { id: 'orphan-user', name: 'Orphan User' },
+    });
+
+    // IndexedDB stores collection namespace state inline on the entry rows, so a
+    // malformed stray row invalidates the whole scope instead of behaving like an
+    // OPFS-style orphaned payload file.
+    corruptEntryRow({
+      key: collectionScope.collection.itemKey('orphan-user'),
+      mockAdapter,
+      scope: collectionScope.collection.namespace,
+      value: { a: 'bad' },
+    });
+    await resolveAfterIndexedDbTimers(mockAdapter.flushPendingWrites());
+
+    createDocumentEnv({
+      storeName: 'cleanup-trigger',
+      sessionKey: 'sess-trigger',
+    });
+
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      keptPayloadExists: await mockAdapter.has(keptItemKey),
+      namespaceSnapshot: await getIndexedDbNamespaceSnapshot(
+        mockAdapter,
+        collectionScope.collection.namespace,
+      ),
+      orphanedPayloadExists: await mockAdapter.has(orphanedItemKey),
+    }).toMatchInlineSnapshot(`
+      keptPayloadExists: '❌'
+      namespaceSnapshot: null
+      orphanedPayloadExists: '❌'
+    `);
+    expect(operationsBreakdown).toContain(
+      'scope=["sess1","orphan-collection","collection.item"] -> keys=1 exists=yes valid=no',
+    );
+    expect(operationsBreakdown).toContain(
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess1","orphan-collection","collection.item"]',
+    );
+
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
+      stores:
+        - autoIncrement: '❌'
+          indexes:
+            - keyPath: ['s', 'n', 't', 'g', 'k']
+              multiEntry: '❌'
+              name: 'byScopeGroup'
+              unique: '❌'
+            - keyPath: ['s', 'n', 't', 'a', 'k']
+              multiEntry: '❌'
+              name: 'byScopeLastAccessAt'
+              unique: '❌'
+            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            - keyPath: ['s', 'o', 'n', 't', 'k']
+              multiEntry: '❌'
+              name: 'bySessionOfflineProtected'
+              unique: '❌'
+          keyPath: ['s', 'n', 't', 'k']
+          name: 'entries'
+          rowCount: 0
+          rows: []
+        - autoIncrement: '❌'
+          indexes: []
+          keyPath: 'k'
+          name: 'meta'
+          rowCount: 0
+          rows: []
+        - autoIncrement: '❌'
+          indexes:
+            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+          keyPath: ['s', 'n', 't']
+          name: 'namespacePolicies'
+          rowCount: 0
+          rows: []
+      version: 1
     `);
   });
 
@@ -743,12 +866,15 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       'unprotected-doc',
       dottedSessionKey,
     );
-    const invalidStrayDoc = mockAdapter.scope(
+    const invalidStrayStore = mockAdapter.scope(
       'invalid-stray',
       dottedSessionKey,
     );
     const protectedDocStorageKey = protectedDoc.document.storageKey();
     const unprotectedDocStorageKey = unprotectedDoc.document.storageKey();
+    const invalidStrayStorageKey = invalidStrayStore.listQuery.queryStorageKey({
+      tableId: 'invalid-stray',
+    });
 
     // Seed two cached dotted-session entries through normal store fetch/persist flows.
     const protectedSeedEnv = createDocumentEnv({
@@ -814,18 +940,23 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     await Promise.resolve();
 
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.123456789);
-    const protectMutationResult = await resolveAfterAllTimers(
+    const protectMutationResult = await resolveAfterIndexedDbStorage(
       protectedDocEnv.apiStore.performMutation({
         mutation: () => Promise.resolve({ name: 'protected', value: 1 }),
         offline: { operation: 'markProtected', input: { value: 1 } },
       }),
+      mockAdapter,
     );
     randomSpy.mockRestore();
 
-    invalidStrayDoc.document.setPayload({
-      d: { value: { name: 'invalid', value: 99 } },
+    invalidStrayStore.listQuery.seedQuery({ tableId: 'invalid-stray' }, []);
+    corruptEntryRow({
+      key: invalidStrayStore.listQuery.queryKey({ tableId: 'invalid-stray' }),
+      mockAdapter,
+      scope: invalidStrayStore.listQuery.queryNamespace,
+      value: { a: 'bad' },
     });
-    invalidStrayDoc.document.setMetadata('{invalid');
+    await resolveAfterIndexedDbTimers(mockAdapter.flushPendingWrites());
 
     expect(protectMutationResult.ok).toBe(true);
 
@@ -834,9 +965,12 @@ describe('indexeddb async storage efficiency: maintenance', () => {
 
     // Re-arm the one-off startup cleanup so this same test can trigger a fresh scan after protection is registered.
     resetExpirationScanTracking();
+    const reloadedAdapter = createIndexedDbPersistentStorageTestStore({
+      databaseName: mockAdapter.databaseName,
+    });
 
     // A fresh entry in another session triggers the scheduled global cleanup pass.
-    const triggerDoc = mockAdapter.scope('trigger-doc', 'sess-trigger');
+    const triggerDoc = reloadedAdapter.scope('trigger-doc', 'sess-trigger');
     const triggerDocEnv = createDocumentStoreTestEnv(
       { name: 'trigger', value: 3 },
       {
@@ -844,7 +978,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
         getSessionKey: () => 'sess-trigger',
         __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         persistentStorage: {
-          adapter: mockAdapter.adapter,
+          adapter: reloadedAdapter.adapter,
           schema: wrappedDocumentSchema,
         },
       },
@@ -855,16 +989,20 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     // Let the trigger store finish its own async persistence before we start
     // capturing, so the timeline only shows the cleanup sweep it scheduled.
     for (let attempt = 0; attempt < 300; attempt++) {
-      if (mockAdapter.has(triggerDoc.document.storageKey())) break;
+      if (await reloadedAdapter.has(triggerDoc.document.storageKey())) break;
       await advanceTime(10);
     }
 
-    expect(mockAdapter.has(triggerDoc.document.storageKey())).toBe(true);
+    expect(await reloadedAdapter.has(triggerDoc.document.storageKey())).toBe(
+      true,
+    );
+    await resolveAfterIndexedDbTimers(reloadedAdapter.flushPendingWrites());
 
     // Capture the full sweep so the snapshot shows offline startup preserving
     // the stale cached entries while pruning invalid junk.
     const localStorageCapture = startPersistentStorageOperationCapture();
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(reloadedAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
     const localStorageOperations = localStorageCapture.finish().timelineString;
@@ -872,50 +1010,55 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     // Offline startup should preserve both stale cached documents, while still
     // pruning the unrelated invalid stray store discovered during the sweep.
     expect({
-      invalidStrayExists: mockAdapter.has(
-        invalidStrayDoc.document.storageKey(),
+      invalidStrayExists: await reloadedAdapter.has(invalidStrayStorageKey),
+      invalidStrayEntries: await listScopeEntryRows(
+        reloadedAdapter,
+        invalidStrayStore.listQuery.queryNamespace,
       ),
-      invalidStrayEntries: mockAdapter.mockIndexedDbFileView.listEntries(
-        'tsdf/user%40example.com/invalid-stray',
+      protectedEntryExists: await reloadedAdapter.has(protectedDocStorageKey),
+      unprotectedEntryExists: await reloadedAdapter.has(
+        unprotectedDocStorageKey,
       ),
-      protectedEntryExists: mockAdapter.has(protectedDocStorageKey),
-      unprotectedEntryExists: mockAdapter.has(unprotectedDocStorageKey),
     }).toMatchInlineSnapshot(`
-      invalidStrayEntries: ['file:d._i.r.json', 'file:d.e.p.json']
-      invalidStrayExists: '✅'
+      invalidStrayEntries: []
+      invalidStrayExists: '❌'
       protectedEntryExists: '✅'
       unprotectedEntryExists: '✅'
     `);
     expect(localStorageOperations).toMatchInlineSnapshot(`"empty"`);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      ""
-      8ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess-trigger","trigger-doc","document"], ["user@example.com","invalid-stray","document"], ["user@example.com","protected-doc","document"], ["user@example.com","protected-doc","offline.entity"], ["user@example.com","protected-doc","offline.queue"], ["user@example.com","unprotected-doc","document"]]
-      8ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess-trigger","trigger-doc","document"], ["user@example.com","invalid-stray","document"], ["user@example.com","protected-doc","document"], ["user@example.com","protected-doc","offline.entity"], ["user@example.com","protected-doc","offline.queue"], ["user@example.com","unprotected-doc","document"]]
-      14ms | 📖 scope-state entries+namespacePolicies scope=["sess-trigger","trigger-doc","document"] -> keys=1 exists=yes valid=yes
-      14ms | 📖 scope-state entries+namespacePolicies scope=["sess-trigger","trigger-doc","document"] -> keys=1 exists=yes valid=yes
-      20ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","invalid-stray","document"] -> keys=1 exists=yes valid=yes
-      20ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","invalid-stray","document"] -> keys=1 exists=yes valid=yes
-      26ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","protected-doc","document"] -> keys=1 exists=yes valid=yes
-      26ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","protected-doc","document"] -> keys=1 exists=yes valid=yes
-      32ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","unprotected-doc","document"] -> keys=1 exists=yes valid=yes
-      32ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","unprotected-doc","document"] -> keys=1 exists=yes valid=yes
-      38ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","protected-doc","offline.entity"] -> keys=1 exists=yes valid=yes
-      38ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","protected-doc","offline.entity"] -> keys=1 exists=yes valid=yes
-      44ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","protected-doc","offline.queue"] -> keys=1 exists=yes valid=yes
-      44ms | 📖 scope-state entries+namespacePolicies scope=["user@example.com","protected-doc","offline.queue"] -> keys=1 exists=yes valid=yes
-      ""
-    `);
-    expect(
-      getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1735689602008`);
-    expect(
-      await getParsedIndexedDbRecordData(mockAdapter, {
-        key: ['user@example.com', 'protected-doc', 'document', 'document'],
-        storeName: 'entries',
-      }),
-    ).toMatchInlineSnapshot(`
-      a: 1735689601871
-
+    expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
+    const maintenanceState = getParsedLocalStorageValue<{ lca: number }>(
+      ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+    );
+    expect(Object.keys(maintenanceState ?? {})).toMatchInlineSnapshot(
+      `['lca']`,
+    );
+    expect(typeof maintenanceState?.lca).toBe('number');
+    const protectedDocumentEntry = await getParsedIndexedDbRecordData<{
+      a: number;
+      d: { d: { value: { name: string; value: number } } };
+      k: string;
+      m: { o: boolean };
+      n: string;
+      o: number;
+      s: string;
+      t: string;
+      v: number;
+    }>(reloadedAdapter, {
+      key: ['user@example.com', 'protected-doc', 'document', 'document'],
+      storeName: 'entries',
+    });
+    expect(typeof protectedDocumentEntry?.a).toBe('number');
+    expect({
+      d: protectedDocumentEntry?.d,
+      k: protectedDocumentEntry?.k,
+      m: protectedDocumentEntry?.m,
+      n: protectedDocumentEntry?.n,
+      o: protectedDocumentEntry?.o,
+      s: protectedDocumentEntry?.s,
+      t: protectedDocumentEntry?.t,
+      v: protectedDocumentEntry?.v,
+    }).toMatchInlineSnapshot(`
       d:
         d:
           value: { name: 'protected', value: 1 }

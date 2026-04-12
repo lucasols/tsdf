@@ -1,25 +1,21 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  test,
-  vi,
-} from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { serializeProtectedRef } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
   createIndexedDbPersistentStorageForTests,
   type IndexedDbPersistentStorageOperation,
 } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
-import { createIndexedDbPersistentStorageTestStore } from '../utils/indexedDbPersistentStorageTestStore';
 import { pick } from '../utils/genericTestUtils';
 import { getParsedIndexedDbRecordData } from '../utils/indexedDbPersistentStorageOptimizationTestUtils';
+import { createIndexedDbPersistentStorageTestStore } from '../utils/indexedDbPersistentStorageTestStore';
 
 beforeEach(() => {
   vi.useRealTimers();
   localStorage.clear();
 });
 
-function getLastOperation<TType extends IndexedDbPersistentStorageOperation['type']>(
+function getLastOperation<
+  TType extends IndexedDbPersistentStorageOperation['type'],
+>(
   operations: IndexedDbPersistentStorageOperation[],
   type: TType,
 ): Extract<IndexedDbPersistentStorageOperation, { type: TType }> | null {
@@ -87,10 +83,10 @@ describe('indexeddb persistent storage adapter', () => {
 
     operations.length = 0;
 
-    const filtered = await driver.__tsdfManagedStorage.listManagedMetadata(scope, {
-      filter: { equals: 'users', key: 'g' },
-      order: 'key',
-    });
+    const filtered = await driver.__tsdfManagedStorage.listManagedMetadata(
+      scope,
+      { filter: { equals: 'users', key: 'g' }, order: 'key' },
+    );
 
     expect(filtered.map((entry) => entry.key)).toMatchInlineSnapshot(
       `['a', 'b']`,
@@ -152,9 +148,10 @@ describe('indexeddb persistent storage adapter', () => {
     await touchPromise;
 
     operations.length = 0;
-    const listed = await driver.__tsdfManagedStorage.listManagedMetadata(scope, {
-      order: 'lru-desc',
-    });
+    const listed = await driver.__tsdfManagedStorage.listManagedMetadata(
+      scope,
+      { order: 'lru-desc' },
+    );
 
     expect(listed.map((entry) => entry.key)).toMatchInlineSnapshot(
       `['new', 'old']`,
@@ -197,10 +194,9 @@ describe('indexeddb persistent storage adapter', () => {
       sessionKey: 'sess1',
       storeName: 'protected-doc',
     } as const;
-    const namespace = adapter.openNamespace<
-      { value: number },
-      { o?: true }
-    >(scope);
+    const namespace = adapter.openNamespace<{ value: number }, { o?: true }>(
+      scope,
+    );
 
     const seedPromise = namespace.commit({
       upserts: [
@@ -327,30 +323,22 @@ describe('indexeddb persistent storage adapter', () => {
     const documentScope = mockAdapter.scope('generic-reader', 'sess1');
 
     documentScope.document.seed(
-      {
-        value: { name: 'Cached document', value: 7 },
-      },
+      { value: { name: 'Cached document', value: 7 } },
       { timestamp: 1735689600000 },
     );
 
-    const entry = await getParsedIndexedDbRecordData(mockAdapter, {
-      key: ['sess1', 'generic-reader', 'document', 'document'],
-      storeName: 'entries',
-    });
+    const entry = await getParsedIndexedDbRecordData<Record<string, unknown>>(
+      mockAdapter,
+      {
+        key: ['sess1', 'generic-reader', 'document', 'document'],
+        storeName: 'entries',
+      },
+    );
 
     expect(
       entry === null
         ? null
-        : pick(entry as Record<string, unknown>, [
-            'a',
-            'd',
-            'k',
-            'n',
-            'o',
-            's',
-            't',
-            'v',
-          ]),
+        : pick(entry, ['a', 'd', 'k', 'n', 'o', 's', 't', 'v']),
     ).toMatchInlineSnapshot(`
       a: 1735689600000
 

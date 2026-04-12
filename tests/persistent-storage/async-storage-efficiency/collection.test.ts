@@ -404,20 +404,18 @@ describe('async storage efficiency: collection', () => {
       1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index)
       1.003s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
+             |    └ (namespace index) | 0.17 kb
              ·
       1.046s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
+             |    └ (namespace index) | 0.17 kb
       1.049s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
-      .      | 🗑️ #3 ✅ tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
-             |    └ (entry data, <"a>)
-      .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      1.052s | ✍️ #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      1.052s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
       1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb -> 0.17 kb
+             |    └ (namespace index) | 0.17 kb -> 0.17 kb
       1.058s | end
       "
     `);
@@ -541,10 +539,10 @@ describe('async storage efficiency: collection', () => {
       1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index)
       1.003s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
+             |    └ (namespace index) | 0.17 kb
              ·
       1.046s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
+             |    └ (namespace index) | 0.17 kb
       1.049s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
@@ -552,7 +550,7 @@ describe('async storage efficiency: collection', () => {
       1.052s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>) | 0.00 kb -> 0.10 kb
       1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.17 kb
+             |    └ (namespace index) | 0.17 kb -> 0.17 kb
              ·
       2.1s   | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb

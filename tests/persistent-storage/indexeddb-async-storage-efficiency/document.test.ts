@@ -1,15 +1,13 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import {
-  advanceTime,
-} from '../../utils/genericTestUtils';
-import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
+import { advanceTime } from '../../utils/genericTestUtils';
 import {
   getIndexedDbStructureSnapshot,
   getParsedIndexedDbRecordData,
   startIndexedDbPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
+import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import {
   captureHookRemount,
   createDocumentEnv,
@@ -77,21 +75,14 @@ describe('indexeddb async storage efficiency: document', () => {
     // skipped touch explicit.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      253ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-flow","document"]]
-      257ms | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-flow","document"] -> keys=1 exists=yes valid=yes
-      258ms | 📖 entries.getMany scope=["sess1","doc-remount-flow","document"] keys=["document"] -> ["document"]
-      261ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-flow","document"]]
-      265ms | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-flow","document"] -> keys=1 exists=yes valid=yes
-      1.268s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-flow","document"]]
-      1.272s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-flow","document"] -> keys=1 exists=yes valid=yes
-      1.315s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-flow","document"] put=["document"] delete=[] touch=[]
-      1.318s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-flow","document"]]
-      1.322s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-flow","document"] -> keys=1 exists=yes valid=yes
+      1ms | 📖 entries.getMany scope=["sess1","doc-remount-flow","document"] keys=["document"] -> ["document"]
+      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-flow","document"] put=["document"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
 
-    expect(await getIndexedDbStructureSnapshot(mockAdapter)).toMatchInlineSnapshot(`
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
       stores:
         - autoIncrement: '❌'
           indexes:
@@ -130,9 +121,8 @@ describe('indexeddb async storage efficiency: document', () => {
       version: 1
     `);
 
-    expect(
-      await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
       a: 1735689600000
 
       d:
@@ -181,17 +171,9 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      253ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-stale-touch","document"]]
-      257ms | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-stale-touch","document"] -> keys=1 exists=yes valid=yes
-      258ms | 📖 entries.getMany scope=["sess1","doc-remount-stale-touch","document"] keys=["document"] -> ["document"]
-      261ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-stale-touch","document"]]
-      265ms | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-stale-touch","document"] -> keys=1 exists=yes valid=yes
-      301ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=[] delete=[] touch=["document"]
-      1.268s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-stale-touch","document"]]
-      1.272s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-stale-touch","document"] -> keys=1 exists=yes valid=yes
-      1.315s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=["document"] delete=[] touch=[]
-      1.318s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-stale-touch","document"]]
-      1.322s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-stale-touch","document"] -> keys=1 exists=yes valid=yes
+      1ms | 📖 entries.getMany scope=["sess1","doc-remount-stale-touch","document"] keys=["document"] -> ["document"]
+      45ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=[] delete=[] touch=["document"]
+      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=["document"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -225,13 +207,8 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      4.302s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> []
-      4.303s | 📖 entries.getMany scope=["sess1","doc-remount-no-cache","document"] keys=["document"] -> []
-      4.305s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> []
-      6.117s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> []
-      6.16s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-no-cache","document"] put=["document"] delete=[] touch=[]
-      6.163s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-remount-no-cache","document"]]
-      6.167s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-remount-no-cache","document"] -> keys=1 exists=yes valid=yes
+      1ms | 📖 entries.getMany scope=["sess1","doc-remount-no-cache","document"] keys=["document"] -> []
+      1.851s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-no-cache","document"] put=["document"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -257,7 +234,8 @@ describe('indexeddb async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
     hook.unmount();
 
-    const readCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const readCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
 
     // Repeated direct reads with small gaps should stay fully in memory.
     expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
@@ -295,7 +273,8 @@ describe('indexeddb async storage efficiency: document', () => {
 
     // Mount the stale cached document so hydration schedules a metadata touch.
     await settleStartupBackgroundScan(mockAdapter);
-    const touchCapture = startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    const touchCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useDocument({
         disableRefetchOnMount: true,
@@ -309,18 +288,15 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 8 }`,
     );
-    expect(
-      await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`
-      a: 1735689603258
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
+      a: 1735689603001
 
       d:
         d:
           value: { name: 'Cached document', value: 8 }
 
       k: 'document'
-      m: {}
-
       n: 'doc-startup-touch-offline-marker'
       o: 0
       s: 'sess1'
@@ -329,12 +305,9 @@ describe('indexeddb async storage efficiency: document', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      253ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-startup-touch-offline-marker","document"]]
-      257ms | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-startup-touch-offline-marker","document"] -> keys=1 exists=yes valid=yes
-      258ms | 📖 entries.getMany scope=["sess1","doc-startup-touch-offline-marker","document"] keys=["document"] -> ["document"]
-      261ms | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-startup-touch-offline-marker","document"]]
-      265ms | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-startup-touch-offline-marker","document"] -> keys=1 exists=yes valid=yes
-      301ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=[] delete=[] touch=["document"]
+      1ms | 📖 entries.getMany scope=["sess1","doc-startup-touch-offline-marker","document"] keys=["document"] -> ["document"]
+      45ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=[] delete=[] touch=["document"]
+      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -367,9 +340,8 @@ describe('indexeddb async storage efficiency: document', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(
-      await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
       a: 1735689600000
 
       d:
@@ -385,11 +357,7 @@ describe('indexeddb async storage efficiency: document', () => {
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.003s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-mutation-flow","document"]]
-      1.007s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-mutation-flow","document"] -> keys=1 exists=yes valid=yes
-      1.05s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-mutation-flow","document"] put=["document"] delete=[] touch=[]
-      1.053s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-mutation-flow","document"]]
-      1.057s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-mutation-flow","document"] -> keys=1 exists=yes valid=yes
+      1.043s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-mutation-flow","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -429,9 +397,8 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(
-      await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
       a: 1735689600000
 
       d:
@@ -447,11 +414,7 @@ describe('indexeddb async storage efficiency: document', () => {
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
-      1.813s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-invalidation-flow","document"]]
-      1.817s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-invalidation-flow","document"] -> keys=1 exists=yes valid=yes
-      1.86s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["document"] delete=[] touch=[]
-      1.863s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-invalidation-flow","document"]]
-      1.867s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-invalidation-flow","document"] -> keys=1 exists=yes valid=yes
+      1.853s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -509,9 +472,8 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 2', value: 42 }`,
     );
-    expect(
-      await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
       a: 1735689600000
 
       d:
@@ -527,11 +489,7 @@ describe('indexeddb async storage efficiency: document', () => {
     `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
-      1.903s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-coalesced-invalidations","document"]]
-      1.907s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-coalesced-invalidations","document"] -> keys=1 exists=yes valid=yes
-      1.95s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-coalesced-invalidations","document"] put=["document"] delete=[] touch=[]
-      1.953s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","doc-coalesced-invalidations","document"]]
-      1.957s | 📖 scope-state entries+namespacePolicies scope=["sess1","doc-coalesced-invalidations","document"] -> keys=1 exists=yes valid=yes
+      1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-coalesced-invalidations","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -572,9 +530,8 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(
-      await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }),
-    ).toMatchInlineSnapshot(`
+    expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
+      .toMatchInlineSnapshot(`
       a: 1735689600000
 
       d:
