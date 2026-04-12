@@ -1261,9 +1261,8 @@ describe('async storage efficiency: collection', () => {
       time   |
       0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.851s | 📂 dir-open ❌ tsdf/sess1 (session directory) ⚠️ DUPLICATE OPEN
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1
-             |    └ (session directory) ⚠️ DUPLICATE OPEN
+      1.851s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
       1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)
       1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json

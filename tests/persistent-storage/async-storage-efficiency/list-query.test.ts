@@ -82,6 +82,7 @@ describe('async storage efficiency: list-query', () => {
       freshItemExists: '✅'
       freshQueryExists: '✅'
     `);
+    expect(operationsBreakdown).not.toContain('⚠️ DUPLICATE OPEN');
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
@@ -399,7 +400,7 @@ describe('async storage efficiency: list-query', () => {
       1.86s  | ✍️ #3 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.00 kb -> 0.09 kb
       1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li._i.r.json
-             |    └ (items index) ⚠️ DUPLICATE OPEN
+             |    └ (items index)
       .      | ✍️ #5 tsdf/sess1/lq-query-metadata/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
       1.865s | ✍️ #2 tsdf/sess1/lq-query-metadata/li._i.r.json
@@ -509,7 +510,7 @@ describe('async storage efficiency: list-query', () => {
       1.86s  | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.00 kb -> 0.09 kb
       1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
-             |    └ (items index) ⚠️ DUPLICATE OPEN
+             |    └ (items index)
       .      | ✍️ #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
       1.865s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
@@ -575,12 +576,12 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(
       `['{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}']`,
     );
+    expect(operationsBreakdown).not.toContain('⚠️ DUPLICATE OPEN');
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
       1.85s  | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1
-             |    └ (session directory) ⚠️ DUPLICATE OPEN
+      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest
              |    └ (store directory)
       1.853s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
@@ -1735,6 +1736,7 @@ describe('async storage efficiency: list-query', () => {
     );
     // The snapshot ends after the initial query+item reads, which makes the
     // skipped touches explicit for both entries.
+    expect(firstMountOperations).not.toContain('⚠️ DUPLICATE OPEN');
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
@@ -2108,6 +2110,7 @@ describe('async storage efficiency: list-query', () => {
       - ['Cached user']
       - ['Cached project']
     `);
+    expect(firstMountOperations).not.toContain('⚠️ DUPLICATE OPEN');
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |

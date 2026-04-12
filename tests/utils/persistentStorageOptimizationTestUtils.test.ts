@@ -256,6 +256,41 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     `);
   });
 
+  test('timelineString does not warn when a missing open is followed by create', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        created: false,
+        exists: false,
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'openFile',
+      },
+      {
+        created: true,
+        exists: false,
+        path,
+        startedTime: 2,
+        time: 3,
+        type: 'ensureFile',
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 👁️ #1 file-open ❌ tsdf/sess1/docs/d._i.r.json (namespace index)
+      2ms  | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index)
+      3ms  | end
+      "
+    `);
+  });
+
   test('timelineString warns for consecutive unchanged OPFS reads within 10ms', () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope('docs', 'sess1');
