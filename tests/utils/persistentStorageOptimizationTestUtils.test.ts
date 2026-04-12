@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-  buildFileName,
-  getPayloadRecordKey,
-} from '../../src/persistentStorage/opfsFileNaming';
+import { getPayloadRecordKey } from '../../src/persistentStorage/asyncStorageShared';
+import { buildFileName } from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { resolveAfterAllTimers } from './genericTestUtils';

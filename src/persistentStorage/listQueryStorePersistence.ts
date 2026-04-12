@@ -19,6 +19,10 @@ import {
   type AsyncStartupCleanupStoreDeletePlan,
 } from './asyncStorageAdapter';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from './asyncStorageShared';
+import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
@@ -28,10 +32,6 @@ import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
 } from './offline/types';
-import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from './opfsFileNaming';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,

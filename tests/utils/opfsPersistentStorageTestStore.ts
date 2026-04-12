@@ -3,14 +3,16 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+  PAYLOAD_RECORD_PREFIX,
+} from '../../src/persistentStorage/asyncStorageShared';
+import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getPayloadRecordKey,
   joinPath,
   OPFS_ROOT_DIR,
   parseFileNameInfo,
-  PAYLOAD_RECORD_PREFIX,
   resolveHashedPayloadRecordKeyFromValue,
 } from '../../src/persistentStorage/opfsFileNaming';
 import type {

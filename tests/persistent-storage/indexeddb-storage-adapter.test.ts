@@ -337,12 +337,12 @@ describe('indexeddb persistent storage adapter', () => {
 
     expect(entry === null ? null : pick(entry, ['a', 'd', 'i']))
       .toMatchInlineSnapshot(`
-      a: 1735689600000
+        a: 1735689600000
 
-      d:
-        value: { name: 'Cached document', value: 7 }
+        d:
+          value: { name: 'Cached document', value: 7 }
 
-      i: '["sess1","generic-reader","document"]'
-    `);
+        i: '["sess1","generic-reader","document"]'
+      `);
   });
 });

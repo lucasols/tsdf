@@ -4,11 +4,13 @@ import { isObject } from '@ls-stack/utils/typeGuards';
 import { asPossiblyUndefined } from '@ls-stack/utils/typingFnUtils';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getNamespaceId,
+  getPayloadRecordKey,
+} from './asyncStorageShared';
+import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getNamespaceId,
-  getPayloadRecordKey,
   joinPath,
   OPFS_ROOT_DIR,
   parseFileNameInfo,

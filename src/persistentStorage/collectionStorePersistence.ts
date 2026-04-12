@@ -18,16 +18,16 @@ import {
   type AsyncStartupCleanupScopePlan,
   type AsyncStartupCleanupStoreDeletePlan,
 } from './asyncStorageAdapter';
+import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from './asyncStorageShared';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from './offline/types';
-import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from './opfsFileNaming';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,

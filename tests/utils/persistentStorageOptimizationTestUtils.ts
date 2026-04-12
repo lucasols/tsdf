@@ -4,10 +4,12 @@ import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from '../../src/persistentStorage/asyncStorageShared';
+import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getPayloadRecordKey,
   OPFS_ROOT_DIR,
   parseFileNameKindAlias,
   parseRecordKey,

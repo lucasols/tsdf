@@ -5,8 +5,10 @@ import { isObject } from '@ls-stack/utils/typeGuards';
 import { rc_array, rc_number, rc_object, rc_parse, rc_string } from 'runcheck';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  compareMetadata,
   getNamespaceId,
   getPayloadRecordKey,
+  normalizeStaticPolicy,
   parseProtectedRef,
   PAYLOAD_RECORD_PREFIX,
   serializeProtectedRef as serializeProtectedRefInternal,
@@ -195,33 +197,6 @@ function parseIndexEntries(
   }
 
   return entries;
-}
-
-function normalizeStaticPolicy(
-  policy: AsyncStorageNamespaceStaticPolicy | null | undefined,
-): AsyncStorageNamespaceStaticPolicy | null {
-  if (policy === undefined || policy === null) return null;
-
-  const maxEntries =
-    typeof policy.maxEntries === 'number' &&
-    Number.isInteger(policy.maxEntries) &&
-    policy.maxEntries >= 0
-      ? policy.maxEntries
-      : undefined;
-  const pinnedKeys = Array.isArray(policy.pinnedKeys)
-    ? [...new Set(policy.pinnedKeys)].sort((left, right) =>
-        left.localeCompare(right),
-      )
-    : [];
-
-  if (maxEntries === undefined && pinnedKeys.length === 0) {
-    return null;
-  }
-
-  return {
-    ...(maxEntries !== undefined ? { maxEntries } : {}),
-    ...(pinnedKeys.length > 0 ? { pinnedKeys } : {}),
-  };
 }
 
 /**
@@ -496,24 +471,6 @@ function parseMaintenanceState(
 
 function createDefaultMaintenanceState(): AsyncStorageMaintenanceState {
   return { lastSuccessfulCleanupAt: null };
-}
-
-function compareMetadata(
-  left: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  right: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  order: AsyncStorageMetadataOrder,
-): number {
-  if (order === 'key') {
-    return left.key.localeCompare(right.key);
-  }
-
-  if (left.lastAccessAt !== right.lastAccessAt) {
-    return order === 'lru-asc'
-      ? left.lastAccessAt - right.lastAccessAt
-      : right.lastAccessAt - left.lastAccessAt;
-  }
-
-  return left.key.localeCompare(right.key);
 }
 
 class ManagedAsyncStorageNamespaceHandle<

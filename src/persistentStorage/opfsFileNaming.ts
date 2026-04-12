@@ -2,22 +2,10 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
-  getNamespaceId as getNamespaceIdInternal,
-  getPayloadRecordKey as getPayloadRecordKeyInternal,
+  getPayloadRecordKey,
   parseAsyncStorageRecordKey,
 } from './asyncStorageShared';
 import type { AsyncStorageNamespaceScope } from './types';
-
-export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
-export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
-
-export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
-  return getNamespaceIdInternal(scope);
-}
-
-export function getPayloadRecordKey(key: string): string {
-  return getPayloadRecordKeyInternal(key);
-}
 
 export const OPFS_ROOT_DIR = 'tsdf';
 export const JSON_FILE_EXTENSION = '.json';
