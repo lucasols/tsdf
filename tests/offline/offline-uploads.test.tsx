@@ -646,29 +646,39 @@ test('document direct uploads survive restart and replay with restored files eve
 });
 
 test('queued direct uploads keep same logical field names isolated per mutation', async () => {
-  createMockBrowserOpfs();
+  const mockBrowserOpfs = createMockBrowserOpfs();
   const sessionKey = 'offline-direct-upload-collision-session';
   const replayedFiles: Array<{ value: number; fileText: string | null }> = [];
+  const randomSpy = vi
+    .spyOn(Math, 'random')
+    .mockReturnValueOnce(0.1)
+    .mockReturnValueOnce(0.2)
+    .mockReturnValueOnce(0.3)
+    .mockReturnValueOnce(0.4)
+    .mockReturnValueOnce(0.5)
+    .mockReturnValue(0.6);
 
-  network.setOffline();
+  try {
+    network.setOffline();
 
-  const storeManager = createStoreManager({
-    getSessionKey: () => sessionKey,
-    errorNormalizer: normalizeError,
-    offlineSession: {
-      network: network.config,
-      uploads: {
-        adapter: opfsOfflineUploadAdapter,
-        upload: ({ id }) => Promise.resolve(`server:${id}`),
+    const storeManager = createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
       },
-    },
-  });
-  const session = storeManager;
-  session.getOfflineStatus();
+    });
+    const session = storeManager;
+    session.getOfflineStatus();
 
-  const env = createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(
-    1,
-    {
+    const env = createDocumentStoreTestEnv<
+      number,
+      DirectUploadUpdateOperations
+    >(1, {
       id: 'offline-direct-upload-collision-doc',
       storeManager,
       testScenario: 'loaded',
@@ -693,54 +703,67 @@ test('queued direct uploads keep same logical field names isolated per mutation'
           },
         },
       },
-    },
-  );
+    });
 
-  await flushAllTimers();
+    await flushAllTimers();
 
-  // Queue two offline mutations that reuse the same logical upload key.
-  await resolveAfterAllTimers(
-    env.apiStore.performMutation({
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve({ value: 2 }),
-      offline: { operation: 'updateValue', input: { value: 2 } },
-      upload: {
-        avatar: new File(['first direct upload'], 'first.txt', {
-          type: 'text/plain',
-          lastModified: 1,
-        }),
-      },
-    }),
-  );
-  // Flush mocked OPFS write latency so the first queued upload is durably
-  // visible before queueing another mutation that reuses the same field name.
-  await flushAllTimers();
-  await resolveAfterAllTimers(
-    env.apiStore.performMutation({
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve({ value: 3 }),
-      offline: { operation: 'updateValue', input: { value: 3 } },
-      upload: {
-        avatar: new File(['second direct upload'], 'second.txt', {
-          type: 'text/plain',
-          lastModified: 2,
-        }),
-      },
-    }),
-  );
-  await flushAllTimers();
+    // Queue two offline mutations that reuse the same logical upload key.
+    await resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        optimisticUpdate: () => {},
+        mutation: () => Promise.resolve({ value: 2 }),
+        offline: { operation: 'updateValue', input: { value: 2 } },
+        upload: {
+          avatar: new File(['first direct upload'], 'first.txt', {
+            type: 'text/plain',
+            lastModified: 1,
+          }),
+        },
+      }),
+    );
+    // Flush mocked OPFS write latency so the first queued upload is durably
+    // visible before queueing another mutation that reuses the same field name.
+    await flushAllTimers();
+    await resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        optimisticUpdate: () => {},
+        mutation: () => Promise.resolve({ value: 3 }),
+        offline: { operation: 'updateValue', input: { value: 3 } },
+        upload: {
+          avatar: new File(['second direct upload'], 'second.txt', {
+            type: 'text/plain',
+            lastModified: 2,
+          }),
+        },
+      }),
+    );
+    await flushAllTimers();
 
-  // Reconnecting should replay each mutation with its own original file.
-  await act(async () => {
-    network.goOnline();
-    await Promise.resolve();
-  });
-  await flushAllTimers();
+    expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+      "tsdf-uploads (1.40 kb)
+      └ offline-direct-upload-collision-session (1.37 kb)
+        ├ offline-direct-upload-collision-doc:1735689600003:eeeeeeee:avatar (0.66 kb)
+        │ ├ binary.blob (0.06 kb)
+        │ └ metadata.json (0.47 kb)
+        └ offline-direct-upload-collision-doc:1735689600012:i:avatar (0.64 kb)
+          ├ binary.blob (0.06 kb)
+          └ metadata.json (0.46 kb)"
+    `);
 
-  expect(replayedFiles).toMatchInlineSnapshot(`
-    - { fileText: 'first direct upload', value: 2 }
-    - { fileText: 'second direct upload', value: 3 }
-  `);
+    // Reconnecting should replay each mutation with its own original file.
+    await act(async () => {
+      network.goOnline();
+      await Promise.resolve();
+    });
+    await flushAllTimers();
+
+    expect(replayedFiles).toMatchInlineSnapshot(`
+      - { fileText: 'first direct upload', value: 2 }
+      - { fileText: 'second direct upload', value: 3 }
+    `);
+  } finally {
+    randomSpy.mockRestore();
+  }
 });
 
 test('clearSessionStorage removes registered offline uploads for local-sync sessions too', async () => {
