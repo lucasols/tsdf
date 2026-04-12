@@ -198,7 +198,7 @@ export function createCollectionStoreTestEnv<
     );
   }
   const getSessionKey = resolvedStoreManager.getSessionKey;
-  const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
+  const resolvedOfflineConfig = resolvedStoreManager.getOfflineConfig();
 
   const { getMutationEmoji } = createEmojiCyclers();
   const offlineTimelineLogger = createOfflineTimelineTestLogger({
@@ -365,7 +365,7 @@ export function createCollectionStoreTestEnv<
                     operation,
                   })),
               adapter: resolvedPersistentStorage.adapter,
-              config: resolvedOfflineSession!.getConfig(),
+              config: resolvedOfflineConfig!,
             });
           }
         },
@@ -428,7 +428,7 @@ export function createCollectionStoreTestEnv<
               operation,
             })),
         adapter: resolvedPersistentStorage.adapter,
-        config: resolvedOfflineSession!.getConfig(),
+        config: resolvedOfflineConfig!,
       });
     }
 

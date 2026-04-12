@@ -12,6 +12,7 @@ import {
 } from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import type { OfflineMutationInput } from '../persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
@@ -961,6 +962,7 @@ export function createMutationApi<
 
   type ListQueryOnlineMutationArgs<T> = ListQueryMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type ListQueryOfflineMutationArgs<T> = ListQueryMutationArgs<T> & {
@@ -973,6 +975,7 @@ export function createMutationApi<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -1020,6 +1023,7 @@ export function createMutationApi<
       onError,
       debounce,
       offline,
+      upload,
     }: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
@@ -1126,6 +1130,7 @@ export function createMutationApi<
             runHybridOfflineMutation({
               controller: offlineController,
               offline,
+              upload,
               directMutation,
             })
         : async () => ({

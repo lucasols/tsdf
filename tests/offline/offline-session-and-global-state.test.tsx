@@ -4,7 +4,6 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
-  createOfflineSession,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   useGlobalOfflineEntities,
@@ -12,6 +11,7 @@ import {
 } from '../../src/main';
 import { readManagedLocalStorageSingleEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
+import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -108,6 +108,19 @@ function getGlobalOfflineStatusSummary(sessionKey: string) {
     'outage',
     'sessionKey',
   ]);
+}
+
+function createManagedOfflineSession(args: {
+  getSessionKey: () => string | false;
+  config: OfflineSessionConfig;
+}) {
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: args.getSessionKey,
+    offlineSession: args.config,
+  });
+
+  return { storeManager, offlineSession: storeManager };
 }
 
 // Protects against stale offline entities leaking after logout: when the session
@@ -319,8 +332,8 @@ test('logging back into the same session replays durable offline mutations queue
     .     | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
     .     | "value:1 pending:no"  | scheduled-fetch-triggered
     1.82s | "value:1 pending:yes" | ui-changed
-    .     | "value:1 pending:yes" | offline:updateValue replay-started
     .     | "value:1 pending:yes" | 🟠 >fetch-started
+    .     | "value:1 pending:yes" | offline:updateValue replay-started
     2.62s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
     3.02s | "value:1 pending:yes" | server-data-changed (value: 2)
     .     | "value:1 pending:yes" | offline:updateValue replay-finished
@@ -943,16 +956,20 @@ test('global offline status is shared across stores in the same session', async 
 
 test('stores sharing a session key reject incompatible offline session configs', () => {
   const sessionKey = 'incompatible-offline-session';
-  const matchingSession = createOfflineSession({
+  const matchingConfig = {
+    network: { enabled: true },
+  } satisfies OfflineSessionConfig;
+  const incompatibleConfig = {
+    network: { enabled: true },
+    outage: { enabled: true, recoveryCheck: () => false },
+  } satisfies OfflineSessionConfig;
+  createManagedOfflineSession({
     getSessionKey: () => sessionKey,
-    config: { network: { enabled: true } },
+    config: matchingConfig,
   });
-  const incompatibleSession = createOfflineSession({
+  const { offlineSession: incompatibleSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
-    config: {
-      network: { enabled: true },
-      outage: { enabled: true, recoveryCheck: () => false },
-    },
+    config: incompatibleConfig,
   });
 
   createDocumentStoreTestEnv(1, {
@@ -961,7 +978,7 @@ test('stores sharing a session key reject incompatible offline session configs',
     storeManager: createStoreManager({
       errorNormalizer: normalizeError,
       getSessionKey: () => sessionKey,
-      offlineSession: matchingSession.getConfig(),
+      offlineSession: matchingConfig,
     }),
     persistentStorage: {
       adapter: 'local-sync',
@@ -1288,7 +1305,7 @@ test('global offline entities stay empty after restart until a store mounts', as
 test('queued mutations from multiple stores in one session share a single global replay order', async () => {
   network.setOffline();
   const sessionKey = 'shared-session-queue-order';
-  const offlineSession = createOfflineSession({
+  const { storeManager } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -1299,11 +1316,7 @@ test('queued mutations from multiple stores in one session share a single global
     > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
-      storeManager: createStoreManager({
-        errorNormalizer: normalizeError,
-        getSessionKey: () => sessionKey,
-        offlineSession: offlineSession.getConfig(),
-      }),
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
@@ -1390,7 +1403,7 @@ test('queued mutations from multiple stores in one session share a single global
 test('reconnect replays queued mutations from multiple stores one at a time in global enqueue order', async () => {
   network.setOffline();
   const sessionKey = 'shared-session-replay-order';
-  const offlineSession = createOfflineSession({
+  const { storeManager } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -1403,11 +1416,7 @@ test('reconnect replays queued mutations from multiple stores one at a time in g
     > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: args.storeName,
       getSessionKey: () => sessionKey,
-      storeManager: createStoreManager({
-        errorNormalizer: normalizeError,
-        getSessionKey: () => sessionKey,
-        offlineSession: offlineSession.getConfig(),
-      }),
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',

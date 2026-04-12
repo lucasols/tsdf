@@ -1,22 +1,86 @@
-import { createOfflineSession } from './persistentStorage/offline/sessionCoordinator';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  Result,
+  type Result as ResultType,
+  resultify,
+  unknownToError,
+} from 't-result';
+import {
+  createDefaultStatus,
+  createOfflineSession,
+} from './persistentStorage/offline/sessionCoordinator';
 import type {
+  GlobalOfflineEntity,
+  GlobalOfflineStatus,
+  OfflineResolutionRecord,
+  OfflineRuntimeConfig,
+  OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
 } from './persistentStorage/offline/types';
-import type { StoreError } from './utils/storeShared';
+import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
+import type { OfflineUpload } from './persistentStorage/offlineUploadTypes';
+import type { StoreError, ValidPayload } from './utils/storeShared';
 
-export type StoreManager = {
+type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
+  /** Returns the shared offline config, when configured. */
+  getOfflineConfig: () => OfflineSessionConfig<TUploadRef> | undefined;
+  /** Latest effective runtime config for this manager's offline session. */
+  getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
+  /** Updates runtime controls for this manager's offline session. */
+  setOfflineRuntimeConfig: (
+    update: OfflineRuntimeConfigUpdate,
+  ) => ResultType<void, Error>;
+  /** Resets runtime controls back to the static session config. */
+  resetOfflineRuntimeConfig: () => void;
+  /** Returns the latest aggregated offline status for this manager. */
+  getOfflineStatus: () => GlobalOfflineStatus;
+  /** Returns the latest aggregated offline entities for this manager. */
+  getOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** Returns the latest aggregated offline resolutions for this manager. */
+  getOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** Returns the latest session-scoped offline uploads for this manager. */
+  getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  resolveOfflineUpload: (id: string) => Promise<ResultType<TUploadRef, Error>>;
+  /** Resolves multiple staged upload ids to their latest final refs. */
+  resolveOfflineUploads: (
+    ids: readonly string[],
+  ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;
+  /** Saves a session-scoped upload locally for later dependency resolution. */
+  saveOfflineUpload: (args: {
+    id: string;
+    file: Blob | File;
+  }) => Promise<ResultType<void, Error>>;
+  /** Replaces a previously stored session-scoped upload. */
+  replaceOfflineUpload: (args: {
+    id: string;
+    file: Blob | File;
+  }) => Promise<ResultType<void, Error>>;
+  /** Loads a previously stored session-scoped upload. */
+  loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
+  /** Deletes a stored upload when it is no longer referenced. */
+  deleteOfflineUpload: (id: string) => Promise<ResultType<void, Error>>;
+  /** React hook subscribing to the manager's aggregated offline status. */
+  useOfflineStatus: () => GlobalOfflineStatus;
+  /** React hook subscribing to the manager's aggregated offline entities. */
+  useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** React hook subscribing to the manager's aggregated offline resolutions. */
+  useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** React hook subscribing to the manager's aggregated offline uploads. */
+  useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+};
+
+export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active shared session / tenant key. */
   getSessionKey: () => string | false;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
-  /** Returns the shared offline session, when configured. */
-  getOfflineSession: () => OfflineSession | undefined;
   /** Returns the unique ids of all currently registered store instances. */
   getAllStoreIds: () => string[];
   /** Resets all registered stores except the ignored logical ids. */
   resetAll: (ignoreStores: string[]) => void;
-};
+} & StoreManagerOfflineApi<TUploadRef>;
 
 type RegisteredStore = { id: string; reset: () => void };
 
@@ -26,12 +90,88 @@ type StoreManagerRegistry = {
 };
 
 const storeManagerRegistry = new WeakMap<StoreManager, StoreManagerRegistry>();
+const storeManagerOfflineSessionRegistry = new WeakMap<
+  StoreManager,
+  OfflineSession | undefined
+>();
 
-type ManagerOwnedOfflineSessionConfig = OfflineSessionConfig & {
-  [K in keyof OfflineSession]?: never;
-};
+const EMPTY_OFFLINE_ENTITIES: readonly GlobalOfflineEntity[] = [];
+const EMPTY_OFFLINE_RESOLUTIONS: readonly OfflineResolutionRecord[] = [];
+const INACTIVE_SESSION_KEY = '__inactive__';
 
-export type CreateStoreManagerOptions = {
+function normalizeStoreManagerOfflineError(error: unknown): Error {
+  const normalizedError = unknownToError(error);
+
+  if (
+    import.meta.env.DEV &&
+    normalizedError.message.startsWith('[tsdf] Incompatible offline ')
+  ) {
+    throw normalizedError;
+  }
+
+  return normalizedError;
+}
+
+function createDisabledStoreManagerOfflineApi<
+  TUploadRef extends ValidPayload = ValidPayload,
+>(getSessionKey: () => string | false): StoreManagerOfflineApi<TUploadRef> {
+  const emptyUploads: readonly OfflineUpload<TUploadRef>[] = [];
+  let cachedStatus: GlobalOfflineStatus | null = null;
+  let cachedStatusSessionKey: string | null = null;
+
+  const getOfflineStatus = () => {
+    const sessionKey = getSessionKey();
+    const resolvedSessionKey =
+      typeof sessionKey === 'string' ? sessionKey : INACTIVE_SESSION_KEY;
+
+    if (cachedStatusSessionKey === resolvedSessionKey && cachedStatus) {
+      return cachedStatus;
+    }
+
+    cachedStatusSessionKey = resolvedSessionKey;
+    cachedStatus = createDefaultStatus(resolvedSessionKey);
+    return cachedStatus;
+  };
+
+  return {
+    getOfflineConfig: () => undefined,
+    getOfflineRuntimeConfig: () => defaultOfflineRuntimeConfig,
+    setOfflineRuntimeConfig: () => Result.ok(undefined),
+    resetOfflineRuntimeConfig: () => {},
+    getOfflineStatus,
+    getOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
+    getOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
+    getOfflineUploads: () => emptyUploads,
+    resolveOfflineUpload: () =>
+      Promise.resolve(
+        Result.err(
+          new Error(
+            '[tsdf] Offline uploads are not configured for this manager',
+          ),
+        ),
+      ),
+    resolveOfflineUploads: () =>
+      Promise.resolve(
+        Result.err(
+          new Error(
+            '[tsdf] Offline uploads are not configured for this manager',
+          ),
+        ),
+      ),
+    saveOfflineUpload: () => Promise.resolve(Result.ok(undefined)),
+    replaceOfflineUpload: () => Promise.resolve(Result.ok(undefined)),
+    loadOfflineUpload: () => Promise.resolve(Result.ok(null)),
+    deleteOfflineUpload: () => Promise.resolve(Result.ok(undefined)),
+    useOfflineStatus: getOfflineStatus,
+    useOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
+    useOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
+    useOfflineUploads: () => emptyUploads,
+  };
+}
+
+export type CreateStoreManagerOptions<
+  TUploadRef extends ValidPayload = ValidPayload,
+> = {
   /**
    * Returns the current authenticated session / tenant key shared by all
    * stores attached to this manager. Return `false` to disable session-scoped
@@ -40,29 +180,82 @@ export type CreateStoreManagerOptions = {
   getSessionKey: () => string | false;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
-  /** Optional shared offline session config owned by this store manager. */
-  offlineSession?: ManagerOwnedOfflineSessionConfig;
+  /** Optional shared offline session config for every attached store. */
+  offlineSession?: OfflineSessionConfig<TUploadRef>;
 };
 
-export function createStoreManager(
-  options: CreateStoreManagerOptions,
-): StoreManager {
+export function createStoreManager<
+  TUploadRef extends ValidPayload = ValidPayload,
+>(options: CreateStoreManagerOptions<TUploadRef>): StoreManager<TUploadRef> {
   const resolvedOfflineSession = options.offlineSession
-    ? createOfflineSession({
+    ? createOfflineSession<TUploadRef>({
         config: options.offlineSession,
         getSessionKey: options.getSessionKey,
       })
     : undefined;
+  const offlineApi: StoreManagerOfflineApi<TUploadRef> = resolvedOfflineSession
+    ? {
+        getOfflineConfig: () => resolvedOfflineSession.getConfig(),
+        getOfflineRuntimeConfig: () =>
+          resolvedOfflineSession.getOfflineRuntimeConfig(),
+        setOfflineRuntimeConfig: (update: OfflineRuntimeConfigUpdate) =>
+          resultify(() => {
+            resolvedOfflineSession.setOfflineRuntimeConfig(update);
+          }, normalizeStoreManagerOfflineError),
+        resetOfflineRuntimeConfig: () => {
+          resolvedOfflineSession.resetOfflineRuntimeConfig();
+        },
+        getOfflineStatus: () => resolvedOfflineSession.getOfflineStatus(),
+        getOfflineEntities: () => resolvedOfflineSession.getOfflineEntities(),
+        getOfflineResolutions: () =>
+          resolvedOfflineSession.getOfflineResolutions(),
+        getOfflineUploads: () => resolvedOfflineSession.getOfflineUploads(),
+        resolveOfflineUpload: (id: string) =>
+          resultify(
+            () => resolvedOfflineSession.resolveOfflineUpload(id),
+            normalizeStoreManagerOfflineError,
+          ),
+        resolveOfflineUploads: (ids: readonly string[]) =>
+          resultify(
+            () => resolvedOfflineSession.resolveOfflineUploads(ids),
+            normalizeStoreManagerOfflineError,
+          ),
+        saveOfflineUpload: (args: { id: string; file: Blob | File }) =>
+          resultify(
+            () => resolvedOfflineSession.saveOfflineUpload(args),
+            normalizeStoreManagerOfflineError,
+          ),
+        replaceOfflineUpload: (args: { id: string; file: Blob | File }) =>
+          resultify(
+            () => resolvedOfflineSession.replaceOfflineUpload(args),
+            normalizeStoreManagerOfflineError,
+          ),
+        loadOfflineUpload: (id: string) =>
+          resultify(
+            () => resolvedOfflineSession.loadOfflineUpload(id),
+            normalizeStoreManagerOfflineError,
+          ),
+        deleteOfflineUpload: (id: string) =>
+          resultify(
+            () => resolvedOfflineSession.deleteOfflineUpload(id),
+            normalizeStoreManagerOfflineError,
+          ),
+        useOfflineStatus: () => resolvedOfflineSession.useOfflineStatus(),
+        useOfflineEntities: () => resolvedOfflineSession.useOfflineEntities(),
+        useOfflineResolutions: () =>
+          resolvedOfflineSession.useOfflineResolutions(),
+        useOfflineUploads: () => resolvedOfflineSession.useOfflineUploads(),
+      }
+    : createDisabledStoreManagerOfflineApi<TUploadRef>(options.getSessionKey);
 
   const registry: StoreManagerRegistry = {
     nextStoreRegistrationId: 0,
     stores: new Map(),
   };
 
-  const storeManager: StoreManager = {
+  const storeManager: StoreManager<TUploadRef> = {
     getSessionKey: options.getSessionKey,
     errorNormalizer: options.errorNormalizer,
-    getOfflineSession: () => resolvedOfflineSession,
     getAllStoreIds: () => Array.from(registry.stores.values(), ({ id }) => id),
     resetAll: (ignoreStores) => {
       const ignoredStoreIds = new Set(ignoreStores);
@@ -72,9 +265,11 @@ export function createStoreManager(
         registeredStore.reset();
       }
     },
+    ...offlineApi,
   };
 
   storeManagerRegistry.set(storeManager, registry);
+  storeManagerOfflineSessionRegistry.set(storeManager, resolvedOfflineSession);
 
   return storeManager;
 }
@@ -113,12 +308,20 @@ export function registerStoreWithManager(
   };
 }
 
-export function resolveStoreManagerOfflineSession(args: {
-  storeManager: StoreManager;
+export function resolveStoreManagerOfflineSession<
+  TUploadRef extends ValidPayload = ValidPayload,
+>(args: {
+  storeManager: StoreManager<TUploadRef>;
   storeName: string;
   usesOfflineStorage: boolean;
-}): OfflineSession | null {
-  const offlineSession = args.storeManager.getOfflineSession();
+}): OfflineSession<TUploadRef> | null {
+  // WORKAROUND: The manager registry stores sessions behind a shared
+  // non-generic weak map, and this rebind restores the caller's known upload-ref
+  // type when reading its own session back out.
+  const offlineSession = __LEGIT_CAST__<
+    OfflineSession<TUploadRef> | undefined,
+    OfflineSession | undefined
+  >(storeManagerOfflineSessionRegistry.get(args.storeManager));
   if (!args.usesOfflineStorage) return null;
 
   if (!offlineSession) {

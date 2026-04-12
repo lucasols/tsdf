@@ -59,6 +59,7 @@ import {
   type OfflineResolutionRecordForOperation,
   type ParsedOfflineResolutionConflictResultForOperation,
 } from './persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from './persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type {
   DocumentPersistentStorageConfig,
@@ -179,7 +180,7 @@ const EMPTY_DOCUMENT_OFFLINE_OPERATIONS = {};
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
-  AnyOfflineOperationDefinition
+  AnyOfflineOperationDefinition<__LEGIT_ANY__>
 > &
   ([State] extends [never] ? never : unknown);
 
@@ -996,6 +997,7 @@ export function createDocumentStore<
 
   type DocumentOnlineMutationArgs<T> = DocumentMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type DocumentOfflineMutationArgs<T> = DocumentMutationArgs<T> & {
@@ -1008,6 +1010,7 @@ export function createDocumentStore<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -1046,6 +1049,7 @@ export function createDocumentStore<
     dontShowErrorToast,
     revalidateOnSuccess,
     offline,
+    upload,
   }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
@@ -1088,6 +1092,7 @@ export function createDocumentStore<
                 unknown
               >(offlineController),
               offline,
+              upload,
               directMutation,
             })
         : async () => ({

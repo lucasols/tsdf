@@ -14,6 +14,7 @@ import {
 } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type { OfflineNetworkModeConfig } from './offline/types';
+import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
@@ -1127,16 +1128,17 @@ export async function clearSessionStorage(
 ): Promise<void> {
   if (adapter === 'local-sync') {
     localPersistentStorage.clearSession(sessionKey);
-    return;
+  } else {
+    await adapter.clearSession(sessionKey);
+    await runLocalStorageMutation(() => {
+      const sessionOfflineStatusKey = getStorageKey(sessionKey, '_o_.s');
+      localPersistentStorage.clearManifest(
+        localPersistentStorage.getManifestKeyForSingle(sessionOfflineStatusKey),
+      );
+    });
   }
 
-  await adapter.clearSession(sessionKey);
-  await runLocalStorageMutation(() => {
-    const sessionOfflineStatusKey = getStorageKey(sessionKey, '_o_.s');
-    localPersistentStorage.clearManifest(
-      localPersistentStorage.getManifestKeyForSingle(sessionOfflineStatusKey),
-    );
-  });
+  await clearRegisteredOfflineUploadStorage(sessionKey);
 }
 
 /** Clears all persistent storage entries for a given session key across built-in adapters. */

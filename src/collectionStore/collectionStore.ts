@@ -55,6 +55,7 @@ import {
   type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
 } from '../persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionPersistentStorageConfig,
@@ -1729,6 +1730,7 @@ export function createCollectionStore<
 
   type CollectionOnlineMutationArgs<T> = CollectionMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type CollectionOfflineMutationArgs<T> = CollectionMutationArgs<T> & {
@@ -1741,6 +1743,7 @@ export function createCollectionStore<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -1787,6 +1790,7 @@ export function createCollectionStore<
       onSuccess,
       debounce: _debounce,
       offline,
+      upload,
     }: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
@@ -1851,6 +1855,7 @@ export function createCollectionStore<
                 unknown
               >(offlineController),
               offline,
+              upload,
               directMutation,
             })
         : async () => ({

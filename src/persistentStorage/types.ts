@@ -283,7 +283,7 @@ type StorePersistentStorageBaseConfig<TFinal, TStorage = unknown> = Omit<
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
-  AnyOfflineOperationDefinition
+  AnyOfflineOperationDefinition<__LEGIT_ANY__>
 > &
   ([State] extends [never] ? never : unknown);
 
@@ -291,10 +291,10 @@ type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
   InternalDocumentOfflineOperations<State> | null;
 
 type PublicStoreOfflineConfig<
-  TOperations extends Record<string, AnyOfflineOperationDefinition> = Record<
-    never,
-    never
-  >,
+  TOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition<__LEGIT_ANY__>
+  > = Record<never, never>,
 > = {
   /** Store-local offline operation definitions. Optional when only session-level offline controls are used. */
   operations?: TOperations;
@@ -303,7 +303,7 @@ type PublicStoreOfflineConfig<
 type PublicStoreOfflineConfigField<
   TOfflineOperations extends Record<
     string,
-    AnyOfflineOperationDefinition
+    AnyOfflineOperationDefinition<__LEGIT_ANY__>
   > | null,
 > = {
   /** Optional offline sync/replay configuration for mutations. */
@@ -364,7 +364,7 @@ type InternalCollectionOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  AnyOfflineOperationDefinition & {
+  AnyOfflineOperationDefinition<__LEGIT_ANY__> & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
     }) => CollectionOfflineEntityRef<ItemPayload>[];
@@ -426,7 +426,7 @@ export type InternalListQueryOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  AnyOfflineOperationDefinition & {
+  AnyOfflineOperationDefinition<__LEGIT_ANY__> & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
     }) => ListQueryOfflineEntityRef<ItemPayload>[];

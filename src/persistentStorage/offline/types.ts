@@ -6,11 +6,18 @@ import {
   rc_number,
   rc_object,
   rc_parse,
+  rc_record,
   rc_string,
   rc_unknown,
 } from 'runcheck';
 import type { Result as ResultType } from 't-result';
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
+import type {
+  OfflineAttachedUploadIds,
+  OfflineOperationUploadsContext,
+  OfflineSessionUploadsConfig,
+  OfflineUpload,
+} from '../offlineUploadTypes';
 import type { PersistentStorageSchema } from '../types';
 import type { SchemaValidationError } from '../validateWithSchema';
 
@@ -54,6 +61,8 @@ const offlineResolutionBaseFields = {
   entityRefs: rc_array(offlineResolutionEntityRefSchema),
   createdAt: rc_number,
   updatedAt: rc_number,
+  attachedUploadIds: rc_record(rc_string).optionalKey(),
+  dependencyUploadIds: rc_array(rc_string).optionalKey(),
 };
 
 /** Runtime schema for validating persisted offline resolution records on hydration. */
@@ -228,7 +237,9 @@ export type OfflineReplayRetryConfig = {
 };
 
 /** Shared offline/session policy reused by every store in the same session. */
-export type OfflineSessionConfig = {
+export type OfflineSessionConfig<
+  TUploadRef extends ValidPayload = ValidPayload,
+> = {
   /**
    * Classify a remote failure as `outage`, `network`, or `ignore`.
    * `outage` activates outage recovery behavior.
@@ -266,6 +277,8 @@ export type OfflineSessionConfig = {
    * @default undefined
    */
   mutationQueueing?: OfflineMutationQueueingConfig;
+  /** Optional upload transport/storage config shared by the whole session. */
+  uploads?: OfflineSessionUploadsConfig<TUploadRef>;
 };
 
 /** Per-session offline status snapshot shared across tabs. */
@@ -390,6 +403,10 @@ type OfflineConflictResolutionRecordBase<
   updatedAt: number;
   /** Optional temporary IDs associated with optimistic entity flow. */
   tempIds?: ValidPayload[];
+  /** Maps original direct-upload keys to their persisted session upload ids. */
+  attachedUploadIds?: OfflineAttachedUploadIds;
+  /** Session upload ids that must resolve before replaying the mutation. */
+  dependencyUploadIds?: string[];
 };
 
 /** Derived dependency metadata exposed for offline manual resolutions. */
@@ -450,6 +467,10 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   updatedAt: number;
   /** Optional temporary IDs associated with optimistic entity flow. */
   tempIds?: ValidPayload[];
+  /** Maps original direct-upload keys to their persisted session upload ids. */
+  attachedUploadIds?: OfflineAttachedUploadIds;
+  /** Session upload ids that must resolve before replaying the mutation. */
+  dependencyUploadIds?: string[];
 };
 
 /**
@@ -473,11 +494,11 @@ export type OfflineResolutionRecord<TConflict = unknown, TInput = unknown> =
   | OfflineRetryExhaustedResolutionRecord<TInput>;
 
 /** Session-scoped offline controller shared across stores in the same session. */
-export type OfflineSession = {
+export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active session key used to scope shared offline state. */
   getSessionKey: () => string | false;
   /** Shared static session configuration used by attached stores. */
-  getConfig: () => OfflineSessionConfig;
+  getConfig: () => OfflineSessionConfig<TUploadRef>;
   /** Latest effective runtime config for this session. */
   getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
   /** Updates runtime controls for this session. */
@@ -490,12 +511,33 @@ export type OfflineSession = {
   getOfflineEntities: () => readonly GlobalOfflineEntity[];
   /** Returns the latest aggregated conflict/retry resolutions for the session. */
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** Returns the latest session-scoped offline uploads for the session. */
+  getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  resolveOfflineUpload: (id: string) => Promise<TUploadRef>;
+  /** Resolves multiple staged upload ids to their latest final refs. */
+  resolveOfflineUploads: (
+    ids: readonly string[],
+  ) => Promise<Record<string, TUploadRef>>;
+  /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
+  saveOfflineUpload: (args: { id: string; file: Blob | File }) => Promise<void>;
+  /** Replaces a previously stored session-scoped upload. */
+  replaceOfflineUpload: (args: {
+    id: string;
+    file: Blob | File;
+  }) => Promise<void>;
+  /** Loads a previously stored session-scoped upload. */
+  loadOfflineUpload: (id: string) => Promise<File | null>;
+  /** Deletes a stored upload when it is no longer referenced. */
+  deleteOfflineUpload: (id: string) => Promise<void>;
   /** React hook subscribing to the session's global offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;
   /** React hook subscribing to the session's aggregated offline entities. */
   useOfflineEntities: () => readonly GlobalOfflineEntity[];
   /** React hook subscribing to the session's aggregated conflict/retry resolutions. */
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** React hook subscribing to the session's upload list. */
+  useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
 };
 
 export const COMPACT_OFFLINE_STATUS_FLAG = 1 as const;
@@ -590,6 +632,10 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   syncState: OfflineSyncState;
   /** Optional temporary IDs for optimistic create operations. */
   tempIds?: ValidPayload[];
+  /** Maps original direct-upload keys to their persisted session upload ids. */
+  attachedUploadIds?: OfflineAttachedUploadIds;
+  /** Session upload ids that must resolve before replaying the mutation. */
+  dependencyUploadIds?: string[];
   /** Last recorded sync error if replay failed. */
   lastError?: { message: string };
   /**
@@ -786,6 +832,13 @@ type OperationBaseContext<TInput> = {
   resolveEntityRef: <TEntityRef extends ValidPayload>(
     entityRef: TEntityRef,
   ) => TEntityRef;
+};
+
+type OperationExecuteContext<
+  TInput,
+  TUploadRef extends ValidPayload = ValidPayload,
+> = OperationBaseContext<TInput> & {
+  uploads: OfflineOperationUploadsContext<TUploadRef>;
 };
 
 /** Context passed to the post-replay success hook after `execute(...)` settles. */
@@ -1062,6 +1115,7 @@ export type OfflineOperationDefinition<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
@@ -1078,7 +1132,7 @@ export type OfflineOperationDefinition<
    * This may run multiple times when transient failures occur.
    */
   execute: (
-    ctx: OperationBaseContext<TInput>,
+    ctx: OperationExecuteContext<TInput, TUploadRef>,
   ) => Promise<TTempResult> | TTempResult;
   /**
    * Optional check executed before retrying a previously failed sync attempt.
@@ -1143,7 +1197,9 @@ type OperationEntityRefsContext<TInput> = {
 };
 
 /** Non-store-specific offline operation definition alias. */
-export type AnyOfflineOperationDefinition = {
+export type AnyOfflineOperationDefinition<
+  TUploadRef extends ValidPayload = ValidPayload,
+> = {
   inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
   kind: OfflineOperationKind;
   conflictHandling?: {
@@ -1163,7 +1219,7 @@ export type AnyOfflineOperationDefinition = {
     __LEGIT_ANY__
   >;
   getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
-  execute: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
+  execute: (ctx: OperationExecuteContext<__LEGIT_ANY__, TUploadRef>) => unknown;
   onSuccessExecute?: OfflineOperationExecuteSuccessHandler<
     __LEGIT_ANY__,
     __LEGIT_ANY__
@@ -1176,7 +1232,22 @@ export type AnyOfflineOperationDefinition = {
   dependsOn?: (
     ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
   ) => __LEGIT_ANY__[];
+  dependsOnUploads?: (
+    ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
+  ) => string[];
 };
+
+export type OfflineOperationsUploadRef<TOperations> =
+  TOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition<__LEGIT_ANY__>
+  >
+    ? TOperations[keyof TOperations] extends AnyOfflineOperationDefinition<
+        infer TUploadRef
+      >
+      ? TUploadRef
+      : ValidPayload
+    : ValidPayload;
 
 /**
  * Compact type-spec helper for a single offline operation.
@@ -1259,15 +1330,25 @@ type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
 export type DocumentOfflineOperationDefinition<
   State extends ValidStoreState,
   TOptions extends DefineOfflineOperation = DefineOfflineOperation,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = WithoutTempEntity<
   OfflineOperationDefinition<
     DocumentOperationInput<TOptions>,
     DocumentOperationConflict<TOptions>,
     DocumentOperationResult<TOptions>,
-    DocumentOperationServerSnapshot<TOptions>
+    DocumentOperationServerSnapshot<TOptions>,
+    string,
+    unknown,
+    ValidPayload,
+    unknown,
+    TUploadRef
   >
-> &
-  ([State] extends [never] ? never : unknown);
+> & {
+  /** Declares which upload ids must finish before replaying this operation. */
+  dependsOnUploads?: (
+    ctx: OperationEntityRefsContext<DocumentOperationInput<TOptions>>,
+  ) => string[];
+} & ([State] extends [never] ? never : unknown);
 
 /**
  * Builds a document offline operations map from a compact operation spec.
@@ -1322,10 +1403,12 @@ export type DocumentOfflineOperationDefinition<
 export type DefineDocumentOfflineOperations<
   State extends ValidStoreState,
   TOperations extends Record<string, DefineOfflineOperation>,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = {
   [TName in keyof TOperations]: DocumentOfflineOperationDefinition<
     State,
-    TOperations[TName]
+    TOperations[TName],
+    TUploadRef
   >;
 };
 
@@ -1359,6 +1442,7 @@ export type CollectionOfflineOperationDefinition<
   TConflict = unknown,
   TTempResult = unknown,
   TServerSnapshot = unknown,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = OfflineOperationDefinition<
   TInput,
   TConflict,
@@ -1367,7 +1451,8 @@ export type CollectionOfflineOperationDefinition<
   ItemPayloadUnused,
   ItemState,
   ItemPayloadUnused,
-  ItemState
+  ItemState,
+  TUploadRef
 > & {
   /**
    * Declares which collection items are affected by this queued mutation.
@@ -1385,6 +1470,8 @@ export type CollectionOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
+  /** Declares which upload ids must finish before replaying this operation. */
+  dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
 } & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
 
 /**
@@ -1424,6 +1511,7 @@ export type DefineCollectionOfflineOperations<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
   TOperations extends Record<string, DefineOfflineOperation>,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = {
   [TName in keyof TOperations]: CollectionOfflineOperationDefinition<
     ItemState,
@@ -1431,7 +1519,8 @@ export type DefineCollectionOfflineOperations<
     DocumentOperationInput<TOperations[TName]>,
     DocumentOperationConflict<TOperations[TName]>,
     DocumentOperationResult<TOperations[TName]>,
-    DocumentOperationServerSnapshot<TOperations[TName]>
+    DocumentOperationServerSnapshot<TOperations[TName]>,
+    TUploadRef
   >;
 };
 
@@ -1467,6 +1556,7 @@ export type ListQueryOfflineOperationDefinition<
   TConflict = unknown,
   TTempResult = unknown,
   TServerSnapshot = unknown,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = OfflineOperationDefinition<
   TInput,
   TConflict,
@@ -1475,7 +1565,8 @@ export type ListQueryOfflineOperationDefinition<
   ItemPayloadUnused,
   ItemState,
   ItemPayloadUnused,
-  ItemState
+  ItemState,
+  TUploadRef
 > & {
   /**
    * Declares which list-query entities are affected by this queued mutation.
@@ -1493,6 +1584,8 @@ export type ListQueryOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
+  /** Declares which upload ids must finish before replaying this operation. */
+  dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
     ? never
     : unknown);
@@ -1537,6 +1630,7 @@ export type DefineListQueryOfflineOperations<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TOperations extends Record<string, DefineOfflineOperation>,
+  TUploadRef extends ValidPayload = ValidPayload,
 > = {
   [TName in keyof TOperations]: ListQueryOfflineOperationDefinition<
     ItemState,
@@ -1545,7 +1639,8 @@ export type DefineListQueryOfflineOperations<
     DocumentOperationInput<TOperations[TName]>,
     DocumentOperationConflict<TOperations[TName]>,
     DocumentOperationResult<TOperations[TName]>,
-    DocumentOperationServerSnapshot<TOperations[TName]>
+    DocumentOperationServerSnapshot<TOperations[TName]>,
+    TUploadRef
   >;
 };
 

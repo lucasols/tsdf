@@ -47,6 +47,7 @@ import {
   type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
 } from '../persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import {
   createProtectedStorageKey,
   isOfflineNetworkModeActiveSync,
@@ -793,9 +794,10 @@ export function createListQueryStore<
     canQueueMutation: () => offlineController?.canQueueMutation() ?? false,
     prepareForMutation: <
       TName extends keyof Exclude<TOfflineOperations, null> & string,
-    >(
-      args: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
-    ) =>
+    >(args: {
+      offline: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>;
+      upload?: OfflineMutationUploadsInput;
+    }) =>
       offlineController
         ? // WORKAROUND: The shared controller also supports session-only offline configs with no operation map, so list-query mutation calls re-narrow it only when typed offline mutation input is present.
           __LEGIT_CAST__<
@@ -805,9 +807,10 @@ export function createListQueryStore<
         : Promise.reject(new Error('Offline mutation controller unavailable')),
     queueMutation: <
       TName extends keyof Exclude<TOfflineOperations, null> & string,
-    >(
-      args: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
-    ) =>
+    >(args: {
+      offline: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>;
+      upload?: OfflineMutationUploadsInput;
+    }) =>
       offlineController
         ? // WORKAROUND: The shared controller also supports session-only offline configs with no operation map, so list-query mutation calls re-narrow it only when typed offline mutation input is present.
           __LEGIT_CAST__<
