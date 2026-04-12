@@ -40,7 +40,7 @@ import {
 } from './parsePersistedData';
 import {
   createShouldIgnoreItemPredicate,
-  getUtf8ByteSize,
+  getSerializedStringSize,
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
@@ -225,7 +225,7 @@ export function setupCollectionPersistence<
   }): number {
     const asyncNamespaceScope = getAsyncNamespaceScope();
     if (asyncNamespaceScope === null) {
-      return getUtf8ByteSize(JSON.stringify(args.value));
+      return JSON.stringify(args.value).length;
     }
 
     const serializedValue = serializeJsonForStorage({
@@ -415,7 +415,7 @@ export function setupCollectionPersistence<
     const snapshot = JSON.stringify(persisted);
     persistedSnapshotByKey.set(itemKey, snapshot);
     if (localStorageAdapter !== null) {
-      persistedSizeBytesByKey.set(itemKey, getUtf8ByteSize(snapshot));
+      persistedSizeBytesByKey.set(itemKey, getSerializedStringSize(snapshot));
     } else {
       persistedSizeBytesByKey.set(
         itemKey,

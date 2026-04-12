@@ -46,7 +46,7 @@ import {
 } from './parsePersistedData';
 import {
   createShouldIgnoreItemPredicate,
-  getUtf8ByteSize,
+  getSerializedStringSize,
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
@@ -387,7 +387,7 @@ export function setupListQueryPersistence<
   }): number {
     const asyncItemNamespaceScope = getAsyncItemNamespaceScope();
     if (asyncItemNamespaceScope === null) {
-      return getUtf8ByteSize(JSON.stringify(args.value));
+      return JSON.stringify(args.value).length;
     }
 
     const serializedValue = serializeJsonForStorage({
@@ -422,7 +422,7 @@ export function setupListQueryPersistence<
   }): number {
     const asyncQueryNamespaceScope = getAsyncQueryNamespaceScope();
     if (asyncQueryNamespaceScope === null) {
-      return getUtf8ByteSize(JSON.stringify(args.value));
+      return JSON.stringify(args.value).length;
     }
 
     const serializedValue = serializeJsonForStorage(
@@ -520,7 +520,10 @@ export function setupListQueryPersistence<
     const sizeBytes =
       rawEntry === null
         ? 0
-        : rememberQueryMetadataSize(queryKey, getUtf8ByteSize(rawEntry));
+        : rememberQueryMetadataSize(
+            queryKey,
+            getSerializedStringSize(rawEntry),
+          );
 
     return {
       queryKey,
@@ -895,7 +898,7 @@ export function setupListQueryPersistence<
     const snapshot = JSON.stringify(persisted);
     itemSnapshotByKey.set(itemKey, snapshot);
     if (localStorageAdapter !== null) {
-      itemSizeBytesByKey.set(itemKey, getUtf8ByteSize(snapshot));
+      itemSizeBytesByKey.set(itemKey, getSerializedStringSize(snapshot));
     } else {
       const nextCustomMetadata: ItemEntryNamespaceMetadata = {
         p: persisted.payload,
@@ -938,7 +941,7 @@ export function setupListQueryPersistence<
     const snapshot = JSON.stringify(persisted);
     querySnapshotByKey.set(queryKey, snapshot);
     if (localStorageAdapter !== null) {
-      querySizeBytesByKey.set(queryKey, getUtf8ByteSize(snapshot));
+      querySizeBytesByKey.set(queryKey, getSerializedStringSize(snapshot));
     } else {
       querySizeBytesByKey.set(
         queryKey,

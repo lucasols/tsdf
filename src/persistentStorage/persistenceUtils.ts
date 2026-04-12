@@ -1,7 +1,5 @@
 import type { ValidPayload } from '../utils/storeShared';
 
-const utf8Encoder = new TextEncoder();
-
 export function createShouldIgnoreItemPredicate<
   ItemPayload extends ValidPayload,
 >(
@@ -15,8 +13,8 @@ export function createShouldIgnoreItemPredicate<
   return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
 }
 
-export function getUtf8ByteSize(value: string): number {
-  return utf8Encoder.encode(value).byteLength;
+export function getSerializedStringSize(value: string): number {
+  return value.length;
 }
 
 export function serializeJsonForStorage(value: unknown): {
@@ -24,7 +22,7 @@ export function serializeJsonForStorage(value: unknown): {
   sizeBytes: number;
 } {
   const rawValue = JSON.stringify(value);
-  return { rawValue, sizeBytes: getUtf8ByteSize(rawValue) };
+  return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
 }
 
 export function keepEntriesWithinByteBudget<T>(args: {

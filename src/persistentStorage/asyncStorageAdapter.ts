@@ -22,7 +22,7 @@ import {
   PAYLOAD_RECORD_PREFIX,
 } from './opfsFileNaming';
 import {
-  getUtf8ByteSize,
+  getSerializedStringSize,
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
@@ -251,8 +251,8 @@ export function estimateManagedAsyncStorageEntrySizeBytes(args: {
   version: number;
 }): number {
   return (
-    getUtf8ByteSize(args.serializedValue) +
-    getUtf8ByteSize(
+    getSerializedStringSize(args.serializedValue) +
+    getSerializedStringSize(
       JSON.stringify(
         serializeInternalManagedMetadataRecord({
           lastAccessAt: args.lastAccessAt,

@@ -1,6 +1,6 @@
 import { createCompactListQueryLocalStorageEntry } from '../../src/persistentStorage/compactListQueryLocalStorageEntry';
 import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
-import { getUtf8ByteSize } from '../../src/persistentStorage/persistenceUtils';
+import { getSerializedStringSize } from '../../src/persistentStorage/persistenceUtils';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 function getDefaultTimestamp(): number {
@@ -16,7 +16,7 @@ export function getLocalCollectionEntrySizeBytes<T>(
   data: T,
   version?: number,
 ): number {
-  return getUtf8ByteSize(
+  return getSerializedStringSize(
     JSON.stringify(
       createCompactLocalStorageEntry({ d: data, p: payload }, version),
     ),
@@ -28,13 +28,15 @@ export function getAsyncCollectionEntrySizeBytes<T>(
   data: T,
 ): number {
   return (
-    getUtf8ByteSize(JSON.stringify({ d: data, p: payload })) +
-    getUtf8ByteSize(JSON.stringify({ a: getDefaultTimestamp(), p: payload }))
+    getSerializedStringSize(JSON.stringify({ d: data, p: payload })) +
+    getSerializedStringSize(
+      JSON.stringify({ a: getDefaultTimestamp(), p: payload }),
+    )
   );
 }
 
 function getAsyncMetadataSizeBytes(payload: unknown): number {
-  return getUtf8ByteSize(
+  return getSerializedStringSize(
     JSON.stringify({ a: getDefaultTimestamp(), p: payload }),
   );
 }
@@ -44,7 +46,7 @@ export function getLocalListItemEntrySizeBytes<T>(
   data: T,
   options: { loadedFields?: string[]; version?: number } = {},
 ): number {
-  return getUtf8ByteSize(
+  return getSerializedStringSize(
     JSON.stringify(
       createCompactLocalStorageEntry(
         {
@@ -66,7 +68,7 @@ export function getAsyncListItemEntrySizeBytes<T>(
   options: { loadedFields?: string[] } = {},
 ): number {
   return (
-    getUtf8ByteSize(
+    getSerializedStringSize(
       JSON.stringify({
         d: data,
         p: payload,
@@ -83,7 +85,7 @@ export function getLocalListQueryEntrySizeBytes(
   items: string[],
   options: { hasMore?: boolean; lastAccessAt?: number; version?: number } = {},
 ): number {
-  return getUtf8ByteSize(
+  return getSerializedStringSize(
     JSON.stringify(
       createCompactListQueryLocalStorageEntry({
         items,
@@ -103,7 +105,7 @@ export function getAsyncListQueryEntrySizeBytes(
   options: { hasMore?: boolean } = {},
 ): number {
   return (
-    getUtf8ByteSize(
+    getSerializedStringSize(
       JSON.stringify({
         i: items,
         ...(options.hasMore === true ? { h: true } : {}),

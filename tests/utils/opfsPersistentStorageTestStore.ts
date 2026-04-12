@@ -14,7 +14,7 @@ import {
   PAYLOAD_RECORD_PREFIX,
   resolveHashedPayloadRecordKeyFromValue,
 } from '../../src/persistentStorage/opfsFileNaming';
-import { getUtf8ByteSize } from '../../src/persistentStorage/persistenceUtils';
+import { getSerializedStringSize } from '../../src/persistentStorage/persistenceUtils';
 import type {
   AsyncStorageNamespaceScope,
   StorageCacheEntry,
@@ -243,8 +243,8 @@ function estimateManagedEntrySizeBytes(args: {
   version: number;
 }): number {
   return (
-    getUtf8ByteSize(args.rawValue) +
-    getUtf8ByteSize(
+    getSerializedStringSize(args.rawValue) +
+    getSerializedStringSize(
       JSON.stringify(
         serializeManagedMetadataRecord({
           key: '__size__',

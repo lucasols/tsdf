@@ -58,7 +58,7 @@ export type AsyncStorageEntryMetadataBase = {
   payloadRef: string;
   writtenAt: number;
   lastAccessAt: number;
-  /** Serialized payload size in bytes for this persisted entry. */
+  /** Serialized JSON size used for persistence budgeting for this entry. */
   sizeBytes?: number;
   version: number;
 };
@@ -397,9 +397,10 @@ type CollectionPersistentStorageFields<ItemPayload extends ValidPayload> = {
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
   /**
-   * Maximum serialized payload bytes to persist for collection items.
-   * Items are evicted via LRU. Defaults to 64 KB in `local-sync` and 128 KB
-   * in async adapters.
+   * Maximum serialized JSON size to persist for collection items. Budgeting
+   * uses the serialized string length, not browser quota bytes. Items are
+   * evicted via LRU. Defaults to 64 KB in `local-sync` and 128 KB in async
+   * adapters.
    */
   maxBytes?: number;
   /** Item payloads that should never be evicted from storage. */
@@ -473,13 +474,15 @@ type ListQueryPersistentStorageFields<
   /** Schema used to validate cached query payloads on load. */
   queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
   /**
-   * Maximum serialized payload bytes to persist for list items. Defaults to
-   * 64 KB in `local-sync` and 128 KB in async adapters.
+   * Maximum serialized JSON size to persist for list items. Budgeting uses the
+   * serialized string length, not browser quota bytes. Defaults to 64 KB in
+   * `local-sync` and 128 KB in async adapters.
    */
   maxItemBytes?: number;
   /**
-   * Maximum serialized payload bytes to persist for list queries. Defaults to
-   * 32 KB in `local-sync` and 64 KB in async adapters.
+   * Maximum serialized JSON size to persist for list queries. Budgeting uses
+   * the serialized string length, not browser quota bytes. Defaults to 32 KB
+   * in `local-sync` and 64 KB in async adapters.
    */
   maxQueryBytes?: number;
   /** Maximum number of items per query to persist. Defaults to 100. */
