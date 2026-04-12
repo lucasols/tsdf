@@ -237,7 +237,9 @@ export type OfflineReplayRetryConfig = {
 };
 
 /** Shared offline/session policy reused by every store in the same session. */
-export type OfflineSessionConfig = {
+export type OfflineSessionConfig<
+  TUploadRef extends ValidPayload = ValidPayload,
+> = {
   /**
    * Classify a remote failure as `outage`, `network`, or `ignore`.
    * `outage` activates outage recovery behavior.
@@ -276,7 +278,7 @@ export type OfflineSessionConfig = {
    */
   mutationQueueing?: OfflineMutationQueueingConfig;
   /** Optional upload transport/storage config shared by the whole session. */
-  uploads?: OfflineSessionUploadsConfig;
+  uploads?: OfflineSessionUploadsConfig<TUploadRef>;
 };
 
 /** Per-session offline status snapshot shared across tabs. */
@@ -496,7 +498,7 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active session key used to scope shared offline state. */
   getSessionKey: () => string | false;
   /** Shared static session configuration used by attached stores. */
-  getConfig: () => OfflineSessionConfig;
+  getConfig: () => OfflineSessionConfig<TUploadRef>;
   /** Latest effective runtime config for this session. */
   getOfflineRuntimeConfig: () => OfflineRuntimeConfig;
   /** Updates runtime controls for this session. */
@@ -1228,6 +1230,18 @@ export type AnyOfflineOperationDefinition<
     ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
   ) => string[];
 };
+
+export type OfflineOperationsUploadRef<TOperations> =
+  TOperations extends Record<
+    string,
+    AnyOfflineOperationDefinition<__LEGIT_ANY__>
+  >
+    ? TOperations[keyof TOperations] extends AnyOfflineOperationDefinition<
+        infer TUploadRef
+      >
+      ? TUploadRef
+      : ValidPayload
+    : ValidPayload;
 
 /**
  * Compact type-spec helper for a single offline operation.

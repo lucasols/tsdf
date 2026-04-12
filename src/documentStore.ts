@@ -57,6 +57,7 @@ import {
   OfflineResolutionConflictParseError,
   type AnyOfflineOperationDefinition,
   type OfflineMutationInput,
+  type OfflineOperationsUploadRef,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecordForOperation,
   type ParsedOfflineResolutionConflictResultForOperation,
@@ -182,7 +183,7 @@ const EMPTY_DOCUMENT_OFFLINE_OPERATIONS = {};
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
-  AnyOfflineOperationDefinition
+  AnyOfflineOperationDefinition<__LEGIT_ANY__>
 > &
   ([State] extends [never] ? never : unknown);
 
@@ -302,6 +303,9 @@ export function createDocumentStore<
   type ResolvedOfflineOperations = TOfflineOperations extends null
     ? Record<never, never>
     : Exclude<TOfflineOperations, null>;
+  type DirectMutationUploads = OfflineDirectMutationContext<
+    OfflineOperationsUploadRef<TOfflineOperations>
+  >['uploads'];
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
@@ -991,7 +995,9 @@ export function createDocumentStore<
     mutation: (ctx: {
       updateState: typeof updateState;
       currentState: State | null;
-      uploads: OfflineDirectMutationContext['uploads'];
+      uploads: OfflineDirectMutationContext<
+        OfflineOperationsUploadRef<TOfflineOperations>
+      >['uploads'];
     }) => Promise<T>;
     debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
     dontShowErrorToast?: boolean;
@@ -1075,7 +1081,7 @@ export function createDocumentStore<
       mutation({
         updateState,
         currentState: store.state.data,
-        uploads: ctx.uploads,
+        uploads: ctx.uploads as DirectMutationUploads,
       });
 
     const result = await performMutationWithLifecycle({

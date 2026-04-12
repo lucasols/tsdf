@@ -53,6 +53,7 @@ import {
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
   type OfflineMutationInput,
+  type OfflineOperationsUploadRef,
   type ParsedOfflineResolutionConflictResultForOperation,
   type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
@@ -1715,6 +1716,9 @@ export function createCollectionStore<
     payload: ItemPayload;
     item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
   };
+  type DirectMutationUploads = OfflineDirectMutationContext<
+    OfflineOperationsUploadRef<TOfflineOperations>
+  >['uploads'];
 
   type CollectionMutationArgs<T> = {
     optimisticUpdate?: (
@@ -1722,7 +1726,11 @@ export function createCollectionStore<
     ) => void | boolean;
     mutation: (
       payload: CollectionMutationPayloadToUse,
-      ctx: { uploads: OfflineDirectMutationContext['uploads'] },
+      ctx: {
+        uploads: OfflineDirectMutationContext<
+          OfflineOperationsUploadRef<TOfflineOperations>
+        >['uploads'];
+      },
     ) => Promise<T>;
     onSuccess?: (
       response: Awaited<T>,
@@ -1838,7 +1846,7 @@ export function createCollectionStore<
         : [];
 
     const directMutation = (ctx: OfflineDirectMutationContext) =>
-      mutation(payloadToUse, { uploads: ctx.uploads });
+      mutation(payloadToUse, { uploads: ctx.uploads as DirectMutationUploads });
 
     const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payloadToUse),

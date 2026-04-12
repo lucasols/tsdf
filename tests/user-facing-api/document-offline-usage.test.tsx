@@ -105,6 +105,78 @@ type RuntimeOnlyDocumentOfflineOperations = DefineDocumentOfflineOperations<
   Record<never, never>
 >;
 
+test('store manager and direct mutation callback keep typed upload refs', () => {
+  if (false) {
+    const storeManager = createStoreManager<UploadedDocumentRef>({
+      getSessionKey: () => 'typed-upload-refs',
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        uploads: {
+          adapter: {
+            save: async () => {},
+            load: async () => null,
+            list: async () => [],
+            remove: async () => {},
+            clearSession: async () => {},
+          },
+          upload: async () => ({ assetId: 'server-asset' }),
+        },
+      },
+    });
+
+    const uploads = storeManager.getOfflineUploads();
+    const resolvedRef = uploads[0]?.resolvedRef;
+    if (!resolvedRef) {
+      throw new Error('Missing store manager upload ref');
+    }
+    const assetId: string = resolvedRef!.assetId;
+    void assetId;
+    // @ts-expect-error - store manager upload refs keep the configured object shape
+    const invalidString: string = resolvedRef!;
+    void invalidString;
+
+    const documentStore = createDocumentStore<
+      DocState,
+      UploadAwareDocumentOfflineOperations
+    >({
+      id: 'typed-upload-refs',
+      storeManager,
+      fetchFn: () => Promise.resolve({ value: 1, label: 'server' }),
+      lowPriorityThrottleMs: 5,
+      baseCoalescingWindowMs: 10,
+      blockWindowClose: null,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: { updateWithUpload: uploadAwareDocumentOperation },
+        },
+      },
+    });
+
+    void documentStore.performMutation({
+      mutation: ({ uploads }) => {
+        const directResolvedRef = uploads.resolvedRefsById.asset;
+        if (!directResolvedRef) {
+          throw new Error('Missing direct upload ref');
+        }
+        const assetId: string = directResolvedRef.assetId;
+        void assetId;
+        // @ts-expect-error - direct mutation upload refs keep the configured object shape
+        const invalidString: string = directResolvedRef;
+        void invalidString;
+        return Promise.resolve(undefined);
+      },
+      offline: {
+        operation: 'updateWithUpload',
+        input: { attachmentId: 'asset' },
+      },
+    });
+  }
+
+  expect(true).toBe(true);
+});
+
 test('direct document store runtime offline controls public api', async () => {
   const network = createOfflineNetworkMock(false);
   const sessionKey = 'direct-document-runtime-controls';

@@ -13,7 +13,10 @@ import {
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
-import type { OfflineMutationInput } from '../persistentStorage/offline/types';
+import type {
+  OfflineMutationInput,
+  OfflineOperationsUploadRef,
+} from '../persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
@@ -194,6 +197,9 @@ export function createMutationApi<
     query: TSFDListQuery<QueryPayload> | undefined;
     invalidationWasTriggered: boolean;
   };
+  type DirectMutationUploads = OfflineDirectMutationContext<
+    OfflineOperationsUploadRef<TOfflineOperations>
+  >['uploads'];
   type OptimisticMutationQueryContext = {
     dynamicQueryMutationEnders: Array<() => boolean>;
     lockedQueryKeys: Set<string>;
@@ -956,7 +962,11 @@ export function createMutationApi<
     optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
     mutation: (
       payload: MutationPayloadToUse,
-      ctx: { uploads: OfflineDirectMutationContext['uploads'] },
+      ctx: {
+        uploads: OfflineDirectMutationContext<
+          OfflineOperationsUploadRef<TOfflineOperations>
+        >['uploads'];
+      },
     ) => Promise<T>;
     revalidateOnSuccess?: RevalidateOnSuccessOption;
     onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
@@ -1096,7 +1106,7 @@ export function createMutationApi<
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
     const directMutation = (ctx: OfflineDirectMutationContext) =>
-      mutation(payloadToUse, { uploads: ctx.uploads });
+      mutation(payloadToUse, { uploads: ctx.uploads as DirectMutationUploads });
 
     const result = await performMutationWithLifecycle({
       startMutation: () => {

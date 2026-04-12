@@ -2232,7 +2232,7 @@ export function getOfflineSessionUploadsConfig<TUploadRef extends ValidPayload>(
 export function createOfflineSession<
   TUploadRef extends ValidPayload = ValidPayload,
 >(args: {
-  config: OfflineSessionConfig;
+  config: OfflineSessionConfig<TUploadRef>;
   getSessionKey?: () => string | false;
 }): OfflineSession<TUploadRef> {
   const getSessionKey = args.getSessionKey ?? (() => false);
