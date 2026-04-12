@@ -793,17 +793,15 @@ describe('indexeddb async storage efficiency: collection', () => {
     await settleIndexedDbStorage();
 
     expect(
-      Object.fromEntries(
-        Object.entries(
-          (await readCollectionEntryRow({
-            mockAdapter,
-            payload: '1',
-            sessionKey,
-            storeName,
-          })) ?? {},
-        ).filter(([key]) => key !== 'a'),
-      ),
+      await readCollectionEntryRow({
+        mockAdapter,
+        payload: '1',
+        sessionKey,
+        storeName,
+      }),
     ).toMatchInlineSnapshot(`
+      a: 1735689606142
+
       d:
         d:
           value: { id: '1', name: 'Edited after delete' }
@@ -883,17 +881,15 @@ describe('indexeddb async storage efficiency: collection', () => {
     await settleIndexedDbStorage();
 
     expect(
-      Object.fromEntries(
-        Object.entries(
-          (await readCollectionEntryRow({
-            mockAdapter,
-            payload: '1',
-            sessionKey,
-            storeName,
-          })) ?? {},
-        ).filter(([key]) => key !== 'a'),
-      ),
+      await readCollectionEntryRow({
+        mockAdapter,
+        payload: '1',
+        sessionKey,
+        storeName,
+      }),
     ).toMatchInlineSnapshot(`
+      a: 1735689606142
+
       d:
         d:
           value: { id: '1', name: 'Edited during write' }
