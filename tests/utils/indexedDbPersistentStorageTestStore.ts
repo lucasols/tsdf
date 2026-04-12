@@ -3,16 +3,11 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from '../../src/persistentStorage/asyncStorageShared';
-import {
   createIndexedDbPersistentStorageForTests,
   type IndexedDbPersistentStorageOperation,
   type IndexedDbPersistentStorageOptions,
 } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
 import type {
-  AsyncStorageAdapter,
   AsyncStorageDriver,
   AsyncStorageNamespaceHandle,
   AsyncStorageNamespaceScope,
@@ -26,10 +21,8 @@ const INDEXED_DB_META_STORE = 'meta';
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 
 type IndexedDbNamespacePolicyRecord = {
-  n: string;
   p: AsyncStorageNamespaceStaticPolicy | null;
   s: string;
-  t: AsyncStorageNamespaceScope['kind'];
 };
 
 type StorageSeedOptions = { timestamp?: number; version?: number };
@@ -195,33 +188,39 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
 }
 
-type IndexedDbEntryRecord = {
-  a: number;
-  d: unknown;
-  g?: string;
-  k: string;
-  m?: Record<string, unknown>;
-  n: string;
-  o: 0 | 1;
-  s: string;
-  t: AsyncStorageNamespaceScope['kind'];
-  v: number;
-};
-
-function isValidEntryRecord(value: unknown): value is IndexedDbEntryRecord {
+function isValidEntryRecord(value: unknown): boolean {
   const record = getRecord(value);
   if (record === null) return false;
 
+  const allowedKeys = new Set([
+    'a',
+    'd',
+    'f',
+    'g',
+    'h',
+    'i',
+    'm',
+    'o',
+    'p',
+    'v',
+  ]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    return false;
+  }
+
+  const loadedFields = record.f;
   return (
-    typeof record.s === 'string' &&
-    typeof record.n === 'string' &&
-    typeof record.t === 'string' &&
-    typeof record.k === 'string' &&
+    typeof record.i === 'string' &&
     typeof record.a === 'number' &&
-    typeof record.v === 'number' &&
+    'd' in record &&
+    (record.v === undefined || typeof record.v === 'number') &&
     (record.m === undefined || getRecord(record.m) !== null) &&
     (record.g === undefined || typeof record.g === 'string') &&
-    (record.o === 0 || record.o === 1)
+    (record.o === undefined || record.o === 1) &&
+    (loadedFields === undefined ||
+      (loadedFields instanceof Array &&
+        loadedFields.every((entry) => typeof entry === 'string'))) &&
+    (record.h === undefined || record.h === 1)
   );
 }
 
@@ -333,6 +332,103 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
   };
 }
 
+function createScopeId(scope: AsyncStorageNamespaceScope): string {
+  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
+}
+
+function createScopePrimaryKey(
+  scope: AsyncStorageNamespaceScope,
+): [string, string, AsyncStorageNamespaceScope['kind']] {
+  return [scope.sessionKey, scope.storeName, scope.kind];
+}
+
+function getEntryPrimaryKey(
+  scope: AsyncStorageNamespaceScope,
+  key: string,
+): [string, string] {
+  return [createScopeId(scope), key];
+}
+
+function getEntryKeyFromPrimaryKey(key: unknown): string | null {
+  return Array.isArray(key) && typeof key[1] === 'string' ? key[1] : null;
+}
+
+function splitCustomMetadata(
+  customMetadata: Record<string, unknown> | undefined,
+): {
+  extraMetadata?: Record<string, unknown>;
+  group?: string;
+  offlineProtected?: true;
+  payload?: unknown;
+} {
+  if (customMetadata === undefined) return {};
+
+  const { g, o, p, ...rest } = customMetadata;
+  return {
+    ...(typeof g === 'string' ? { group: g } : {}),
+    ...(o === true ? { offlineProtected: true as const } : {}),
+    ...('p' in customMetadata ? { payload: p } : {}),
+    ...(Object.keys(rest).length > 0 ? { extraMetadata: rest } : {}),
+  };
+}
+
+function mergeCustomMetadata(fields: {
+  extraMetadata?: Record<string, unknown>;
+  group?: string;
+  offlineProtected?: true;
+  payload?: unknown;
+}): Record<string, unknown> | undefined {
+  const result: Record<string, unknown> = {
+    ...(fields.extraMetadata ?? {}),
+    ...(fields.group !== undefined ? { g: fields.group } : {}),
+    ...(fields.offlineProtected === true ? { o: true } : {}),
+    ...(fields.payload !== undefined ? { p: fields.payload } : {}),
+  };
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+type IndexedDbEntryRecord = {
+  a: number;
+  d: unknown;
+  f?: string[];
+  g?: string;
+  h?: 1;
+  i: string;
+  m?: Record<string, unknown>;
+  o?: 1;
+  p?: unknown;
+  v?: number;
+};
+
+function compactEntryValue(
+  scope: AsyncStorageNamespaceScope,
+  value: unknown,
+): Pick<IndexedDbEntryRecord, 'd' | 'f' | 'h'> {
+  const record = getRecord(value);
+
+  switch (scope.kind) {
+    case 'document':
+    case 'collection.item':
+    case 'listQuery.item':
+      return { d: record !== null && 'd' in record ? record.d : value };
+    case 'listQuery.query':
+      return {
+        d: record !== null && Array.isArray(record.i) ? record.i : value,
+      };
+    default:
+      return { d: value };
+  }
+}
+
+function expandEntryValue(
+  scope: AsyncStorageNamespaceScope,
+  record: IndexedDbEntryRecord,
+): unknown {
+  void scope;
+  return record.d;
+}
+
 function buildCustomMetadata(
   scope: AsyncStorageNamespaceScope,
   data: unknown,
@@ -342,12 +438,24 @@ function buildCustomMetadata(
 
   switch (scope.kind) {
     case 'collection.item':
-    case 'listQuery.item':
       return typeof record.payload === 'string'
         ? { p: record.payload }
         : typeof record.p === 'string'
           ? { p: record.p }
           : {};
+    case 'listQuery.item':
+      return {
+        ...(typeof record.payload === 'string'
+          ? { p: record.payload }
+          : typeof record.p === 'string'
+            ? { p: record.p }
+            : {}),
+        ...(Array.isArray(record.loadedFields)
+          ? { f: record.loadedFields }
+          : Array.isArray(record.lf)
+            ? { f: record.lf }
+            : {}),
+      };
     case 'listQuery.query':
       return {
         ...(typeof record.payload === 'object' ||
@@ -356,6 +464,7 @@ function buildCustomMetadata(
           : 'p' in record
             ? { p: record.p }
             : {}),
+        ...(record.hasMore === true || record.h === true ? { h: true } : {}),
       };
     default:
       return {};
@@ -369,8 +478,8 @@ function normalizeTestStaticPolicy(
     ...(typeof policy.m === 'number' ? { maxEntries: policy.m } : {}),
     ...(Array.isArray(policy.p)
       ? {
-          pinnedKeys: policy.p.filter(
-            (value): value is string => typeof value === 'string',
+          pinnedKeys: policy.p.flatMap((value) =>
+            typeof value === 'string' ? [value] : [],
           ),
         }
       : {}),
@@ -467,32 +576,44 @@ function normalizeLogicalPayload(
   metadata?: ManagedMetadataRecord | null,
 ): unknown {
   const record = getRecord(value);
-  if (record === null) return value;
 
   switch (scope.kind) {
     case 'document':
-      return 'd' in record ? { data: record.d } : value;
+      return { data: record !== null && 'd' in record ? record.d : value };
     case 'collection.item':
-      return 'd' in record && 'p' in record
-        ? { data: record.d, payload: record.p }
-        : value;
-    case 'listQuery.item':
-      return 'd' in record && 'p' in record
-        ? {
-            data: record.d,
-            payload: record.p,
-            ...('lf' in record && Array.isArray(record.lf)
-              ? { loadedFields: record.lf }
-              : {}),
-          }
-        : value;
-    case 'listQuery.query':
-      return Array.isArray(record.i) &&
-        metadata?.customMetadata !== undefined &&
+      return metadata?.customMetadata !== undefined &&
         'p' in metadata.customMetadata
         ? {
-            hasMore: record.h === true,
-            items: record.i,
+            data: record !== null && 'd' in record ? record.d : value,
+            payload: metadata.customMetadata.p,
+          }
+        : value;
+    case 'listQuery.item':
+      if (
+        metadata?.customMetadata === undefined ||
+        !('p' in metadata.customMetadata)
+      ) {
+        return value;
+      }
+
+      return {
+        data: record !== null && 'd' in record ? record.d : value,
+        payload: metadata.customMetadata.p,
+        ...(Array.isArray(metadata.customMetadata.f)
+          ? { loadedFields: metadata.customMetadata.f }
+          : record !== null && 'lf' in record && Array.isArray(record.lf)
+            ? { loadedFields: record.lf }
+            : {}),
+      };
+    case 'listQuery.query':
+      return metadata?.customMetadata !== undefined &&
+        'p' in metadata.customMetadata &&
+        (Array.isArray(value) || (record !== null && Array.isArray(record.i)))
+        ? {
+            hasMore:
+              metadata.customMetadata.h === true ||
+              (record !== null && record.h === true),
+            items: Array.isArray(value) ? value : record?.i,
             payload: metadata.customMetadata.p,
           }
         : value;
@@ -523,34 +644,6 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
       reject(transaction.error ?? new Error('IndexedDB transaction failed.'));
     transaction.onabort = () =>
       reject(transaction.error ?? new Error('IndexedDB transaction aborted.'));
-  });
-}
-
-async function iterateCursor<T>(
-  request: IDBRequest<IDBCursorWithValue | null>,
-  callback: (cursor: IDBCursorWithValue) => Promise<T> | T,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    request.onerror = () =>
-      reject(request.error ?? new Error('IndexedDB cursor request failed.'));
-    request.onsuccess = async () => {
-      const cursor = request.result;
-      if (cursor === null) {
-        resolve();
-        return;
-      }
-
-      try {
-        await callback(cursor);
-        cursor.continue();
-      } catch (error) {
-        reject(
-          error instanceof Error
-            ? error
-            : new Error('IndexedDB cursor callback failed.'),
-        );
-      }
-    };
   });
 }
 
@@ -686,33 +779,28 @@ export function createIndexedDbPersistentStorageTestStore(
     const request = indexedDB.open(databaseName, 1);
     request.onupgradeneeded = () => {
       const database = request.result;
-      if (!database.objectStoreNames.contains(INDEXED_DB_ENTRY_STORE)) {
-        const store = database.createObjectStore(INDEXED_DB_ENTRY_STORE, {
-          keyPath: ['s', 'n', 't', 'k'],
-        });
-        store.createIndex('bySession', 's', { unique: false });
-        store.createIndex('byScopeLastAccessAt', ['s', 'n', 't', 'a', 'k'], {
-          unique: false,
-        });
-        store.createIndex('byScopeGroup', ['s', 'n', 't', 'g', 'k'], {
-          unique: false,
-        });
-        store.createIndex(
-          'bySessionOfflineProtected',
-          ['s', 'o', 'n', 't', 'k'],
-          { unique: false },
-        );
+      if (database.objectStoreNames.contains(INDEXED_DB_ENTRY_STORE)) {
+        database.deleteObjectStore(INDEXED_DB_ENTRY_STORE);
+      }
+      if (
+        database.objectStoreNames.contains(INDEXED_DB_NAMESPACE_POLICY_STORE)
+      ) {
+        database.deleteObjectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
       }
 
-      if (
-        !database.objectStoreNames.contains(INDEXED_DB_NAMESPACE_POLICY_STORE)
-      ) {
-        const store = database.createObjectStore(
-          INDEXED_DB_NAMESPACE_POLICY_STORE,
-          { keyPath: ['s', 'n', 't'] },
-        );
-        store.createIndex('bySession', 's', { unique: false });
-      }
+      const entryStore = database.createObjectStore(INDEXED_DB_ENTRY_STORE);
+      entryStore.createIndex('byScopeLastAccessAt', ['i', 'a'], {
+        unique: false,
+      });
+      entryStore.createIndex('byScopeGroup', ['i', 'g'], { unique: false });
+      entryStore.createIndex('byScopeOfflineProtected', ['i', 'o'], {
+        unique: false,
+      });
+
+      const scopeStore = database.createObjectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      scopeStore.createIndex('bySession', 's', { unique: false });
 
       if (!database.objectStoreNames.contains(INDEXED_DB_META_STORE)) {
         database.createObjectStore(INDEXED_DB_META_STORE, { keyPath: 'k' });
@@ -753,17 +841,37 @@ export function createIndexedDbPersistentStorageTestStore(
       );
   }
 
+  function normalizeIndexedDbStoreKey(
+    storeName: string,
+    key: unknown,
+  ): unknown {
+    if (
+      storeName === INDEXED_DB_ENTRY_STORE &&
+      Array.isArray(key) &&
+      key.length === 4 &&
+      typeof key[0] === 'string' &&
+      typeof key[1] === 'string' &&
+      typeof key[2] === 'string' &&
+      typeof key[3] === 'string'
+    ) {
+      return [JSON.stringify([key[0], key[1], key[2]]), key[3]];
+    }
+
+    return key;
+  }
+
   function mutateRawFakeIndexedDbStoreRow(
     storeName: string,
     key: unknown,
     update: (current: unknown) => unknown,
   ): void {
+    const normalizedKey = normalizeIndexedDbStoreKey(storeName, key);
     const rawStore = getRawFakeIndexedDbStore(storeName);
     if (rawStore === null) {
       throw new Error(`Expected raw IndexedDB store "${storeName}" to exist.`);
     }
 
-    const record = rawStore.records.get(key);
+    const record = rawStore.records.get(normalizedKey);
     if (record === undefined) {
       throw new Error(
         `Expected raw IndexedDB row ${JSON.stringify(key)} in "${storeName}".`,
@@ -812,12 +920,8 @@ export function createIndexedDbPersistentStorageTestStore(
     const row = listRawFakeIndexedDbStoreRows(INDEXED_DB_ENTRY_STORE).find(
       (entry) =>
         JSON.stringify(entry.key) ===
-          JSON.stringify([
-            scope.sessionKey,
-            scope.storeName,
-            scope.kind,
-            key,
-          ]) && isValidEntryRecord(entry.value),
+          JSON.stringify(getEntryPrimaryKey(scope, key)) &&
+        isValidEntryRecord(entry.value),
     );
 
     return row === undefined
@@ -853,36 +957,68 @@ export function createIndexedDbPersistentStorageTestStore(
       version: number;
     },
   ): Promise<void> {
-    await withReadwriteStores([INDEXED_DB_ENTRY_STORE], (transaction) => {
-      transaction
-        .objectStore(INDEXED_DB_ENTRY_STORE)
-        .put({
-          a: args.lastAccessAt,
-          d: args.value,
-          g:
-            typeof args.customMetadata?.g === 'string'
-              ? args.customMetadata.g
-              : undefined,
-          k: args.key,
-          m: args.customMetadata,
-          n: scope.storeName,
-          o: args.customMetadata?.o === true ? 1 : 0,
-          s: scope.sessionKey,
-          t: scope.kind,
-          v: args.version,
-        } satisfies IndexedDbEntryRecord);
-    });
+    await withReadwriteStores(
+      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+      async (transaction) => {
+        const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+        const scopeStore = transaction.objectStore(
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        );
+        const existingScopeRecord = await openRequestAsPromise<
+          IndexedDbNamespacePolicyRecord | undefined
+        >(scopeStore.get(createScopePrimaryKey(scope)));
+        const { extraMetadata, group, offlineProtected, payload } =
+          splitCustomMetadata(args.customMetadata);
+        const compactValue = compactEntryValue(scope, args.value);
+
+        entryStore.put(
+          {
+            a: args.lastAccessAt,
+            ...compactValue,
+            ...(group !== undefined ? { g: group } : {}),
+            i: createScopeId(scope),
+            ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+            ...(offlineProtected === true ? { o: 1 as const } : {}),
+            ...(payload !== undefined ? { p: payload } : {}),
+            ...(args.version !== 1 ? { v: args.version } : {}),
+          } satisfies IndexedDbEntryRecord,
+          getEntryPrimaryKey(scope, args.key),
+        );
+        scopeStore.put(
+          {
+            p: existingScopeRecord?.p ?? null,
+            s: scope.sessionKey,
+          } satisfies IndexedDbNamespacePolicyRecord,
+          createScopePrimaryKey(scope),
+        );
+      },
+    );
   }
 
-  async function deleteEntryRecord(
-    scope: AsyncStorageNamespaceScope,
+  function getCustomMetadataFromEntryRecord(
+    record: IndexedDbEntryRecord,
+  ): Record<string, unknown> {
+    return (
+      mergeCustomMetadata({
+        extraMetadata: record.m,
+        group: record.g,
+        offlineProtected: record.o === 1 ? true : undefined,
+        payload: record.p,
+      }) ?? {}
+    );
+  }
+
+  function getManagedMetadataFromEntryRecord(
     key: string,
-  ): Promise<void> {
-    await withReadwriteStores([INDEXED_DB_ENTRY_STORE], (transaction) => {
-      transaction
-        .objectStore(INDEXED_DB_ENTRY_STORE)
-        .delete([scope.sessionKey, scope.storeName, scope.kind, key]);
-    });
+    record: IndexedDbEntryRecord,
+  ): ManagedMetadataRecord {
+    return {
+      customMetadata: getCustomMetadataFromEntryRecord(record),
+      key,
+      lastAccessAt: record.a,
+      version: record.v ?? 1,
+      writtenAt: record.a,
+    };
   }
 
   async function putPolicyRecord(
@@ -892,21 +1028,28 @@ export function createIndexedDbPersistentStorageTestStore(
     await withReadwriteStores(
       [INDEXED_DB_NAMESPACE_POLICY_STORE],
       (transaction) => {
-        const store = transaction.objectStore(
-          INDEXED_DB_NAMESPACE_POLICY_STORE,
-        );
-        if (staticPolicy === null) {
-          store.delete([scope.sessionKey, scope.storeName, scope.kind]);
-        } else {
-          store.put({
-            n: scope.storeName,
-            p: staticPolicy,
-            s: scope.sessionKey,
-            t: scope.kind,
-          } satisfies IndexedDbNamespacePolicyRecord);
-        }
+        transaction
+          .objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE)
+          .put(
+            {
+              p: staticPolicy,
+              s: scope.sessionKey,
+            } satisfies IndexedDbNamespacePolicyRecord,
+            createScopePrimaryKey(scope),
+          );
       },
     );
+  }
+
+  async function deleteEntryRecord(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+  ): Promise<void> {
+    await withReadwriteStores([INDEXED_DB_ENTRY_STORE], (transaction) => {
+      transaction
+        .objectStore(INDEXED_DB_ENTRY_STORE)
+        .delete(getEntryPrimaryKey(scope, key));
+    });
   }
 
   function listEntryRecords(
@@ -916,21 +1059,35 @@ export function createIndexedDbPersistentStorageTestStore(
       .filter(
         (entry) =>
           Array.isArray(entry.key) &&
-          entry.key[0] === scope.sessionKey &&
-          entry.key[1] === scope.storeName &&
-          entry.key[2] === scope.kind &&
+          entry.key[0] === createScopeId(scope) &&
           isValidEntryRecord(entry.value),
       )
       .map((entry) =>
         __LEGIT_CAST__<IndexedDbEntryRecord, unknown>(entry.value),
       )
-      .sort((left, right) => left.k.localeCompare(right.k));
+      .sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right)),
+      );
+  }
+
+  function listEntryKeys(scope: AsyncStorageNamespaceScope): string[] {
+    return listRawFakeIndexedDbStoreRows(INDEXED_DB_ENTRY_STORE)
+      .filter(
+        (entry) =>
+          Array.isArray(entry.key) && entry.key[0] === createScopeId(scope),
+      )
+      .flatMap((entry) => {
+        const entryKey = getEntryKeyFromPrimaryKey(entry.key);
+        return entryKey === null ? [] : [entryKey];
+      })
+      .sort((left, right) => left.localeCompare(right));
   }
 
   function getStoreRow(storeName: string, key: unknown): unknown {
+    const normalizedKey = normalizeIndexedDbStoreKey(storeName, key);
     return (
       listRawFakeIndexedDbStoreRows(storeName).find(
-        (row) => JSON.stringify(row.key) === JSON.stringify(key),
+        (row) => JSON.stringify(row.key) === JSON.stringify(normalizedKey),
       )?.value ?? null
     );
   }
@@ -983,16 +1140,17 @@ export function createIndexedDbPersistentStorageTestStore(
     storeName: string,
     key: unknown,
   ): Promise<void> {
+    const normalizedKey = normalizeIndexedDbStoreKey(storeName, key);
     const rawStore = getRawFakeIndexedDbStore(storeName);
     if (rawStore !== null) {
-      rawStore.deleteRecord(structuredClone(key));
+      rawStore.deleteRecord(structuredClone(normalizedKey));
       return;
     }
 
     await withReadwriteStores([storeName], (transaction) => {
       transaction
         .objectStore(storeName)
-        .delete(__LEGIT_CAST__<IndexedDbStoreKey, unknown>(key));
+        .delete(__LEGIT_CAST__<IndexedDbStoreKey, unknown>(normalizedKey));
     });
   }
 
@@ -1001,12 +1159,13 @@ export function createIndexedDbPersistentStorageTestStore(
     key: unknown,
     update: (current: unknown) => unknown,
   ): Promise<void> {
+    const normalizedKey = normalizeIndexedDbStoreKey(storeName, key);
     const rawStore = getRawFakeIndexedDbStore(storeName);
     if (rawStore !== null) {
-      const existingRecord = rawStore.records.get(key);
-      rawStore.deleteRecord(structuredClone(key));
+      const existingRecord = rawStore.records.get(normalizedKey);
+      rawStore.deleteRecord(structuredClone(normalizedKey));
       rawStore.storeRecord({
-        key: structuredClone(key),
+        key: structuredClone(normalizedKey),
         value: structuredClone(
           update(
             existingRecord === undefined ? undefined : existingRecord.value,
@@ -1019,22 +1178,20 @@ export function createIndexedDbPersistentStorageTestStore(
     await withReadwriteStores([storeName], async (transaction) => {
       const store = transaction.objectStore(storeName);
       const currentValue = await openRequestAsPromise(
-        store.get(__LEGIT_CAST__<IndexedDbStoreKey, unknown>(key)),
+        store.get(__LEGIT_CAST__<IndexedDbStoreKey, unknown>(normalizedKey)),
       );
-      store.put(update(currentValue));
+      if (
+        storeName === INDEXED_DB_ENTRY_STORE ||
+        storeName === INDEXED_DB_NAMESPACE_POLICY_STORE
+      ) {
+        store.put(
+          update(currentValue),
+          __LEGIT_CAST__<IDBValidKey, unknown>(normalizedKey),
+        );
+      } else {
+        store.put(update(currentValue));
+      }
     });
-  }
-
-  function toManagedMetadata(
-    record: IndexedDbEntryRecord,
-  ): ManagedMetadataRecord {
-    return {
-      customMetadata: record.m ?? {},
-      key: record.k,
-      lastAccessAt: record.a,
-      version: record.v,
-      writtenAt: record.a,
-    };
   }
 
   function readLogicalStorageEntry<T>(
@@ -1046,10 +1203,14 @@ export function createIndexedDbPersistentStorageTestStore(
     const record = getEntryRecord(parsed.scope, parsed.key);
     if (record === null) return Promise.resolve(null);
 
-    const metadata = toManagedMetadata(record);
+    const metadata = getManagedMetadataFromEntryRecord(parsed.key, record);
     return Promise.resolve({
       data: __LEGIT_CAST__<T, unknown>(
-        normalizeLogicalPayload(parsed.scope, record.d, metadata),
+        normalizeLogicalPayload(
+          parsed.scope,
+          expandEntryValue(parsed.scope, record),
+          metadata,
+        ),
       ),
       timestamp: metadata.lastAccessAt,
       version: metadata.version,
@@ -1080,7 +1241,10 @@ export function createIndexedDbPersistentStorageTestStore(
     enqueueWrite(async () => {
       const existing = getEntryRecord(parsed.scope, parsed.key);
       await putEntryRecord(parsed.scope, {
-        customMetadata: existing?.m ?? buildCustomMetadata(parsed.scope, value),
+        customMetadata:
+          existing === null
+            ? buildCustomMetadata(parsed.scope, value)
+            : getCustomMetadataFromEntryRecord(existing),
         key: parsed.key,
         lastAccessAt: existing?.a ?? Date.now(),
         value,
@@ -1105,7 +1269,7 @@ export function createIndexedDbPersistentStorageTestStore(
         customMetadata: metadata.customMetadata,
         key: parsed.key,
         lastAccessAt: metadata.lastAccessAt,
-        value: existing.d,
+        value: expandEntryValue(parsed.scope, existing),
         version: metadata.version,
       });
     });
@@ -1136,7 +1300,11 @@ export function createIndexedDbPersistentStorageTestStore(
     const parsed = parseFlatStorageKey(key);
     if (parsed === null) return Promise.resolve(null);
     const record = getEntryRecord(parsed.scope, parsed.key);
-    return Promise.resolve(record === null ? null : toManagedMetadata(record));
+    return Promise.resolve(
+      record === null
+        ? null
+        : getManagedMetadataFromEntryRecord(parsed.key, record),
+    );
   }
 
   async function listRawNamespaceKeys(
@@ -1237,7 +1405,7 @@ export function createIndexedDbPersistentStorageTestStore(
           return Promise.resolve(
             entries
               .flatMap((entry) =>
-                typeof entry.m?.p === 'string' ? [entry.m.p] : [],
+                typeof entry.p === 'string' ? [entry.p] : [],
               )
               .sort((left, right) => left.localeCompare(right)),
           );
@@ -1269,20 +1437,10 @@ export function createIndexedDbPersistentStorageTestStore(
         itemNamespace: listQueryItemNamespace,
         itemStorageKey: listQueryItemStorageKey,
         listStoredItemKeys() {
-          const entries = listEntryRecords(listQueryItemNamespace);
-          return Promise.resolve(
-            entries
-              .map((entry) => entry.k)
-              .sort((left, right) => left.localeCompare(right)),
-          );
+          return Promise.resolve(listEntryKeys(listQueryItemNamespace));
         },
         listStoredQueryKeys() {
-          const entries = listEntryRecords(listQueryQueryNamespace);
-          return Promise.resolve(
-            entries
-              .map((entry) => entry.k)
-              .sort((left, right) => left.localeCompare(right)),
-          );
+          return Promise.resolve(listEntryKeys(listQueryQueryNamespace));
         },
         queryKey: listQueryQueryKey,
         queryNamespace: listQueryQueryNamespace,
@@ -1365,13 +1523,13 @@ export function createIndexedDbPersistentStorageTestStore(
   ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
     const namespace = baseOpenNamespace<TValue, TCustomMetadata>(scope);
     return {
-      async get(key, options) {
+      async get(key, getOptions) {
         await flushWrites();
-        return namespace.get(key, options);
+        return namespace.get(key, getOptions);
       },
-      async getMany(keys, options) {
+      async getMany(keys, getManyOptions) {
         await flushWrites();
-        return namespace.getMany(keys, options);
+        return namespace.getMany(keys, getManyOptions);
       },
       async listKeys() {
         await flushWrites();
@@ -1512,16 +1670,12 @@ export function createIndexedDbPersistentStorageTestStore(
     get listKeysRequests() {
       return instrumentationOperations
         .slice(instrumentationStartIndex)
-        .filter(
-          (
-            operation,
-          ): operation is Extract<
-            IndexedDbPersistentStorageOperation,
-            { type: 'listManagedMetadata' }
-          > => operation.type === 'listManagedMetadata',
-        )
-        .filter((operation) => operation.usedIndex === 'key')
-        .map((operation) => operation.scope);
+        .flatMap((operation) =>
+          operation.type === 'listManagedMetadata' &&
+          operation.usedIndex === 'key'
+            ? [operation.scope]
+            : [],
+        );
     },
     get operations() {
       return instrumentationOperations.slice(instrumentationStartIndex);
@@ -1529,37 +1683,25 @@ export function createIndexedDbPersistentStorageTestStore(
     get payloadGetManyRequests() {
       return instrumentationOperations
         .slice(readStartIndex)
-        .filter(
-          (
-            operation,
-          ): operation is Extract<
-            IndexedDbPersistentStorageOperation,
-            { type: 'readManagedEntries' }
-          > => operation.type === 'readManagedEntries',
-        )
-        .filter((operation) => operation.keys.length > 1)
-        .map((operation) =>
-          operation.keys.map((key) =>
-            getLogicalStorageKey(operation.scope, key),
-          ),
+        .flatMap((operation) =>
+          operation.type === 'readManagedEntries' && operation.keys.length > 1
+            ? [
+                operation.keys.map((key) =>
+                  getLogicalStorageKey(operation.scope, key),
+                ),
+              ]
+            : [],
         );
     },
     get payloadGetRequests() {
       return instrumentationOperations
         .slice(readStartIndex)
-        .filter(
-          (
-            operation,
-          ): operation is Extract<
-            IndexedDbPersistentStorageOperation,
-            { type: 'readManagedEntries' }
-          > => operation.type === 'readManagedEntries',
-        )
-        .filter((operation) => operation.keys.length === 1)
         .flatMap((operation) =>
-          operation.keys.map((key) =>
-            getLogicalStorageKey(operation.scope, key),
-          ),
+          operation.type === 'readManagedEntries' && operation.keys.length === 1
+            ? operation.keys.map((key) =>
+                getLogicalStorageKey(operation.scope, key),
+              )
+            : [],
         );
     },
     storage: {

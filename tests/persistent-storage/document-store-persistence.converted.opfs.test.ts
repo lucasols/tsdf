@@ -268,7 +268,8 @@ describe('opfs: converted document store persistence', () => {
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
     expect(getParsedOpfsFileData('tsdf/sess1/doc-opfs-save-error/d.e.p.json'))
       .toMatchInlineSnapshot(`
-        d: { amount: 7, fullName: 'cached' }
+        amount: 7
+        fullName: 'cached'
       `);
   });
 });

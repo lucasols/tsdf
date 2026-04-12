@@ -1,11 +1,11 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getNamespaceId,
   getPayloadRecordKey,
   parseAsyncStorageRecordKey,
 } from './asyncStorageShared';
-import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,
@@ -20,21 +20,13 @@ import type {
 } from './types';
 import { parseAsyncStorageNamespaceKind } from './types';
 
-export const DEFAULT_INDEXED_DB_NAME = 'tsdf-persistent-storage-compact';
+export const DEFAULT_INDEXED_DB_NAME =
+  'tsdf-persistent-storage-compact-alpha-reset';
 const INDEXED_DB_VERSION = 1;
 const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
 const INDEXED_DB_META_STORE = 'meta';
 const INDEXED_DB_MAINTENANCE_META_KEY = 'maintenance';
-
-
-
-
-
-
-
-
-
 
 type IndexedDbManagedMetadataRecord = {
   customMetadata?: Record<string, unknown>;
@@ -49,10 +41,7 @@ type IndexedDbManagedIndexState = {
   valid: boolean;
 };
 
-type IndexedDbManagedMetadataFilter = {
-  equals: unknown;
-  key: string;
-};
+type IndexedDbManagedMetadataFilter = { equals: unknown; key: string };
 
 type IndexedDbTestOperation =
   | {
@@ -137,37 +126,27 @@ type IndexedDbDriverInstrumentation = {
       staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
     },
   ) => void;
-  onRemoveMany?: (
-    scope: AsyncStorageNamespaceScope,
-    keys: string[],
-  ) => void;
+  onRemoveMany?: (scope: AsyncStorageNamespaceScope, keys: string[]) => void;
   operations: IndexedDbTestOperation[];
   record: (operation: IndexedDbTestOperation) => void;
   reset: () => void;
 };
 
-
-
-
-
 type ScopePrimaryKey = [string, string, AsyncStorageNamespaceScope['kind']];
 
-function createScopePrimaryKey(scope: AsyncStorageNamespaceScope): ScopePrimaryKey {
+function createScopePrimaryKey(
+  scope: AsyncStorageNamespaceScope,
+): ScopePrimaryKey {
   return [scope.sessionKey, scope.storeName, scope.kind];
 }
 
-type EntryPrimaryKey = [
-  string,
-  string,
-  AsyncStorageNamespaceScope['kind'],
-  string,
-];
+type EntryPrimaryKey = [string, string];
 
 function createEntryPrimaryKey(
   scope: AsyncStorageNamespaceScope,
   key: string,
 ): EntryPrimaryKey {
-  return [scope.sessionKey, scope.storeName, scope.kind, key];
+  return [createScopeId(scope.sessionKey, scope.storeName, scope.kind), key];
 }
 
 function createScopeKeyRange(scope: AsyncStorageNamespaceScope): IDBKeyRange {
@@ -180,9 +159,10 @@ function createScopeKeyRange(scope: AsyncStorageNamespaceScope): IDBKeyRange {
 function createScopeLastAccessRange(
   scope: AsyncStorageNamespaceScope,
 ): IDBKeyRange {
+  const scopeId = createScopeId(scope.sessionKey, scope.storeName, scope.kind);
   return IDBKeyRange.bound(
-    [scope.sessionKey, scope.storeName, scope.kind, Number.MIN_SAFE_INTEGER, ''],
-    [scope.sessionKey, scope.storeName, scope.kind, Number.MAX_SAFE_INTEGER, '\uffff'],
+    [scopeId, Number.MIN_SAFE_INTEGER],
+    [scopeId, Number.MAX_SAFE_INTEGER],
   );
 }
 
@@ -190,10 +170,19 @@ function createScopeGroupRange(
   scope: AsyncStorageNamespaceScope,
   group: string,
 ): IDBKeyRange {
-  return IDBKeyRange.bound(
-    [scope.sessionKey, scope.storeName, scope.kind, group, ''],
-    [scope.sessionKey, scope.storeName, scope.kind, group, '\uffff'],
-  );
+  return IDBKeyRange.only([
+    createScopeId(scope.sessionKey, scope.storeName, scope.kind),
+    group,
+  ]);
+}
+
+function createScopeOfflineProtectedRange(
+  scope: AsyncStorageNamespaceScope,
+): IDBKeyRange {
+  return IDBKeyRange.only([
+    createScopeId(scope.sessionKey, scope.storeName, scope.kind),
+    1,
+  ]);
 }
 
 function createScopePolicyKey(
@@ -221,56 +210,99 @@ function getScopeFromPrimaryKey(
   }
 
   const kind =
-    typeof rawKind === 'string' ? parseAsyncStorageNamespaceKind(rawKind) : null;
+    typeof rawKind === 'string'
+      ? parseAsyncStorageNamespaceKind(rawKind)
+      : null;
   if (kind === null) return null;
 
   return { kind, sessionKey, storeName };
 }
 
-function getEntryFromPrimaryKey(
-  key: unknown,
-): { key: string; scope: AsyncStorageNamespaceScope } | null {
-  if (!Array.isArray(key) || key.length < 4) return null;
+function getEntryKeyFromPrimaryKey(key: unknown): string | null {
+  if (!Array.isArray(key) || key.length < 2) return null;
+  return typeof key[1] === 'string' ? key[1] : null;
+}
 
-  const scope = getScopeFromPrimaryKey(key);
-  const entryKey = key[3];
-  if (scope === null || typeof entryKey !== 'string') return null;
+type IndexedDbCustomMetadataFields = {
+  extraMetadata?: Record<string, unknown>;
+  group?: string;
+  offlineProtected?: true;
+  payload?: unknown;
+};
 
-  return { key: entryKey, scope };
+function splitCustomMetadata(
+  customMetadata: Record<string, unknown> | undefined,
+): IndexedDbCustomMetadataFields {
+  if (customMetadata === undefined) return {};
+
+  const { g, o, p, ...rest } = customMetadata;
+  return {
+    ...(typeof g === 'string' ? { group: g } : {}),
+    ...(o === true ? { offlineProtected: true as const } : {}),
+    ...('p' in customMetadata ? { payload: p } : {}),
+    ...(Object.keys(rest).length > 0 ? { extraMetadata: rest } : {}),
+  };
+}
+
+function mergeCustomMetadata(
+  fields: IndexedDbCustomMetadataFields,
+): Record<string, unknown> | undefined {
+  const result: Record<string, unknown> = {
+    ...(fields.extraMetadata ?? {}),
+    ...(fields.group !== undefined ? { g: fields.group } : {}),
+    ...(fields.offlineProtected === true ? { o: true } : {}),
+    ...(fields.payload !== undefined ? { p: fields.payload } : {}),
+  };
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 type IndexedDbEntryRecord = {
   a: number;
   d: unknown;
+  f?: string[];
   g?: string;
-  k: string;
+  h?: 1;
+  i: string;
   m?: Record<string, unknown>;
-  n: string;
-  o: 0 | 1;
-  s: string;
-  t: AsyncStorageNamespaceScope['kind'];
-  v: number;
+  o?: 1;
+  p?: unknown;
+  v?: number;
 };
+
+function getCustomMetadataFromEntryRecord(
+  record: IndexedDbEntryRecord,
+): Record<string, unknown> | undefined {
+  return mergeCustomMetadata({
+    extraMetadata: record.m,
+    group: record.g,
+    offlineProtected: record.o === 1 ? true : undefined,
+    payload: record.p,
+  });
+}
 
 function toMetadataRecord(
   record: IndexedDbEntryRecord,
 ): IndexedDbManagedMetadataRecord {
+  const customMetadata = getCustomMetadataFromEntryRecord(record);
+
   return {
     lastAccessAt: record.a,
-    version: record.v,
-    ...(record.m ? { customMetadata: record.m } : {}),
+    version: record.v ?? 1,
+    ...(customMetadata ? { customMetadata } : {}),
   };
 }
 
 function toPublicMetadata(
+  key: string,
   record: IndexedDbEntryRecord,
 ): AsyncStorageEntryMetadata<Record<string, unknown>> {
   return {
-    customMetadata: record.m ?? {},
-    key: record.k,
+    customMetadata: getCustomMetadataFromEntryRecord(record) ?? {},
+    key,
     lastAccessAt: record.a,
-    payloadRef: getPayloadRecordKey(record.k),
-    version: record.v,
+    payloadRef: getPayloadRecordKey(key),
+    version: record.v ?? 1,
     writtenAt: record.a,
   };
 }
@@ -302,50 +334,130 @@ function normalizeStaticPolicy(
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+const INDEXED_DB_ENTRY_RECORD_KEYS = new Set([
+  'a',
+  'd',
+  'f',
+  'g',
+  'h',
+  'i',
+  'm',
+  'o',
+  'p',
+  'v',
+]);
+
+const INDEXED_DB_NAMESPACE_POLICY_RECORD_KEYS = new Set(['p', 's']);
+
+function isRecord(value: unknown): boolean {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isValidEntryRecord(record: unknown): record is IndexedDbEntryRecord {
-  if (!isRecord(record)) return false;
+function toRecordValue(value: unknown): Record<string, unknown> {
+  // WORKAROUND: IndexedDB returns untyped object payloads, and callers only use
+  // this after confirming the value is a non-array object.
+  return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+}
 
-  return (
-    typeof record.s === 'string' &&
-    typeof record.n === 'string' &&
-    typeof record.t === 'string' &&
-    typeof record.k === 'string' &&
-    typeof record.a === 'number' &&
-    typeof record.v === 'number' &&
-    (record.m === undefined || isRecord(record.m)) &&
-    (record.g === undefined || typeof record.g === 'string') &&
-    (record.o === 0 || record.o === 1)
-  );
+function toEntryRecordValue(value: unknown): IndexedDbEntryRecord {
+  // WORKAROUND: IndexedDB returns untyped entry rows, and callers only use this
+  // after validating the row shape with isValidEntryRecord.
+  return __LEGIT_CAST__<IndexedDbEntryRecord, unknown>(value);
 }
 
 type IndexedDbNamespacePolicyRecord = {
-  n: string;
   p: AsyncStorageNamespaceStaticPolicy | null;
   s: string;
-  t: AsyncStorageNamespaceScope['kind'];
 };
 
-function isValidNamespacePolicyRecord(
-  record: unknown,
-): record is IndexedDbNamespacePolicyRecord {
+function toNamespacePolicyRecordValue(
+  value: unknown,
+): IndexedDbNamespacePolicyRecord {
+  // WORKAROUND: IndexedDB returns untyped namespace-policy rows, and callers
+  // only use this after validating the row shape with isValidNamespacePolicyRecord.
+  return __LEGIT_CAST__<IndexedDbNamespacePolicyRecord, unknown>(value);
+}
+
+function toStaticPolicyCandidate(
+  value: unknown,
+): AsyncStorageNamespaceStaticPolicy | null | undefined {
+  // WORKAROUND: Static policies cross the IndexedDB boundary as unknown and must
+  // be rebound before normalizeStaticPolicy can validate their shape.
+  return __LEGIT_CAST__<
+    AsyncStorageNamespaceStaticPolicy | null | undefined,
+    unknown
+  >(value);
+}
+
+function isValidEntryRecord(record: unknown): boolean {
   if (!isRecord(record)) return false;
+  const recordValue = toRecordValue(record);
+
+  if (
+    Object.keys(recordValue).some(
+      (key) => !INDEXED_DB_ENTRY_RECORD_KEYS.has(key),
+    )
+  ) {
+    return false;
+  }
+
+  const loadedFields = recordValue.f;
+  return (
+    typeof recordValue.i === 'string' &&
+    typeof recordValue.a === 'number' &&
+    'd' in recordValue &&
+    (recordValue.v === undefined || typeof recordValue.v === 'number') &&
+    (recordValue.m === undefined || isRecord(recordValue.m)) &&
+    (recordValue.g === undefined || typeof recordValue.g === 'string') &&
+    (recordValue.o === undefined || recordValue.o === 1) &&
+    (loadedFields === undefined ||
+      (loadedFields instanceof Array &&
+        loadedFields.every((value) => typeof value === 'string'))) &&
+    (recordValue.h === undefined || recordValue.h === 1)
+  );
+}
+
+function isValidNamespacePolicyRecord(record: unknown): boolean {
+  if (!isRecord(record)) return false;
+  const recordValue = toRecordValue(record);
+  if (
+    Object.keys(recordValue).some(
+      (key) => !INDEXED_DB_NAMESPACE_POLICY_RECORD_KEYS.has(key),
+    )
+  ) {
+    return false;
+  }
+
+  if (typeof recordValue.s !== 'string' || !('p' in recordValue)) {
+    return false;
+  }
 
   return (
-    typeof record.s === 'string' &&
-    typeof record.n === 'string' &&
-    typeof record.t === 'string' &&
-    // WORKAROUND: Static policies come from IndexedDB's untyped DOM surface, so
-    // we validate the unknown value before treating it as a policy candidate.
-    normalizeStaticPolicy(
-      __LEGIT_CAST__<AsyncStorageNamespaceStaticPolicy | null | undefined, unknown>(
-        record.p,
-      ),
-    ) !== undefined
+    recordValue.p === null ||
+    normalizeStaticPolicy(toStaticPolicyCandidate(recordValue.p)) !== null
   );
+}
+
+function getStaticPolicyFromScopeRecord(
+  record: IndexedDbNamespacePolicyRecord | undefined,
+): AsyncStorageNamespaceStaticPolicy | null {
+  return record === undefined ? null : normalizeStaticPolicy(record.p);
+}
+
+function compactEntryValue(
+  scope: AsyncStorageNamespaceScope,
+  value: unknown,
+): Pick<IndexedDbEntryRecord, 'd' | 'f' | 'h'> {
+  void scope;
+  return { d: value };
+}
+
+function expandEntryValue(
+  scope: AsyncStorageNamespaceScope,
+  record: IndexedDbEntryRecord,
+): unknown {
+  void scope;
+  return record.d;
 }
 
 function compareMetadata(
@@ -425,11 +537,6 @@ function deleteDatabase(databaseName: string): Promise<void> {
   });
 }
 
-type IndexedDbMetaRecord = {
-  k: string;
-  v: unknown;
-};
-
 type IndexedDbStructureInspection = {
   stores: Array<{
     autoIncrement: boolean;
@@ -441,13 +548,12 @@ type IndexedDbStructureInspection = {
     }>;
     keyPath: string | string[] | null;
     name: string;
-    rows: Array<{
-      key: unknown;
-      value: unknown;
-    }>;
+    rows: Array<{ key: unknown; value: unknown }>;
   }>;
   version: number;
 };
+
+type IndexedDbMetaRecord = { k: string; v: unknown };
 
 async function getMaintenanceState(
   database: IDBDatabase,
@@ -460,14 +566,19 @@ async function getMaintenanceState(
   await transactionDone(transaction);
 
   const recordValue = value?.v;
-  if (!isRecord(recordValue) || !('lca' in recordValue)) {
+  if (!isRecord(recordValue)) {
+    return { lastSuccessfulCleanupAt: null };
+  }
+  const metadataRecord = toRecordValue(recordValue);
+  if (!('lca' in metadataRecord)) {
     return { lastSuccessfulCleanupAt: null };
   }
 
-  const lastSuccessfulCleanupAt = recordValue.lca;
+  const lastSuccessfulCleanupAt = metadataRecord.lca;
   return {
     lastSuccessfulCleanupAt:
-      typeof lastSuccessfulCleanupAt === 'number' || lastSuccessfulCleanupAt === null
+      typeof lastSuccessfulCleanupAt === 'number' ||
+      lastSuccessfulCleanupAt === null
         ? lastSuccessfulCleanupAt
         : null,
   };
@@ -478,10 +589,12 @@ async function setMaintenanceState(
   value: { lastSuccessfulCleanupAt: number | null },
 ): Promise<void> {
   const transaction = database.transaction(INDEXED_DB_META_STORE, 'readwrite');
-  transaction.objectStore(INDEXED_DB_META_STORE).put({
-    k: INDEXED_DB_MAINTENANCE_META_KEY,
-    v: { lca: value.lastSuccessfulCleanupAt },
-  } satisfies IndexedDbMetaRecord);
+  transaction
+    .objectStore(INDEXED_DB_META_STORE)
+    .put({
+      k: INDEXED_DB_MAINTENANCE_META_KEY,
+      v: { lca: value.lastSuccessfulCleanupAt },
+    } satisfies IndexedDbMetaRecord);
   await transactionDone(transaction);
 }
 
@@ -509,7 +622,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const parsedKey = parseAsyncStorageRecordKey(key);
     if (parsedKey.recordKind === 'payload') {
       const entry = await this.#getEntry(scope, parsedKey.userKey);
-      return entry?.d ?? null;
+      return entry === null ? null : expandEntryValue(scope, entry);
     }
 
     if (parsedKey.rawKey !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
@@ -565,7 +678,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         const existing = await this.#getEntry(scope, parsedKey.userKey);
         const lastAccessAt = existing?.a ?? Date.now();
         await this.#putEntryRecord(scope, {
-          customMetadata: existing?.m,
+          customMetadata:
+            existing === null
+              ? undefined
+              : getCustomMetadataFromEntryRecord(existing),
           key: parsedKey.userKey,
           lastAccessAt,
           value: entry.value,
@@ -593,10 +709,12 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       'readwrite',
     );
     const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
 
     let removedAnyEntry = false;
-    let removedPolicy = false;
+    let removedScope = false;
     for (const key of keys) {
       const parsedKey = parseAsyncStorageRecordKey(key);
       if (parsedKey.recordKind === 'payload') {
@@ -607,11 +725,11 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
       if (parsedKey.rawKey === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
         policyStore.delete(createScopePolicyKey(scope));
-        removedPolicy = true;
+        removedScope = true;
       }
     }
 
-    if (removedAnyEntry && !removedPolicy) {
+    if (removedAnyEntry && !removedScope) {
       const countRequest = entryStore.count(createScopeKeyRange(scope));
       countRequest.onsuccess = () => {
         if (countRequest.result === 0) {
@@ -634,10 +752,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const state = await this.readNamespaceIndexState(scope);
     if (!state.exists || state.entries === null) return [];
 
-    const keys = [...state.entries.keys()].map((key) => getPayloadRecordKey(key));
-    if (state.exists) {
-      keys.push(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-    }
+    const keys = [...state.entries.keys()].map((key) =>
+      getPayloadRecordKey(key),
+    );
+    keys.push(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
     return keys.sort((left, right) => left.localeCompare(right));
   }
 
@@ -646,9 +764,9 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   }
 
   async listScopes(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]> {
-    return (
-      await this.listScopesWithKnownRecordKeys(sessionKey)
-    ).map(({ scope }) => scope);
+    return (await this.listScopesWithKnownRecordKeys(sessionKey)).map(
+      ({ scope }) => scope,
+    );
   }
 
   async listScopesWithKnownRecordKeys(
@@ -660,86 +778,43 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       'readonly',
     );
     const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
-    const scopesById = new Map<
-      string,
-      { keys: Set<string>; scope: AsyncStorageNamespaceScope }
-    >();
-
-    const entryRequest =
-      sessionKey === undefined
-        ? entryStore.openCursor()
-        : entryStore.index('bySession').openCursor(IDBKeyRange.only(sessionKey));
-    await iterateCursor(entryRequest, (cursor) => {
-      const record = cursor.value;
-      const parsedEntry = isValidEntryRecord(record)
-        ? {
-            key: record.k,
-            scope: {
-              kind: record.t,
-              sessionKey: record.s,
-              storeName: record.n,
-            } satisfies AsyncStorageNamespaceScope,
-          }
-        : getEntryFromPrimaryKey(cursor.primaryKey);
-      if (parsedEntry === null) return;
-
-      const { key, scope } = parsedEntry;
-      const scopeId = createScopeId(scope.sessionKey, scope.storeName, scope.kind);
-      const existing = scopesById.get(scopeId);
-      if (existing !== undefined) {
-        existing.keys.add(getPayloadRecordKey(key));
-        existing.keys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-        return;
-      }
-
-      scopesById.set(scopeId, {
-        keys: new Set([
-          getPayloadRecordKey(key),
-          ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-        ]),
-        scope,
-      });
-    });
-
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
+    const discoveredScopes: AsyncStorageDiscoveredScope[] = [];
     const policyRequest =
       sessionKey === undefined
         ? policyStore.openCursor()
-        : policyStore.index('bySession').openCursor(IDBKeyRange.only(sessionKey));
-    await iterateCursor(policyRequest, (cursor) => {
-      const record = cursor.value;
-      const scope = isValidNamespacePolicyRecord(record)
-        ? ({
-            kind: record.t,
-            sessionKey: record.s,
-            storeName: record.n,
-          } satisfies AsyncStorageNamespaceScope)
-        : getScopeFromPrimaryKey(cursor.primaryKey);
+        : policyStore
+            .index('bySession')
+            .openCursor(IDBKeyRange.only(sessionKey));
+    await iterateCursor(policyRequest, async (cursor) => {
+      const scope = getScopeFromPrimaryKey(cursor.primaryKey);
       if (scope === null) return;
+      const keys = new Set<string>([ASYNC_NAMESPACE_INDEX_RECORD_KEY]);
 
-      const scopeId = createScopeId(scope.sessionKey, scope.storeName, scope.kind);
-      const existing = scopesById.get(scopeId);
-      if (existing !== undefined) {
-        existing.keys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-        return;
-      }
+      await iterateCursor(
+        entryStore.openCursor(createScopeKeyRange(scope)),
+        (entryCursor) => {
+          const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
+          if (entryKey === null) return;
+          keys.add(getPayloadRecordKey(entryKey));
+        },
+      );
 
-      scopesById.set(scopeId, {
-        keys: new Set([ASYNC_NAMESPACE_INDEX_RECORD_KEY]),
+      discoveredScopes.push({
+        knownRecordKeys: [...keys].sort((left, right) =>
+          left.localeCompare(right),
+        ),
         scope,
       });
     });
 
     await transactionDone(transaction);
 
-    const discoveredScopes = [...scopesById.values()]
-      .map(({ keys, scope }) => ({
-        knownRecordKeys: [...keys].sort((left, right) => left.localeCompare(right)),
-        scope,
-      }))
-      .sort((left, right) =>
-        getNamespaceId(left.scope).localeCompare(getNamespaceId(right.scope)),
-      );
+    discoveredScopes.sort((left, right) =>
+      getNamespaceId(left.scope).localeCompare(getNamespaceId(right.scope)),
+    );
 
     this.instrumentation?.record({
       scopeIds: discoveredScopes.map(({ scope }) => getNamespaceId(scope)),
@@ -755,10 +830,16 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     scope: AsyncStorageNamespaceScope,
     keys: string[],
   ): Promise<
-    Map<string, AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null>
+    Map<
+      string,
+      AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
+    >
   > {
     const database = await this.#getDatabase();
-    const transaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readonly');
+    const transaction = database.transaction(
+      INDEXED_DB_ENTRY_STORE,
+      'readonly',
+    );
     const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
     const uniqueKeys = [...new Set(keys)];
     const result = new Map<
@@ -768,19 +849,22 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
     await Promise.all(
       uniqueKeys.map(async (key) => {
-        const record = await openRequestAsPromise<IndexedDbEntryRecord | undefined>(
-          store.get(createEntryPrimaryKey(scope, key)),
-        );
+        const record = await openRequestAsPromise<
+          IndexedDbEntryRecord | undefined
+        >(store.get(createEntryPrimaryKey(scope, key)));
         if (!isValidEntryRecord(record)) {
           result.set(key, null);
           return;
         }
+        const entryRecord = toEntryRecordValue(record);
 
         result.set(key, {
-          metadata: toPublicMetadata(record),
+          metadata: toPublicMetadata(key, entryRecord),
           // WORKAROUND: IndexedDB payload values cross the untyped storage
           // boundary as unknown and are only rebound to the caller's TValue here.
-          value: __LEGIT_CAST__<TValue, unknown>(record.d),
+          value: __LEGIT_CAST__<TValue, unknown>(
+            expandEntryValue(scope, entryRecord),
+          ),
         });
       }),
     );
@@ -808,7 +892,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   ): Promise<AsyncStorageEntryMetadata<Record<string, unknown>>[]> {
     const order = args.order ?? 'key';
     const database = await this.#getDatabase();
-    const transaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readonly');
+    const transaction = database.transaction(
+      INDEXED_DB_ENTRY_STORE,
+      'readonly',
+    );
     const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
     const entries: AsyncStorageEntryMetadata<Record<string, unknown>>[] = [];
     let usedIndex: 'group' | 'key' | 'lru' = 'key';
@@ -820,13 +907,14 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     ) {
       usedIndex = 'group';
       await iterateCursor(
-        store.index('byScopeGroup').openCursor(
-          createScopeGroupRange(scope, args.filter.equals),
-        ),
+        store
+          .index('byScopeGroup')
+          .openCursor(createScopeGroupRange(scope, args.filter.equals)),
         (cursor) => {
           const record = cursor.value;
-          if (!isValidEntryRecord(record)) return;
-          entries.push(toPublicMetadata(record));
+          const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+          if (!isValidEntryRecord(record) || entryKey === null) return;
+          entries.push(toPublicMetadata(entryKey, toEntryRecordValue(record)));
         },
       );
     } else if (order === 'lru-asc' || order === 'lru-desc') {
@@ -840,16 +928,21 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           ),
         (cursor) => {
           const record = cursor.value;
-          if (!isValidEntryRecord(record)) return;
-          entries.push(toPublicMetadata(record));
+          const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+          if (!isValidEntryRecord(record) || entryKey === null) return;
+          entries.push(toPublicMetadata(entryKey, toEntryRecordValue(record)));
         },
       );
     } else {
-      await iterateCursor(store.openCursor(createScopeKeyRange(scope)), (cursor) => {
-        const record = cursor.value;
-        if (!isValidEntryRecord(record)) return;
-        entries.push(toPublicMetadata(record));
-      });
+      await iterateCursor(
+        store.openCursor(createScopeKeyRange(scope)),
+        (cursor) => {
+          const record = cursor.value;
+          const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+          if (!isValidEntryRecord(record) || entryKey === null) return;
+          entries.push(toPublicMetadata(entryKey, toEntryRecordValue(record)));
+        },
+      );
     }
 
     await transactionDone(transaction);
@@ -863,7 +956,9 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           );
 
     if (usedIndex !== 'lru') {
-      filteredEntries.sort((left, right) => compareMetadata(left, right, order));
+      filteredEntries.sort((left, right) =>
+        compareMetadata(left, right, order),
+      );
     }
 
     this.instrumentation?.record({
@@ -883,17 +978,24 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     return entries.map((entry) => entry.key);
   }
 
-  async clearManagedNamespace(scope: AsyncStorageNamespaceScope): Promise<void> {
+  async clearManagedNamespace(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<void> {
     const database = await this.#getDatabase();
     const transaction = database.transaction(
       [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
       'readwrite',
     );
     const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
-    await iterateCursor(entryStore.openCursor(createScopeKeyRange(scope)), (cursor) => {
-      cursor.delete();
-    });
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
+    await iterateCursor(
+      entryStore.openCursor(createScopeKeyRange(scope)),
+      (cursor) => {
+        cursor.delete();
+      },
+    );
     policyStore.delete(createScopePolicyKey(scope));
     await transactionDone(transaction);
 
@@ -922,10 +1024,17 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       'readwrite',
     );
     const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
     const upserts = args.upserts ?? [];
     const removes = [...new Set(args.removes ?? [])];
     const touches = args.touches ?? [];
+    const scopeId = createScopeId(
+      scope.sessionKey,
+      scope.storeName,
+      scope.kind,
+    );
     const uniqueKeys = [
       ...new Set([
         ...removes,
@@ -938,14 +1047,22 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const touchTimestamps = new Map(
       touches.map((touch) => [touch.key, touch.lastAccessAt ?? now]),
     );
+    const rawScopeRecord = await openRequestAsPromise<unknown>(
+      policyStore.get(createScopePolicyKey(scope)),
+    );
+    const existingStaticPolicy = isValidNamespacePolicyRecord(rawScopeRecord)
+      ? getStaticPolicyFromScopeRecord(
+          toNamespacePolicyRecordValue(rawScopeRecord),
+        )
+      : null;
 
     await Promise.all(
       uniqueKeys.map(async (key) => {
-        const record = await openRequestAsPromise<IndexedDbEntryRecord | undefined>(
-          entryStore.get(createEntryPrimaryKey(scope, key)),
-        );
+        const record = await openRequestAsPromise<
+          IndexedDbEntryRecord | undefined
+        >(entryStore.get(createEntryPrimaryKey(scope, key)));
         if (isValidEntryRecord(record)) {
-          existingEntries.set(key, record);
+          existingEntries.set(key, toEntryRecordValue(record));
         }
       }),
     );
@@ -960,23 +1077,29 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       const customMetadata = helpers.mergeOfflineProtectionMetadata(
         upsert.key,
         upsert.metadata,
-        existing?.m,
+        existing === undefined
+          ? undefined
+          : getCustomMetadataFromEntryRecord(existing),
       );
+      const { extraMetadata, group, offlineProtected, payload } =
+        splitCustomMetadata(customMetadata);
       const nextLastAccessAt =
         touchTimestamps.get(upsert.key) ?? existing?.a ?? now;
+      const compactValue = compactEntryValue(scope, upsert.value);
       await openRequestAsPromise(
-        entryStore.put({
-          a: nextLastAccessAt,
-          d: upsert.value,
-          g: typeof customMetadata?.g === 'string' ? customMetadata.g : undefined,
-          k: upsert.key,
-          m: customMetadata,
-          n: scope.storeName,
-          o: customMetadata?.o === true ? 1 : 0,
-          s: scope.sessionKey,
-          t: scope.kind,
-          v: upsert.version,
-        } satisfies IndexedDbEntryRecord),
+        entryStore.put(
+          {
+            a: nextLastAccessAt,
+            ...compactValue,
+            ...(group !== undefined ? { g: group } : {}),
+            i: scopeId,
+            ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+            ...(offlineProtected === true ? { o: 1 as const } : {}),
+            ...(payload !== undefined ? { p: payload } : {}),
+            ...(upsert.version !== 1 ? { v: upsert.version } : {}),
+          } satisfies IndexedDbEntryRecord,
+          createEntryPrimaryKey(scope, upsert.key),
+        ),
       );
     }
 
@@ -987,34 +1110,33 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       const nextLastAccessAt = touch.lastAccessAt ?? now;
       if (existing.a === nextLastAccessAt) continue;
       await openRequestAsPromise(
-        entryStore.put({
-          ...existing,
-          a: nextLastAccessAt,
-        } satisfies IndexedDbEntryRecord),
+        entryStore.put(
+          { ...existing, a: nextLastAccessAt } satisfies IndexedDbEntryRecord,
+          createEntryPrimaryKey(scope, touch.key),
+        ),
       );
     }
 
     const normalizedStaticPolicy =
-      'staticPolicy' in args ? normalizeStaticPolicy(args.staticPolicy) : undefined;
+      'staticPolicy' in args
+        ? normalizeStaticPolicy(args.staticPolicy)
+        : undefined;
     const remainingCount = await openRequestAsPromise<number>(
       entryStore.count(createScopeKeyRange(scope)),
     );
 
     if (remainingCount === 0) {
       policyStore.delete(createScopePolicyKey(scope));
-    } else if ('staticPolicy' in args) {
-      if (normalizedStaticPolicy === null) {
-        policyStore.delete(createScopePolicyKey(scope));
-      } else if (normalizedStaticPolicy !== undefined) {
-        await openRequestAsPromise(
-          policyStore.put({
-            n: scope.storeName,
-            p: normalizedStaticPolicy,
+    } else {
+      await openRequestAsPromise(
+        policyStore.put(
+          {
+            p: normalizedStaticPolicy ?? existingStaticPolicy,
             s: scope.sessionKey,
-            t: scope.kind,
-          } satisfies IndexedDbNamespacePolicyRecord),
-        );
-      }
+          } satisfies IndexedDbNamespacePolicyRecord,
+          createScopePolicyKey(scope),
+        ),
+      );
     }
 
     await transactionDone(transaction);
@@ -1025,13 +1147,13 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       scope,
       staticPolicyChanged: 'staticPolicy' in args,
       time: Date.now(),
-      touches: touches.map((touch) => touch.key).sort((left, right) =>
-        left.localeCompare(right),
-      ),
+      touches: touches
+        .map((touch) => touch.key)
+        .sort((left, right) => left.localeCompare(right)),
       type: 'applyManagedCommit',
-      upserts: upserts.map((upsert) => upsert.key).sort((left, right) =>
-        left.localeCompare(right),
-      ),
+      upserts: upserts
+        .map((upsert) => upsert.key)
+        .sort((left, right) => left.localeCompare(right)),
     });
   }
 
@@ -1046,26 +1168,37 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       'readonly',
     );
     const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
     const entries = new Map<string, IndexedDbManagedMetadataRecord>();
-    let valid = true;
+    let invalidEntryCount = 0;
 
-    await iterateCursor(entryStore.openCursor(createScopeKeyRange(scope)), (cursor) => {
-      const record = cursor.value;
-      if (!isValidEntryRecord(record)) {
-        valid = false;
-        return;
-      }
+    await iterateCursor(
+      entryStore.openCursor(createScopeKeyRange(scope)),
+      (cursor) => {
+        const record = cursor.value;
+        const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+        if (!isValidEntryRecord(record)) {
+          invalidEntryCount += 1;
+          return;
+        }
 
-      entries.set(record.k, toMetadataRecord(record));
-    });
+        if (entryKey === null) {
+          invalidEntryCount += 1;
+          return;
+        }
 
-    const rawPolicy = await openRequestAsPromise<IndexedDbNamespacePolicyRecord | undefined>(
+        entries.set(entryKey, toMetadataRecord(toEntryRecordValue(record)));
+      },
+    );
+
+    const rawPolicy = await openRequestAsPromise<unknown>(
       policyStore.get(createScopePolicyKey(scope)),
     );
     await transactionDone(transaction);
 
-    if (!valid) {
+    if (invalidEntryCount > 0) {
       const result = {
         entries: null,
         exists: entries.size > 0 || rawPolicy !== undefined,
@@ -1101,13 +1234,36 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       return result;
     }
 
-    const staticPolicy =
-      rawPolicy === undefined ? null : normalizeStaticPolicy(rawPolicy.p);
-    const exists = entries.size > 0 || staticPolicy !== null;
+    const exists = rawPolicy !== undefined || entries.size > 0;
+    if (
+      (rawPolicy === undefined && entries.size > 0) ||
+      (rawPolicy !== undefined && entries.size === 0)
+    ) {
+      const result = {
+        entries: null,
+        exists,
+        staticPolicy: null,
+        valid: false,
+      };
+      this.instrumentation?.record({
+        exists: result.exists,
+        keyCount: entries.size,
+        scope,
+        time: Date.now(),
+        type: 'readManagedIndexState',
+        valid: result.valid,
+      });
+      return result;
+    }
+
     const result = {
       entries,
-      exists,
-      staticPolicy,
+      exists: rawPolicy !== undefined,
+      staticPolicy: getStaticPolicyFromScopeRecord(
+        rawPolicy === undefined
+          ? undefined
+          : toNamespacePolicyRecordValue(rawPolicy),
+      ),
       valid: true,
     };
     this.instrumentation?.record({
@@ -1130,17 +1286,20 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   ): Promise<void> {
     const database = await this.#getDatabase();
     const existingEntries = new Map<string, IndexedDbEntryRecord>();
-    const readTransaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readonly');
+    const readTransaction = database.transaction(
+      INDEXED_DB_ENTRY_STORE,
+      'readonly',
+    );
     const readStore = readTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
     const desiredKeys = [...state.entries.keys()];
 
     await Promise.all(
       desiredKeys.map(async (key) => {
-        const existing = await openRequestAsPromise<IndexedDbEntryRecord | undefined>(
-          readStore.get(createEntryPrimaryKey(scope, key)),
-        );
+        const existing = await openRequestAsPromise<
+          IndexedDbEntryRecord | undefined
+        >(readStore.get(createEntryPrimaryKey(scope, key)));
         if (isValidEntryRecord(existing)) {
-          existingEntries.set(key, existing);
+          existingEntries.set(key, toEntryRecordValue(existing));
         }
       }),
     );
@@ -1151,34 +1310,45 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       'readwrite',
     );
     const entryStore = writeTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = writeTransaction.objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
+    const policyStore = writeTransaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
 
     for (const [key, metadata] of state.entries.entries()) {
       const existing = existingEntries.get(key);
       if (existing === undefined) continue;
+      const { extraMetadata, group, offlineProtected, payload } =
+        splitCustomMetadata(metadata.customMetadata);
 
-      entryStore.put({
-        ...existing,
-        a: metadata.lastAccessAt,
-        g:
-          typeof metadata.customMetadata?.g === 'string'
-            ? metadata.customMetadata.g
-            : undefined,
-        m: metadata.customMetadata,
-        o: metadata.customMetadata?.o === true ? 1 : 0,
-        v: metadata.version,
-      } satisfies IndexedDbEntryRecord);
+      entryStore.put(
+        {
+          ...existing,
+          a: metadata.lastAccessAt,
+          ...(group !== undefined ? { g: group } : {}),
+          ...(group === undefined ? { g: undefined } : {}),
+          ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+          ...(extraMetadata === undefined ? { m: undefined } : {}),
+          ...(offlineProtected === true ? { o: 1 as const } : {}),
+          ...(offlineProtected !== true ? { o: undefined } : {}),
+          ...(payload !== undefined ? { p: payload } : {}),
+          ...(payload === undefined ? { p: undefined } : {}),
+          ...(metadata.version !== 1 ? { v: metadata.version } : {}),
+          ...(metadata.version === 1 ? { v: undefined } : {}),
+        } satisfies IndexedDbEntryRecord,
+        createEntryPrimaryKey(scope, key),
+      );
     }
 
-    if (state.entries.size === 0 || state.staticPolicy === null) {
+    if (state.entries.size === 0) {
       policyStore.delete(createScopePolicyKey(scope));
     } else {
-      policyStore.put({
-        n: scope.storeName,
-        p: normalizeStaticPolicy(state.staticPolicy),
-        s: scope.sessionKey,
-        t: scope.kind,
-      } satisfies IndexedDbNamespacePolicyRecord);
+      policyStore.put(
+        {
+          p: normalizeStaticPolicy(state.staticPolicy),
+          s: scope.sessionKey,
+        } satisfies IndexedDbNamespacePolicyRecord,
+        createScopePolicyKey(scope),
+      );
     }
 
     await transactionDone(writeTransaction);
@@ -1194,31 +1364,41 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   async readProtectedStorageKeys(sessionKey: string): Promise<string[]> {
     const database = await this.#getDatabase();
-    const transaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readonly');
-    const index = transaction.objectStore(INDEXED_DB_ENTRY_STORE).index(
-      'bySessionOfflineProtected',
+    const transaction = database.transaction(
+      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+      'readonly',
+    );
+    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
     );
     const values: string[] = [];
-    await iterateCursor(
-      index.openCursor(
-        IDBKeyRange.bound(
-          [sessionKey, 1, '', '', ''],
-          [sessionKey, 1, '\uffff', '\uffff', '\uffff'],
-        ),
-      ),
-      (cursor) => {
-        const record = cursor.value;
-        if (!isValidEntryRecord(record)) return;
-        values.push(
-          JSON.stringify([
-            record.s,
-            record.n,
-            record.t,
-            record.k,
-          ]),
-        );
-      },
-    );
+    const scopeRequest = policyStore
+      .index('bySession')
+      .openCursor(IDBKeyRange.only(sessionKey));
+    await iterateCursor(scopeRequest, async (scopeCursor) => {
+      const scope = getScopeFromPrimaryKey(scopeCursor.primaryKey);
+      if (scope === null) return;
+
+      await iterateCursor(
+        entryStore
+          .index('byScopeOfflineProtected')
+          .openCursor(createScopeOfflineProtectedRange(scope)),
+        (entryCursor) => {
+          const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
+          const record = entryCursor.value;
+          if (!isValidEntryRecord(record) || entryKey === null) return;
+          values.push(
+            JSON.stringify([
+              scope.sessionKey,
+              scope.storeName,
+              scope.kind,
+              entryKey,
+            ]),
+          );
+        },
+      );
+    });
     await transactionDone(transaction);
 
     this.instrumentation?.record({
@@ -1237,50 +1417,62 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   ): Promise<void> {
     const nextProtectedKeys = new Set(protectedKeys);
     const database = await this.#getDatabase();
-    const transaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readwrite');
+    const transaction = database.transaction(
+      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+      'readwrite',
+    );
     const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const index = store.index('bySession');
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
 
-    await iterateCursor(index.openCursor(IDBKeyRange.only(sessionKey)), (cursor) => {
-      const record = cursor.value;
-      if (!isValidEntryRecord(record)) return;
+    await iterateCursor(
+      policyStore.index('bySession').openCursor(IDBKeyRange.only(sessionKey)),
+      async (scopeCursor) => {
+        const scope = getScopeFromPrimaryKey(scopeCursor.primaryKey);
+        if (scope === null) return;
 
-      const ref = JSON.stringify([
-        record.s,
-        record.n,
-        record.t,
-        record.k,
-      ]);
-      const shouldProtect = nextProtectedKeys.has(ref);
-      if ((record.m?.o === true) === shouldProtect) {
-        return;
-      }
+        await iterateCursor(
+          store.openCursor(createScopeKeyRange(scope)),
+          (cursor) => {
+            const record = cursor.value;
+            const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+            if (!isValidEntryRecord(record) || entryKey === null) return;
+            const entryRecord = toEntryRecordValue(record);
 
-      const nextCustomMetadata = shouldProtect
-        ? { ...(record.m ?? {}), o: true }
-        : Object.fromEntries(
-            Object.entries(record.m ?? {}).filter(
-              ([key]) => key !== 'o',
-            ),
-          );
-      cursor.update({
-        ...record,
-        m:
-          Object.keys(nextCustomMetadata).length > 0 ? nextCustomMetadata : undefined,
-        o: shouldProtect ? 1 : 0,
-      } satisfies IndexedDbEntryRecord);
-    });
+            const ref = JSON.stringify([
+              scope.sessionKey,
+              scope.storeName,
+              scope.kind,
+              entryKey,
+            ]);
+            const shouldProtect = nextProtectedKeys.has(ref);
+            if ((entryRecord.o === 1) === shouldProtect) return;
+
+            const nextRecord = {
+              ...entryRecord,
+              ...(shouldProtect ? { o: 1 as const } : { o: undefined }),
+            } satisfies IndexedDbEntryRecord;
+            cursor.update(nextRecord);
+          },
+        );
+      },
+    );
     await transactionDone(transaction);
 
     this.instrumentation?.record({
       sessionKey,
       time: Date.now(),
       type: 'syncSessionProtectedKeys',
-      values: [...nextProtectedKeys].sort((left, right) => left.localeCompare(right)),
+      values: [...nextProtectedKeys].sort((left, right) =>
+        left.localeCompare(right),
+      ),
     });
   }
 
-  async readMaintenanceState(): Promise<{ lastSuccessfulCleanupAt: number | null }> {
+  async readMaintenanceState(): Promise<{
+    lastSuccessfulCleanupAt: number | null;
+  }> {
     return getMaintenanceState(await this.#getDatabase());
   }
 
@@ -1332,17 +1524,11 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         indexes,
         keyPath: store.keyPath,
         name: storeName,
-        rows: keys.map((key, index) => ({
-          key,
-          value: values[index],
-        })),
+        rows: keys.map((key, index) => ({ key, value: values[index] })),
       });
     }
 
-    return {
-      stores,
-      version: database.version,
-    };
+    return { stores, version: database.version };
   }
 
   async #getEntry(
@@ -1350,12 +1536,17 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     key: string,
   ): Promise<IndexedDbEntryRecord | null> {
     const database = await this.#getDatabase();
-    const transaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readonly');
+    const transaction = database.transaction(
+      INDEXED_DB_ENTRY_STORE,
+      'readonly',
+    );
     const record = await openRequestAsPromise<IndexedDbEntryRecord | undefined>(
-      transaction.objectStore(INDEXED_DB_ENTRY_STORE).get(createEntryPrimaryKey(scope, key)),
+      transaction
+        .objectStore(INDEXED_DB_ENTRY_STORE)
+        .get(createEntryPrimaryKey(scope, key)),
     );
     await transactionDone(transaction);
-    return isValidEntryRecord(record) ? record : null;
+    return isValidEntryRecord(record) ? toEntryRecordValue(record) : null;
   }
 
   async #putEntryRecord(
@@ -1369,46 +1560,75 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     },
   ): Promise<void> {
     const database = await this.#getDatabase();
-    const transaction = database.transaction(INDEXED_DB_ENTRY_STORE, 'readwrite');
-    transaction.objectStore(INDEXED_DB_ENTRY_STORE).put({
-      a: args.lastAccessAt,
-      d: args.value,
-      g:
-        typeof args.customMetadata?.g === 'string' ? args.customMetadata.g : undefined,
-      k: args.key,
-      m: args.customMetadata,
-      n: scope.storeName,
-      o: args.customMetadata?.o === true ? 1 : 0,
-      s: scope.sessionKey,
-      t: scope.kind,
-      v: args.version,
-    } satisfies IndexedDbEntryRecord);
+    const transaction = database.transaction(
+      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+      'readwrite',
+    );
+    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
+    const existingScopeRecord = await openRequestAsPromise<unknown>(
+      policyStore.get(createScopePolicyKey(scope)),
+    );
+    const { extraMetadata, group, offlineProtected, payload } =
+      splitCustomMetadata(args.customMetadata);
+    const compactValue = compactEntryValue(scope, args.value);
+    entryStore.put(
+      {
+        a: args.lastAccessAt,
+        ...compactValue,
+        ...(group !== undefined ? { g: group } : {}),
+        i: createScopeId(scope.sessionKey, scope.storeName, scope.kind),
+        ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+        ...(offlineProtected === true ? { o: 1 as const } : {}),
+        ...(payload !== undefined ? { p: payload } : {}),
+        ...(args.version !== 1 ? { v: args.version } : {}),
+      } satisfies IndexedDbEntryRecord,
+      createEntryPrimaryKey(scope, args.key),
+    );
+    policyStore.put(
+      {
+        p: getStaticPolicyFromScopeRecord(
+          isValidNamespacePolicyRecord(existingScopeRecord)
+            ? toNamespacePolicyRecordValue(existingScopeRecord)
+            : undefined,
+        ),
+        s: scope.sessionKey,
+      } satisfies IndexedDbNamespacePolicyRecord,
+      createScopePolicyKey(scope),
+    );
     await transactionDone(transaction);
   }
 
-  #parsePersistedIndexState(value: unknown): {
+  #parsePersistedIndexState(
+    value: unknown,
+  ): {
     entries: Map<string, IndexedDbManagedMetadataRecord>;
     staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   } | null {
     if (!isRecord(value)) return null;
-    const rawEntries = value.e;
+    const recordValue = toRecordValue(value);
+    const rawEntries = recordValue.e;
     if (!isRecord(rawEntries)) return null;
+    const rawEntriesRecord = toRecordValue(rawEntries);
 
     const entries = new Map<string, IndexedDbManagedMetadataRecord>();
-    for (const [key, rawMetadata] of Object.entries(rawEntries)) {
-      if (!isRecord(rawMetadata) || typeof rawMetadata.a !== 'number') {
-        return null;
-      }
+    for (const [key, rawMetadata] of Object.entries(rawEntriesRecord)) {
+      if (!isRecord(rawMetadata)) return null;
+      const rawMetadataRecord = toRecordValue(rawMetadata);
+      if (typeof rawMetadataRecord.a !== 'number') return null;
 
       const customMetadata = Object.fromEntries(
-        Object.entries(rawMetadata).filter(
+        Object.entries(rawMetadataRecord).filter(
           ([metadataKey]) => metadataKey !== 'a' && metadataKey !== 'v',
         ),
       );
       entries.set(key, {
         ...(Object.keys(customMetadata).length > 0 ? { customMetadata } : {}),
-        lastAccessAt: rawMetadata.a,
-        version: typeof rawMetadata.v === 'number' ? rawMetadata.v : 1,
+        lastAccessAt: rawMetadataRecord.a,
+        version:
+          typeof rawMetadataRecord.v === 'number' ? rawMetadataRecord.v : 1,
       });
     }
 
@@ -1417,9 +1637,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       // WORKAROUND: Persisted namespace policies come from IndexedDB's untyped
       // DOM request surface and must be rebound after normalization.
       staticPolicy: normalizeStaticPolicy(
-        __LEGIT_CAST__<AsyncStorageNamespaceStaticPolicy | null | undefined, unknown>(
-          value.s,
-        ),
+        __LEGIT_CAST__<
+          AsyncStorageNamespaceStaticPolicy | null | undefined,
+          unknown
+        >(recordValue.s),
       ),
     };
   }
@@ -1433,35 +1654,28 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       const request = indexedDB.open(this.databaseName, INDEXED_DB_VERSION);
       request.onupgradeneeded = () => {
         const database = request.result;
-        if (!database.objectStoreNames.contains(INDEXED_DB_ENTRY_STORE)) {
-          const store = database.createObjectStore(INDEXED_DB_ENTRY_STORE, {
-            keyPath: ['s', 'n', 't', 'k'],
-          });
-          store.createIndex('bySession', 's', { unique: false });
-          store.createIndex(
-            'byScopeLastAccessAt',
-            ['s', 'n', 't', 'a', 'k'],
-            { unique: false },
-          );
-          store.createIndex(
-            'byScopeGroup',
-            ['s', 'n', 't', 'g', 'k'],
-            { unique: false },
-          );
-          store.createIndex(
-            'bySessionOfflineProtected',
-            ['s', 'o', 'n', 't', 'k'],
-            { unique: false },
-          );
+        if (database.objectStoreNames.contains(INDEXED_DB_ENTRY_STORE)) {
+          database.deleteObjectStore(INDEXED_DB_ENTRY_STORE);
+        }
+        if (
+          database.objectStoreNames.contains(INDEXED_DB_NAMESPACE_POLICY_STORE)
+        ) {
+          database.deleteObjectStore(INDEXED_DB_NAMESPACE_POLICY_STORE);
         }
 
-        if (!database.objectStoreNames.contains(INDEXED_DB_NAMESPACE_POLICY_STORE)) {
-          const store = database.createObjectStore(
-            INDEXED_DB_NAMESPACE_POLICY_STORE,
-            { keyPath: ['s', 'n', 't'] },
-          );
-          store.createIndex('bySession', 's', { unique: false });
-        }
+        const entryStore = database.createObjectStore(INDEXED_DB_ENTRY_STORE);
+        entryStore.createIndex('byScopeLastAccessAt', ['i', 'a'], {
+          unique: false,
+        });
+        entryStore.createIndex('byScopeGroup', ['i', 'g'], { unique: false });
+        entryStore.createIndex('byScopeOfflineProtected', ['i', 'o'], {
+          unique: false,
+        });
+
+        const policyStore = database.createObjectStore(
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        );
+        policyStore.createIndex('bySession', 's', { unique: false });
 
         if (!database.objectStoreNames.contains(INDEXED_DB_META_STORE)) {
           database.createObjectStore(INDEXED_DB_META_STORE, { keyPath: 'k' });
@@ -1476,9 +1690,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   }
 }
 
-export type IndexedDbPersistentStorageOptions = {
-  databaseName?: string;
-};
+export type IndexedDbPersistentStorageOptions = { databaseName?: string };
 
 export function createIndexedDbPersistentStorage(
   options: IndexedDbPersistentStorageOptions = {},
@@ -1495,10 +1707,7 @@ type IndexedDbPersistentStorageInternalOptions =
 
 export function createIndexedDbPersistentStorageForTests(
   options: IndexedDbPersistentStorageInternalOptions = {},
-): {
-  adapter: AsyncStorageAdapter;
-  driver: IndexedDbAsyncStorageDriver;
-} {
+): { adapter: AsyncStorageAdapter; driver: IndexedDbAsyncStorageDriver } {
   const driver = new IndexedDbAsyncStorageDriver(
     options.databaseName,
     options.instrumentation,

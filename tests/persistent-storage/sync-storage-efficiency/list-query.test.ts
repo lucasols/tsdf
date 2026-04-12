@@ -382,10 +382,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ #5 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item data, <"fourth||2>) | ❌ -> 0.09 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.12 kb -> 0.22 kb
+            |    └ (items index) | 0.12 kb -> 0.28 kb
             ·
       3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.22 kb
+            |    └ (items index) | 0.28 kb
       .     | 🔑[0] #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
       .     | 🔑[1] #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
@@ -531,6 +531,7 @@ describe('sync storage efficiency: list-query', () => {
       `
         e:
           - a: 1735689605910
+            f: ['age', 'email', 'id', 'name']
             k: '"users||1'
             p: 'users||1'
       `,
@@ -567,7 +568,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
       "
     `);
   });
@@ -864,7 +865,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-delete-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
       .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
-           |    └ (items index) | 0.22 kb -> 0.12 kb
+           |    └ (items index) | 0.22 kb -> 0.18 kb
       "
     `);
   });
@@ -1108,7 +1109,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
       "
     `);
   });
@@ -1195,7 +1196,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
       "
     `);
   });
@@ -1280,12 +1281,14 @@ describe('sync storage efficiency: list-query', () => {
         `tsdf.${sessionKey}.${storeName}.li.`,
       )?.meta,
     ).toMatchInlineSnapshot(`
+      f: ['age', 'email', 'id', 'name']
       o: '✅'
       p: 'users||1'
     `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
         - a: 1735689605910
+          f: ['age', 'email', 'id', 'name']
           k: '"users||1'
           o: '✅'
           p: 'users||1'
@@ -1503,7 +1506,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
       "
     `);
   });
@@ -1799,7 +1802,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.12 kb -> 0.12 kb
+           |    └ (items index) | 0.12 kb -> 0.18 kb
       "
     `);
   });

@@ -336,10 +336,12 @@ export type PersistentStorageHandle<T> = {
 export function createPersistentStorageHandle<T>(
   config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
   {
+    asyncValueCodec,
     getManifestMeta,
     asyncNamespace,
     valueCodec,
   }: {
+    asyncValueCodec?: AsyncStorageValueCodec<T>;
     getManifestMeta?: (data: T) => Record<string, unknown> | undefined;
     asyncNamespace?: {
       storeName?: string;
@@ -355,6 +357,7 @@ export function createPersistentStorageHandle<T>(
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncEntryKey = asyncNamespace?.entryKey ?? 'document';
+  const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -408,8 +411,11 @@ export function createPersistentStorageHandle<T>(
           return null;
         }
 
-        const decoded = valueCodec
-          ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
+        const decoded = effectiveAsyncValueCodec
+          ? effectiveAsyncValueCodec.deserialize(
+              entry.value,
+              entry.metadata.customMetadata,
+            )
           : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
             __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
@@ -453,7 +459,9 @@ export function createPersistentStorageHandle<T>(
           upserts: [
             {
               key: asyncEntryKey,
-              value: valueCodec ? valueCodec.serialize(data) : data,
+              value: effectiveAsyncValueCodec
+                ? effectiveAsyncValueCodec.serialize(data)
+                : data,
               version: asyncVersion,
               metadata: getManifestMeta?.(data),
             },
@@ -624,9 +632,11 @@ export function createPersistentStorageNamespaceHandle<
     entryPrefix: string;
   },
   {
+    asyncValueCodec,
     getManifestMeta,
     valueCodec,
   }: {
+    asyncValueCodec?: AsyncStorageValueCodec<T, unknown, TMetadata>;
     getManifestMeta?: (data: T, entryKey: string) => TMetadata | undefined;
     valueCodec?: AsyncStorageValueCodec<T, unknown, TMetadata>;
   } = {},
@@ -637,6 +647,7 @@ export function createPersistentStorageNamespaceHandle<
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncNamespaceKind = ensureAsyncNamespaceKind(config.entryPrefix);
+  const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
   scheduleAdapterExpirationScan(adapter);
 
@@ -678,8 +689,8 @@ export function createPersistentStorageNamespaceHandle<
           touches: args.touches,
           upserts: args.upserts?.map((upsert) => ({
             key: upsert.key,
-            value: valueCodec
-              ? valueCodec.serialize(upsert.data)
+            value: effectiveAsyncValueCodec
+              ? effectiveAsyncValueCodec.serialize(upsert.data)
               : // WORKAROUND: In the no-codec path, persistence stores opaque caller values as unknown and only erases the generic for transport through the adapter.
                 __LEGIT_CAST__<unknown, T>(upsert.data),
             version: asyncVersion,
@@ -771,8 +782,11 @@ export function createPersistentStorageNamespaceHandle<
           return null;
         }
 
-        const decoded = valueCodec
-          ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
+        const decoded = effectiveAsyncValueCodec
+          ? effectiveAsyncValueCodec.deserialize(
+              entry.value,
+              entry.metadata.customMetadata,
+            )
           : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
             __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
@@ -822,8 +836,11 @@ export function createPersistentStorageNamespaceHandle<
           return null;
         }
 
-        const decoded = valueCodec
-          ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
+        const decoded = effectiveAsyncValueCodec
+          ? effectiveAsyncValueCodec.deserialize(
+              entry.value,
+              entry.metadata.customMetadata,
+            )
           : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
             __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
@@ -880,8 +897,11 @@ export function createPersistentStorageNamespaceHandle<
             }
             return null;
           }
-          const decoded = valueCodec
-            ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
+          const decoded = effectiveAsyncValueCodec
+            ? effectiveAsyncValueCodec.deserialize(
+                entry.value,
+                entry.metadata.customMetadata,
+              )
             : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
               __LEGIT_CAST__<T, unknown>(entry.value);
           if (decoded === null) {

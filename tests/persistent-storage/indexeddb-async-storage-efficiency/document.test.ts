@@ -76,7 +76,7 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-remount-flow","document"] keys=["document"] -> ["document"]
-      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-flow","document"] put=["document"] delete=[] touch=[]
+      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-flow","document"] put=["document"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -86,25 +86,24 @@ describe('indexeddb async storage efficiency: document', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['sess1', 'doc-remount-flow', 'document', 'document']
-                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","doc-remount-flow","document"]', 'document']
+                value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -114,10 +113,12 @@ describe('indexeddb async storage efficiency: document', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
-            rowCount: 0
-            rows: []
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'doc-remount-flow', 'document']
+                value: 'JSON object | 0.0 kb'
         version: 1
       `);
 
@@ -126,15 +127,9 @@ describe('indexeddb async storage efficiency: document', () => {
         a: 1735689600000
 
         d:
-          d:
-            value: { name: 'Cached document', value: 7 }
+          value: { name: 'Cached document', value: 7 }
 
-        k: 'document'
-        n: 'doc-remount-flow'
-        o: 0
-        s: 'sess1'
-        t: 'document'
-        v: 1
+        i: '["sess1","doc-remount-flow","document"]'
       `);
   });
 
@@ -172,8 +167,8 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-remount-stale-touch","document"] keys=["document"] -> ["document"]
-      45ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=[] delete=[] touch=["document"]
-      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=["document"] delete=[] touch=[]
+      47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=[] delete=[] touch=["document"]
+      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=["document"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -293,21 +288,15 @@ describe('indexeddb async storage efficiency: document', () => {
         a: 1735689603001
 
         d:
-          d:
-            value: { name: 'Cached document', value: 8 }
+          value: { name: 'Cached document', value: 8 }
 
-        k: 'document'
-        n: 'doc-startup-touch-offline-marker'
-        o: 0
-        s: 'sess1'
-        t: 'document'
-        v: 1
+        i: '["sess1","doc-startup-touch-offline-marker","document"]'
       `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-startup-touch-offline-marker","document"] keys=["document"] -> ["document"]
-      45ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=[] delete=[] touch=["document"]
-      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=["document"] delete=[] touch=[]
+      47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=[] delete=[] touch=["document"]
+      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -345,19 +334,13 @@ describe('indexeddb async storage efficiency: document', () => {
         a: 1735689600000
 
         d:
-          d:
-            value: { name: 'Edited document', value: 99 }
+          value: { name: 'Edited document', value: 99 }
 
-        k: 'document'
-        n: 'doc-mutation-flow'
-        o: 0
-        s: 'sess1'
-        t: 'document'
-        v: 1
+        i: '["sess1","doc-mutation-flow","document"]'
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.043s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-mutation-flow","document"] put=["document"] delete=[] touch=[]
+      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-mutation-flow","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -402,19 +385,13 @@ describe('indexeddb async storage efficiency: document', () => {
         a: 1735689600000
 
         d:
-          d:
-            value: { name: 'Fresh document', value: 42 }
+          value: { name: 'Fresh document', value: 42 }
 
-        k: 'document'
-        n: 'doc-invalidation-flow'
-        o: 0
-        s: 'sess1'
-        t: 'document'
-        v: 1
+        i: '["sess1","doc-invalidation-flow","document"]'
       `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
-      1.853s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["document"] delete=[] touch=[]
+      1.855s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["document"] delete=[] touch=[]
       ""
     `);
   });
@@ -477,15 +454,9 @@ describe('indexeddb async storage efficiency: document', () => {
         a: 1735689600000
 
         d:
-          d:
-            value: { name: 'Fresh document 2', value: 42 }
+          value: { name: 'Fresh document 2', value: 42 }
 
-        k: 'document'
-        n: 'doc-coalesced-invalidations'
-        o: 0
-        s: 'sess1'
-        t: 'document'
-        v: 1
+        i: '["sess1","doc-coalesced-invalidations","document"]'
       `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -535,16 +506,10 @@ describe('indexeddb async storage efficiency: document', () => {
         a: 1735689600000
 
         d:
-          d:
-            value: { name: 'Fresh document', value: 42 }
+          value: { name: 'Fresh document', value: 42 }
 
-        k: 'document'
-        m: { o: '✅' }
-        n: 'doc-offline-marker-flow'
+        i: '["sess1","doc-offline-marker-flow","document"]'
         o: 1
-        s: 'sess1'
-        t: 'document'
-        v: 1
       `);
   });
 });

@@ -124,11 +124,11 @@ describe('async storage efficiency: collection', () => {
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.44 kb)
-      ├ sess1 (0.37 kb)
-      │ └ collection-expiration (0.36 kb)
+      "tsdf (0.40 kb)
+      ├ sess1 (0.33 kb)
+      │ └ collection-expiration (0.32 kb)
       │   ├ ci._i.r.json (0.14 kb)
-      │   └ ci.h~135684128.p.json (0.18 kb)
+      │   └ ci.h~135684128.p.json (0.14 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
 
@@ -142,12 +142,7 @@ describe('async storage efficiency: collection', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/collection-expiration/ci.<"fresh-user>.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { id: 'fresh-user', name: 'Fresh User' }
-
-      p: 'fresh-user'
-    `);
+    ).toMatchInlineSnapshot(`value: { id: 'fresh-user', name: 'Fresh User' }`);
   });
 
   test('startup cleanup enforces maxItems against preloaded persisted entries', async () => {
@@ -411,9 +406,9 @@ describe('async storage efficiency: collection', () => {
       1.049s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>)
+             |    └ (entry data)
       1.052s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
+             |    └ (entry data) | 0.00 kb -> 0.07 kb
       1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
       1.058s | end
@@ -421,12 +416,12 @@ describe('async storage efficiency: collection', () => {
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.61 kb)
-      ├ sess1 (0.54 kb)
-      │ └ col-max-items-metadata (0.53 kb)
+      "tsdf (0.55 kb)
+      ├ sess1 (0.48 kb)
+      │ └ col-max-items-metadata (0.47 kb)
       │   ├ ci._i.r.json (0.19 kb)
-      │   ├ ci.h~2103001283.p.json (0.14 kb)
-      │   └ ci.h~3994120284.p.json (0.15 kb)
+      │   ├ ci.h~2103001283.p.json (0.11 kb)
+      │   └ ci.h~3994120284.p.json (0.13 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
   });
@@ -485,9 +480,9 @@ describe('async storage efficiency: collection', () => {
       .      | 🗑️ #3 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>)
+             |    └ (entry data)
       1.052s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
+             |    └ (entry data) | 0.00 kb -> 0.07 kb
       1.056s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.17 kb
       1.058s | end
@@ -546,9 +541,9 @@ describe('async storage efficiency: collection', () => {
       1.049s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
-             |    └ (entry data, <"c>)
+             |    └ (entry data)
       1.052s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
-             |    └ (entry data, <"c>) | 0.00 kb -> 0.10 kb
+             |    └ (entry data) | 0.00 kb -> 0.07 kb
       1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
              ·
@@ -558,11 +553,11 @@ describe('async storage efficiency: collection', () => {
       2.143s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb
       2.146s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
-             |    └ (entry data, <"b>)
+             |    └ (entry data)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
       2.149s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
+             |    └ (entry data, <"d>) | 0.00 kb -> 0.07 kb
       2.153s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
       2.155s | end
@@ -612,13 +607,13 @@ describe('async storage efficiency: collection', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.11 kb
+           |    └ (entry data, <"1>) | 0.08 kb
       10ms | 📖 #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
            |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
       13ms | 👁️ #3 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
       14ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
-           |    └ (entry data, <"2>) | 0.12 kb
+           |    └ (entry data, <"2>) | 0.10 kb
       17ms | end
       "
     `);
@@ -696,13 +691,9 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.<"1>.p.json'))
-      .toMatchInlineSnapshot(`
-        d:
-          value: { id: '1', name: 'Edited user' }
-
-        p: '1'
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.<"1>.p.json'),
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Edited user' }`);
     expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
@@ -714,7 +705,7 @@ describe('async storage efficiency: collection', () => {
       1.04s  | 📖 #1 tsdf/sess1/col-mutation-flow/ci._i.r.json
              |    └ (namespace index) | 0.08 kb
       1.045s | ✍️ #2 tsdf/sess1/col-mutation-flow/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
+             |    └ (entry data, <"1>) | 0.08 kb -> 0.08 kb
       1.047s | end
       "
     `);
@@ -765,12 +756,7 @@ describe('async storage efficiency: collection', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/col-mutation-retry-after-delete/ci.<"1>.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { id: '1', name: 'Edited after delete' }
-
-      p: '1'
-    `);
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Edited after delete' }`);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json',
@@ -795,7 +781,7 @@ describe('async storage efficiency: collection', () => {
       1.047s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
       1.05s  | ✍️ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.00 kb -> 0.12 kb
+             |    └ (entry data, <"1>) | 0.00 kb -> 0.10 kb
       1.052s | end
       "
     `);
@@ -847,12 +833,7 @@ describe('async storage efficiency: collection', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/col-mutation-retry-during-write/ci.%221.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { id: '1', name: 'Edited during write' }
-
-      p: '1'
-    `);
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Edited during write' }`);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json',
@@ -876,7 +857,7 @@ describe('async storage efficiency: collection', () => {
       1.049s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
       1.052s | ✍️ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.00 kb -> 0.12 kb
+             |    └ (entry data, <"1>) | 0.00 kb -> 0.10 kb
       1.054s | end
       "
     `);
@@ -964,19 +945,14 @@ describe('async storage efficiency: collection', () => {
     );
     expect(
       getParsedOpfsFileData('tsdf/sess1/col-invalidation-flow/ci.%221.p.json'),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { id: '1', name: 'Fresh user' }
-
-      p: '1'
-    `);
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Fresh user' }`);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.85s  | 📖 #1 tsdf/sess1/col-invalidation-flow/ci._i.r.json
              |    └ (namespace index) | 0.08 kb
       1.855s | ✍️ #2 tsdf/sess1/col-invalidation-flow/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
+             |    └ (entry data, <"1>) | 0.08 kb -> 0.08 kb
       1.857s | end
       "
     `);
@@ -1032,12 +1008,7 @@ describe('async storage efficiency: collection', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/col-offline-marker-flow/ci.%221.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { id: '1', name: 'Fresh user' }
-
-      p: '1'
-    `);
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Fresh user' }`);
   });
 
   test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
@@ -1101,19 +1072,14 @@ describe('async storage efficiency: collection', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { id: '1', name: 'Fresh user 2' }
-
-      p: '1'
-    `);
+    ).toMatchInlineSnapshot(`value: { id: '1', name: 'Fresh user 2' }`);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.85s  | 📖 #1 tsdf/sess1/col-coalesced-invalidations/ci._i.r.json
              |    └ (namespace index) | 0.08 kb
       1.855s | ✍️ #2 tsdf/sess1/col-coalesced-invalidations/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
+             |    └ (entry data, <"1>) | 0.08 kb -> 0.08 kb
       1.857s | end
       "
     `);
@@ -1166,7 +1132,7 @@ describe('async storage efficiency: collection', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-remount-flow/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.11 kb
+           |    └ (entry data, <"1>) | 0.08 kb
       10ms | end
       "
     `);
@@ -1217,7 +1183,7 @@ describe('async storage efficiency: collection', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.11 kb
+           |    └ (entry data, <"1>) | 0.08 kb
            ·
       50ms | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index) | 0.08 kb
@@ -1270,9 +1236,9 @@ describe('async storage efficiency: collection', () => {
       1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)
       1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>)
+             |    └ (entry data)
       1.857s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
-             |    └ (entry data, <"1>) | 0.00 kb -> 0.11 kb
+             |    └ (entry data) | 0.00 kb -> 0.08 kb
       1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index)
       1.862s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
@@ -1331,9 +1297,9 @@ describe('async storage efficiency: collection', () => {
       .    | 👁️ #3 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
       7ms  | 📖 #2 tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.11 kb
+           |    └ (entry data, <"1>) | 0.08 kb
       .    | 📖 #3 tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
-           |    └ (entry data, <"2>) | 0.11 kb
+           |    └ (entry data, <"2>) | 0.08 kb
       10ms | end
       "
     `);
@@ -1419,7 +1385,7 @@ describe('async storage efficiency: collection', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/collection-opfs-efficiency/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/collection-opfs-efficiency/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.09 kb
+           |    └ (entry data, <"1>) | 0.06 kb
       10ms | end
       "
     `);
@@ -1482,9 +1448,9 @@ describe('async storage efficiency: collection', () => {
       .    | 👁️ #3 file-open ✅ tsdf/sess1/collection-opfs-batched-preload/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
       7ms  | 📖 #2 tsdf/sess1/collection-opfs-batched-preload/ci.h~3574006234.p.json
-           |    └ (entry data, <"1>) | 0.09 kb
+           |    └ (entry data, <"1>) | 0.06 kb
       .    | 📖 #3 tsdf/sess1/collection-opfs-batched-preload/ci.h~1409323532.p.json
-           |    └ (entry data, <"2>) | 0.09 kb
+           |    └ (entry data, <"2>) | 0.06 kb
       10ms | end
       "
     `);

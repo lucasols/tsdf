@@ -205,22 +205,26 @@ export async function resolveAfterIndexedDbStorage<T>(
   mockAdapter: MockIndexedDbAdapter,
 ): Promise<T> {
   const pendingResult = Symbol('pendingResult');
-  let didSettle = false;
 
   const settledResultPromise = promise.then(
-    (value) => {
-      didSettle = true;
-      return { status: 'resolved' as const, value };
-    },
-    (error) => {
-      didSettle = true;
-      return { status: 'rejected' as const, error };
-    },
+    (value) => ({ status: 'resolved' as const, value }),
+    (error) => ({ status: 'rejected' as const, error }),
   );
 
   for (let pass = 0; pass < 10; pass++) {
-    if (didSettle) break;
     await settleIndexedDbStorageCapture(mockAdapter);
+
+    const settledResult = await Promise.race([
+      settledResultPromise,
+      Promise.resolve(pendingResult),
+    ]);
+    if (settledResult !== pendingResult) {
+      if (settledResult.status === 'rejected') {
+        throw settledResult.error;
+      }
+
+      return settledResult.value;
+    }
   }
 
   const settledResult = await Promise.race([

@@ -76,26 +76,24 @@ describe('async storage efficiency: document', () => {
            |    └ (namespace index) | 0.07 kb
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.p.json
            |    └ (entry data)
-      7ms  | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.p.json (entry data) | 0.10 kb
+      7ms  | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.p.json (entry data) | 0.09 kb
       10ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.33 kb)
-      ├ sess1 (0.26 kb)
-      │ └ doc-remount-flow (0.25 kb)
+      "tsdf (0.32 kb)
+      ├ sess1 (0.25 kb)
+      │ └ doc-remount-flow (0.24 kb)
       │   ├ d._i.r.json (0.10 kb)
-      │   └ d.e.p.json (0.12 kb)
+      │   └ d.e.p.json (0.11 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
 
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.p.json'))
-      .toMatchInlineSnapshot(`
-        d:
-          value: { name: 'Cached document', value: 7 }
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.p.json'),
+    ).toMatchInlineSnapshot(`value: { name: 'Cached document', value: 7 }`);
 
     expect(getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d._i.r.json'))
       .toMatchInlineSnapshot(`
@@ -147,7 +145,7 @@ describe('async storage efficiency: document', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data)
       7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
-           |    └ (entry data) | 0.10 kb
+           |    └ (entry data) | 0.09 kb
            ·
       50ms | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.07 kb
@@ -198,7 +196,7 @@ describe('async storage efficiency: document', () => {
       1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data)
       1.857s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
-             |    └ (entry data) | 0.00 kb -> 0.08 kb
+             |    └ (entry data) | 0.00 kb -> 0.07 kb
       1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index)
       1.862s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
@@ -288,10 +286,9 @@ describe('async storage efficiency: document', () => {
       e:
         - { a: 1735689603010, o: '✅' }
     `);
-    expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
-      d:
-        value: { name: 'Cached document', value: 8 }
-    `);
+    expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 8 }`,
+    );
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
@@ -303,7 +300,7 @@ describe('async storage efficiency: document', () => {
       1.04s  | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
-             |    └ (entry data) | 0.10 kb -> 0.10 kb ⚠️ UNCHANGED
+             |    └ (entry data) | 0.09 kb -> 0.09 kb ⚠️ UNCHANGED
       1.047s | end
       "
     `);
@@ -337,11 +334,9 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.p.json'))
-      .toMatchInlineSnapshot(`
-        d:
-          value: { name: 'Edited document', value: 99 }
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.p.json'),
+    ).toMatchInlineSnapshot(`value: { name: 'Edited document', value: 99 }`);
     expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
@@ -353,7 +348,7 @@ describe('async storage efficiency: document', () => {
       1.04s  | 📖 #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
-             |    └ (entry data) | 0.10 kb -> 0.10 kb
+             |    └ (entry data) | 0.09 kb -> 0.09 kb
       1.047s | end
       "
     `);
@@ -394,18 +389,16 @@ describe('async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-invalidation-flow/d.e.p.json'))
-      .toMatchInlineSnapshot(`
-        d:
-          value: { name: 'Fresh document', value: 42 }
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/doc-invalidation-flow/d.e.p.json'),
+    ).toMatchInlineSnapshot(`value: { name: 'Fresh document', value: 42 }`);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.85s  | 📖 #1 tsdf/sess1/doc-invalidation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
-             |    └ (entry data) | 0.10 kb -> 0.10 kb
+             |    └ (entry data) | 0.09 kb -> 0.09 kb
       1.857s | end
       "
     `);
@@ -468,17 +461,14 @@ describe('async storage efficiency: document', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/doc-coalesced-invalidations/d.e.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { name: 'Fresh document 2', value: 42 }
-    `);
+    ).toMatchInlineSnapshot(`value: { name: 'Fresh document 2', value: 42 }`);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.85s  | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
              |    └ (namespace index) | 0.07 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
-             |    └ (entry data) | 0.10 kb -> 0.11 kb
+             |    └ (entry data) | 0.09 kb -> 0.09 kb
       1.857s | end
       "
     `);
@@ -528,9 +518,6 @@ describe('async storage efficiency: document', () => {
     `);
     expect(
       getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d.e.p.json'),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { name: 'Fresh document', value: 42 }
-    `);
+    ).toMatchInlineSnapshot(`value: { name: 'Fresh document', value: 42 }`);
   });
 });

@@ -284,8 +284,8 @@ describe('opfs: converted collection store persistence', () => {
     expect(
       getParsedOpfsFileData('tsdf/sess1/col-opfs-save-error/ci.%221.p.json'),
     ).toMatchInlineSnapshot(`
-      d: { itemId: '1', label: 'Cached' }
-      p: '1'
+      itemId: '1'
+      label: 'Cached'
     `);
   });
 });

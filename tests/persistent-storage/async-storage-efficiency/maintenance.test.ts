@@ -581,16 +581,16 @@ describe('async storage efficiency: maintenance', () => {
     createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.76 kb)
-      └ sess1 (0.75 kb)
-        ├ mixed-list-query (0.53 kb)
+      "tsdf (0.69 kb)
+      └ sess1 (0.68 kb)
+        ├ mixed-list-query (0.47 kb)
         │ ├ li._i.r.json (0.14 kb)
-        │ ├ li.h~2924752681.p.json (0.14 kb)
+        │ ├ li.h~2924752681.p.json (0.10 kb)
         │ ├ lq._i.r.json (0.13 kb)
-        │ └ lq.h~2044383828.p.json (0.09 kb)
-        └ valid-doc (0.21 kb)
+        │ └ lq.h~2044383828.p.json (0.08 kb)
+        └ valid-doc (0.20 kb)
           ├ d._i.r.json (0.10 kb)
-          └ d.e.p.json (0.10 kb)"
+          └ d.e.p.json (0.09 kb)"
     `);
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -644,14 +644,14 @@ describe('async storage efficiency: maintenance', () => {
       "
     `);
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.61 kb)
-      ├ sess1 (0.54 kb)
-      │ ├ mixed-list-query (0.32 kb)
+      "tsdf (0.55 kb)
+      ├ sess1 (0.48 kb)
+      │ ├ mixed-list-query (0.27 kb)
       │ │ ├ li._i.r.json (0.14 kb)
-      │ │ └ li.h~2924752681.p.json (0.14 kb)
-      │ └ valid-doc (0.21 kb)
+      │ │ └ li.h~2924752681.p.json (0.10 kb)
+      │ └ valid-doc (0.20 kb)
       │   ├ d._i.r.json (0.10 kb)
-      │   └ d.e.p.json (0.10 kb)
+      │   └ d.e.p.json (0.09 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
   });
@@ -689,7 +689,7 @@ describe('async storage efficiency: maintenance', () => {
       ),
     }).toMatchInlineSnapshot(`
       keptPayloadExists: '✅'
-      namespaceRecords: ['__tsdf_payload__:"kept-user', '_i']
+      namespaceRecords: ['_i']
       orphanedPayloadFileExists: '❌'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -704,17 +704,17 @@ describe('async storage efficiency: maintenance', () => {
       2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
              |    └ (namespace index) | 0.11 kb
       2.008s | 🗑️ #2 ✅ tsdf/sess1/orphan-collection/ci.h~2293725328.p.json
-             |    └ (entry data, <"orphan-user>)
+             |    └ (entry data)
       2.009s | end
       "
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.43 kb)
-      ├ sess1 (0.36 kb)
-      │ └ orphan-collection (0.35 kb)
+      "tsdf (0.38 kb)
+      ├ sess1 (0.31 kb)
+      │ └ orphan-collection (0.30 kb)
       │   ├ ci._i.r.json (0.13 kb)
-      │   └ ci.h~1706329294.p.json (0.18 kb)
+      │   └ ci.h~1706329294.p.json (0.13 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
     expect(getParsedOpfsFileData('tsdf/sess1/orphan-collection/ci._i.r.json'))
@@ -926,9 +926,6 @@ describe('async storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`lca: 1736985605681`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
-    ).toMatchInlineSnapshot(`
-      d:
-        value: { name: 'protected', value: 1 }
-    `);
+    ).toMatchInlineSnapshot(`value: { name: 'protected', value: 1 }`);
   });
 });

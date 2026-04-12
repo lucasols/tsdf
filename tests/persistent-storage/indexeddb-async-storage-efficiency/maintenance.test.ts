@@ -20,7 +20,6 @@ import {
 import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import { createOfflineNetworkMock } from '../../utils/networkMock';
 import {
-  createCollectionEnv,
   createDocumentEnv,
   createListQueryEnv,
   resolveAfterIndexedDbStorage,
@@ -33,23 +32,14 @@ setupAsyncStorageEfficiencyTestSuite();
 
 async function resolveAfterIndexedDbTimers<T>(promise: Promise<T>): Promise<T> {
   const pendingResult = Symbol('pendingResult');
-  let didSettle = false;
 
   const settledResultPromise = promise.then(
-    (value) => {
-      didSettle = true;
-      return { status: 'resolved' as const, value };
-    },
-    (error) => {
-      didSettle = true;
-      return { status: 'rejected' as const, error };
-    },
+    (value) => ({ status: 'resolved' as const, value }),
+    (error) => ({ status: 'rejected' as const, error }),
   );
 
   let stableIdlePasses = 0;
   for (let pass = 0; pass < 200; pass++) {
-    if (didSettle && stableIdlePasses >= 2) break;
-
     if (vi.getTimerCount() > 0) {
       stableIdlePasses = 0;
       await vi.advanceTimersToNextTimerAsync();
@@ -64,6 +54,19 @@ async function resolveAfterIndexedDbTimers<T>(promise: Promise<T>): Promise<T> {
     } else {
       stableIdlePasses = 0;
     }
+
+    if (stableIdlePasses < 2) continue;
+
+    const settledResult = await Promise.race([
+      settledResultPromise,
+      Promise.resolve(pendingResult),
+    ]);
+    if (settledResult === pendingResult) continue;
+    if (settledResult.status === 'rejected') {
+      throw settledResult.error;
+    }
+
+    return settledResult.value;
   }
 
   const settledResult = await Promise.race([
@@ -88,7 +91,7 @@ const NAMESPACE_POLICY_STORE_NAME = 'namespacePolicies';
 function matchesScopeKey(
   rawKey: unknown,
   scope: AsyncStorageNamespaceScope,
-): rawKey is [string, string, AsyncStorageNamespaceScope['kind'], string] {
+): boolean {
   return (
     Array.isArray(rawKey) &&
     rawKey[0] === scope.sessionKey &&
@@ -215,21 +218,21 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       "
       time   |
       2s     | 📖 #1 ❌ tsdf._am.g (async global maintenance)
-      2.006s | 📖 #2 ❌ tsdf.sess1._o_.s (entry data)
-      2.013s | ✍️ #1 ❌->✅ tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
+      2.009s | 📖 #2 ❌ tsdf.sess1._o_.s (entry data)
+      2.016s | ✍️ #1 ❌->✅ tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
       "
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.006s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      2.01s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.01s | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.013s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
+      2.009s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
+      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
+      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
+      2.016s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
       ""
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1735689602013`);
+    ).toMatchInlineSnapshot(`lca: 1735689602016`);
   });
 
   test('startup cleanup deletes invalid IndexedDB rows while keeping valid scopes', async () => {
@@ -285,7 +288,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     `);
 
     expect(operationsBreakdown).toContain(
-      'scope=["sess1","invalid-only-list-query","listQuery.query"] -> keys=0 exists=no valid=no',
+      'scope=["sess1","invalid-only-list-query","listQuery.query"] -> keys=0 exists=yes valid=no',
     );
     expect(operationsBreakdown).toContain(
       'scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes',
@@ -295,25 +298,24 @@ describe('indexeddb async storage efficiency: maintenance', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['sess1', 'fresh-doc', 'document', 'document']
-                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","fresh-doc","document"]', 'document']
+                value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -323,10 +325,12 @@ describe('indexeddb async storage efficiency: maintenance', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
-            rowCount: 0
-            rows: []
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'fresh-doc', 'document']
+                value: 'JSON object | 0.0 kb'
         version: 1
       `);
   });
@@ -386,8 +390,6 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     const corruptedStore = mockAdapter.scope('corrupted', 'sess1');
     const triggerDoc = mockAdapter.scope('trigger', 'sess1');
     const corruptedPayload = 'bad-user';
-    const corruptedEntryKey =
-      corruptedStore.collection.itemKey(corruptedPayload);
     const corruptedKey =
       corruptedStore.collection.itemStorageKey(corruptedPayload);
     const triggerKey = triggerDoc.document.storageKey();
@@ -477,12 +479,12 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.007s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess2","expired-doc","document"], ["sess2","fresh-doc","document"]]
-      2.011s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.011s | 📖 scope-state entries+namespacePolicies scope=["sess2","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.011s | 📖 scope-state entries+namespacePolicies scope=["sess2","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.014s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
-      2.017s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess2","expired-doc","document"] keys=["document", "@scope"]
+      2.012s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess2","expired-doc","document"], ["sess2","fresh-doc","document"]]
+      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
+      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess2","expired-doc","document"] -> keys=1 exists=yes valid=yes
+      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess2","fresh-doc","document"] -> keys=1 exists=yes valid=yes
+      2.019s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
+      2.022s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess2","expired-doc","document"] keys=["document", "@scope"]
       ""
     `);
   });
@@ -613,7 +615,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       validEntryExists: '✅'
     `);
     expect(operationsBreakdown).toContain(
-      'scope=["sess1","invalid-entry","collection.item"] -> keys=0 exists=no valid=no',
+      'scope=["sess1","invalid-entry","collection.item"] -> keys=0 exists=yes valid=no',
     );
     expect(operationsBreakdown).toContain(
       'scope=["sess1","orphaned-policy","collection.item"] -> keys=0 exists=yes valid=no',
@@ -623,25 +625,24 @@ describe('indexeddb async storage efficiency: maintenance', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['sess1', 'valid-doc', 'document', 'document']
-                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","valid-doc","document"]', 'document']
+                value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -651,10 +652,12 @@ describe('indexeddb async storage efficiency: maintenance', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
-            rowCount: 0
-            rows: []
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'valid-doc', 'document']
+                value: 'JSON object | 0.0 kb'
         version: 1
       `);
   });
@@ -719,7 +722,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       validItemExists: '✅'
     `);
     expect(operationsBreakdown).toContain(
-      'scope=["sess1","mixed-list-query","listQuery.query"] -> keys=0 exists=no valid=no',
+      'scope=["sess1","mixed-list-query","listQuery.query"] -> keys=0 exists=yes valid=no',
     );
     expect(operationsBreakdown).not.toContain(
       'scope=["sess1","mixed-list-query","listQuery.item"] -> keys=0 exists=yes valid=no',
@@ -729,27 +732,26 @@ describe('indexeddb async storage efficiency: maintenance', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 2
             rows:
-              - key: ['sess1', 'mixed-list-query', 'listQuery.item', '"projects||1']
-                value: 'JSON object | 0.4 kb'
-              - key: ['sess1', 'valid-doc', 'document', 'document']
-                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","mixed-list-query","listQuery.item"]', '"projects||1']
+                value: 'JSON object | 0.2 kb'
+              - key: ['["sess1","valid-doc","document"]', 'document']
+                value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -759,10 +761,14 @@ describe('indexeddb async storage efficiency: maintenance', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
-            rowCount: 0
-            rows: []
+            rowCount: 2
+            rows:
+              - key: ['sess1', 'mixed-list-query', 'listQuery.item']
+                value: 'JSON object | 0.0 kb'
+              - key: ['sess1', 'valid-doc', 'document']
+                value: 'JSON object | 0.0 kb'
         version: 1
       `);
   });
@@ -779,7 +785,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
 
     // IndexedDB stores collection namespace state inline on the entry rows, so a
     // malformed stray row invalidates the whole scope instead of behaving like an
-    // OPFS-style orphaned payload file.
+    // isolated orphaned payload.
     corruptEntryRow({
       key: collectionScope.collection.itemKey('orphan-user'),
       mockAdapter,
@@ -822,20 +828,19 @@ describe('indexeddb async storage efficiency: maintenance', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 0
             rows: []
@@ -848,7 +853,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
             rowCount: 0
             rows: []
@@ -1037,13 +1042,8 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     const protectedDocumentEntry = await getParsedIndexedDbRecordData<{
       a: number;
       d: { d: { value: { name: string; value: number } } };
-      k: string;
-      m: { o: boolean };
-      n: string;
-      o: number;
-      s: string;
-      t: string;
-      v: number;
+      i: string;
+      o?: number;
     }>(reloadedAdapter, {
       key: ['user@example.com', 'protected-doc', 'document', 'document'],
       storeName: 'entries',
@@ -1051,25 +1051,14 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     expect(typeof protectedDocumentEntry?.a).toBe('number');
     expect({
       d: protectedDocumentEntry?.d,
-      k: protectedDocumentEntry?.k,
-      m: protectedDocumentEntry?.m,
-      n: protectedDocumentEntry?.n,
+      i: protectedDocumentEntry?.i,
       o: protectedDocumentEntry?.o,
-      s: protectedDocumentEntry?.s,
-      t: protectedDocumentEntry?.t,
-      v: protectedDocumentEntry?.v,
     }).toMatchInlineSnapshot(`
       d:
-        d:
-          value: { name: 'protected', value: 1 }
+        value: { name: 'protected', value: 1 }
 
-      k: 'document'
-      m: { o: '✅' }
-      n: 'protected-doc'
+      i: '["user@example.com","protected-doc","document"]'
       o: 1
-      s: 'user@example.com'
-      t: 'document'
-      v: 1
     `);
   });
 });

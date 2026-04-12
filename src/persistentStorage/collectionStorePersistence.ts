@@ -175,13 +175,25 @@ export function setupCollectionPersistence<
     serialize: (
       data: PersistedCollectionItemData<ItemState | StorageState>,
     ) => ({ d: data.data, p: data.payload }),
-    deserialize: (value: unknown) =>
+    deserialize: (value: unknown, metadata?: { p?: unknown }) =>
       typeof value === 'object' &&
       value !== null &&
       'd' in value &&
-      'p' in value
+      ('p' in value || metadata?.p !== undefined)
         ? parsePersistedCollectionItemData(
-            { data: value.d, payload: value.p },
+            { data: value.d, payload: 'p' in value ? value.p : metadata?.p },
+            config.payloadSchema,
+            dataSchema,
+          )
+        : null,
+  };
+  const asyncItemStorageValueCodec = {
+    serialize: (data: PersistedCollectionItemData<ItemState | StorageState>) =>
+      data.data,
+    deserialize: (value: unknown, metadata?: { p?: unknown }) =>
+      metadata?.p !== undefined
+        ? parsePersistedCollectionItemData(
+            { data: value, payload: metadata.p },
             config.payloadSchema,
             dataSchema,
           )
@@ -194,6 +206,7 @@ export function setupCollectionPersistence<
   >(
     { ...persistentConfig, entryPrefix: COLLECTION_STORAGE_ENTRY_PREFIX },
     {
+      asyncValueCodec: asyncItemStorageValueCodec,
       getManifestMeta: (data) => ({ p: data.payload }),
       valueCodec: itemStorageValueCodec,
     },

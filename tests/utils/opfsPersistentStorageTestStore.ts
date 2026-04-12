@@ -183,12 +183,24 @@ function buildCustomMetadata(
 
   switch (scope.kind) {
     case 'collection.item':
-    case 'listQuery.item':
       return typeof record.payload === 'string'
         ? { p: record.payload }
         : typeof record.p === 'string'
           ? { p: record.p }
           : {};
+    case 'listQuery.item':
+      return {
+        ...(typeof record.payload === 'string'
+          ? { p: record.payload }
+          : typeof record.p === 'string'
+            ? { p: record.p }
+            : {}),
+        ...(Array.isArray(record.loadedFields)
+          ? { f: record.loadedFields }
+          : Array.isArray(record.lf)
+            ? { f: record.lf }
+            : {}),
+      };
     case 'listQuery.query':
       return {
         ...(typeof record.payload === 'object' ||
@@ -197,9 +209,28 @@ function buildCustomMetadata(
           : 'p' in record
             ? { p: record.p }
             : {}),
+        ...(record.hasMore === true || record.h === true ? { h: true } : {}),
       };
     default:
       return {};
+  }
+}
+
+function compactLogicalPayload(
+  scope: AsyncStorageNamespaceScope,
+  value: unknown,
+): unknown {
+  const record = getRecord(value);
+
+  switch (scope.kind) {
+    case 'document':
+    case 'collection.item':
+    case 'listQuery.item':
+      return record !== null && 'd' in record ? record.d : value;
+    case 'listQuery.query':
+      return record !== null && Array.isArray(record.i) ? record.i : value;
+    default:
+      return value;
   }
 }
 
@@ -333,33 +364,41 @@ function normalizeLogicalPayload(
   metadata?: ManagedMetadataRecord | null,
 ): unknown {
   const record = getRecord(value);
-  if (record === null) return value;
 
   switch (scope.kind) {
     case 'document':
-      return 'd' in record ? { data: record.d } : value;
+      return { data: record !== null && 'd' in record ? record.d : value };
     case 'collection.item':
-      return 'd' in record && 'p' in record
-        ? { data: record.d, payload: record.p }
+      return metadata?.customMetadata !== undefined &&
+        'p' in metadata.customMetadata
+        ? {
+            data: record !== null && 'd' in record ? record.d : value,
+            payload: metadata.customMetadata.p,
+          }
         : value;
     case 'listQuery.item':
-      return 'd' in record && 'p' in record
+      return metadata?.customMetadata !== undefined &&
+        'p' in metadata.customMetadata
         ? {
-            data: record.d,
-            payload: record.p,
-            ...('lf' in record && Array.isArray(record.lf)
-              ? { loadedFields: record.lf }
-              : {}),
+            data: record !== null && 'd' in record ? record.d : value,
+            payload: metadata.customMetadata.p,
+            ...(Array.isArray(metadata.customMetadata.f)
+              ? { loadedFields: metadata.customMetadata.f }
+              : record !== null && 'lf' in record && Array.isArray(record.lf)
+                ? { loadedFields: record.lf }
+                : {}),
           }
         : value;
     case 'listQuery.query':
-      return Array.isArray(record.i) &&
-        metadata?.customMetadata !== undefined &&
-        'p' in metadata.customMetadata
+      return metadata?.customMetadata !== undefined &&
+        'p' in metadata.customMetadata &&
+        (Array.isArray(value) || (record !== null && Array.isArray(record.i)))
         ? {
             payload: metadata.customMetadata.p,
-            items: record.i,
-            hasMore: record.h === true,
+            items: Array.isArray(value) ? value : record?.i,
+            hasMore:
+              metadata.customMetadata.h === true ||
+              (record !== null && record.h === true),
           }
         : value;
     default:
@@ -534,7 +573,7 @@ function writeLogicalStorageEntry(
     mockBrowserOpfs,
     parsed.scope,
     getPayloadRecordKey(parsed.key),
-    JSON.stringify(entry.data),
+    JSON.stringify(compactLogicalPayload(parsed.scope, entry.data)),
   );
   const nextEntries = readNamespaceIndex(mockBrowserOpfs, parsed.scope);
   nextEntries.set(parsed.key, {
@@ -1433,7 +1472,10 @@ export function createOpfsPersistentStorageTestStore(
           setMetadataValue(mockBrowserOpfs, storageKey, {
             lastAccessAt: entry.timestamp,
             version: entry.version,
-            customMetadata: { p: params },
+            customMetadata: {
+              ...(queryOptions.hasMore === true ? { h: true } : {}),
+              p: params,
+            },
           });
           return storageKey;
         },

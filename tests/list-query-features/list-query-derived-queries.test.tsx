@@ -1364,19 +1364,19 @@ test('offline derived query hydration with opfs preloads only the requested grou
   // Snapshot the persisted OPFS layout so the test also protects which groups
   // and exact queries were written before the offline restart.
   expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-    "tsdf (2.43 kb)
-    ├ derived-queries-opfs-groups (2.36 kb)
-    │ └ derived-queries-opfs-groups-store (2.30 kb)
+    "tsdf (2.14 kb)
+    ├ derived-queries-opfs-groups (2.07 kb)
+    │ └ derived-queries-opfs-groups-store (2.02 kb)
     │   ├ li._i.r.json (0.79 kb)
-    │   ├ li.h~1937155452.p.json (0.15 kb)
-    │   ├ li.h~228010772.p.json (0.14 kb)
-    │   ├ li.h~3098628732.p.json (0.14 kb)
-    │   ├ li.h~3224064498.p.json (0.14 kb)
-    │   ├ li.h~4067562186.p.json (0.14 kb)
-    │   ├ li.h~993806230.p.json (0.14 kb)
+    │   ├ li.h~1937155452.p.json (0.11 kb)
+    │   ├ li.h~228010772.p.json (0.10 kb)
+    │   ├ li.h~3098628732.p.json (0.10 kb)
+    │   ├ li.h~3224064498.p.json (0.10 kb)
+    │   ├ li.h~4067562186.p.json (0.10 kb)
+    │   ├ li.h~993806230.p.json (0.09 kb)
     │   ├ lq._i.r.json (0.31 kb)
-    │   ├ lq.h~2167180490.p.json (0.15 kb)
-    │   └ lq.h~2902406637.p.json (0.13 kb)
+    │   ├ lq.h~2167180490.p.json (0.14 kb)
+    │   └ lq.h~2902406637.p.json (0.12 kb)
     └ tsdf._am.g* (0.06 kb)"
   `);
 
@@ -1453,15 +1453,15 @@ test('offline derived query hydration with opfs preloads only the requested grou
     .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
          |    └ (items index) | 0.77 kb
     3ms  | 📖 #3 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq.h~2902406637.p.json
-         |    └ (query data, <{tableId:"users"}>) | 0.09 kb
+         |    └ (query data, <{tableId:"users"}>) | 0.08 kb
     .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
          |    └ (items index) | 0.77 kb ⚠️ REPEATED READ <10ms UNCHANGED
     6ms  | 📖 #4 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~228010772.p.json
-         |    └ (item data, <"users||1>) | 0.10 kb
+         |    └ (item data, <"users||1>) | 0.06 kb
     .    | 📖 #5 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~1937155452.p.json
-         |    └ (item data, <"users||2>) | 0.10 kb
+         |    └ (item data, <"users||2>) | 0.06 kb
     .    | 📖 #6 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~3224064498.p.json
-         |    └ (item data, <"users||3>) | 0.10 kb
+         |    └ (item data, <"users||3>) | 0.06 kb
     9ms  | end
     "
   `);

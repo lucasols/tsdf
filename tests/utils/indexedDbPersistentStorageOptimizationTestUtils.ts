@@ -200,10 +200,6 @@ function compareUnknownValues(left: unknown, right: unknown): number {
   return JSON.stringify(left).localeCompare(JSON.stringify(right));
 }
 
-function areIndexedDbKeysEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 async function flushIndexedDbWrites(
   mockAdapter: IndexedDbPersistentStorageTestStore,
 ): Promise<void> {
@@ -295,11 +291,31 @@ export async function getParsedIndexedDbRecordData<T = unknown>(
     maybeReference === undefined
       ? __LEGIT_CAST__<IndexedDbRowReference, unknown>(mockAdapterOrReference)
       : maybeReference;
+  const normalizedReference =
+    reference.storeName === 'entries' &&
+    Array.isArray(reference.key) &&
+    reference.key.length === 4 &&
+    typeof reference.key[0] === 'string' &&
+    typeof reference.key[1] === 'string' &&
+    typeof reference.key[2] === 'string' &&
+    typeof reference.key[3] === 'string'
+      ? {
+          ...reference,
+          key: [
+            JSON.stringify([
+              reference.key[0],
+              reference.key[1],
+              reference.key[2],
+            ]),
+            reference.key[3],
+          ],
+        }
+      : reference;
 
   await flushIndexedDbWrites(mockAdapter);
   const row = await mockAdapter.indexedDb.getRow(
-    reference.storeName,
-    reference.key,
+    normalizedReference.storeName,
+    normalizedReference.key,
   );
 
   return __LEGIT_CAST__<T | null, unknown>(row === null ? null : row);
@@ -309,16 +325,22 @@ function toManagedMetadataRecord(value: unknown): ManagedMetadataRecord | null {
   const record = getObjectRecord(value);
   if (
     record === null ||
-    typeof record.k !== 'string' ||
     typeof record.a !== 'number' ||
     ('v' in record && record.v !== undefined && typeof record.v !== 'number')
   ) {
     return null;
   }
 
+  const customMetadata: Record<string, unknown> = {
+    ...(getObjectRecord(record.m) ?? {}),
+    ...(typeof record.g === 'string' ? { g: record.g } : {}),
+    ...(record.o === 1 ? { o: true } : {}),
+    ...('p' in record ? { p: record.p } : {}),
+  };
+
   return {
-    customMetadata: getObjectRecord(record.m) ?? {},
-    key: record.k,
+    customMetadata,
+    key: '',
     lastAccessAt: record.a,
     version: typeof record.v === 'number' ? record.v : 1,
     writtenAt: record.a,
@@ -346,16 +368,22 @@ export async function getIndexedDbNamespaceSnapshot(
     .filter(
       (row) =>
         Array.isArray(row.key) &&
-        row.key[0] === scope.sessionKey &&
-        row.key[1] === scope.storeName &&
-        row.key[2] === scope.kind,
+        row.key[0] ===
+          JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]),
     )
     .flatMap((row) => {
       const metadata = toManagedMetadataRecord(row.value);
-      return metadata === null
+      const entryKey =
+        Array.isArray(row.key) && typeof row.key[1] === 'string'
+          ? row.key[1]
+          : null;
+      return metadata === null || entryKey === null
         ? []
         : ([
-            [metadata.key, serializeManagedMetadataRecord(metadata)],
+            [
+              entryKey,
+              serializeManagedMetadataRecord({ ...metadata, key: entryKey }),
+            ],
           ] satisfies Array<[string, Record<string, unknown>]>);
     })
     .sort(([left], [right]) => left.localeCompare(right));
@@ -390,9 +418,11 @@ export async function getIndexedDbPayloadSnapshot<T = unknown>(
     mockAdapter,
     {
       key: [
-        args.scope.sessionKey,
-        args.scope.storeName,
-        args.scope.kind,
+        JSON.stringify([
+          args.scope.sessionKey,
+          args.scope.storeName,
+          args.scope.kind,
+        ]),
         args.key,
       ],
       storeName: 'entries',

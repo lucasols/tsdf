@@ -1,3 +1,4 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { serializeProtectedRef } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
@@ -19,17 +20,16 @@ function getLastOperation<
   operations: IndexedDbPersistentStorageOperation[],
   type: TType,
 ): Extract<IndexedDbPersistentStorageOperation, { type: TType }> | null {
-  const match = [...operations]
-    .reverse()
-    .find(
-      (
-        operation,
-      ): operation is Extract<
-        IndexedDbPersistentStorageOperation,
-        { type: TType }
-      > => operation.type === type,
-    );
-  return match ?? null;
+  for (const operation of [...operations].reverse()) {
+    if (operation.type === type) {
+      return __LEGIT_CAST__<
+        Extract<IndexedDbPersistentStorageOperation, { type: TType }>,
+        IndexedDbPersistentStorageOperation
+      >(operation);
+    }
+  }
+
+  return null;
 }
 
 describe('indexeddb persistent storage adapter', () => {
@@ -335,23 +335,14 @@ describe('indexeddb persistent storage adapter', () => {
       },
     );
 
-    expect(
-      entry === null
-        ? null
-        : pick(entry, ['a', 'd', 'k', 'n', 'o', 's', 't', 'v']),
-    ).toMatchInlineSnapshot(`
+    expect(entry === null ? null : pick(entry, ['a', 'd', 'i']))
+      .toMatchInlineSnapshot(`
       a: 1735689600000
 
       d:
-        d:
-          value: { name: 'Cached document', value: 7 }
+        value: { name: 'Cached document', value: 7 }
 
-      k: 'document'
-      n: 'generic-reader'
-      o: 0
-      s: 'sess1'
-      t: 'document'
-      v: 1
+      i: '["sess1","generic-reader","document"]'
     `);
   });
 });

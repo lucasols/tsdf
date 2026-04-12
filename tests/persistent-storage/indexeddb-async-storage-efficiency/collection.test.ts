@@ -131,11 +131,11 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.007s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-expiration","collection.item"]]
-      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
-      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
-      2.017s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-expiration","collection.item"] keys=["\\"expired-user", "\\"expired-user-2"]
-      2.022s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-expiration","collection.item"] keys=1
+      2.008s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-expiration","collection.item"]]
+      2.014s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
+      2.014s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
+      2.018s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-expiration","collection.item"] keys=["\\"expired-user", "\\"expired-user-2"]
+      2.023s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-expiration","collection.item"] keys=1
       ""
     `);
 
@@ -144,25 +144,24 @@ describe('indexeddb async storage efficiency: collection', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['sess1', 'collection-expiration', 'collection.item', '"fresh-user']
-                value: 'JSON object | 0.4 kb'
+              - key: ['["sess1","collection-expiration","collection.item"]', '"fresh-user']
+                value: 'JSON object | 0.3 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -172,10 +171,12 @@ describe('indexeddb async storage efficiency: collection', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
-            rowCount: 0
-            rows: []
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'collection-expiration', 'collection.item']
+                value: 'JSON object | 0.0 kb'
         version: 1
       `);
 
@@ -190,17 +191,10 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689600000
 
       d:
-        d:
-          value: { id: 'fresh-user', name: 'Fresh User' }
-        p: 'fresh-user'
+        value: { id: 'fresh-user', name: 'Fresh User' }
 
-      k: '"fresh-user'
-      m: { p: 'fresh-user' }
-      n: 'collection-expiration'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      i: '["sess1","collection-expiration","collection.item"]'
+      p: 'fresh-user'
     `);
   });
 
@@ -257,10 +251,8 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      n: 'collection-startup-max-items'
       p: { maxEntries: 2 }
       s: 'sess1'
-      t: 'collection.item'
     `);
   });
 
@@ -508,26 +500,25 @@ describe('indexeddb async storage efficiency: collection', () => {
         stores:
           - autoIncrement: '❌'
             indexes:
-              - keyPath: ['s', 'n', 't', 'g', 'k']
+              - keyPath: ['i', 'g']
                 multiEntry: '❌'
                 name: 'byScopeGroup'
                 unique: '❌'
-              - keyPath: ['s', 'n', 't', 'a', 'k']
+              - keyPath: ['i', 'a']
                 multiEntry: '❌'
                 name: 'byScopeLastAccessAt'
                 unique: '❌'
-              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-              - keyPath: ['s', 'o', 'n', 't', 'k']
+              - keyPath: ['i', 'o']
                 multiEntry: '❌'
-                name: 'bySessionOfflineProtected'
+                name: 'byScopeOfflineProtected'
                 unique: '❌'
-            keyPath: ['s', 'n', 't', 'k']
+            keyPath: null
             name: 'entries'
             rowCount: 2
             rows:
-              - key: ['sess1', 'col-expired-during-max-items', 'collection.item', '"c']
-                value: 'JSON object | 0.4 kb'
-              - key: ['sess1', 'col-expired-during-max-items', 'collection.item', '"d']
+              - key: ['["sess1","col-expired-during-max-items","collection.item"]', '"c']
+                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","col-expired-during-max-items","collection.item"]', '"d']
                 value: 'JSON object | 0.3 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -538,12 +529,12 @@ describe('indexeddb async storage efficiency: collection', () => {
           - autoIncrement: '❌'
             indexes:
               - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            keyPath: ['s', 'n', 't']
+            keyPath: null
             name: 'namespacePolicies'
             rowCount: 1
             rows:
               - key: ['sess1', 'col-expired-during-max-items', 'collection.item']
-                value: 'JSON object | 0.2 kb'
+                value: 'JSON object | 0.1 kb'
         version: 1
       `);
   });
@@ -729,21 +720,14 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689600000
 
       d:
-        d:
-          value: { id: '1', name: 'Edited user' }
-        p: '1'
+        value: { id: '1', name: 'Edited user' }
 
-      k: '"1'
-      m: { p: '1' }
-      n: 'col-mutation-flow'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      i: '["sess1","col-mutation-flow","collection.item"]'
+      p: '1'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -803,21 +787,14 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689606142
 
       d:
-        d:
-          value: { id: '1', name: 'Edited after delete' }
-        p: '1'
+        value: { id: '1', name: 'Edited after delete' }
 
-      k: '"1'
-      m: { p: '1' }
-      n: 'col-mutation-retry-after-delete'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      i: '["sess1","col-mutation-retry-after-delete","collection.item"]'
+      p: '1'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-after-delete","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-after-delete","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -891,21 +868,14 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689606142
 
       d:
-        d:
-          value: { id: '1', name: 'Edited during write' }
-        p: '1'
+        value: { id: '1', name: 'Edited during write' }
 
-      k: '"1'
-      m: { p: '1' }
-      n: 'col-mutation-retry-during-write'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      i: '["sess1","col-mutation-retry-during-write","collection.item"]'
+      p: '1'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   }, 5000);
@@ -1001,21 +971,14 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689600000
 
       d:
-        d:
-          value: { id: '1', name: 'Fresh user' }
-        p: '1'
+        value: { id: '1', name: 'Fresh user' }
 
-      k: '"1'
-      m: { p: '1' }
-      n: 'col-invalidation-flow'
-      o: 0
-      s: 'sess-invalidation-flow'
-      t: 'collection.item'
-      v: 1
+      i: '["sess-invalidation-flow","col-invalidation-flow","collection.item"]'
+      p: '1'
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
-      1.854s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.855s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -1074,17 +1037,11 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689600000
 
       d:
-        d:
-          value: { id: '1', name: 'Fresh user' }
-        p: '1'
+        value: { id: '1', name: 'Fresh user' }
 
-      k: '"1'
-      m: { o: '✅', p: '1' }
-      n: 'col-offline-marker-flow'
+      i: '["sess1","col-offline-marker-flow","collection.item"]'
       o: 1
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      p: '1'
     `);
   });
 
@@ -1162,17 +1119,10 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689600000
 
       d:
-        d:
-          value: { id: '1', name: 'Fresh user 2' }
-        p: '1'
+        value: { id: '1', name: 'Fresh user 2' }
 
-      k: '"1'
-      m: { p: '1' }
-      n: 'col-coalesced-invalidations'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      i: '["sess1","col-coalesced-invalidations","collection.item"]'
+      p: '1'
     `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -1275,7 +1225,7 @@ describe('indexeddb async storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","col-remount-stale-touch","collection.item"] keys=["\\"1"] -> ["\\"1"]
-      44ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-stale-touch","collection.item"] put=[] delete=[] touch=["\\"1"]
+      46ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-stale-touch","collection.item"] put=[] delete=[] touch=["\\"1"]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1338,17 +1288,10 @@ describe('indexeddb async storage efficiency: collection', () => {
       a: 1735689604851
 
       d:
-        d:
-          value: { id: '1', name: 'Fetched user' }
-        p: '1'
+        value: { id: '1', name: 'Fetched user' }
 
-      k: '"1'
-      m: { p: '1' }
-      n: 'col-remount-no-cache'
-      o: 0
-      s: 'sess1'
-      t: 'collection.item'
-      v: 1
+      i: '["sess1","col-remount-no-cache","collection.item"]'
+      p: '1'
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""

@@ -519,9 +519,7 @@ describe('opfs: list query store persistence', () => {
       readerEnv.store.state.itemLoadedFields[
         listQueryScope.itemKey('users', 1)
       ],
-    ).toMatchInlineSnapshot(`
-      ['id', 'name']
-    `);
+    ).toMatchInlineSnapshot(`['id', 'name']`);
   });
 
   test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
@@ -1002,7 +1000,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
 
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
@@ -1014,7 +1012,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||2']`);
   });
 
   test('cold persisted query items can be evicted during unrelated maxItems cleanup and later hydrate with missing items filtered out', async () => {
@@ -1051,7 +1049,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-cold-query-items/lq.%7BtableId%3A%22users%22%7D.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
 
     const readerEnv = createEnv({
       storeName,
@@ -1530,10 +1528,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-max-query-size/lq.%7BtableId%3A%22users%22%7D.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      h: '✅'
-      i: ['"users||1', '"users||2']
-    `);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
     expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 1))).toBe(
       true,
     );
