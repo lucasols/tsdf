@@ -108,7 +108,7 @@ describe('indexeddb async storage efficiency: document', () => {
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['["sess1","doc-remount-flow","document"]', 'd']
+              - key: ['["sess1","doc-remount-flow","d"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -123,7 +123,7 @@ describe('indexeddb async storage efficiency: document', () => {
             name: 'namespacePolicies'
             rowCount: 1
             rows:
-              - key: ['sess1', 'doc-remount-flow', 'document']
+              - key: ['sess1', 'doc-remount-flow', 'd']
                 value: 'JSON object | 0.0 kb'
         version: 1
       `);
@@ -135,7 +135,7 @@ describe('indexeddb async storage efficiency: document', () => {
         d:
           value: { name: 'Cached document', value: 7 }
 
-        i: '["sess1","doc-remount-flow","document"]'
+        i: '["sess1","doc-remount-flow","d"]'
       `);
   });
 
@@ -296,7 +296,7 @@ describe('indexeddb async storage efficiency: document', () => {
         d:
           value: { name: 'Cached document', value: 8 }
 
-        i: '["sess1","doc-startup-touch-offline-marker","document"]'
+        i: '["sess1","doc-startup-touch-offline-marker","d"]'
       `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
@@ -342,7 +342,7 @@ describe('indexeddb async storage efficiency: document', () => {
         d:
           value: { name: 'Edited document', value: 99 }
 
-        i: '["sess1","doc-mutation-flow","document"]'
+        i: '["sess1","doc-mutation-flow","d"]'
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
@@ -393,7 +393,7 @@ describe('indexeddb async storage efficiency: document', () => {
         d:
           value: { name: 'Fresh document', value: 42 }
 
-        i: '["sess1","doc-invalidation-flow","document"]'
+        i: '["sess1","doc-invalidation-flow","d"]'
       `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -462,7 +462,7 @@ describe('indexeddb async storage efficiency: document', () => {
         d:
           value: { name: 'Fresh document 2', value: 42 }
 
-        i: '["sess1","doc-coalesced-invalidations","document"]'
+        i: '["sess1","doc-coalesced-invalidations","d"]'
       `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -514,7 +514,7 @@ describe('indexeddb async storage efficiency: document', () => {
         d:
           value: { name: 'Fresh document', value: 42 }
 
-        i: '["sess1","doc-offline-marker-flow","document"]'
+        i: '["sess1","doc-offline-marker-flow","d"]'
         o: 1
       `);
   });

@@ -2,7 +2,9 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
+  encodePersistedAsyncNamespaceKind,
   getPayloadRecordKey,
+  parsePersistedAsyncNamespaceKind,
   parseAsyncStorageRecordKey,
 } from './asyncStorageShared';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
@@ -41,54 +43,6 @@ export function encodeFileNameSegment(value: string): string {
 
 export function joinPath(...segments: string[]): string {
   return segments.filter((segment) => segment.length > 0).join('/');
-}
-
-export function getFileNameKindAlias(
-  kind: AsyncStorageNamespaceScope['kind'],
-): string {
-  switch (kind) {
-    case 'document':
-      return 'd';
-    case 'collection.item':
-      return 'ci';
-    case 'listQuery.item':
-      return 'li';
-    case 'listQuery.query':
-      return 'lq';
-    case 'offline.queue':
-      return 'oq';
-    case 'offline.conflict':
-      return 'oc';
-    case 'offline.entity':
-      return 'oe';
-    case '__internal.protected':
-      return 'ip';
-  }
-}
-
-export function parseFileNameKindAlias(
-  value: string,
-): AsyncStorageNamespaceScope['kind'] | null {
-  switch (value) {
-    case 'd':
-      return 'document';
-    case 'ci':
-      return 'collection.item';
-    case 'li':
-      return 'listQuery.item';
-    case 'lq':
-      return 'listQuery.query';
-    case 'oq':
-      return 'offline.queue';
-    case 'oc':
-      return 'offline.conflict';
-    case 'oe':
-      return 'offline.entity';
-    case 'ip':
-      return '__internal.protected';
-    default:
-      return null;
-  }
 }
 
 export type OpfsRecordKind = 'payload' | 'raw';
@@ -160,7 +114,7 @@ export function buildFileName(
   key: string,
 ): string {
   const parsedRecordKey = parseRecordKey(key);
-  const kindAlias = getFileNameKindAlias(scope.kind);
+  const kindAlias = encodePersistedAsyncNamespaceKind(scope.kind);
 
   if (parsedRecordKey.recordKind === 'raw') {
     return (
@@ -220,7 +174,7 @@ export function parseFileNameInfo(fileName: string): ParsedOpfsFileName | null {
   const entryPart = parts[1] ?? '';
   const recordPart = parts[2] ?? '';
 
-  const kind = parseFileNameKindAlias(kindPart);
+  const kind = parsePersistedAsyncNamespaceKind(kindPart);
   if (kind === null) return null;
 
   const recordKind = parseRecordKindAlias(recordPart);

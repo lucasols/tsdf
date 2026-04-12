@@ -160,7 +160,7 @@ describe('indexeddb async storage efficiency: collection', () => {
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['["sess1","collection-expiration","collection.item"]', '"fresh-user']
+              - key: ['["sess1","collection-expiration","ci"]', '"fresh-user']
                 value: 'JSON object | 0.3 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -175,7 +175,7 @@ describe('indexeddb async storage efficiency: collection', () => {
             name: 'namespacePolicies'
             rowCount: 1
             rows:
-              - key: ['sess1', 'collection-expiration', 'collection.item']
+              - key: ['sess1', 'collection-expiration', 'ci']
                 value: 'JSON object | 0.0 kb'
         version: 1
       `);
@@ -193,7 +193,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: 'fresh-user', name: 'Fresh User' }
 
-      i: '["sess1","collection-expiration","collection.item"]'
+      i: '["sess1","collection-expiration","ci"]'
       p: 'fresh-user'
     `);
   });
@@ -251,7 +251,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      p: { maxEntries: 2 }
+      p: { m: 2 }
       s: 'sess1'
     `);
   });
@@ -516,10 +516,10 @@ describe('indexeddb async storage efficiency: collection', () => {
             name: 'entries'
             rowCount: 2
             rows:
-              - key: ['["sess1","col-expired-during-max-items","collection.item"]', '"c']
+              - key: ['["sess1","col-expired-during-max-items","ci"]', '"c']
                 value: 'JSON object | 0.3 kb'
-              - key: ['["sess1","col-expired-during-max-items","collection.item"]', '"d']
-                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","col-expired-during-max-items","ci"]', '"d']
+                value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -533,8 +533,8 @@ describe('indexeddb async storage efficiency: collection', () => {
             name: 'namespacePolicies'
             rowCount: 1
             rows:
-              - key: ['sess1', 'col-expired-during-max-items', 'collection.item']
-                value: 'JSON object | 0.1 kb'
+              - key: ['sess1', 'col-expired-during-max-items', 'ci']
+                value: 'JSON object | 0.0 kb'
         version: 1
       `);
   });
@@ -722,7 +722,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Edited user' }
 
-      i: '["sess1","col-mutation-flow","collection.item"]'
+      i: '["sess1","col-mutation-flow","ci"]'
       p: '1'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
@@ -789,7 +789,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Edited after delete' }
 
-      i: '["sess1","col-mutation-retry-after-delete","collection.item"]'
+      i: '["sess1","col-mutation-retry-after-delete","ci"]'
       p: '1'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
@@ -870,7 +870,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Edited during write' }
 
-      i: '["sess1","col-mutation-retry-during-write","collection.item"]'
+      i: '["sess1","col-mutation-retry-during-write","ci"]'
       p: '1'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
@@ -973,7 +973,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Fresh user' }
 
-      i: '["sess-invalidation-flow","col-invalidation-flow","collection.item"]'
+      i: '["sess-invalidation-flow","col-invalidation-flow","ci"]'
       p: '1'
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
@@ -1039,7 +1039,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Fresh user' }
 
-      i: '["sess1","col-offline-marker-flow","collection.item"]'
+      i: '["sess1","col-offline-marker-flow","ci"]'
       o: 1
       p: '1'
     `);
@@ -1121,7 +1121,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Fresh user 2' }
 
-      i: '["sess1","col-coalesced-invalidations","collection.item"]'
+      i: '["sess1","col-coalesced-invalidations","ci"]'
       p: '1'
     `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
@@ -1290,7 +1290,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       d:
         value: { id: '1', name: 'Fetched user' }
 
-      i: '["sess1","col-remount-no-cache","collection.item"]'
+      i: '["sess1","col-remount-no-cache","ci"]'
       p: '1'
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`

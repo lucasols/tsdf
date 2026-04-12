@@ -215,7 +215,7 @@ describe('indexeddb persistent storage adapter', () => {
     const protectedKeys = await adapter.readProtectedStorageKeys('sess1');
 
     expect([...protectedKeys]).toMatchInlineSnapshot(
-      `['["sess1","protected-doc","document","document"]']`,
+      `['["sess1","protected-doc","d","document"]']`,
     );
     expect(
       getLastOperation(operations, 'readProtectedStorageKeys') === null
@@ -228,7 +228,7 @@ describe('indexeddb persistent storage adapter', () => {
     ).toMatchInlineSnapshot(`
       sessionKey: 'sess1'
       type: 'readProtectedStorageKeys'
-      values: ['["sess1","protected-doc","document","document"]']
+      values: ['["sess1","protected-doc","d","document"]']
     `);
 
     operations.length = 0;
@@ -251,7 +251,7 @@ describe('indexeddb persistent storage adapter', () => {
     ).toMatchInlineSnapshot(`
       sessionKey: 'sess1'
       type: 'syncSessionProtectedKeys'
-      values: ['["sess1","protected-doc","document","document"]']
+      values: ['["sess1","protected-doc","d","document"]']
     `);
 
     adapter.resetForTests?.();
@@ -348,7 +348,7 @@ describe('indexeddb persistent storage adapter', () => {
         d:
           value: { name: 'Cached document', value: 7 }
 
-        i: '["sess1","generic-reader","document"]'
+        i: '["sess1","generic-reader","d"]'
       `);
   });
 });

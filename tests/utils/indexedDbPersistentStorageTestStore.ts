@@ -2,6 +2,10 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
+import {
+  encodePersistedAsyncNamespaceKind,
+  getPersistedNamespaceId,
+} from '../../src/persistentStorage/asyncStorageShared';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   createIndexedDbPersistentStorageForTests,
@@ -15,14 +19,17 @@ import type {
   AsyncStorageNamespaceStaticPolicy,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { parseAsyncStorageNamespaceKind } from '../../src/persistentStorage/types';
 
 const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
 const INDEXED_DB_META_STORE = 'meta';
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 
+type IndexedDbPersistedStaticPolicy = { k?: string[]; m?: number };
+
 type IndexedDbNamespacePolicyRecord = {
-  p: AsyncStorageNamespaceStaticPolicy | null;
+  p: IndexedDbPersistedStaticPolicy | null;
   s: string;
 };
 
@@ -334,13 +341,17 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
 }
 
 function createScopeId(scope: AsyncStorageNamespaceScope): string {
-  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
+  return getPersistedNamespaceId(scope);
 }
 
 function createScopePrimaryKey(
   scope: AsyncStorageNamespaceScope,
-): [string, string, AsyncStorageNamespaceScope['kind']] {
-  return [scope.sessionKey, scope.storeName, scope.kind];
+): [string, string, string] {
+  return [
+    scope.sessionKey,
+    scope.storeName,
+    encodePersistedAsyncNamespaceKind(scope.kind),
+  ];
 }
 
 function getEntryPrimaryKey(
@@ -476,25 +487,69 @@ function normalizeTestStaticPolicy(
   policy: Record<string, unknown>,
 ): AsyncStorageNamespaceStaticPolicy {
   return {
-    ...(typeof policy.m === 'number' ? { maxEntries: policy.m } : {}),
-    ...(Array.isArray(policy.p)
+    ...(typeof policy.m === 'number'
+      ? { maxEntries: policy.m }
+      : typeof policy.maxEntries === 'number'
+        ? { maxEntries: policy.maxEntries }
+        : {}),
+    ...(Array.isArray(policy.k)
       ? {
-          pinnedKeys: policy.p.flatMap((value) =>
+          pinnedKeys: policy.k.flatMap((value) =>
             typeof value === 'string' ? [value] : [],
           ),
         }
-      : {}),
+      : Array.isArray(policy.p)
+        ? {
+            pinnedKeys: policy.p.flatMap((value) =>
+              typeof value === 'string' ? [value] : [],
+            ),
+          }
+        : Array.isArray(policy.pinnedKeys)
+          ? {
+              pinnedKeys: policy.pinnedKeys.flatMap((value) =>
+                typeof value === 'string' ? [value] : [],
+              ),
+            }
+          : {}),
   };
 }
 
 export function serializeTestStaticPolicy(
-  policy: AsyncStorageNamespaceStaticPolicy | null | undefined,
+  policy:
+    | AsyncStorageNamespaceStaticPolicy
+    | Record<string, unknown>
+    | null
+    | undefined,
 ): Record<string, unknown> | null {
   if (policy === undefined || policy === null) return null;
 
+  const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(policy);
+
   return {
-    ...(typeof policy.maxEntries === 'number' ? { m: policy.maxEntries } : {}),
-    ...(Array.isArray(policy.pinnedKeys) ? { p: policy.pinnedKeys } : {}),
+    ...(typeof record.m === 'number'
+      ? { m: record.m }
+      : typeof record.maxEntries === 'number'
+        ? { m: record.maxEntries }
+        : {}),
+    ...(Array.isArray(record.k)
+      ? {
+          k: record.k.flatMap((value) =>
+            typeof value === 'string' ? [value] : [],
+          ),
+        }
+      : Array.isArray(record.p)
+        ? {
+            k: record.p.flatMap((value) =>
+              typeof value === 'string' ? [value] : [],
+            ),
+          }
+        : Array.isArray(record.pinnedKeys)
+          ? {
+              k: record.pinnedKeys.flatMap((value) =>
+                typeof value === 'string' ? [value] : [],
+              ),
+            }
+          : {}),
   };
 }
 
@@ -846,16 +901,39 @@ export function createIndexedDbPersistentStorageTestStore(
     storeName: string,
     key: unknown,
   ): unknown {
+    const semanticKind =
+      Array.isArray(key) && typeof key[2] === 'string'
+        ? parseAsyncStorageNamespaceKind(key[2])
+        : null;
+
     if (
       storeName === INDEXED_DB_ENTRY_STORE &&
       Array.isArray(key) &&
       key.length === 4 &&
       typeof key[0] === 'string' &&
       typeof key[1] === 'string' &&
-      typeof key[2] === 'string' &&
+      semanticKind !== null &&
       typeof key[3] === 'string'
     ) {
-      return [JSON.stringify([key[0], key[1], key[2]]), key[3]];
+      return [
+        getPersistedNamespaceId({
+          kind: semanticKind,
+          sessionKey: key[0],
+          storeName: key[1],
+        }),
+        key[3],
+      ];
+    }
+
+    if (
+      storeName === INDEXED_DB_NAMESPACE_POLICY_STORE &&
+      Array.isArray(key) &&
+      key.length === 3 &&
+      typeof key[0] === 'string' &&
+      typeof key[1] === 'string' &&
+      semanticKind !== null
+    ) {
+      return [key[0], key[1], encodePersistedAsyncNamespaceKind(semanticKind)];
     }
 
     return key;
@@ -1033,7 +1111,7 @@ export function createIndexedDbPersistentStorageTestStore(
           .objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE)
           .put(
             {
-              p: staticPolicy,
+              p: serializeTestStaticPolicy(staticPolicy),
               s: scope.sessionKey,
             } satisfies IndexedDbNamespacePolicyRecord,
             createScopePrimaryKey(scope),

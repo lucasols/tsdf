@@ -6,6 +6,7 @@ import { advanceTime } from '../../utils/genericTestUtils';
 import {
   getIndexedDbNamespaceSnapshot,
   getIndexedDbPayloadSnapshot,
+  getIndexedDbStructureSnapshot,
   getParsedIndexedDbRecordData,
   startIndexedDbPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
@@ -106,22 +107,22 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed one stale query+item pair and one fresh pair to verify cleanup across both namespaces.
-    listQueryScope.listQuery.seedItem(
+    const expiredItemKey = listQueryScope.listQuery.seedItem(
       'expired-users',
       1,
       { id: 1, name: 'Expired Item' },
       { timestamp: expiredTimestamp },
-    );
-    listQueryScope.listQuery.seedQuery(
+    ).storageKey;
+    const expiredQueryKey = listQueryScope.listQuery.seedQuery(
       expiredQueryParams,
       [storeItemKey('expired-users', 1)],
       { timestamp: expiredTimestamp },
     );
-    listQueryScope.listQuery.seedItem('fresh-users', 2, {
+    const freshItemKey = listQueryScope.listQuery.seedItem('fresh-users', 2, {
       id: 2,
       name: 'Fresh Item',
-    });
-    listQueryScope.listQuery.seedQuery(freshQueryParams, [
+    }).storageKey;
+    const freshQueryKey = listQueryScope.listQuery.seedQuery(freshQueryParams, [
       storeItemKey('fresh-users', 2),
     ]);
     // Startup should only queue the background scan.
@@ -138,6 +139,18 @@ describe('indexeddb async storage efficiency: list-query', () => {
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      expiredItemExists: await mockAdapter.has(expiredItemKey),
+      expiredQueryExists: await mockAdapter.has(expiredQueryKey),
+      freshItemExists: await mockAdapter.has(freshItemKey),
+      freshQueryExists: await mockAdapter.has(freshQueryKey),
+    }).toMatchInlineSnapshot(`
+      expiredItemExists: '❌'
+      expiredQueryExists: '❌'
+      freshItemExists: '✅'
+      freshQueryExists: '✅'
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
       2.011s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","list-query-expiration","listQuery.item"], ["sess1","list-query-expiration","listQuery.query"]]
@@ -151,6 +164,92 @@ describe('indexeddb async storage efficiency: list-query', () => {
       2.03s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","list-query-expiration","listQuery.query"] keys=1
       ""
     `);
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['i', 'g']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['i', 'a']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - keyPath: ['i', 'o']
+                multiEntry: '❌'
+                name: 'byScopeOfflineProtected'
+                unique: '❌'
+            keyPath: null
+            name: 'entries'
+            rowCount: 2
+            rows:
+              - key: ['["sess1","list-query-expiration","li"]', '"fresh-users||2']
+                value: 'JSON object | 0.2 kb'
+              - key: ['["sess1","list-query-expiration","lq"]', '{tableId:"fresh-users"}']
+                value: 'JSON object | 0.2 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: null
+            name: 'namespacePolicies'
+            rowCount: 2
+            rows:
+              - key: ['sess1', 'list-query-expiration', 'li']
+                value: 'JSON object | 0.0 kb'
+              - key: ['sess1', 'list-query-expiration', 'lq']
+                value: 'JSON object | 0.0 kb'
+        version: 1
+      `);
+    expect(
+      await readListQueryItemNamespaceSnapshot({
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`
+      entries:
+        "fresh-users||2: { a: 1735689600000, p: 'fresh-users||2' }
+    `);
+    expect(
+      await readListQueryItemPayloadSnapshot({
+        id: 2,
+        mockAdapter,
+        sessionKey,
+        storeName,
+        tableId: 'fresh-users',
+      }),
+    ).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Fresh Item'
+    `);
+    expect(
+      await readListQueryQueryNamespaceSnapshot({
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`
+      entries:
+        {tableId:"fresh-users"}:
+          a: 1735689600000
+          p: { tableId: 'fresh-users' }
+    `);
+    expect(
+      await readListQueryQueryPayloadSnapshot({
+        mockAdapter,
+        params: freshQueryParams,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`['"fresh-users||2']`);
   });
 
   test('startup cleanup enforces maxQueries against preloaded persisted entries', async () => {
@@ -197,6 +296,23 @@ describe('indexeddb async storage efficiency: list-query', () => {
       ""
     `);
     expect(
+      await readListQueryQueryNamespaceSnapshot({
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`
+      entries:
+        {tableId:"second"}:
+          a: 1735689600100
+          p: { tableId: 'second' }
+        {tableId:"third"}:
+          a: 1735689600200
+          p: { tableId: 'third' }
+
+      staticPolicy: { m: 2 }
+    `);
+    expect(
       await readListQueryNamespacePolicyRow({
         kind: 'listQuery.query',
         mockAdapter,
@@ -204,7 +320,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      p: { maxEntries: 2 }
+      p: { m: 2 }
       s: 'sess1'
     `);
   });
@@ -677,7 +793,9 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(
       (await listQueryScope.listQuery.listStoredItemKeys()).sort(),
     ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
-    expect(operationsBreakdown).not.toContain('query data');
+    expect(operationsBreakdown).not.toContain(
+      'scope=["sess1","lq-item-metadata","listQuery.query"]',
+    );
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
       1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-item-metadata","listQuery.item"] order=lru-desc -> ["\\"users||2", "\\"users||1"]
@@ -687,46 +805,82 @@ describe('indexeddb async storage efficiency: list-query', () => {
   });
 
   test('maxItems-triggered flush re-evaluates mixed standalone and query-backed items using persisted recency', async () => {
+    const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'lq-expired-during-max-items';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
+    const adminsQuery = { tableId: 'admins' };
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
-    const env = createListQueryEnv({ storeName, sessionKey, maxItems: 2 });
-
-    // Seed two persisted query-backed items with different recencies, then let
-    // an unrelated standalone write push the cache over maxItems.
-    listQueryScope.listQuery.seedItem(
-      'users',
-      1,
-      { id: 1, name: 'Older cached' },
-      { timestamp: Date.now() - 100 },
-    );
-    listQueryScope.listQuery.seedItem('users', 2, {
-      id: 2,
-      name: 'Newer cached',
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      maxItems: 2,
+      serverData: {
+        users: [{ id: 3, name: 'Referenced fresh' }],
+        admins: [{ id: 4, name: 'Second referenced fresh' }],
+      },
     });
-    listQueryScope.listQuery.seedQuery(usersQuery, [
-      storeItemKey('users', 1),
-      storeItemKey('users', 2),
-    ]);
+
+    // Drain startup cleanup first so the later item removals are attributable to the maxItems path.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // Adding a standalone item should force the inline maxItems pass to re-evaluate
-    // both the cold query-backed items and the new standalone entry by persisted recency.
+    // Persist two standalone items that will later look expired to the cleanup pass.
+    env.apiStore.addItemToState(rawItemPayload('standalone', 1), {
+      id: 1,
+      name: 'Expired oldest',
+    });
+    await advanceTime(1100);
+    await settleIndexedDbStorage();
+
+    await advanceTime(100);
+    env.apiStore.addItemToState(rawItemPayload('standalone', 2), {
+      id: 2,
+      name: 'Expired newer',
+    });
+    await advanceTime(1100);
+    await settleIndexedDbStorage();
+
+    // Persist one query-backed item before introducing a second query-backed item.
+    env.scheduleFetch('highPriority', usersQuery);
+    await settleIndexedDbStorage();
+    await advanceTime(1100);
+    await settleIndexedDbStorage();
+
+    // Backdate the standalone entries so the later maxItems cleanup sees them as stale persisted candidates.
+    mockAdapter.setMetadata(
+      listQueryScope.listQuery.itemStorageKey('standalone', 1),
+      {
+        ...(await mockAdapter.readMetadata(
+          listQueryScope.listQuery.itemStorageKey('standalone', 1),
+        )),
+        lastAccessAt: expiredTimestamp,
+      },
+    );
+    mockAdapter.setMetadata(
+      listQueryScope.listQuery.itemStorageKey('standalone', 2),
+      {
+        ...(await mockAdapter.readMetadata(
+          listQueryScope.listQuery.itemStorageKey('standalone', 2),
+        )),
+        lastAccessAt: expiredTimestamp,
+      },
+    );
+    await settleIndexedDbStorage();
+
+    // Fetching a second query-backed item should re-run the inline trim using the
+    // persisted timestamps from the earlier writes.
     const readCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
-    env.apiStore.addItemToState(rawItemPayload('standalone', 3), {
-      id: 3,
-      name: 'Fresh standalone',
-    });
+    env.scheduleFetch('highPriority', adminsQuery);
+    await settleIndexedDbStorage();
     await advanceTime(1100);
     await settleIndexedDbStorage();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
       (await listQueryScope.listQuery.listStoredItemKeys()).sort(),
-    ).toMatchInlineSnapshot(`['"standalone||3', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"admins||4', '"standalone||1']`);
     expect(
       await readListQueryItemNamespaceSnapshot({
         mockAdapter,
@@ -735,8 +889,8 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
-        "standalone||3: { a: 1735689604040, p: 'standalone||3' }
-        "users||2: { a: 1735689600000, p: 'users||2' }
+        "admins||4: { a: 1735689610215, p: 'admins||4' }
+        "standalone||1: { a: 1735689610215, p: 'standalone||1' }
 
       staticPolicy: { m: 2 }
     `);
@@ -748,8 +902,11 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
+        {tableId:"admins"}:
+          a: 1735689610169
+          p: { tableId: 'admins' }
         {tableId:"users"}:
-          a: 1735689600000
+          a: 1735689607154
           p: { tableId: 'users' }
     `);
     expect(
@@ -759,13 +916,71 @@ describe('indexeddb async storage efficiency: list-query', () => {
         sessionKey,
         storeName,
       }),
-    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||3']`);
+    expect(
+      await readListQueryQueryPayloadSnapshot({
+        mockAdapter,
+        params: adminsQuery,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`['"admins||4']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-expired-during-max-items","listQuery.item"] order=lru-desc -> ["\\"users||2", "\\"users||1"]
-      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-expired-during-max-items","listQuery.item"] put=["\\"standalone||3"] delete=["\\"users||1"] touch=[] static-policy
+      1.813s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-expired-during-max-items","listQuery.item"] order=lru-desc -> ["\\"users||3", "\\"standalone||2"]
+      1.859s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-expired-during-max-items","listQuery.query"] put=["{tableId:\\"admins\\"}"] delete=[] touch=[] static-policy
+      1.911s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-expired-during-max-items","listQuery.item"] put=["\\"admins||4", "\\"standalone||1"] delete=["\\"users||3", "\\"standalone||2"] touch=[] static-policy
       ""
     `);
+
+    expect(await getIndexedDbStructureSnapshot(mockAdapter))
+      .toMatchInlineSnapshot(`
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['i', 'g']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['i', 'a']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - keyPath: ['i', 'o']
+                multiEntry: '❌'
+                name: 'byScopeOfflineProtected'
+                unique: '❌'
+            keyPath: null
+            name: 'entries'
+            rowCount: 4
+            rows:
+              - key: ['["sess1","lq-expired-during-max-items","li"]', '"admins||4']
+                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","lq-expired-during-max-items","li"]', '"standalone||1']
+                value: 'JSON object | 0.3 kb'
+              - key: ['["sess1","lq-expired-during-max-items","lq"]', '{tableId:"admins"}']
+                value: 'JSON object | 0.2 kb'
+              - key: ['["sess1","lq-expired-during-max-items","lq"]', '{tableId:"users"}']
+                value: 'JSON object | 0.2 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: null
+            name: 'namespacePolicies'
+            rowCount: 2
+            rows:
+              - key: ['sess1', 'lq-expired-during-max-items', 'li']
+                value: 'JSON object | 0.0 kb'
+              - key: ['sess1', 'lq-expired-during-max-items', 'lq']
+                value: 'JSON object | 0.0 kb'
+        version: 1
+      `);
   });
 
   test('item flush preserves fresh standalone entries that were persisted before the store noticed them', async () => {
@@ -900,7 +1115,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
-    expect(cleanupOperations).not.toContain('query data');
+    expect(cleanupOperations).not.toContain('entries.getMany');
     expect(cleanupOperations).toMatchInlineSnapshot(`
       ""
       2.013s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","lq-shared-item-cleanup","listQuery.item"], ["sess1","lq-shared-item-cleanup","listQuery.query"]]
@@ -945,30 +1160,31 @@ describe('indexeddb async storage efficiency: list-query', () => {
     await settleIndexedDbStorage();
 
     // Capture the explicit delete path after the initial query+item persistence has settled.
-    const deleteCapture =
-      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
     await settleIndexedDbStorage();
-    const deleteOperations = deleteCapture.finish().timelineString;
 
     expect(await mockAdapter.has(deletedItemStorageKey)).toBe(false);
     expect(
       (await listQueryScope.listQuery.listStoredItemKeys()).sort(),
     ).toMatchInlineSnapshot(`['"users||2']`);
     expect(
-      Object.keys(
-        (
-          await readListQueryQueryNamespaceSnapshot({
-            mockAdapter,
-            sessionKey,
-            storeName,
-          })
-        )?.entries ?? {},
-      ).sort(),
+      await readListQueryQueryNamespaceSnapshot({
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
     ).toMatchInlineSnapshot(`
-      - '{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}'
-      - '{tableId:"users"}'
+      entries:
+        {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}:
+          a: 1735689602048
+          p:
+            filters:
+              - { field: 'name', op: 'eq', value: 'Alice' }
+            tableId: 'users'
+        {tableId:"users"}:
+          a: 1735689602048
+          p: { tableId: 'users' }
     `);
     expect(
       await readListQueryQueryPayloadSnapshot({
@@ -986,14 +1202,6 @@ describe('indexeddb async storage efficiency: list-query', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`[]`);
-    // The exact commit timestamps can drift by a couple of milliseconds, but the
-    // protected behavior is the order and content of the two namespace writes.
-    expect(stripTimelineDurations(deleteOperations)).toMatchInlineSnapshot(`
-      ""
-      | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-delete-flow","listQuery.query"] put=["{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"}", "{tableId:\\"users\\"}"] delete=[] touch=[] static-policy
-      | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-delete-flow","listQuery.item"] put=["\\"users||2"] delete=["\\"users||1"] touch=[] static-policy
-      ""
-    `);
   });
 
   test('deleteItemState removes a cold persisted item without hydrating it first', async () => {
@@ -1046,6 +1254,12 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(deleteOperations).toContain(
       'commit scope=["sess1","lq-cold-delete-flow","listQuery.item"] put=[] delete=["\\"users||1"] touch=[] static-policy',
     );
+    expect(deleteOperations).toMatchInlineSnapshot(`
+      ""
+      1s | 🔎 entries.primaryKey scope=["sess1","lq-cold-delete-flow","listQuery.item"] order=key -> ["\\"users||1"]
+      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-cold-delete-flow","listQuery.item"] put=[] delete=["\\"users||1"] touch=[] static-policy
+      ""
+    `);
   });
 
   test('preloadQueryFromStorage hydrates the cached list query once and keeps later preloads and direct reads in memory', async () => {
@@ -1912,6 +2126,18 @@ describe('indexeddb async storage efficiency: list-query', () => {
         id: 1
         name: 'Edited user'
       `);
+    expect(
+      await readListQueryItemPayloadSnapshot({
+        id: 1,
+        mockAdapter,
+        sessionKey,
+        storeName,
+        tableId: 'users',
+      }),
+    ).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Edited user'
+    `);
     expect(
       await readListQueryItemNamespaceSnapshot({
         mockAdapter,

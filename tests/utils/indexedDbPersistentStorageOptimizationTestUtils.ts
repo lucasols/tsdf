@@ -1,11 +1,16 @@
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { parseAsyncStorageRecordKey } from '../../src/persistentStorage/asyncStorageShared';
+import {
+  encodePersistedAsyncNamespaceKind,
+  getPersistedNamespaceId,
+  parseAsyncStorageRecordKey,
+} from '../../src/persistentStorage/asyncStorageShared';
 import { type IndexedDbPersistentStorageOperation } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
 import type {
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
 } from '../../src/persistentStorage/types';
+import { parseAsyncStorageNamespaceKind } from '../../src/persistentStorage/types';
 import {
   type IndexedDbPersistentStorageTestStore,
   type ManagedMetadataRecord,
@@ -298,19 +303,37 @@ export async function getParsedIndexedDbRecordData<T = unknown>(
     typeof reference.key[0] === 'string' &&
     typeof reference.key[1] === 'string' &&
     typeof reference.key[2] === 'string' &&
-    typeof reference.key[3] === 'string'
+    typeof reference.key[3] === 'string' &&
+    parseAsyncStorageNamespaceKind(reference.key[2]) !== null
       ? {
           ...reference,
           key: [
-            JSON.stringify([
-              reference.key[0],
-              reference.key[1],
-              reference.key[2],
-            ]),
+            getPersistedNamespaceId({
+              kind: parseAsyncStorageNamespaceKind(reference.key[2])!,
+              sessionKey: reference.key[0],
+              storeName: reference.key[1],
+            }),
             reference.key[3],
           ],
         }
-      : reference;
+      : reference.storeName === 'namespacePolicies' &&
+          Array.isArray(reference.key) &&
+          reference.key.length === 3 &&
+          typeof reference.key[0] === 'string' &&
+          typeof reference.key[1] === 'string' &&
+          typeof reference.key[2] === 'string' &&
+          parseAsyncStorageNamespaceKind(reference.key[2]) !== null
+        ? {
+            ...reference,
+            key: [
+              reference.key[0],
+              reference.key[1],
+              encodePersistedAsyncNamespaceKind(
+                parseAsyncStorageNamespaceKind(reference.key[2])!,
+              ),
+            ],
+          }
+        : reference;
 
   await flushIndexedDbWrites(mockAdapter);
   const row = await mockAdapter.indexedDb.getRow(
@@ -360,16 +383,14 @@ export async function getIndexedDbNamespaceSnapshot(
     mockAdapter.indexedDb.getRow('namespacePolicies', [
       scope.sessionKey,
       scope.storeName,
-      scope.kind,
+      encodePersistedAsyncNamespaceKind(scope.kind),
     ]),
   ]);
 
   const serializedEntries: Array<[string, Record<string, unknown>]> = entryRows
     .filter(
       (row) =>
-        Array.isArray(row.key) &&
-        row.key[0] ===
-          JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]),
+        Array.isArray(row.key) && row.key[0] === getPersistedNamespaceId(scope),
     )
     .flatMap((row) => {
       const metadata = toManagedMetadataRecord(row.value);
@@ -417,14 +438,7 @@ export async function getIndexedDbPayloadSnapshot<T = unknown>(
   const row = await getParsedIndexedDbRecordData<Record<string, unknown>>(
     mockAdapter,
     {
-      key: [
-        JSON.stringify([
-          args.scope.sessionKey,
-          args.scope.storeName,
-          args.scope.kind,
-        ]),
-        args.key,
-      ],
+      key: [getPersistedNamespaceId(args.scope), args.key],
       storeName: 'entries',
     },
   );

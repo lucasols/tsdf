@@ -1,6 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
-import { serializeProtectedRef } from './asyncStorageShared';
+import {
+  parsePersistedAsyncNamespaceKind,
+  serializeProtectedRef,
+} from './asyncStorageShared';
 import {
   createCompactLocalStorageEntry,
   parseCompactLocalStorageEntry,
@@ -91,24 +94,10 @@ function ensureAsyncNamespaceKind(
   const directKind = parseAsyncStorageNamespaceKind(entryPrefix);
   if (directKind !== null) return directKind;
 
-  switch (entryPrefix) {
-    case 'ci':
-      return 'collection.item';
-    case 'li':
-      return 'listQuery.item';
-    case 'lq':
-      return 'listQuery.query';
-    case 'oq':
-      return 'offline.queue';
-    case 'oc':
-      return 'offline.conflict';
-    case 'oe':
-      return 'offline.entity';
-    default:
-      throw new Error(
-        `[tsdf] Unsupported async namespace kind: ${entryPrefix}`,
-      );
-  }
+  const persistedKind = parsePersistedAsyncNamespaceKind(entryPrefix);
+  if (persistedKind !== null) return persistedKind;
+
+  throw new Error(`[tsdf] Unsupported async namespace kind: ${entryPrefix}`);
 }
 
 /**

@@ -4,9 +4,12 @@ import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   compareMetadata,
+  encodePersistedAsyncNamespaceKind,
   getNamespaceId,
+  getPersistedNamespaceId,
   getPayloadRecordKey,
   normalizeStaticPolicy,
+  parsePersistedAsyncNamespaceKind,
   parseAsyncStorageRecordKey,
   serializeProtectedRef,
 } from './asyncStorageShared';
@@ -22,7 +25,6 @@ import type {
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
 } from './types';
-import { parseAsyncStorageNamespaceKind } from './types';
 
 export const DEFAULT_INDEXED_DB_NAME =
   'tsdf-persistent-storage-compact-alpha-reset';
@@ -136,12 +138,16 @@ type IndexedDbDriverInstrumentation = {
   reset: () => void;
 };
 
-type ScopePrimaryKey = [string, string, AsyncStorageNamespaceScope['kind']];
+type ScopePrimaryKey = [string, string, string];
 
 function createScopePrimaryKey(
   scope: AsyncStorageNamespaceScope,
 ): ScopePrimaryKey {
-  return [scope.sessionKey, scope.storeName, scope.kind];
+  return [
+    scope.sessionKey,
+    scope.storeName,
+    encodePersistedAsyncNamespaceKind(scope.kind),
+  ];
 }
 
 type EntryPrimaryKey = [string, string];
@@ -200,7 +206,7 @@ function createScopeId(
   storeName: string,
   kind: AsyncStorageNamespaceScope['kind'],
 ): string {
-  return getNamespaceId({ sessionKey, storeName, kind });
+  return getPersistedNamespaceId({ sessionKey, storeName, kind });
 }
 
 function getScopeFromPrimaryKey(
@@ -215,7 +221,7 @@ function getScopeFromPrimaryKey(
 
   const kind =
     typeof rawKind === 'string'
-      ? parseAsyncStorageNamespaceKind(rawKind)
+      ? parsePersistedAsyncNamespaceKind(rawKind)
       : null;
   if (kind === null) return null;
 
@@ -338,8 +344,10 @@ function toEntryRecordValue(value: unknown): IndexedDbEntryRecord {
   return __LEGIT_CAST__<IndexedDbEntryRecord, unknown>(value);
 }
 
+type IndexedDbPersistedStaticPolicy = { k?: string[]; m?: number };
+
 type IndexedDbNamespacePolicyRecord = {
-  p: AsyncStorageNamespaceStaticPolicy | null;
+  p: IndexedDbPersistedStaticPolicy | null;
   s: string;
 };
 
@@ -351,15 +359,64 @@ function toNamespacePolicyRecordValue(
   return __LEGIT_CAST__<IndexedDbNamespacePolicyRecord, unknown>(value);
 }
 
-function toStaticPolicyCandidate(
+function parseIndexedDbPersistedStaticPolicy(
   value: unknown,
 ): AsyncStorageNamespaceStaticPolicy | null | undefined {
-  // WORKAROUND: Static policies cross the IndexedDB boundary as unknown and must
-  // be rebound before normalizeStaticPolicy can validate their shape.
-  return __LEGIT_CAST__<
-    AsyncStorageNamespaceStaticPolicy | null | undefined,
-    unknown
-  >(value);
+  if (value === null || value === undefined) return null;
+  if (!isObject(value)) return undefined;
+
+  const record = toRecordValue(value);
+  if (Object.keys(record).some((key) => key !== 'k' && key !== 'm')) {
+    return undefined;
+  }
+
+  const rawMaxEntries = record.m;
+  if (
+    rawMaxEntries !== undefined &&
+    (typeof rawMaxEntries !== 'number' ||
+      !Number.isInteger(rawMaxEntries) ||
+      rawMaxEntries < 0)
+  ) {
+    return undefined;
+  }
+
+  const validatedPinnedKeys =
+    record.k === undefined ? undefined : validateStringArray(record.k);
+  if (validatedPinnedKeys === null) return undefined;
+
+  return normalizeStaticPolicy({
+    ...(typeof record.m === 'number' ? { maxEntries: record.m } : {}),
+    ...(validatedPinnedKeys !== undefined
+      ? { pinnedKeys: validatedPinnedKeys }
+      : {}),
+  });
+}
+
+function serializeIndexedDbPersistedStaticPolicy(
+  policy: AsyncStorageNamespaceStaticPolicy | null | undefined,
+): IndexedDbPersistedStaticPolicy | null {
+  const normalizedPolicy = normalizeStaticPolicy(policy);
+  if (normalizedPolicy === null) return null;
+
+  return {
+    ...(normalizedPolicy.maxEntries !== undefined
+      ? { m: normalizedPolicy.maxEntries }
+      : {}),
+    ...(normalizedPolicy.pinnedKeys !== undefined &&
+    normalizedPolicy.pinnedKeys.length > 0
+      ? { k: normalizedPolicy.pinnedKeys }
+      : {}),
+  };
+}
+
+function validateStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const result: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') return null;
+    result.push(entry);
+  }
+  return result;
 }
 
 function isValidEntryRecord(record: unknown): boolean {
@@ -407,14 +464,16 @@ function isValidNamespacePolicyRecord(record: unknown): boolean {
 
   return (
     recordValue.p === null ||
-    normalizeStaticPolicy(toStaticPolicyCandidate(recordValue.p)) !== null
+    parseIndexedDbPersistedStaticPolicy(recordValue.p) !== undefined
   );
 }
 
 function getStaticPolicyFromScopeRecord(
   record: IndexedDbNamespacePolicyRecord | undefined,
 ): AsyncStorageNamespaceStaticPolicy | null {
-  return record === undefined ? null : normalizeStaticPolicy(record.p);
+  if (record === undefined) return null;
+
+  return parseIndexedDbPersistedStaticPolicy(record.p) ?? null;
 }
 
 function compactEntryValue(
@@ -1086,7 +1145,9 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       await openRequestAsPromise(
         policyStore.put(
           {
-            p: normalizedStaticPolicy ?? existingStaticPolicy,
+            p: serializeIndexedDbPersistedStaticPolicy(
+              normalizedStaticPolicy ?? existingStaticPolicy,
+            ),
             s: scope.sessionKey,
           } satisfies IndexedDbNamespacePolicyRecord,
           createScopePolicyKey(scope),
@@ -1299,7 +1360,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     } else {
       policyStore.put(
         {
-          p: normalizeStaticPolicy(state.staticPolicy),
+          p: serializeIndexedDbPersistedStaticPolicy(state.staticPolicy),
           s: scope.sessionKey,
         } satisfies IndexedDbNamespacePolicyRecord,
         createScopePolicyKey(scope),
@@ -1532,10 +1593,12 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     policyStore.put(
       {
-        p: getStaticPolicyFromScopeRecord(
-          isValidNamespacePolicyRecord(existingScopeRecord)
-            ? toNamespacePolicyRecordValue(existingScopeRecord)
-            : undefined,
+        p: serializeIndexedDbPersistedStaticPolicy(
+          getStaticPolicyFromScopeRecord(
+            isValidNamespacePolicyRecord(existingScopeRecord)
+              ? toNamespacePolicyRecordValue(existingScopeRecord)
+              : undefined,
+          ),
         ),
         s: scope.sessionKey,
       } satisfies IndexedDbNamespacePolicyRecord,
@@ -1575,17 +1638,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       });
     }
 
-    return {
-      entries,
-      // WORKAROUND: Persisted namespace policies come from IndexedDB's untyped
-      // DOM request surface and must be rebound after normalization.
-      staticPolicy: normalizeStaticPolicy(
-        __LEGIT_CAST__<
-          AsyncStorageNamespaceStaticPolicy | null | undefined,
-          unknown
-        >(recordValue.s),
-      ),
-    };
+    const staticPolicy = parseIndexedDbPersistedStaticPolicy(recordValue.s);
+    if (staticPolicy === undefined) return null;
+
+    return { entries, staticPolicy };
   }
 
   async #getDatabase(): Promise<IDBDatabase> {

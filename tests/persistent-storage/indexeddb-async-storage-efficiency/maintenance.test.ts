@@ -316,7 +316,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['["sess1","fresh-doc","document"]', 'd']
+              - key: ['["sess1","fresh-doc","d"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -331,7 +331,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'namespacePolicies'
             rowCount: 1
             rows:
-              - key: ['sess1', 'fresh-doc', 'document']
+              - key: ['sess1', 'fresh-doc', 'd']
                 value: 'JSON object | 0.0 kb'
         version: 1
       `);
@@ -643,7 +643,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['["sess1","valid-doc","document"]', 'd']
+              - key: ['["sess1","valid-doc","d"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -658,7 +658,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'namespacePolicies'
             rowCount: 1
             rows:
-              - key: ['sess1', 'valid-doc', 'document']
+              - key: ['sess1', 'valid-doc', 'd']
                 value: 'JSON object | 0.0 kb'
         version: 1
       `);
@@ -750,9 +750,9 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'entries'
             rowCount: 2
             rows:
-              - key: ['["sess1","mixed-list-query","listQuery.item"]', '"projects||1']
+              - key: ['["sess1","mixed-list-query","li"]', '"projects||1']
                 value: 'JSON object | 0.2 kb'
-              - key: ['["sess1","valid-doc","document"]', 'd']
+              - key: ['["sess1","valid-doc","d"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -767,9 +767,9 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'namespacePolicies'
             rowCount: 2
             rows:
-              - key: ['sess1', 'mixed-list-query', 'listQuery.item']
+              - key: ['sess1', 'mixed-list-query', 'li']
                 value: 'JSON object | 0.0 kb'
-              - key: ['sess1', 'valid-doc', 'document']
+              - key: ['sess1', 'valid-doc', 'd']
                 value: 'JSON object | 0.0 kb'
         version: 1
       `);
@@ -1065,7 +1065,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       d:
         value: { name: 'protected', value: 1 }
 
-      i: '["user@example.com","protected-doc","document"]'
+      i: '["user@example.com","protected-doc","d"]'
       o: 1
     `);
   });

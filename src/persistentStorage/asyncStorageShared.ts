@@ -2,17 +2,85 @@ import { rc_parse_json, rc_string, rc_tuple } from 'runcheck';
 import type {
   AsyncStorageEntryMetadata,
   AsyncStorageMetadataOrder,
+  AsyncStorageNamespaceKind,
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
   AsyncStorageProtectedEntryRef,
 } from './types';
-import { parseAsyncStorageNamespaceKind } from './types';
 
 export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
 export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
 
 export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
   return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
+}
+
+export type PersistedAsyncNamespaceKindAlias =
+  | 'd'
+  | 'ci'
+  | 'li'
+  | 'lq'
+  | 'oq'
+  | 'oc'
+  | 'oe'
+  | 'ip';
+
+export function encodePersistedAsyncNamespaceKind(
+  kind: AsyncStorageNamespaceKind,
+): PersistedAsyncNamespaceKindAlias {
+  switch (kind) {
+    case 'document':
+      return 'd';
+    case 'collection.item':
+      return 'ci';
+    case 'listQuery.item':
+      return 'li';
+    case 'listQuery.query':
+      return 'lq';
+    case 'offline.queue':
+      return 'oq';
+    case 'offline.conflict':
+      return 'oc';
+    case 'offline.entity':
+      return 'oe';
+    case '__internal.protected':
+      return 'ip';
+  }
+}
+
+export function parsePersistedAsyncNamespaceKind(
+  value: string,
+): AsyncStorageNamespaceKind | null {
+  switch (value) {
+    case 'd':
+      return 'document';
+    case 'ci':
+      return 'collection.item';
+    case 'li':
+      return 'listQuery.item';
+    case 'lq':
+      return 'listQuery.query';
+    case 'oq':
+      return 'offline.queue';
+    case 'oc':
+      return 'offline.conflict';
+    case 'oe':
+      return 'offline.entity';
+    case 'ip':
+      return '__internal.protected';
+    default:
+      return null;
+  }
+}
+
+export function getPersistedNamespaceId(
+  scope: AsyncStorageNamespaceScope,
+): string {
+  return JSON.stringify([
+    scope.sessionKey,
+    scope.storeName,
+    encodePersistedAsyncNamespaceKind(scope.kind),
+  ]);
 }
 
 export function getPayloadRecordKey(key: string): string {
@@ -22,7 +90,12 @@ export function getPayloadRecordKey(key: string): string {
 export function serializeProtectedRef(
   ref: AsyncStorageProtectedEntryRef,
 ): string {
-  return JSON.stringify([ref.sessionKey, ref.storeName, ref.kind, ref.key]);
+  return JSON.stringify([
+    ref.sessionKey,
+    ref.storeName,
+    encodePersistedAsyncNamespaceKind(ref.kind),
+    ref.key,
+  ]);
 }
 
 export function parseProtectedRef(
@@ -35,7 +108,7 @@ export function parseProtectedRef(
   if (parsed === null) return null;
 
   const [sessionKey, storeName, rawKind, key] = parsed;
-  const kind = parseAsyncStorageNamespaceKind(rawKind);
+  const kind = parsePersistedAsyncNamespaceKind(rawKind);
   if (kind === null) return null;
 
   return { sessionKey, storeName, kind, key };
