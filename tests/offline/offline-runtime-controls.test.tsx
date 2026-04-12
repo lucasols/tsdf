@@ -2,7 +2,6 @@ import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -11,6 +10,7 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   getOfflineQueueEntries,
   type UpdateValueExecuteContext,
@@ -43,19 +43,17 @@ function createManagedOfflineSession(args: {
 }
 
 beforeEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('runtime mode enabled toggles are shared across stores in the same session', async () => {
@@ -253,7 +251,7 @@ test('runtime offline overrides are memory-only and reset to the store config af
   `);
 
   // Simulate a fresh app boot with the same persisted storage but a new runtime session.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
   const { offlineSession: restartedOfflineSession } =
     createManagedOfflineSession({
       getSessionKey: () => sessionKey,

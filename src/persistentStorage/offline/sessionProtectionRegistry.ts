@@ -16,3 +16,13 @@ export function getSessionProtectedKeysSnapshot(
 export function clearSessionProtectedKeysSnapshot(sessionKey: string): void {
   protectedKeysBySession.delete(sessionKey);
 }
+
+export function __resetSessionProtectedKeysSnapshotForTests(): void {
+  if (!import.meta.env.TEST) {
+    throw new Error(
+      '[tsdf] __resetSessionProtectedKeysSnapshotForTests is test-only',
+    );
+  }
+
+  protectedKeysBySession.clear();
+}

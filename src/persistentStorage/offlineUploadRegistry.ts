@@ -27,3 +27,11 @@ export async function clearRegisteredOfflineUploadStorage(
     throw firstFailure.reason;
   }
 }
+
+export function __resetOfflineUploadRegistryForTests(): void {
+  if (!import.meta.env.TEST) {
+    throw new Error('[tsdf] __resetOfflineUploadRegistryForTests is test-only');
+  }
+
+  uploadAdaptersBySession.clear();
+}

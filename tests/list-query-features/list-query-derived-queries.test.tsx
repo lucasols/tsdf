@@ -23,7 +23,6 @@ import {
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
-import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { listQueryQueryPayloadSchema } from '../offline/offlineTestShared';
 import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
@@ -35,6 +34,7 @@ import {
   startOpfsPersistentStorageOperationCapture,
   startPersistentStorageOperationCapture,
 } from '../utils/persistentStorageOptimizationTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
@@ -107,16 +107,12 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterAll(() => {
@@ -1182,8 +1178,10 @@ test('offline derived query hydration only loads the requested group from persis
   // Snapshot the persisted local-sync state so the restart coverage also
   // protects the stored query membership and item index shape.
   expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-    "tsdf (2.08 kb)
-    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.76 kb)
+    "tsdf (2.13 kb)
+    ├ _m (0.81 kb)
+    │ ├ g (0.04 kb)
+    │ └ r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.76 kb)
     └ derived-queries-persisted-groups.derived-queries-persisted-groups-store (1.31 kb)
       ├ li (0.73 kb)
       │ ├ "products||1 (0.12 kb)
@@ -1421,7 +1419,7 @@ test('offline derived query hydration with opfs preloads only the requested grou
   await flushAllTimers();
   // Simulate the memory boundary of a real app restart. Persisted OPFS data
   // stays on disk, but the per-tab async adapter cache should not survive.
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests();
   mockAdapter.clearInstrumentation();
   restartedEnv.clearTimeline();
   restartedEnv.addTimelineComments('beforeNextAction', [
