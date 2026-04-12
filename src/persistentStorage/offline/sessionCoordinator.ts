@@ -138,7 +138,7 @@ const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
 
-function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
+export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
     sessionKey,
     network: { enabled: false, active: false },
@@ -2234,10 +2234,10 @@ export function createOfflineSession<
 >(args: {
   config: OfflineSessionConfig;
   getSessionKey?: () => string | false;
-  uploads?: OfflineSessionUploadsConfig<TUploadRef>;
 }): OfflineSession<TUploadRef> {
   const getSessionKey = args.getSessionKey ?? (() => false);
-  const { config, uploads } = args;
+  const { config } = args;
+  const uploads = config.uploads;
   const inactiveScope = `offline-session:${Math.random().toString(36).slice(2)}`;
   const baseRuntimeConfig: OfflineRuntimeConfig = {
     network: { enabled: config.network?.enabled ?? false },

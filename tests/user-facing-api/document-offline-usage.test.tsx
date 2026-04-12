@@ -114,7 +114,7 @@ test('direct document store runtime offline controls public api', async () => {
     errorNormalizer: normalizeError,
     offlineSession: { network: network.config },
   });
-  const offlineSession = storeManager.getOfflineSession()!;
+  const offlineSession = storeManager;
 
   const documentStore_ = createDocumentStore<
     DocState,
@@ -151,10 +151,12 @@ test('direct document store runtime offline controls public api', async () => {
     updatedAt: 1735689602000
   `);
 
-  offlineSession.setOfflineRuntimeConfig({
-    network: { enabled: false },
-    mutationQueueing: { network: 'disallow' },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({
+      network: { enabled: false },
+      mutationQueueing: { network: 'disallow' },
+    })
+    .unwrap();
   await Promise.resolve();
 
   expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
@@ -173,15 +175,19 @@ test('direct document store runtime offline controls public api', async () => {
     updatedAt: 1735689602000
   `);
 
-  expect(() => {
-    offlineSession.setOfflineRuntimeConfig({ outage: { enabled: true } });
-  }).toThrowErrorMatchingInlineSnapshot(
-    `
-    Error#:
-      message: 'Offline runtime control "outage.enabled" is unavailable for session "direct-document-runtime-controls" because offlineSession.outage was not configured'
-      name: 'Error'
-    `,
-  );
+  const unavailableOutageResult = offlineSession.setOfflineRuntimeConfig({
+    outage: { enabled: true },
+  });
+  expect(unavailableOutageResult.ok).toBe(false);
+  if (!unavailableOutageResult.ok) {
+    expect(unavailableOutageResult.error).toMatchInlineSnapshot(
+      `
+        Error#:
+          message: 'Offline runtime control "outage.enabled" is unavailable for session "direct-document-runtime-controls" because offlineSession.outage was not configured'
+          name: 'Error'
+      `,
+    );
+  }
 
   offlineSession.resetOfflineRuntimeConfig();
   await Promise.resolve();

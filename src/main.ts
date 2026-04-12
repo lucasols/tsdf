@@ -163,7 +163,6 @@ export { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
 
 export {
-  createOfflineSession,
   getGlobalOfflineEntities,
   getGlobalOfflineResolutions,
   getGlobalOfflineStatus,

@@ -15,6 +15,7 @@ import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type {
   OfflineAttachedUploadIds,
   OfflineOperationUploadsContext,
+  OfflineSessionUploadsConfig,
   OfflineUpload,
 } from '../offlineUploadTypes';
 import type { PersistentStorageSchema } from '../types';
@@ -274,6 +275,8 @@ export type OfflineSessionConfig = {
    * @default undefined
    */
   mutationQueueing?: OfflineMutationQueueingConfig;
+  /** Optional upload transport/storage config shared by the whole session. */
+  uploads?: OfflineSessionUploadsConfig;
 };
 
 /** Per-session offline status snapshot shared across tabs. */

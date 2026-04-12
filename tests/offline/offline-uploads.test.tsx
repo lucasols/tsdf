@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
   clearSessionStorage,
-  createOfflineSession,
+  createStoreManager,
   opfsOfflineUploadAdapter,
 } from '../../src/main';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
@@ -16,7 +16,7 @@ import {
   createMockBrowserOpfs,
   resetMockBrowserOpfsForTests,
 } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -66,17 +66,20 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
   const mockBrowserOpfs = createMockBrowserOpfs();
   const uploadRenders = createLoggerStore();
   const uploadCalls: string[] = [];
-  const session = createOfflineSession({
+  const session = createStoreManager({
     getSessionKey: () => 'offline-upload-hook-session',
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: async ({ id, onProgress }) => {
-        uploadCalls.push(id);
-        onProgress({ progress: 0.5 });
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        onProgress({ progress: 1 });
-        return `server:${id}`;
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, onProgress }) => {
+          uploadCalls.push(id);
+          onProgress({ progress: 0.5 });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          onProgress({ progress: 1 });
+          return `server:${id}`;
+        },
       },
     },
   });
@@ -93,15 +96,17 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
   // Queue a manual upload while offline so the hook exposes the pending entry.
   network.setOffline();
   uploadRenders.addMark('queue upload while offline');
-  await resolveAfterAllTimers(
-    session.saveOfflineUpload({
-      id: 'avatar',
-      file: new File(['manual upload'], 'avatar.txt', {
-        type: 'text/plain',
-        lastModified: 1,
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'avatar',
+        file: new File(['manual upload'], 'avatar.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
       }),
-    }),
-  );
+    )
+  ).unwrap();
 
   expect(
     uploadHook.result.current &&
@@ -205,14 +210,17 @@ test('manual uploads expire only after one week in the current online session', 
   const sessionKey = 'offline-upload-retention-session';
   const dayMs = 24 * 60 * 60 * 1000;
   const uploadCalls: string[] = [];
-  const session = createOfflineSession({
+  const session = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => {
-        uploadCalls.push(id);
-        return Promise.resolve(`server:${id}`);
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => {
+          uploadCalls.push(id);
+          return Promise.resolve(`server:${id}`);
+        },
       },
     },
   });
@@ -222,15 +230,17 @@ test('manual uploads expire only after one week in the current online session', 
   // Keep the upload offline first so a long disconnected stretch does not
   // start the retention clock yet.
   network.setOffline();
-  await resolveAfterAllTimers(
-    session.saveOfflineUpload({
-      id: 'stale-manual-upload',
-      file: new File(['retention body'], 'retention.txt', {
-        type: 'text/plain',
-        lastModified: 1,
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'stale-manual-upload',
+        file: new File(['retention body'], 'retention.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
       }),
-    }),
-  );
+    )
+  ).unwrap();
 
   await advanceTime(8 * dayMs);
   expect(
@@ -403,27 +413,30 @@ test('document direct uploads survive restart and replay with restored files eve
   // Start offline so the mutation is persisted instead of replaying immediately.
   network.setOffline();
 
-  const session = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
+  const session = storeManager;
   session.getOfflineStatus();
 
   const env = createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(
     1,
     {
       id: 'offline-direct-upload-doc',
-      getSessionKey: () => sessionKey,
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session,
           operations: {
             updateValue: {
               inputSchema: rc_object({ value: rc_number }),
@@ -490,14 +503,18 @@ test('document direct uploads survive restart and replay with restored files eve
   uploadHook.unmount();
   __resetSessionOfflineCoordinatorRegistryForTests();
 
-  const restartedSession = createOfflineSession({
+  const restartedStoreManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
+  const restartedSession = restartedStoreManager;
   restartedSession.getOfflineStatus();
 
   const restartedEnv = createDocumentStoreTestEnv<
@@ -505,13 +522,12 @@ test('document direct uploads survive restart and replay with restored files eve
     DirectUploadUpdateOperations
   >(1, {
     id: 'offline-direct-upload-doc',
-    getSessionKey: () => sessionKey,
+    storeManager: restartedStoreManager,
     testScenario: 'idle',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: restartedSession,
         operations: {
           updateValue: {
             inputSchema: rc_object({ value: rc_number }),
@@ -636,27 +652,30 @@ test('queued direct uploads keep same logical field names isolated per mutation'
 
   network.setOffline();
 
-  const session = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
+  const session = storeManager;
   session.getOfflineStatus();
 
   const env = createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(
     1,
     {
       id: 'offline-direct-upload-collision-doc',
-      getSessionKey: () => sessionKey,
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session,
           operations: {
             updateValue: {
               inputSchema: rc_object({ value: rc_number }),
@@ -728,25 +747,30 @@ test('clearSessionStorage removes registered offline uploads for local-sync sess
   const mockBrowserOpfs = createMockBrowserOpfs();
   const sessionKey = 'offline-upload-clear-session';
 
-  const session = createOfflineSession({
+  const session = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
 
   await flushAllTimers();
-  await resolveAfterAllTimers(
-    session.saveOfflineUpload({
-      id: 'avatar',
-      file: new File(['clear me'], 'clear.txt', {
-        type: 'text/plain',
-        lastModified: 1,
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'avatar',
+        file: new File(['clear me'], 'clear.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
       }),
-    }),
-  );
+    )
+  ).unwrap();
 
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
     "tsdf-uploads (0.46 kb)
@@ -762,12 +786,15 @@ test('clearSessionStorage removes registered offline uploads for local-sync sess
 
   __resetSessionOfflineCoordinatorRegistryForTests();
 
-  const restartedSession = createOfflineSession({
+  const restartedSession = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
 
@@ -781,42 +808,52 @@ test('uploads named metadata.json still rehydrate their original bytes after res
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-metadata-filename-session';
 
-  const session = createOfflineSession({
+  const session = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
 
   await flushAllTimers();
-  await resolveAfterAllTimers(
-    session.saveOfflineUpload({
-      id: 'metadata-file',
-      file: new File(['real file bytes'], 'metadata.json', {
-        type: 'application/json',
-        lastModified: 1,
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'metadata-file',
+        file: new File(['real file bytes'], 'metadata.json', {
+          type: 'application/json',
+          lastModified: 1,
+        }),
       }),
-    }),
-  );
+    )
+  ).unwrap();
 
   __resetSessionOfflineCoordinatorRegistryForTests();
 
-  const restartedSession = createOfflineSession({
+  const restartedSession = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: ({ id }) => Promise.resolve(`server:${id}`),
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
     },
   });
 
   await flushAllTimers();
 
-  const restoredFile = await resolveAfterAllTimers(
-    restartedSession.loadOfflineUpload('metadata-file'),
-  );
+  const restoredFile = (
+    await resolveAfterAllTimers(
+      restartedSession.loadOfflineUpload('metadata-file'),
+    )
+  ).unwrap();
   expect(restoredFile?.name).toBe('metadata.json');
   expect(await restoredFile?.text()).toBe('real file bytes');
 });
@@ -837,33 +874,36 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
   // queue up first.
   network.setOffline();
 
-  const session = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: async ({ id, file, onProgress }) => {
-        replayEvents.push(`upload-start:${id}:${file.name}`);
-        onProgress({ progress: 0.5 });
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        onProgress({ progress: 1 });
-        replayEvents.push(`upload-finish:${id}`);
-        return `server:${id}`;
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file, onProgress }) => {
+          replayEvents.push(`upload-start:${id}:${file.name}`);
+          onProgress({ progress: 0.5 });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          onProgress({ progress: 1 });
+          replayEvents.push(`upload-finish:${id}`);
+          return `server:${id}`;
+        },
       },
     },
   });
+  const session = storeManager;
 
   const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
     1,
     {
       id: 'offline-upload-dependency-doc',
-      getSessionKey: () => sessionKey,
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session,
           operations: {
             updateWithAttachment: {
               inputSchema: rc_object({
@@ -901,15 +941,17 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
   await flushAllTimers();
 
   // Save the upload first; the mutation will refer to this offline upload id.
-  await resolveAfterAllTimers(
-    session.saveOfflineUpload({
-      id: 'asset-1',
-      file: new File(['dependency body'], 'dependency.txt', {
-        type: 'text/plain',
-        lastModified: 1,
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'asset-1',
+        file: new File(['dependency body'], 'dependency.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
       }),
-    }),
-  );
+    )
+  ).unwrap();
 
   // Queue the mutation that depends on the upload resolving to a final ref.
   await resolveAfterAllTimers(
@@ -1001,33 +1043,36 @@ test('online mutations can resolve staged upload ids after reconnect and use the
 
   network.setOffline();
 
-  const session = createOfflineSession({
+  const storeManager = createStoreManager({
     getSessionKey: () => sessionKey,
-    config: { network: network.config },
-    uploads: {
-      adapter: opfsOfflineUploadAdapter,
-      upload: async ({ id, file, onProgress }) => {
-        requestEvents.push(`upload-start:${id}:${file.name}`);
-        onProgress({ progress: 0.5 });
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        onProgress({ progress: 1 });
-        requestEvents.push(`upload-finish:${id}`);
-        return `server:${id}`;
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file, onProgress }) => {
+          requestEvents.push(`upload-start:${id}:${file.name}`);
+          onProgress({ progress: 0.5 });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          onProgress({ progress: 1 });
+          requestEvents.push(`upload-finish:${id}`);
+          return `server:${id}`;
+        },
       },
     },
   });
+  const session = storeManager;
 
   const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
     1,
     {
       id: 'online-staged-upload-doc',
-      getSessionKey: () => sessionKey,
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session,
           operations: {
             updateWithAttachment: {
               inputSchema: rc_object({
@@ -1054,15 +1099,17 @@ test('online mutations can resolve staged upload ids after reconnect and use the
 
   await flushAllTimers();
 
-  await resolveAfterAllTimers(
-    session.saveOfflineUpload({
-      id: 'asset-1',
-      file: new File(['online dependency body'], 'online-dependency.txt', {
-        type: 'text/plain',
-        lastModified: 1,
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'asset-1',
+        file: new File(['online dependency body'], 'online-dependency.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
       }),
-    }),
-  );
+    )
+  ).unwrap();
 
   await act(async () => {
     network.goOnline();
