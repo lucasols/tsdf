@@ -1,3 +1,4 @@
+import { createCache, type Cache } from '@ls-stack/utils/cache';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
@@ -50,6 +51,10 @@ export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g';
 const ASYNC_STARTUP_CLEANUP_LOCK_NAME = 'tsdf-async-storage-maintenance';
 const ASYNC_STARTUP_CLEANUP_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; async OPFS startup cleanup is using unlocked coordination.';
+const ASYNC_STORAGE_CACHE_INVALIDATION_CHANNEL_NAME =
+  'tsdf-async-storage-cache-v1';
+const ASYNC_STORAGE_NAMESPACE_INDEX_CACHE_MAX_SIZE = 500;
+const ASYNC_STORAGE_PAYLOAD_CACHE_MAX_SIZE = 5_000;
 
 function getBucketId(timestamp: number): string {
   return String(Math.floor(timestamp / ASYNC_STORAGE_RECENCY_BUCKET_MS));
@@ -421,6 +426,220 @@ export async function readAsyncStorageNamespaceIndexStateUsingDriver(
   };
 }
 
+type AsyncStorageManagedReadMode = 'cached' | 'fresh';
+
+type AsyncStoragePayloadReadState = { value: unknown };
+
+function cloneStaticPolicy(
+  policy: AsyncStorageNamespaceStaticPolicy | null,
+): AsyncStorageNamespaceStaticPolicy | null {
+  return policy === null
+    ? null
+    : {
+        ...(policy.maxEntries !== undefined
+          ? { maxEntries: policy.maxEntries }
+          : {}),
+        ...(policy.pinnedKeys !== undefined
+          ? { pinnedKeys: [...policy.pinnedKeys] }
+          : {}),
+      };
+}
+
+function cloneManagedMetadataRecord(
+  metadata: AsyncStorageManagedMetadataRecord,
+): AsyncStorageManagedMetadataRecord {
+  return {
+    lastAccessAt: metadata.lastAccessAt,
+    version: metadata.version,
+    ...(metadata.customMetadata !== undefined
+      ? { customMetadata: { ...metadata.customMetadata } }
+      : {}),
+  };
+}
+
+type AsyncStorageNamespaceIndexReadState = Awaited<
+  ReturnType<typeof readAsyncStorageNamespaceIndexStateUsingDriver>
+>;
+
+function cloneNamespaceIndexReadState(
+  state: AsyncStorageNamespaceIndexReadState,
+): AsyncStorageNamespaceIndexReadState {
+  return {
+    entries:
+      state.entries === null
+        ? null
+        : new Map(
+            [...state.entries.entries()].map(([key, metadata]) => [
+              key,
+              cloneManagedMetadataRecord(metadata),
+            ]),
+          ),
+    exists: state.exists,
+    staticPolicy: cloneStaticPolicy(state.staticPolicy),
+    valid: state.valid,
+  };
+}
+
+type AsyncStorageCacheInvalidationReason =
+  | 'clear'
+  | 'commit'
+  | 'remove'
+  | 'startup-cleanup';
+
+function parseAsyncStorageCacheInvalidationReason(
+  value: unknown,
+): AsyncStorageCacheInvalidationReason | null {
+  switch (value) {
+    case 'clear':
+    case 'commit':
+    case 'remove':
+    case 'startup-cleanup':
+      return value;
+    default:
+      return null;
+  }
+}
+
+type AsyncStorageCacheInvalidationMessage = {
+  kind: 'namespace-invalidated';
+  protocolVersion: 1;
+  reason: AsyncStorageCacheInvalidationReason;
+  scope: AsyncStorageNamespaceScope;
+};
+
+function parseAsyncStorageCacheInvalidationMessage(
+  value: unknown,
+): AsyncStorageCacheInvalidationMessage | null {
+  const record = getRecord(value);
+  if (
+    record === null ||
+    record.kind !== 'namespace-invalidated' ||
+    record.protocolVersion !== 1
+  ) {
+    return null;
+  }
+
+  const scopeRecord = getRecord(record.scope);
+  if (
+    scopeRecord === null ||
+    typeof scopeRecord.kind !== 'string' ||
+    typeof scopeRecord.sessionKey !== 'string' ||
+    typeof scopeRecord.storeName !== 'string'
+  ) {
+    return null;
+  }
+
+  const kind = parseAsyncStorageNamespaceKind(scopeRecord.kind);
+  const reason = parseAsyncStorageCacheInvalidationReason(record.reason);
+  if (kind === null || reason === null) return null;
+
+  return {
+    kind: 'namespace-invalidated',
+    protocolVersion: 1,
+    reason,
+    scope: {
+      kind,
+      sessionKey: scopeRecord.sessionKey,
+      storeName: scopeRecord.storeName,
+    },
+  };
+}
+
+type AsyncStorageReadCacheParticipant = {
+  clearAllCachedReads: () => void;
+  onRemoteCacheInvalidation: (
+    message: AsyncStorageCacheInvalidationMessage,
+  ) => void;
+};
+
+const asyncStorageReadCacheParticipants: Array<
+  WeakRef<AsyncStorageReadCacheParticipant>
+> = [];
+let asyncStorageCacheInvalidationChannel: BroadcastChannel | null | undefined;
+let asyncStorageReadCacheLifecycleReady = false;
+
+function getLiveAsyncStorageReadCacheParticipants(): AsyncStorageReadCacheParticipant[] {
+  const liveParticipants: AsyncStorageReadCacheParticipant[] = [];
+  const retainedRefs: Array<WeakRef<AsyncStorageReadCacheParticipant>> = [];
+
+  for (const ref of asyncStorageReadCacheParticipants) {
+    const participant = ref.deref();
+    if (participant === undefined) continue;
+    liveParticipants.push(participant);
+    retainedRefs.push(ref);
+  }
+
+  asyncStorageReadCacheParticipants.length = 0;
+  asyncStorageReadCacheParticipants.push(...retainedRefs);
+  return liveParticipants;
+}
+
+function clearAllAsyncStorageReadCaches(): void {
+  for (const participant of getLiveAsyncStorageReadCacheParticipants()) {
+    participant.clearAllCachedReads();
+  }
+}
+
+function notifyLocalAsyncStorageReadCacheInvalidation(
+  source: AsyncStorageReadCacheParticipant,
+  message: AsyncStorageCacheInvalidationMessage,
+): void {
+  for (const participant of getLiveAsyncStorageReadCacheParticipants()) {
+    if (participant === source) continue;
+    participant.onRemoteCacheInvalidation(message);
+  }
+}
+
+function handleAsyncStorageCacheInvalidationEvent(
+  event: MessageEvent<unknown>,
+) {
+  const message = parseAsyncStorageCacheInvalidationMessage(event.data);
+  if (message === null) return;
+
+  for (const participant of getLiveAsyncStorageReadCacheParticipants()) {
+    participant.onRemoteCacheInvalidation(message);
+  }
+}
+
+function ensureAsyncStorageReadCacheLifecycle(): void {
+  if (!asyncStorageReadCacheLifecycleReady) {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        clearAllAsyncStorageReadCaches();
+      }
+    });
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pageshow', () => {
+        clearAllAsyncStorageReadCaches();
+      });
+    }
+
+    asyncStorageReadCacheLifecycleReady = true;
+  }
+
+  if (asyncStorageCacheInvalidationChannel !== undefined) return;
+
+  try {
+    asyncStorageCacheInvalidationChannel = new BroadcastChannel(
+      ASYNC_STORAGE_CACHE_INVALIDATION_CHANNEL_NAME,
+    );
+    asyncStorageCacheInvalidationChannel.addEventListener(
+      'message',
+      handleAsyncStorageCacheInvalidationEvent,
+    );
+  } catch {
+    asyncStorageCacheInvalidationChannel = null;
+  }
+}
+
+function registerAsyncStorageReadCacheParticipant(
+  participant: AsyncStorageReadCacheParticipant,
+): void {
+  ensureAsyncStorageReadCacheLifecycle();
+  asyncStorageReadCacheParticipants.push(new WeakRef(participant));
+}
+
 function parseMaintenanceState(
   value: unknown,
 ): AsyncStorageMaintenanceState | null {
@@ -714,12 +933,19 @@ type PendingNamespaceCommit = {
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
+  #cachedNamespaceIndexReads: Cache<AsyncStorageNamespaceIndexReadState> =
+    createCache({ maxCacheSize: ASYNC_STORAGE_NAMESPACE_INDEX_CACHE_MAX_SIZE });
+  #cachedPayloadReads: Cache<AsyncStoragePayloadReadState | null> = createCache(
+    { maxCacheSize: ASYNC_STORAGE_PAYLOAD_CACHE_MAX_SIZE },
+  );
   #observedScopes = new Map<string, AsyncStorageNamespaceScope>();
   #pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
   #recentTouchedBuckets = new Map<string, string>();
   #startupCleanupScheduled = false;
 
-  constructor(private readonly driver: AsyncStorageDriver) {}
+  constructor(private readonly driver: AsyncStorageDriver) {
+    registerAsyncStorageReadCacheParticipant(this);
+  }
 
   openNamespace<
     TValue,
@@ -836,10 +1062,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     await Promise.all(
       [...updatesByScope.values()].map(async ({ scope, protectionByKey }) => {
-        const indexEntries = await this.#readNamespaceIndexEntriesUsingDriver(
+        const indexState = await this.#readNamespaceIndexStateUsingDriver(
           this.driver,
           scope,
+          { mode: 'fresh' },
         );
+        const indexEntries =
+          indexState.valid && indexState.entries !== null
+            ? indexState.entries
+            : new Map<string, InternalManagedMetadataRecord>();
         let changed = false;
 
         for (const [key, shouldProtect] of protectionByKey.entries()) {
@@ -875,8 +1106,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             staticPolicy: await this.#readNamespaceIndexStaticPolicyUsingDriver(
               this.driver,
               scope,
+              undefined,
+              'fresh',
             ),
           });
+          this.#broadcastNamespaceInvalidation(scope, 'commit');
         }
       }),
     );
@@ -886,6 +1120,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     for (const pending of this.#pendingNamespaceCommits.values()) {
       pending.cancelFlush?.();
     }
+    this.clearAllCachedReads();
     this.#observedScopes.clear();
     this.#pendingNamespaceCommits.clear();
     this.#recentTouchedBuckets.clear();
@@ -1100,11 +1335,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     knownRecordKeys?: string[] | null,
+    mode: AsyncStorageManagedReadMode = 'cached',
   ): Promise<Map<string, InternalManagedMetadataRecord>> {
-    const state = await readAsyncStorageNamespaceIndexStateUsingDriver(
+    const state = await this.#readNamespaceIndexStateUsingDriver(
       driver,
       scope,
-      knownRecordKeys,
+      { knownRecordKeys, mode },
     );
     return state.valid && state.entries !== null ? state.entries : new Map();
   }
@@ -1113,13 +1349,72 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     knownRecordKeys?: string[] | null,
+    mode: AsyncStorageManagedReadMode = 'cached',
   ): Promise<AsyncStorageNamespaceStaticPolicy | null> {
-    const state = await readAsyncStorageNamespaceIndexStateUsingDriver(
+    const state = await this.#readNamespaceIndexStateUsingDriver(
       driver,
       scope,
-      knownRecordKeys,
+      { knownRecordKeys, mode },
     );
     return state.valid ? normalizeStaticPolicy(state.staticPolicy) : null;
+  }
+
+  async #readNamespaceIndexStateUsingDriver(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    args: {
+      knownRecordKeys?: string[] | null;
+      mode?: AsyncStorageManagedReadMode;
+    } = {},
+  ): Promise<AsyncStorageNamespaceIndexReadState> {
+    const mode = args.mode ?? 'cached';
+    const knownRecordKeys = args.knownRecordKeys;
+    const namespaceKey = getNamespaceId(scope);
+    const shouldUseCache = driver === this.driver && mode === 'cached';
+
+    if (knownRecordKeys != null) {
+      if (!knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)) {
+        this.#invalidateCachedNamespaceIndexState(scope);
+        return {
+          entries: null,
+          exists: false,
+          staticPolicy: null,
+          valid: true,
+        };
+      }
+
+      if (shouldUseCache) {
+        const existing =
+          await this.#cachedNamespaceIndexReads.getAsync(namespaceKey);
+        if (existing !== undefined) {
+          return cloneNamespaceIndexReadState(existing);
+        }
+      }
+    }
+
+    if (!shouldUseCache) {
+      return readAsyncStorageNamespaceIndexStateUsingDriver(
+        driver,
+        scope,
+        knownRecordKeys,
+      );
+    }
+
+    const state = await this.#cachedNamespaceIndexReads.getOrInsertAsync(
+      namespaceKey,
+      async ({ skipCaching }) => {
+        const nextState = await readAsyncStorageNamespaceIndexStateUsingDriver(
+          driver,
+          scope,
+          knownRecordKeys,
+        );
+
+        return this.#shouldCacheNamespaceIndexState(nextState)
+          ? cloneNamespaceIndexReadState(nextState)
+          : skipCaching(nextState);
+      },
+    );
+    return cloneNamespaceIndexReadState(state);
   }
 
   async #persistNamespaceIndexUsingDriver(
@@ -1131,6 +1426,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       await this.#driverRemoveManyFrom(driver, scope, [
         ASYNC_NAMESPACE_INDEX_RECORD_KEY,
       ]);
+      this.#invalidateCachedNamespaceIndexState(scope);
       return;
     }
 
@@ -1140,6 +1436,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         value: serializeIndexState(state),
       },
     ]);
+    this.#setCachedNamespaceIndexState(scope, {
+      entries: state.entries,
+      exists: true,
+      staticPolicy: state.staticPolicy,
+      valid: true,
+    });
   }
 
   async readManagedEntries<
@@ -1156,10 +1458,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       scope,
     );
     const payloadKeys = keys.filter((key) => metadataByKey.has(key));
-    const payloadValues = await driverGetManyFrom(
+    const payloadValues = await this.#readPayloadValuesUsingDriver(
       this.driver,
       scope,
-      payloadKeys.map((key) => getPayloadRecordKey(key)),
+      payloadKeys,
     );
     const payloadByKey = new Map<string, unknown>();
     for (const [index, key] of payloadKeys.entries()) {
@@ -1262,6 +1564,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     await this.driver.clear(scope);
+    this.#invalidateCachedNamespace(scope);
+    this.#broadcastNamespaceInvalidation(scope, 'clear');
     const namespaceKey = getNamespaceId(scope);
     this.#observedScopes.delete(namespaceKey);
     this.#pendingNamespaceCommits.delete(namespaceKey);
@@ -1286,8 +1590,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
   ): Promise<void> {
-    const currentIndexState =
-      await readAsyncStorageNamespaceIndexStateUsingDriver(this.driver, scope);
+    const currentIndexState = await this.#readNamespaceIndexStateUsingDriver(
+      this.driver,
+      scope,
+      { mode: 'fresh' },
+    );
     const indexEntries =
       currentIndexState.valid && currentIndexState.entries !== null
         ? currentIndexState.entries
@@ -1384,12 +1691,30 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         ? this.#driverSetManyFrom(this.driver, scope, setEntries)
         : Promise.resolve(),
     ]);
+
+    for (const key of removes) {
+      this.#invalidateCachedPayloadValue(scope, key);
+    }
+
+    for (const upsert of upserts) {
+      this.#setCachedPayloadValue(scope, upsert.key, { value: upsert.value });
+    }
+
     if (indexChanged) {
       await this.#persistNamespaceIndexUsingDriver(this.driver, scope, {
         entries: indexEntries,
         staticPolicy: nextStaticPolicy,
       });
+    } else {
+      this.#setCachedNamespaceIndexState(scope, {
+        entries: currentIndexState.valid ? indexEntries : null,
+        exists: currentIndexState.exists,
+        staticPolicy: currentIndexState.staticPolicy,
+        valid: currentIndexState.valid,
+      });
     }
+
+    this.#broadcastNamespaceInvalidation(scope, 'commit');
   }
 
   #mergeOfflineProtectionMetadata(
@@ -1432,15 +1757,17 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const uniqueKeys = [...new Set(keys)];
     if (uniqueKeys.length === 0) return;
 
+    this.#invalidateCachedNamespace(scope);
     await this.#driverRemoveManyFrom(
       driver,
       scope,
       uniqueKeys.map((key) => getPayloadRecordKey(key)),
     );
 
-    const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
+    const indexState = await this.#readNamespaceIndexStateUsingDriver(
       driver,
       scope,
+      { mode: 'fresh' },
     );
     if (!indexState.valid || indexState.entries === null) return;
 
@@ -1454,6 +1781,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         staticPolicy: normalizeStaticPolicy(indexState.staticPolicy),
       });
     }
+
+    this.#broadcastNamespaceInvalidation(scope, 'remove');
   }
 
   async #driverSetManyFrom(
@@ -1493,6 +1822,154 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
       JSON.stringify({ lca: state.lastSuccessfulCleanupAt }),
     );
+  }
+
+  clearAllCachedReads(): void {
+    this.#cachedNamespaceIndexReads.clear();
+    this.#cachedPayloadReads.clear();
+  }
+
+  onRemoteCacheInvalidation(
+    message: AsyncStorageCacheInvalidationMessage,
+  ): void {
+    this.#invalidateCachedNamespace(message.scope);
+  }
+
+  async #readPayloadValuesUsingDriver(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+    mode: AsyncStorageManagedReadMode = 'cached',
+  ): Promise<unknown[]> {
+    if (keys.length === 0) return [];
+
+    const shouldUseCache = driver === this.driver && mode === 'cached';
+    if (!shouldUseCache) {
+      return driverGetManyFrom(
+        driver,
+        scope,
+        keys.map((key) => getPayloadRecordKey(key)),
+      );
+    }
+
+    const promisesByKey = new Map<
+      string,
+      Promise<AsyncStoragePayloadReadState | null>
+    >();
+    const uncachedKeys: string[] = [];
+
+    for (const key of keys) {
+      const payloadCacheKey = this.#getPayloadCacheKey(scope, key);
+      if (this.#cachedPayloadReads.has(payloadCacheKey)) {
+        promisesByKey.set(
+          key,
+          this.#cachedPayloadReads
+            .getAsync(payloadCacheKey)
+            .then((state) => state ?? null),
+        );
+        continue;
+      }
+      uncachedKeys.push(key);
+    }
+
+    if (uncachedKeys.length > 0) {
+      const readPromise = driverGetManyFrom(
+        driver,
+        scope,
+        uncachedKeys.map((key) => getPayloadRecordKey(key)),
+      );
+
+      for (const [index, key] of uncachedKeys.entries()) {
+        const payloadCacheKey = this.#getPayloadCacheKey(scope, key);
+        const keyPromise = this.#cachedPayloadReads.setAsync(
+          payloadCacheKey,
+          async ({ skipCaching }) => {
+            const value = (await readPromise)[index] ?? null;
+            return value === null ? skipCaching(null) : { value };
+          },
+        );
+        promisesByKey.set(key, keyPromise);
+      }
+    }
+
+    return Promise.all(
+      keys.map(async (key) => {
+        const state = await promisesByKey.get(key);
+        return state?.value ?? null;
+      }),
+    );
+  }
+
+  #setCachedNamespaceIndexState(
+    scope: AsyncStorageNamespaceScope,
+    state: AsyncStorageNamespaceIndexReadState,
+  ): void {
+    if (!this.#shouldCacheNamespaceIndexState(state)) {
+      this.#cachedNamespaceIndexReads.delete(getNamespaceId(scope));
+      return;
+    }
+
+    this.#cachedNamespaceIndexReads.set(
+      getNamespaceId(scope),
+      cloneNamespaceIndexReadState(state),
+    );
+  }
+
+  #setCachedPayloadValue(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    state: AsyncStoragePayloadReadState,
+  ): void {
+    this.#cachedPayloadReads.set(this.#getPayloadCacheKey(scope, key), state);
+  }
+
+  #invalidateCachedNamespaceIndexState(
+    scope: AsyncStorageNamespaceScope,
+  ): void {
+    this.#cachedNamespaceIndexReads.delete(getNamespaceId(scope));
+  }
+
+  #invalidateCachedPayloadValue(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+  ): void {
+    this.#cachedPayloadReads.delete(this.#getPayloadCacheKey(scope, key));
+  }
+
+  #invalidateCachedNamespace(scope: AsyncStorageNamespaceScope): void {
+    const namespaceKey = `${getNamespaceId(scope)}::`;
+    this.#invalidateCachedNamespaceIndexState(scope);
+
+    for (const key of this.#cachedPayloadReads[' cache'].map.keys()) {
+      if (key.startsWith(namespaceKey)) {
+        this.#cachedPayloadReads.delete(key);
+      }
+    }
+  }
+
+  #getPayloadCacheKey(scope: AsyncStorageNamespaceScope, key: string): string {
+    return `${getNamespaceId(scope)}::${key}`;
+  }
+
+  #shouldCacheNamespaceIndexState(
+    state: AsyncStorageNamespaceIndexReadState,
+  ): boolean {
+    return state.valid && state.exists && state.entries !== null;
+  }
+
+  #broadcastNamespaceInvalidation(
+    scope: AsyncStorageNamespaceScope,
+    reason: AsyncStorageCacheInvalidationReason,
+  ): void {
+    const message = {
+      kind: 'namespace-invalidated',
+      protocolVersion: 1,
+      reason,
+      scope,
+    } satisfies AsyncStorageCacheInvalidationMessage;
+
+    notifyLocalAsyncStorageReadCacheInvalidation(this, message);
+    asyncStorageCacheInvalidationChannel?.postMessage(message);
   }
 
   async #listDiscoveredScopes(
@@ -1583,14 +2060,18 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async #performStartupCleanup(): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
-    await this.#withCleanupDriver((driver) =>
+    const scopesToInvalidate = await this.#withCleanupDriver((driver) =>
       this.#performStartupCleanupWithDriver(driver),
     );
+    for (const scope of scopesToInvalidate) {
+      this.#invalidateCachedNamespace(scope);
+      this.#broadcastNamespaceInvalidation(scope, 'startup-cleanup');
+    }
   }
 
   async #performStartupCleanupWithDriver(
     driver: AsyncStorageDriver,
-  ): Promise<void> {
+  ): Promise<AsyncStorageNamespaceScope[]> {
     // WORKAROUND: Startup cleanup only runs through the cleanup-capable driver path, but this shared helper keeps the broader AsyncStorageDriver parameter.
     const cleanupActionDriver = __LEGIT_CAST__<
       AsyncStorageStartupCleanupActionCapableDriver,
@@ -1733,6 +2214,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       staticPolicy: AsyncStorageNamespaceStaticPolicy | null | undefined;
       scope: AsyncStorageNamespaceScope;
     }> = [];
+    const invalidatedScopesByNamespaceId = new Map<
+      string,
+      AsyncStorageNamespaceScope
+    >();
     const successfulStoreDeleteSessions = new Set<string>();
     const successfulStoreDeleteScopes = new Set<string>();
     const skippedScopeIds = new Set(
@@ -1776,6 +2261,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         );
         for (const { scope } of storeDeletePlan.removedKeysByScope) {
           const namespaceId = getNamespaceId(scope);
+          invalidatedScopesByNamespaceId.set(namespaceId, scope);
           successfulStoreDeleteScopes.add(namespaceId);
           skippedScopeIds.add(namespaceId);
         }
@@ -1809,6 +2295,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             cleanupActionDriver.cleanupFinalizeRemovedRecords?.(
               result.action.scope,
               result.removedKeys,
+            );
+            invalidatedScopesByNamespaceId.set(
+              getNamespaceId(result.action.scope),
+              result.action.scope,
             );
           }
           if (!result.allSucceeded) continue;
@@ -1899,6 +2389,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       persistPromise,
     ]);
 
+    for (const { scope } of persistPlans) {
+      invalidatedScopesByNamespaceId.set(getNamespaceId(scope), scope);
+    }
+
     for (const settledResult of sessionDeleteResults) {
       if (settledResult.status !== 'fulfilled') continue;
       const result = settledResult.value;
@@ -1907,6 +2401,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         result.action.sessionKey,
       );
     }
+
+    return [...invalidatedScopesByNamespaceId.values()];
   }
 
   #intersectPersistEntries(

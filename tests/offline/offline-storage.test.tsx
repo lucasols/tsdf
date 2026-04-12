@@ -982,8 +982,7 @@ test('async OPFS idle offline boot hydrates pending offline items from storage w
     time | pending-deletes | pending-items |
     0    | -               | -             | -- restart offline with OPFS storage and mount only usePendingOfflineItems; the async preload should recover the same pending state
     .    | (none)          | (none)        | [pending-items, pending-deletes] ui-initialized
-    9ms  | users||2        | (none)        | [pending-deletes] ui-changed
-    15ms | users||2        | Ada queued    | [pending-items] ui-changed
+    1ms  | users||2        | Ada queued    | [pending-deletes, pending-items] ui-changed
     "
   `);
 

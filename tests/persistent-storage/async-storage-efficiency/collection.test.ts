@@ -554,20 +554,17 @@ describe('async storage efficiency: collection', () => {
       1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.17 kb
              ·
-      2.1s   | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      2.14s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb
-             ·
-      2.143s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.17 kb
-      2.146s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
+      2.143s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      2.149s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
+      2.146s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
-      2.153s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      2.15s  | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
-      2.155s | end
+      2.152s | end
       "
     `);
   });
@@ -615,13 +612,11 @@ describe('async storage efficiency: collection', () => {
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.11 kb
-      10ms | 📖 #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
-           |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      13ms | 👁️ #3 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+      10ms | 👁️ #3 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
-      14ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+      11ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>) | 0.12 kb
-      17ms | end
+      14ms | end
       "
     `);
 
