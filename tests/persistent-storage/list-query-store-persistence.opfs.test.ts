@@ -522,6 +522,172 @@ describe('opfs: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['id', 'name']`);
   });
 
+  test('partial-resource persistence stores each item with its own loaded fields', async () => {
+    const storeName = 'lq-opfs-partial-multiple-item-fields';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice', age: 31, email: 'alice@site.test' },
+          { id: 2, name: 'Bob', age: 42, email: 'bob@site.test' },
+        ],
+      },
+    });
+
+    env.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+      fields: ['id', 'name'],
+    });
+    env.apiStore.scheduleItemFetch('highPriority', 'users||2', {
+      fields: ['id', 'name', 'age'],
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 2)}>.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`
+      age: 42
+      id: 2
+      name: 'Bob'
+    `);
+  });
+
+  test('hydration keeps extra persisted fields visible even when loadedFields is narrower', async () => {
+    const storeName = 'lq-opfs-partial-extra-data-visible';
+    const sessionKey = 'sess1';
+    const itemPayload = 'users||1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedItem(
+      'users',
+      1,
+      { id: 1, name: 'Cached', email: 'cached@site.test' },
+      { loadedFields: ['id', 'name'] },
+    );
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', email: 'fresh@site.test' }],
+      },
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromStorage(itemPayload);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name', 'email'],
+        disableRefetches: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        name: data?.name ?? null,
+        email: data?.email ?? null,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached ⋅ email: cached@site.test
+      "
+    `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('later partial saves keep extra fields already present in persisted item data', async () => {
+    const storeName = 'lq-opfs-partial-keep-extra-fields-on-save';
+    const sessionKey = 'sess1';
+    const itemPayload = 'users||1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedItem(
+      'users',
+      1,
+      { id: 1, name: 'Cached', email: 'cached@site.test' },
+      { loadedFields: ['id', 'name'] },
+    );
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', email: 'fresh@site.test' }],
+      },
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromStorage(itemPayload);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+
+    renderHook(() => {
+      env.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name'],
+        disableRefetchOnMount: true,
+      });
+    });
+
+    await flushAllTimers();
+
+    env.apiStore.scheduleItemFetch('highPriority', itemPayload, {
+      fields: ['id', 'name'],
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`
+      email: 'cached@site.test'
+      id: 1
+      name: 'Fresh'
+    `);
+  });
+
   test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
     const storeName = 'lq-opfs-item-partial-missing-fields';
     const sessionKey = 'sess1';

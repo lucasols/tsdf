@@ -2,14 +2,15 @@ import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { createOfflineSession } from '../../src/main';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
+import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   getOfflineQueueEntries,
   type UpdateValueExecuteContext,
@@ -28,20 +29,31 @@ import {
 
 let network = createOfflineNetworkMock();
 
+function createManagedOfflineSession(args: {
+  getSessionKey: () => string | false;
+  config: OfflineSessionConfig;
+}) {
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: args.getSessionKey,
+    offlineSession: args.config,
+  });
+
+  return { storeManager, offlineSession: storeManager };
+}
+
 beforeEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('runtime mode enabled toggles are shared across stores in the same session', async () => {
@@ -50,7 +62,7 @@ test('runtime mode enabled toggles are shared across stores in the same session'
   const usersQuery = { tableId: 'users' } as const;
   const sharedOutageRecoveryCheck = () => false;
   const statusRenders = createLoggerStore();
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       network: network.config,
@@ -62,10 +74,15 @@ test('runtime mode enabled toggles are shared across stores in the same session'
   createDocumentStoreTestEnv(1, {
     id: 'shared-runtime-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: offlineSession, operations: {} },
+      offline: { operations: {} },
     },
   });
 
@@ -74,11 +91,16 @@ test('runtime mode enabled toggles are shared across stores in the same session'
     {
       id: 'shared-runtime-collection',
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: offlineSession.getOfflineConfig(),
+      }),
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: { session: offlineSession, operations: {} },
+        offline: { operations: {} },
       },
     },
   );
@@ -88,13 +110,18 @@ test('runtime mode enabled toggles are shared across stores in the same session'
     {
       id: 'shared-runtime-list-query',
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: offlineSession.getOfflineConfig(),
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
         schema: userRowSchema,
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
-        offline: { session: offlineSession, operations: {} },
+        offline: { operations: {} },
       },
     },
   );
@@ -111,10 +138,12 @@ test('runtime mode enabled toggles are shared across stores in the same session'
   // Disabling both modes should preserve the observed state while preventing
   // future operations from entering those offline causes.
   statusRenders.addMark('Disable runtime offline modes');
-  offlineSession.setOfflineRuntimeConfig({
-    network: { enabled: false },
-    outage: { enabled: false },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({
+      network: { enabled: false },
+      outage: { enabled: false },
+    })
+    .unwrap();
   await Promise.resolve();
 
   expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
@@ -132,10 +161,12 @@ test('runtime mode enabled toggles are shared across stores in the same session'
 
   // Re-enabling the runtime controls should reuse the preserved observed state.
   statusRenders.addMark('Re-enable runtime offline modes');
-  offlineSession.setOfflineRuntimeConfig({
-    network: { enabled: true },
-    outage: { enabled: true },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({
+      network: { enabled: true },
+      outage: { enabled: true },
+    })
+    .unwrap();
   await Promise.resolve();
 
   expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
@@ -183,7 +214,7 @@ test('runtime mode enabled toggles are shared across stores in the same session'
 test('runtime offline overrides are memory-only and reset to the store config after restart', async () => {
   network.setOffline();
   const sessionKey = 'memory-only-runtime-offline-controls';
-  const firstOfflineSession = createOfflineSession({
+  const { offlineSession: firstOfflineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -192,18 +223,25 @@ test('runtime offline overrides are memory-only and reset to the store config af
   createDocumentStoreTestEnv(1, {
     id: 'memory-only-runtime-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: firstOfflineSession.getOfflineConfig(),
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: firstOfflineSession, operations: {} },
+      offline: { operations: {} },
     },
   });
 
   await Promise.resolve();
-  firstOfflineSession.setOfflineRuntimeConfig({
-    network: { enabled: false },
-    mutationQueueing: { network: 'disallow' },
-  });
+  firstOfflineSession
+    .setOfflineRuntimeConfig({
+      network: { enabled: false },
+      mutationQueueing: { network: 'disallow' },
+    })
+    .unwrap();
   await Promise.resolve();
 
   expect(firstOfflineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
@@ -213,19 +251,25 @@ test('runtime offline overrides are memory-only and reset to the store config af
   `);
 
   // Simulate a fresh app boot with the same persisted storage but a new runtime session.
-  __resetSessionOfflineCoordinatorRegistryForTests();
-  const restartedOfflineSession = createOfflineSession({
-    getSessionKey: () => sessionKey,
-    config: { network: network.config },
-  });
+  resetSessionForTests();
+  const { offlineSession: restartedOfflineSession } =
+    createManagedOfflineSession({
+      getSessionKey: () => sessionKey,
+      config: { network: network.config },
+    });
 
   createDocumentStoreTestEnv(1, {
     id: 'memory-only-runtime-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: restartedOfflineSession.getOfflineConfig(),
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: restartedOfflineSession, operations: {} },
+      offline: { operations: {} },
     },
   });
 
@@ -248,7 +292,7 @@ test('runtime offline overrides are memory-only and reset to the store config af
 test('offline sessions follow dynamic session key changes and keep runtime overrides scoped per session key', () => {
   let currentSessionKey: string | false = 'dynamic-offline-session-a';
   const runtimeConfigRenders = createLoggerStore();
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => currentSessionKey,
     config: { network: { enabled: true } },
   });
@@ -256,7 +300,9 @@ test('offline sessions follow dynamic session key changes and keep runtime overr
   runtimeConfigRenders.add(offlineSession.getOfflineRuntimeConfig());
 
   // Session A disables network mode for itself.
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
   runtimeConfigRenders.add(offlineSession.getOfflineRuntimeConfig());
 
   // A different session key should see the default runtime config.
@@ -307,7 +353,7 @@ test('disabling active network mode preserves offline state while future operati
   const storeName = 'runtime-network-replay-pause-doc';
   const replayedInputs: { value: number }[] = [];
   const statusRenders = createLoggerStore();
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -315,12 +361,16 @@ test('disabling active network mode preserves offline state while future operati
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -371,7 +421,9 @@ test('disabling active network mode preserves offline state while future operati
 
   // Disabling runtime network mode should preserve the existing offline state,
   // while future operations bypass new network offline admission.
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
 
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
@@ -446,7 +498,9 @@ test('disabling active network mode preserves offline state while future operati
   expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
 
   // Re-enabling network mode should restore offline status until connectivity returns.
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: true } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: true } })
+    .unwrap();
   await Promise.resolve();
 
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
@@ -519,7 +573,7 @@ test('disabled network support ignores classified network failures while startin
   const directMutation = vi.fn(() =>
     Promise.reject(new Error('disabled-network-error')),
   );
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'network' as const,
@@ -539,12 +593,16 @@ test('disabled network support ignores classified network failures while startin
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -565,7 +623,9 @@ test('disabled network support ignores classified network failures while startin
   });
 
   await Promise.resolve();
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
 
   // Starting from a healthy online state, disabled network support should
@@ -606,7 +666,7 @@ test('disabled outage support ignores outage classifications while starting from
   const directMutation = vi.fn(() =>
     Promise.reject(new Error('disabled-outage-error')),
   );
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'outage' as const,
@@ -617,12 +677,16 @@ test('disabled outage support ignores outage classifications while starting from
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -643,7 +707,9 @@ test('disabled outage support ignores outage classifications while starting from
   });
 
   await Promise.resolve();
-  offlineSession.setOfflineRuntimeConfig({ outage: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ outage: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
 
   const result = await env.apiStore.performMutation({
@@ -682,7 +748,7 @@ test('browser reconnects replay queued mutations even while runtime network supp
   const storeName = 'runtime-network-remains-disabled-on-browser-reconnect-doc';
   const replayedInputs: { value: number }[] = [];
   const statusRenders = createLoggerStore();
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -690,12 +756,16 @@ test('browser reconnects replay queued mutations even while runtime network supp
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -738,7 +808,9 @@ test('browser reconnects replay queued mutations even while runtime network supp
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
 
   // Disable runtime network support while the browser is still offline.
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
   statusRenders.addMark('Disable runtime network mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
@@ -834,7 +906,7 @@ test('disabling classified network mode preserves recovery and replay for alread
     recoveryAttempts += 1;
     return recoveryAttempts >= 2;
   });
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'network' as const,
@@ -854,12 +926,16 @@ test('disabling classified network mode preserves recovery and replay for alread
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -899,7 +975,9 @@ test('disabling classified network mode preserves recovery and replay for alread
 
   // Disabling network support should not discard already-active classified
   // recovery work. The recovery loop keeps running until it succeeds.
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
   statusRenders.addMark('Disable runtime network mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
@@ -961,7 +1039,7 @@ test('disabling active outage mode preserves recovery and replay for already-act
     recoveryAttempts += 1;
     return recoveryAttempts >= 2;
   });
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'outage' as const,
@@ -981,12 +1059,16 @@ test('disabling active outage mode preserves recovery and replay for already-act
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1030,7 +1112,9 @@ test('disabling active outage mode preserves recovery and replay for already-act
 
   // Disabling runtime outage mode should not discard already-active outage
   // recovery work. The recovery loop keeps running until it succeeds.
-  offlineSession.setOfflineRuntimeConfig({ outage: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ outage: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
   statusRenders.addMark('Disable runtime outage mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
@@ -1087,7 +1171,7 @@ test('browser events do not clear preserved outage state while runtime outage su
   const storeName = 'runtime-outage-remains-disabled-on-browser-reconnect-doc';
   const replayedInputs: { value: number }[] = [];
   const statusRenders = createLoggerStore();
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'outage' as const,
@@ -1098,12 +1182,16 @@ test('browser events do not clear preserved outage state while runtime outage su
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1142,7 +1230,9 @@ test('browser events do not clear preserved outage state while runtime outage su
   expect(replayedInputs).toMatchInlineSnapshot(`[]`);
 
   // Disable runtime outage support before any recovery can happen.
-  offlineSession.setOfflineRuntimeConfig({ outage: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ outage: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
   statusRenders.addMark('Disable runtime outage mode');
   statusRenders.add(getGlobalOfflineStatusSummary(sessionKey));
@@ -1208,7 +1298,7 @@ test('browser events do not clear preserved outage state while runtime outage su
 test('runtime mutation queueing overrides are shared across stores in the same session and affect only future mutations', async () => {
   network.setOffline();
   const sessionKey = 'runtime-mutation-queueing-overrides';
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -1217,12 +1307,16 @@ test('runtime mutation queueing overrides are shared across stores in the same s
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: offlineSession.getOfflineConfig(),
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: offlineSession,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1275,9 +1369,9 @@ test('runtime mutation queueing overrides are shared across stores in the same s
 
   // Tighten runtime queueing rules; future mutations should stop queueing but
   // still follow the normal direct mutation path.
-  offlineSession.setOfflineRuntimeConfig({
-    mutationQueueing: { network: 'disallow' },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({ mutationQueueing: { network: 'disallow' } })
+    .unwrap();
 
   const directMutationA = vi.fn(() =>
     navigator.onLine
@@ -1374,18 +1468,23 @@ test('runtime mutation queueing overrides are shared across stores in the same s
 
 test('disabling runtime network mutation queueing does not change offline fetch behavior', async () => {
   const sessionKey = 'runtime-mutation-queueing-fetch-network';
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
   const env = createDocumentStoreTestEnv(1, {
     id: 'runtime-mutation-queueing-fetch-network-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: offlineSession, operations: {} },
+      offline: { operations: {} },
     },
   });
 
@@ -1396,9 +1495,9 @@ test('disabling runtime network mutation queueing does not change offline fetch 
   });
   await Promise.resolve();
 
-  offlineSession.setOfflineRuntimeConfig({
-    mutationQueueing: { network: 'disallow' },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({ mutationQueueing: { network: 'disallow' } })
+    .unwrap();
   await Promise.resolve();
 
   expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
@@ -1444,7 +1543,7 @@ test('disabling runtime network mutation queueing does not change offline fetch 
 
 test('disabling runtime outage mutation queueing does not change outage fetch behavior', async () => {
   const sessionKey = 'runtime-mutation-queueing-fetch-outage';
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'outage' as const,
@@ -1463,11 +1562,16 @@ test('disabling runtime outage mutation queueing does not change outage fetch be
   const env = createDocumentStoreTestEnv(1, {
     id: 'runtime-mutation-queueing-fetch-outage-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: offlineSession, operations: {} },
+      offline: { operations: {} },
     },
   });
 
@@ -1485,9 +1589,9 @@ test('disabling runtime outage mutation queueing does not change outage fetch be
     sessionKey: 'runtime-mutation-queueing-fetch-outage'
   `);
 
-  offlineSession.setOfflineRuntimeConfig({
-    mutationQueueing: { outage: 'disallow' },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({ mutationQueueing: { outage: 'disallow' } })
+    .unwrap();
   await Promise.resolve();
 
   expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
@@ -1535,7 +1639,7 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
   network.setOffline();
   const sessionKey = 'runtime-disabled-by-default-modes';
   const recoveryCheck = vi.fn(() => false);
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: {
       classifyFailure: () => 'outage' as const,
@@ -1547,12 +1651,16 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'runtime-disabled-by-default-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1583,7 +1691,9 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
 
   // Enabling network support later should immediately start using the preserved
   // network config without rebuilding the store.
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: true } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: true } })
+    .unwrap();
   await Promise.resolve();
 
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
@@ -1595,10 +1705,12 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
 
   // Disable network again, enable outage support, and verify outage handling
   // also works without rebuilding the session.
-  offlineSession.setOfflineRuntimeConfig({
-    network: { enabled: false },
-    outage: { enabled: true },
-  });
+  offlineSession
+    .setOfflineRuntimeConfig({
+      network: { enabled: false },
+      outage: { enabled: true },
+    })
+    .unwrap();
   await Promise.resolve();
 
   expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
@@ -1629,7 +1741,7 @@ test('configured runtime-disabled modes can be enabled later without rebuilding 
 test('disabling runtime network support preserves the compact persisted status for existing offline work', async () => {
   network.setOffline();
   const sessionKey = 'runtime-disable-persistence-semantics';
-  const offlineSession = createOfflineSession({
+  const { offlineSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -1637,11 +1749,15 @@ test('disabling runtime network support preserves the compact persisted status f
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'runtime-disable-persistence-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: offlineSession.getOfflineConfig(),
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: offlineSession,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1671,7 +1787,9 @@ test('disabling runtime network support preserves the compact persisted status f
       u: 1735689600000
   `);
 
-  offlineSession.setOfflineRuntimeConfig({ network: { enabled: false } });
+  offlineSession
+    .setOfflineRuntimeConfig({ network: { enabled: false } })
+    .unwrap();
   await Promise.resolve();
 
   expect(

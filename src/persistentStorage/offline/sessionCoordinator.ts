@@ -1,4 +1,6 @@
+import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useCallback, useMemo } from 'react';
 import { rc_object, rc_parse } from 'runcheck';
 import { Store } from 't-state';
@@ -7,7 +9,20 @@ import {
   createBrowserTabsCoordinatorWithPriority,
   type BrowserTabsMessageMeta,
 } from '../../utils/browserTabsSync';
+import type { ValidPayload } from '../../utils/storeShared';
 import { parseCompactLocalStorageEntry } from '../compactLocalStorageEntry';
+import { registerOfflineUploadAdapterForSession } from '../offlineUploadRegistry';
+import {
+  createStoredUploadRecord,
+  stripStoredUploadFile,
+} from '../offlineUploadsShared';
+import type {
+  OfflineSessionUploadsConfig,
+  OfflineStoredUploadRecord,
+  OfflineUpload,
+  OfflineUploadProgress,
+  OfflineUploadState,
+} from '../offlineUploadTypes';
 import {
   createPersistentStorageHandle,
   getLocalStorageAdapter,
@@ -53,6 +68,7 @@ type SessionStoreState = {
   status: GlobalOfflineStatus;
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
+  uploads: OfflineUpload[];
 };
 
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
@@ -60,6 +76,7 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   status: GlobalOfflineStatus;
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
+  uploads: OfflineUpload[];
 };
 
 type OfflineSessionMessage =
@@ -77,6 +94,7 @@ type SessionStoreContribution = {
   adapter: StorageAdapter;
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
+  referencedUploadIds: string[];
   protectedKeys: string[];
   replayHead: SessionReplayHead | null;
 };
@@ -92,6 +110,7 @@ type SessionCoordinatorOptions = {
   adapter?: StorageAdapter;
   onPersistentStorageError?: (error: unknown) => void;
   config?: OfflineSessionConfig;
+  uploads?: OfflineSessionUploadsConfig;
   bootstrapStatusFromLocalStorage?: boolean;
 };
 
@@ -111,8 +130,15 @@ const defaultGetIsOffline = () => !navigator.onLine;
 
 const defaultStatusBySession = new Map<string, GlobalOfflineStatus>();
 const registry = new Map<string, SessionOfflineCoordinator>();
+const uploadsConfigByOfflineSession = new WeakMap<
+  OfflineSession,
+  OfflineSessionUploadsConfig | undefined
+>();
+const DEFAULT_UPLOAD_CONCURRENCY = 3;
+const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
 
-function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
+export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
     sessionKey,
     network: { enabled: false, active: false },
@@ -407,6 +433,72 @@ function sameCanonicalConfig(
   );
 }
 
+function sameUploadsConfig(
+  left: OfflineSessionUploadsConfig | undefined,
+  right: OfflineSessionUploadsConfig | undefined,
+): boolean {
+  return (
+    left?.adapter === right?.adapter &&
+    left?.upload === right?.upload &&
+    (left?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY) ===
+      (right?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY)
+  );
+}
+
+function eraseOfflineSession<TUploadRef extends ValidPayload>(
+  session: OfflineSession<TUploadRef>,
+): OfflineSession {
+  // WORKAROUND: Offline sessions are runtime-identical regardless of the
+  // upload-ref generic, but the coordinator registry stores them behind a
+  // single shared map keyed by session identity.
+  return __LEGIT_CAST__<OfflineSession, OfflineSession<TUploadRef>>(session);
+}
+
+function eraseUploadsConfig<TUploadRef extends ValidPayload>(
+  uploads: OfflineSessionUploadsConfig<TUploadRef> | undefined,
+): OfflineSessionUploadsConfig | undefined {
+  // WORKAROUND: The coordinator keeps one upload-config slot per session and
+  // treats the upload-ref generic as compile-time only, so this boundary erases
+  // the specific ref type when crossing into the shared runtime registry.
+  return __LEGIT_CAST__<
+    OfflineSessionUploadsConfig | undefined,
+    OfflineSessionUploadsConfig<TUploadRef> | undefined
+  >(uploads);
+}
+
+function castUploads<TUploadRef extends ValidPayload>(
+  uploads: readonly OfflineUpload[],
+): readonly OfflineUpload<TUploadRef>[] {
+  // WORKAROUND: The coordinator stores uploads in one shared runtime shape, and
+  // the session API rebinds that same data back to the caller's compile-time
+  // upload-ref generic.
+  return __LEGIT_CAST__<
+    readonly OfflineUpload<TUploadRef>[],
+    readonly OfflineUpload[]
+  >(uploads);
+}
+
+function castResolvedUploadRef<TUploadRef extends ValidPayload>(
+  resolvedRef: ValidPayload,
+): TUploadRef {
+  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
+  // boundary, and the session API rebinds that same known-safe value back to
+  // the caller's compile-time upload-ref generic.
+  return __LEGIT_CAST__<TUploadRef, ValidPayload>(resolvedRef);
+}
+
+function castResolvedUploadRefs<TUploadRef extends ValidPayload>(
+  resolvedRefsById: Record<string, ValidPayload>,
+): Record<string, TUploadRef> {
+  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
+  // boundary, and the session API rebinds that same known-safe map back to the
+  // caller's compile-time upload-ref generic.
+  return __LEGIT_CAST__<
+    Record<string, TUploadRef>,
+    Record<string, ValidPayload>
+  >(resolvedRefsById);
+}
+
 function normalizePersistedLocalSessionSnapshot(
   sessionKey: string,
   rawSnapshot: unknown,
@@ -481,6 +573,16 @@ export class SessionOfflineCoordinator {
   #sessionHandle: PersistentStorageHandle<PersistedLocalSessionSnapshot>;
   readonly #browserTabs;
   #onPersistentStorageError: ((error: unknown) => void) | undefined;
+  #uploadsConfig: OfflineSessionUploadsConfig | undefined;
+  #uploads = new Map<string, OfflineStoredUploadRecord>();
+  #referencedUploadIds = new Set<string>();
+  #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
+  #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
+  #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+  #uploadOnlineSessionStartedAt: number | null = null;
+  #uploadOnlineSessionStabilizationTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  #uploadRetentionToken = 0;
   #cleanupNetworkListeners: (() => void) | null = null;
   #canonicalConfig: SessionCanonicalConfig;
   #hasCanonicalConfig: boolean;
@@ -511,6 +613,7 @@ export class SessionOfflineCoordinator {
     adapter,
     onPersistentStorageError,
     config,
+    uploads,
     bootstrapStatusFromLocalStorage = false,
   }: SessionCoordinatorOptions) {
     this.sessionKey = sessionKey;
@@ -519,6 +622,14 @@ export class SessionOfflineCoordinator {
       this.#adapters.add(adapter);
     }
     this.#onPersistentStorageError = onPersistentStorageError;
+    this.#uploadsConfig = uploads;
+    if (uploads) {
+      registerOfflineUploadAdapterForSession(this.sessionKey, uploads.adapter);
+    }
+    this.#uploadQueue = createAsyncQueue<ValidPayload>({
+      autoStart: true,
+      concurrency: uploads?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY,
+    });
     const shouldBootstrapFromStorage =
       config !== undefined || bootstrapStatusFromLocalStorage;
     const bootstrappedLocalSnapshot = shouldBootstrapFromStorage
@@ -547,6 +658,7 @@ export class SessionOfflineCoordinator {
           }),
         entities: [],
         resolutions: [],
+        uploads: [],
       }),
     });
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
@@ -583,7 +695,6 @@ export class SessionOfflineCoordinator {
     if (this.#hydrated) return;
     this.#hydrated = true;
     const hydrationToken = this.#hydrationToken;
-
     let persistedLocalSnapshot: PersistedLocalSessionSnapshot | null = null;
 
     try {
@@ -633,6 +744,19 @@ export class SessionOfflineCoordinator {
 
     this.#protectedKeys = [...protectedKeys].sort();
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
+    if (this.#uploadsConfig) {
+      try {
+        const uploads = await this.#uploadsConfig.adapter.list(this.sessionKey);
+        if (hydrationToken === this.#hydrationToken) {
+          this.#uploads = new Map(uploads.map((upload) => [upload.id, upload]));
+          this.#syncUploadsState();
+          this.#scheduleUploadOnlineSessionStabilization();
+          void this.#refreshUploadRetention();
+        }
+      } catch (error) {
+        this.#onPersistentStorageError?.(error);
+      }
+    }
     void this.#persistSessionSnapshot();
   }
 
@@ -640,12 +764,34 @@ export class SessionOfflineCoordinator {
     adapter?: StorageAdapter;
     onPersistentStorageError?: (error: unknown) => void;
     config?: OfflineSessionConfig;
+    uploads?: OfflineSessionUploadsConfig;
   }): void {
     if (options.adapter !== undefined) {
       this.#adapters.add(options.adapter);
     }
     if (options.onPersistentStorageError !== undefined) {
       this.#onPersistentStorageError = options.onPersistentStorageError;
+    }
+    if (options.uploads !== undefined) {
+      if (
+        import.meta.env.DEV &&
+        this.#uploadsConfig !== undefined &&
+        !sameUploadsConfig(this.#uploadsConfig, options.uploads)
+      ) {
+        throw new Error(
+          `[tsdf] Incompatible offline upload configuration for session "${this.sessionKey}"`,
+        );
+      }
+      this.#uploadsConfig = options.uploads;
+      registerOfflineUploadAdapterForSession(
+        this.sessionKey,
+        options.uploads.adapter,
+      );
+      this.#uploadQueue = createAsyncQueue<ValidPayload>({
+        autoStart: true,
+        concurrency: options.uploads.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY,
+      });
+      void this.hydrate();
     }
 
     if (!this.#hasCanonicalConfig && options.config) {
@@ -811,6 +957,83 @@ export class SessionOfflineCoordinator {
 
   getResolutions(): OfflineResolutionRecord[] {
     return this.store.state.resolutions;
+  }
+
+  getUploads(): OfflineUpload[] {
+    return this.store.state.uploads;
+  }
+
+  async saveUpload(args: {
+    id: string;
+    file: Blob | File;
+    source?: 'manual' | 'mutation';
+  }): Promise<void> {
+    if (!this.#uploadsConfig) {
+      throw new Error(
+        `[tsdf] Offline uploads are not configured for session "${this.sessionKey}"`,
+      );
+    }
+
+    const existing = this.#uploads.get(args.id);
+    const nextRecord = createStoredUploadRecord({
+      id: args.id,
+      sessionKey: this.sessionKey,
+      file: args.file,
+      source: args.source ?? 'manual',
+      createdAt: existing?.createdAt,
+      lastOnlineSessionStartedAt:
+        this.#getCurrentUploadOnlineSessionStartedAt(),
+    });
+
+    await this.#saveUploadRecord(nextRecord);
+  }
+
+  async replaceUpload(args: { id: string; file: Blob | File }): Promise<void> {
+    const existing = this.#uploads.get(args.id);
+    if (existing?.state === 'uploading') {
+      throw new Error(`Cannot replace upload "${args.id}" while uploading`);
+    }
+
+    await this.saveUpload({
+      id: args.id,
+      file: args.file,
+      source: existing?.source ?? 'manual',
+    });
+  }
+
+  async loadUpload(id: string): Promise<File | null> {
+    const record = await this.#getUploadRecord(id);
+    return record?.file ?? null;
+  }
+
+  async deleteUpload(id: string): Promise<void> {
+    if (this.#referencedUploadIds.has(id)) {
+      throw new Error(
+        `Cannot delete upload "${id}" while it is still referenced`,
+      );
+    }
+    if (this.#uploadPromisesById.has(id)) {
+      throw new Error(`Cannot delete upload "${id}" while it is uploading`);
+    }
+    if (!this.#uploadsConfig) return;
+
+    this.#uploads.delete(id);
+    await this.#uploadsConfig.adapter.remove(this.sessionKey, id);
+    this.#syncUploadsState();
+    void this.#refreshUploadRetention();
+  }
+
+  async resolveUploadIds(
+    uploadIds: readonly string[],
+  ): Promise<Record<string, ValidPayload>> {
+    const entries = await Promise.all(
+      uploadIds.map(async (id) => {
+        const resolvedRef = await this.#ensureUploadResolved(id);
+        return [id, resolvedRef] as const;
+      }),
+    );
+
+    return Object.fromEntries(entries);
   }
 
   isLeader(): boolean {
@@ -981,11 +1204,17 @@ export class SessionOfflineCoordinator {
     this.#syncRecoveryProbe();
 
     if (!wasEffectivelyOffline && this.store.state.status.isOfflineMode) {
+      this.#uploadOnlineSessionStartedAt = null;
+      this.#stopUploadCleanupTimer();
+      this.#stopUploadOnlineSessionStabilization();
       this.#notifyOfflineCycle();
       return;
     }
 
     if (wasEffectivelyOffline && !this.store.state.status.isOfflineMode) {
+      this.#uploadOnlineSessionStartedAt = null;
+      this.#stopUploadOnlineSessionStabilization();
+      this.#scheduleUploadOnlineSessionStabilization();
       this.#notifyGreenCycle();
       return;
     }
@@ -1157,6 +1386,7 @@ export class SessionOfflineCoordinator {
     if (this.store.state.status.isOfflineMode || !this.isLeader()) {
       return;
     }
+    void this.#refreshUploadRetention();
     for (const registration of this.#registrations.values()) {
       registration.onGreenCycle?.();
     }
@@ -1166,6 +1396,7 @@ export class SessionOfflineCoordinator {
     if (!this.store.state.status.isOfflineMode || !this.isLeader()) {
       return;
     }
+    void this.#refreshUploadRetention();
     for (const registration of this.#registrations.values()) {
       registration.onOfflineCycle?.();
     }
@@ -1216,13 +1447,390 @@ export class SessionOfflineCoordinator {
     }
   }
 
+  async #getUploadRecord(
+    id: string,
+  ): Promise<OfflineStoredUploadRecord | null> {
+    const existing = this.#uploads.get(id);
+    if (existing) return existing;
+    if (!this.#uploadsConfig) return null;
+
+    const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
+    if (loaded) {
+      this.#uploads.set(id, loaded);
+      this.#syncUploadsState();
+    }
+
+    return loaded;
+  }
+
+  async #saveUploadRecord(record: OfflineStoredUploadRecord): Promise<void> {
+    if (!this.#uploadsConfig) {
+      throw new Error(
+        `[tsdf] Offline uploads are not configured for session "${this.sessionKey}"`,
+      );
+    }
+
+    this.#uploads.set(record.id, record);
+    await this.#uploadsConfig.adapter.save(this.sessionKey, record.id, record);
+    this.#syncUploadsState();
+    void this.#refreshUploadRetention();
+  }
+
+  #getCurrentUploadOnlineSessionStartedAt(): number | undefined {
+    if (this.store.state.status.isOfflineMode) return undefined;
+
+    return this.#uploadOnlineSessionStartedAt ?? undefined;
+  }
+
+  #getUploadRetentionCandidates(): OfflineStoredUploadRecord[] {
+    return [...this.#uploads.values()].filter(
+      (upload) =>
+        !this.#referencedUploadIds.has(upload.id) &&
+        !this.#uploadPromisesById.has(upload.id),
+    );
+  }
+
+  #stopUploadCleanupTimer(): void {
+    if (this.#uploadCleanupTimer !== null) {
+      clearTimeout(this.#uploadCleanupTimer);
+      this.#uploadCleanupTimer = null;
+    }
+  }
+
+  #stopUploadOnlineSessionStabilization(): void {
+    if (this.#uploadOnlineSessionStabilizationTimer !== null) {
+      clearTimeout(this.#uploadOnlineSessionStabilizationTimer);
+      this.#uploadOnlineSessionStabilizationTimer = null;
+    }
+  }
+
+  #scheduleUploadOnlineSessionStabilization(): void {
+    if (
+      this.#uploadsConfig === undefined ||
+      this.store.state.status.isOfflineMode ||
+      !this.isLeader() ||
+      this.#uploadOnlineSessionStartedAt !== null ||
+      this.#uploadOnlineSessionStabilizationTimer !== null
+    ) {
+      return;
+    }
+
+    this.#uploadOnlineSessionStabilizationTimer = setTimeout(() => {
+      this.#uploadOnlineSessionStabilizationTimer = null;
+      if (
+        this.#disposed ||
+        this.#uploadsConfig === undefined ||
+        this.store.state.status.isOfflineMode ||
+        !this.isLeader()
+      ) {
+        return;
+      }
+
+      this.#uploadOnlineSessionStartedAt = Date.now();
+      void this.#refreshUploadRetention().catch((error: unknown) => {
+        this.#onPersistentStorageError?.(error);
+      });
+    }, OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS);
+  }
+
+  async #refreshUploadRetention(): Promise<void> {
+    const uploadsConfig = this.#uploadsConfig;
+    const token = ++this.#uploadRetentionToken;
+
+    this.#stopUploadCleanupTimer();
+    if (
+      !uploadsConfig ||
+      this.store.state.status.isOfflineMode ||
+      !this.isLeader()
+    ) {
+      this.#uploadOnlineSessionStartedAt = null;
+      return;
+    }
+
+    const onlineSessionStartedAt = this.#uploadOnlineSessionStartedAt;
+    if (onlineSessionStartedAt === null) {
+      this.#scheduleUploadOnlineSessionStabilization();
+      return;
+    }
+
+    let didChange = false;
+
+    const candidates = this.#getUploadRetentionCandidates();
+    const stampUpdates: OfflineStoredUploadRecord[] = [];
+    for (const upload of candidates) {
+      if (upload.lastOnlineSessionStartedAt === onlineSessionStartedAt) {
+        continue;
+      }
+
+      const nextRecord: OfflineStoredUploadRecord = {
+        ...upload,
+        lastOnlineSessionStartedAt: onlineSessionStartedAt,
+        updatedAt: Date.now(),
+      };
+      this.#uploads.set(nextRecord.id, nextRecord);
+      stampUpdates.push(nextRecord);
+    }
+    if (stampUpdates.length > 0) {
+      await Promise.all(
+        stampUpdates.map((record) =>
+          uploadsConfig.adapter.save(this.sessionKey, record.id, record),
+        ),
+      );
+      didChange = true;
+    }
+
+    if (token !== this.#uploadRetentionToken) return;
+
+    const now = Date.now();
+    // Re-read candidates from the map after stamping since lastOnlineSessionStartedAt changed.
+    const stampedCandidates = didChange
+      ? candidates
+          .map((c) => this.#uploads.get(c.id))
+          .filter((c) => c !== undefined)
+      : candidates;
+    const expiredIds = stampedCandidates
+      .filter((upload) => {
+        if (upload.lastOnlineSessionStartedAt === undefined) return false;
+
+        return (
+          now - upload.lastOnlineSessionStartedAt >= OFFLINE_UPLOAD_RETENTION_MS
+        );
+      })
+      .map((upload) => upload.id);
+
+    const expiredIdSet = new Set(expiredIds);
+    if (expiredIdSet.size > 0) {
+      for (const id of expiredIdSet) {
+        this.#uploads.delete(id);
+      }
+      await Promise.all(
+        expiredIds.map((id) =>
+          uploadsConfig.adapter.remove(this.sessionKey, id),
+        ),
+      );
+      didChange = true;
+    }
+
+    if (token !== this.#uploadRetentionToken || this.#disposed) return;
+
+    if (didChange) {
+      this.#syncUploadsState();
+    }
+
+    const remainingCandidates =
+      expiredIdSet.size > 0
+        ? stampedCandidates.filter((upload) => !expiredIdSet.has(upload.id))
+        : stampedCandidates;
+    const nextExpiryAt = Math.min(
+      ...remainingCandidates.flatMap((upload) =>
+        upload.lastOnlineSessionStartedAt === undefined
+          ? []
+          : [upload.lastOnlineSessionStartedAt + OFFLINE_UPLOAD_RETENTION_MS],
+      ),
+    );
+
+    if (!Number.isFinite(nextExpiryAt)) return;
+
+    this.#uploadCleanupTimer = setTimeout(
+      () => {
+        this.#uploadCleanupTimer = null;
+        void this.#refreshUploadRetention().catch((error: unknown) => {
+          this.#onPersistentStorageError?.(error);
+        });
+      },
+      Math.max(0, nextExpiryAt - Date.now()),
+    );
+  }
+
+  #syncUploadsState(): void {
+    const uploads = [...this.#uploads.values()]
+      .map(stripStoredUploadFile)
+      .sort((left, right) => left.id.localeCompare(right.id));
+
+    this.store.setPartialState(
+      { uploads },
+      { action: 'offline-session-uploads' },
+    );
+    this.#publishSnapshot();
+  }
+
+  #buildNextUploadRecord(
+    current: OfflineStoredUploadRecord,
+    args: {
+      state: OfflineUploadState;
+      resolvedRef?: ValidPayload;
+      progress?: OfflineUploadProgress;
+      lastError?: { message: string };
+    },
+  ): OfflineStoredUploadRecord {
+    return {
+      ...current,
+      state: args.state,
+      updatedAt: Date.now(),
+      ...(args.resolvedRef !== undefined
+        ? { resolvedRef: args.resolvedRef }
+        : {}),
+      ...(args.progress !== undefined ? { progress: args.progress } : {}),
+      ...(args.lastError !== undefined ? { lastError: args.lastError } : {}),
+    };
+  }
+
+  async #updateUploadState(args: {
+    id: string;
+    state: OfflineUploadState;
+    resolvedRef?: ValidPayload;
+    progress?: OfflineUploadProgress;
+    lastError?: { message: string };
+    /** When true, only update in-memory state and UI without persisting to storage. */
+    skipPersist?: boolean;
+  }): Promise<OfflineStoredUploadRecord | null> {
+    const current = await this.#getUploadRecord(args.id);
+    if (!current) return null;
+
+    const nextRecord = this.#buildNextUploadRecord(current, args);
+
+    if (args.skipPersist) {
+      this.#uploads.set(nextRecord.id, nextRecord);
+      this.#syncUploadsState();
+    } else {
+      await this.#saveUploadRecord(nextRecord);
+    }
+    return nextRecord;
+  }
+
+  async #ensureUploadResolved(id: string): Promise<ValidPayload> {
+    const existingRecord = await this.#getUploadRecord(id);
+    if (!existingRecord) {
+      throw new Error(`Unknown offline upload "${id}"`);
+    }
+    if (
+      existingRecord.state === 'uploaded' &&
+      existingRecord.resolvedRef !== undefined
+    ) {
+      return existingRecord.resolvedRef;
+    }
+
+    const existingPromise = this.#uploadPromisesById.get(id);
+    if (existingPromise) return existingPromise;
+    if (!this.#uploadsConfig) {
+      throw new Error(
+        `[tsdf] Offline uploads are not configured for session "${this.sessionKey}"`,
+      );
+    }
+    const uploadsConfig = this.#uploadsConfig;
+
+    const uploadPromise = this.#uploadQueue
+      .resultifyAdd(async () => {
+        const queuedRecord = await this.#getUploadRecord(id);
+        if (!queuedRecord) {
+          throw new Error(`Unknown offline upload "${id}"`);
+        }
+        if (
+          queuedRecord.state === 'uploaded' &&
+          queuedRecord.resolvedRef !== undefined
+        ) {
+          return queuedRecord.resolvedRef;
+        }
+
+        const file = queuedRecord.file;
+        await this.#updateUploadState({
+          id,
+          state: 'uploading',
+          progress: {
+            loadedBytes: 0,
+            totalBytes: queuedRecord.sizeBytes,
+            progress: 0,
+          },
+        });
+
+        try {
+          const resolvedRef = await uploadsConfig.upload({
+            id,
+            sessionKey: this.sessionKey,
+            file,
+            onProgress: (progress) => {
+              void this.#updateUploadState({
+                id,
+                state: 'uploading',
+                progress,
+                skipPersist: true,
+              });
+            },
+          });
+
+          await this.#updateUploadState({
+            id,
+            state: 'uploaded',
+            resolvedRef,
+            progress: {
+              loadedBytes: queuedRecord.sizeBytes,
+              totalBytes: queuedRecord.sizeBytes,
+              progress: 1,
+            },
+          });
+
+          return resolvedRef;
+        } catch (error) {
+          await this.#updateUploadState({
+            id,
+            state: 'failed',
+            lastError: {
+              message: error instanceof Error ? error.message : 'Upload failed',
+            },
+          });
+          throw error;
+        }
+      })
+      .then((result) => {
+        if (!result.ok) throw result.error;
+        return result.value;
+      })
+      .finally(() => {
+        this.#uploadPromisesById.delete(id);
+      });
+
+    this.#uploadPromisesById.set(id, uploadPromise);
+    return uploadPromise;
+  }
+
+  async #cleanupUnusedMutationUploads(): Promise<void> {
+    const uploadsConfig = this.#uploadsConfig;
+    if (!uploadsConfig) return;
+
+    const removableIds = [...this.#uploads.values()]
+      .filter((upload) => upload.source === 'mutation')
+      .map((upload) => upload.id)
+      .filter(
+        (id) =>
+          !this.#referencedUploadIds.has(id) &&
+          !this.#uploadPromisesById.has(id),
+      );
+
+    if (removableIds.length === 0) return;
+
+    for (const id of removableIds) {
+      this.#uploads.delete(id);
+    }
+    await Promise.all(
+      removableIds.map((id) =>
+        uploadsConfig.adapter.remove(this.sessionKey, id),
+      ),
+    );
+    this.#syncUploadsState();
+    void this.#refreshUploadRetention();
+  }
+
   #refreshAggregates(): void {
     const allEntities: InternalGlobalOfflineEntity[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
+    const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
     for (const contribution of this.#storeContributions.values()) {
       allEntities.push(...contribution.entities);
       allResolutions.push(...contribution.resolutions);
+      for (const uploadId of contribution.referencedUploadIds) {
+        referencedUploadIds.add(uploadId);
+      }
       const existing =
         nextProtectedKeysByAdapter.get(contribution.adapter) ?? [];
       existing.push(...contribution.protectedKeys);
@@ -1272,6 +1880,7 @@ export class SessionOfflineCoordinator {
       }
     }
     this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
+    this.#referencedUploadIds = referencedUploadIds;
 
     if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
       this.#protectedKeys = nextProtectedKeys;
@@ -1284,6 +1893,13 @@ export class SessionOfflineCoordinator {
     );
     void this.#persistSessionSnapshot();
     this.#publishSnapshot();
+    if (
+      this.#uploadsConfig &&
+      this.#uploads.size > 0 &&
+      this.#storeContributions.size === this.#registrations.size
+    ) {
+      void this.#cleanupUnusedMutationUploads();
+    }
   }
 
   #stampLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
@@ -1328,6 +1944,7 @@ export class SessionOfflineCoordinator {
       status,
       entities: this.store.state.entities,
       resolutions: this.store.state.resolutions,
+      uploads: this.store.state.uploads,
     });
   }
 
@@ -1343,6 +1960,7 @@ export class SessionOfflineCoordinator {
         }),
         entities: message.entities,
         resolutions: message.resolutions,
+        uploads: message.uploads,
       },
       { action: 'offline-session-remote' },
     );
@@ -1392,10 +2010,13 @@ export class SessionOfflineCoordinator {
 
     if (!this.isLeader()) {
       this.#stopRecoveryProbe();
+      this.#stopUploadCleanupTimer();
+      this.#stopUploadOnlineSessionStabilization();
       return;
     }
 
     if (leadershipChanged && !this.store.state.status.isOfflineMode) {
+      this.#scheduleUploadOnlineSessionStabilization();
       this.#notifyGreenCycle();
     }
 
@@ -1529,6 +2150,8 @@ export class SessionOfflineCoordinator {
   dispose(): void {
     this.#disposed = true;
     this.#stopRecoveryProbe();
+    this.#stopUploadCleanupTimer();
+    this.#stopUploadOnlineSessionStabilization();
     this.#cleanupNetworkListeners?.();
     this.#browserTabs.priority.close();
     this.#browserTabs.coordinator.close();
@@ -1551,6 +2174,7 @@ export function getOrCreateSessionOfflineCoordinator(
       adapter: options.adapter,
       onPersistentStorageError: options.onPersistentStorageError,
       config: options.config,
+      uploads: options.uploads,
     });
     return existing;
   }
@@ -1560,6 +2184,7 @@ export function getOrCreateSessionOfflineCoordinator(
     adapter: options.adapter,
     onPersistentStorageError: options.onPersistentStorageError,
     config: options.config,
+    uploads: options.uploads,
     bootstrapStatusFromLocalStorage: options.bootstrapStatusFromLocalStorage,
   });
   registry.set(sessionKey, created);
@@ -1599,6 +2224,14 @@ export function getGlobalOfflineResolutions(
   return registry.get(sessionKey)?.getResolutions() ?? [];
 }
 
+/**
+ * Test-only primitive for resetting just the offline session coordinator
+ * registry.
+ *
+ * Prefer calling `resetSessionForTests()` from
+ * `tests/utils/resetSessionForTests.ts` so restart-style tests reset the full
+ * session/runtime boundary instead of invoking this low-level reset directly.
+ */
 export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   if (!import.meta.env.TEST) {
     throw new Error(
@@ -1613,12 +2246,27 @@ export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   defaultStatusBySession.clear();
 }
 
-export function createOfflineSession(args: {
-  config: OfflineSessionConfig;
+export function getOfflineSessionUploadsConfig<TUploadRef extends ValidPayload>(
+  session: OfflineSession<TUploadRef>,
+): OfflineSessionUploadsConfig<TUploadRef> | undefined {
+  // WORKAROUND: Reading from the shared weak map loses the compile-time upload
+  // ref generic, so the session API rebinds the stored config to the caller's
+  // known upload-ref type.
+  return __LEGIT_CAST__<
+    OfflineSessionUploadsConfig<TUploadRef> | undefined,
+    unknown
+  >(uploadsConfigByOfflineSession.get(eraseOfflineSession(session)));
+}
+
+export function createOfflineSession<
+  TUploadRef extends ValidPayload = ValidPayload,
+>(args: {
+  config: OfflineSessionConfig<TUploadRef>;
   getSessionKey?: () => string | false;
-}): OfflineSession {
+}): OfflineSession<TUploadRef> {
   const getSessionKey = args.getSessionKey ?? (() => false);
   const { config } = args;
+  const uploads = config.uploads;
   const inactiveScope = `offline-session:${Math.random().toString(36).slice(2)}`;
   const baseRuntimeConfig: OfflineRuntimeConfig = {
     network: { enabled: config.network?.enabled ?? false },
@@ -1637,6 +2285,7 @@ export function createOfflineSession(args: {
 
     return getOrCreateSessionOfflineCoordinator(sessionKey, {
       config,
+      uploads: eraseUploadsConfig(uploads),
       bootstrapStatusFromLocalStorage,
     });
   }
@@ -1648,11 +2297,12 @@ export function createOfflineSession(args: {
         ? resolveOfflineSessionScope(false, inactiveScope)
         : activeSessionKey,
       activeSessionKey === false ? undefined : config,
+      eraseUploadsConfig(activeSessionKey === false ? undefined : uploads),
       activeSessionKey !== false,
     );
   }
 
-  return {
+  const session: OfflineSession<TUploadRef> = {
     getSessionKey,
     getConfig: () => config,
     getOfflineRuntimeConfig: () =>
@@ -1694,6 +2344,58 @@ export function createOfflineSession(args: {
         getGlobalOfflineResolutions(sessionKey)
       );
     },
+    getOfflineUploads: () => {
+      const sessionKey = getSessionKey();
+      if (sessionKey === false) return [];
+
+      return castUploads<TUploadRef>(
+        getActiveCoordinator(false)?.getUploads() ?? [],
+      );
+    },
+    resolveOfflineUpload: async (id) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) {
+        throw new Error(
+          `[tsdf] Offline uploads are not configured for inactive session scope "${inactiveScope}"`,
+        );
+      }
+      const resolvedRef = (await coordinator.resolveUploadIds([id]))[id];
+      if (resolvedRef === undefined) {
+        throw new Error(`Unknown offline upload "${id}"`);
+      }
+      return castResolvedUploadRef<TUploadRef>(resolvedRef);
+    },
+    resolveOfflineUploads: async (ids) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) {
+        throw new Error(
+          `[tsdf] Offline uploads are not configured for inactive session scope "${inactiveScope}"`,
+        );
+      }
+      return castResolvedUploadRefs<TUploadRef>(
+        await coordinator.resolveUploadIds(ids),
+      );
+    },
+    saveOfflineUpload: ({ id, file }) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) return Promise.resolve();
+      return coordinator.saveUpload({ id, file, source: 'manual' });
+    },
+    replaceOfflineUpload: ({ id, file }) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) return Promise.resolve();
+      return coordinator.replaceUpload({ id, file });
+    },
+    loadOfflineUpload: (id) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) return Promise.resolve(null);
+      return coordinator.loadUpload(id);
+    },
+    deleteOfflineUpload: (id) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) return Promise.resolve();
+      return coordinator.deleteUpload(id);
+    },
     useOfflineStatus: () => {
       const coordinator = useSessionCoordinator();
       const statusSelector = useCallback(
@@ -1726,7 +2428,27 @@ export function createOfflineSession(args: {
         equalityFn: deepEqual,
       });
     },
+    useOfflineUploads: () => {
+      const coordinator = useSessionCoordinator();
+      const uploadsSelector = useCallback(
+        (state: SessionStoreState) => state.uploads,
+        [],
+      );
+
+      return castUploads<TUploadRef>(
+        coordinator.store.useSelectorRC(uploadsSelector, {
+          equalityFn: deepEqual,
+        }),
+      );
+    },
   };
+
+  uploadsConfigByOfflineSession.set(
+    eraseOfflineSession(session),
+    eraseUploadsConfig(uploads),
+  );
+
+  return session;
 }
 
 function useSessionOfflineCoordinator(
@@ -1746,15 +2468,17 @@ function useSessionOfflineCoordinator(
 function useConfiguredSessionOfflineCoordinator(
   sessionKey: string,
   config: OfflineSessionConfig | undefined,
+  uploads: OfflineSessionUploadsConfig | undefined,
   bootstrapStatusFromLocalStorage = false,
 ): SessionOfflineCoordinator {
   return useMemo(
     () =>
       getOrCreateSessionOfflineCoordinator(sessionKey, {
         config,
+        uploads,
         bootstrapStatusFromLocalStorage,
       }),
-    [bootstrapStatusFromLocalStorage, config, sessionKey],
+    [bootstrapStatusFromLocalStorage, config, sessionKey, uploads],
   );
 }
 

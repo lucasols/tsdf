@@ -3,12 +3,12 @@ import { act } from 'react';
 import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { ListQueryOfflineOperationDefinition } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
@@ -103,6 +103,15 @@ describe('list-query replay', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -110,14 +119,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -330,6 +331,15 @@ describe('list-query replay', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -337,14 +347,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -408,7 +410,7 @@ describe('list-query replay', () => {
       'queue a temp create while offline',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',
@@ -599,6 +601,15 @@ describe('list-query replay', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -606,14 +617,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUsers: {
                 inputSchema: batchCreateUserInputSchema,
@@ -686,34 +689,40 @@ describe('list-query replay', () => {
       'queue one batch temp create while offline',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
-        optimisticUpdate: () => {
-          env.apiStore.addItemToState(
-            'temp:Ada offline',
-            { id: -1, name: 'Ada offline' },
-            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
-          );
-          env.apiStore.addItemToState(
-            'temp:Linus offline',
-            { id: -1, name: 'Linus offline' },
-            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
-          );
+      await env.apiStore.performMutation(
+        ['temp:Ada offline', 'temp:Linus offline'],
+        {
+          optimisticUpdate: () => {
+            env.apiStore.addItemToState(
+              'temp:Ada offline',
+              { id: -1, name: 'Ada offline' },
+              { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+            );
+            env.apiStore.addItemToState(
+              'temp:Linus offline',
+              { id: -1, name: 'Linus offline' },
+              { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+            );
+          },
+          mutation: async () => {
+            const results = [
+              { id: 3, name: 'Ada offline' },
+              { id: 4, name: 'Linus offline' },
+            ];
+            for (const result of results) {
+              await env.serverTable.delayedSetItem(
+                `users||${result.id}`,
+                result,
+              );
+            }
+            return results;
+          },
+          offline: {
+            operation: 'createUsers',
+            input: [{ name: 'Ada offline' }, { name: 'Linus offline' }],
+          },
         },
-        mutation: async () => {
-          const results = [
-            { id: 3, name: 'Ada offline' },
-            { id: 4, name: 'Linus offline' },
-          ];
-          for (const result of results) {
-            await env.serverTable.delayedSetItem(`users||${result.id}`, result);
-          }
-          return results;
-        },
-        offline: {
-          operation: 'createUsers',
-          input: [{ name: 'Ada offline' }, { name: 'Linus offline' }],
-        },
-      });
+      );
     });
 
     // Edit each temp row before reconnecting. Replay should preserve this order
@@ -905,6 +914,15 @@ describe('list-query replay', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -912,14 +930,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -997,7 +1007,7 @@ describe('list-query replay', () => {
       'queue the temp create that starts the offline lifecycle',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',
@@ -1155,6 +1165,16 @@ describe('list-query replay', () => {
       {
         id: 'offline-replay-nested-temp-create-chain-store',
         getSessionKey: () => 'offline-replay-nested-temp-create-chain-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () =>
+            'offline-replay-nested-temp-create-chain-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1162,15 +1182,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () =>
-                'offline-replay-nested-temp-create-chain-session',
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -1236,7 +1247,7 @@ describe('list-query replay', () => {
       'queue the root parent temp create',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Parent offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Parent offline',
@@ -1258,7 +1269,7 @@ describe('list-query replay', () => {
       'queue a nested child temp create depending on the parent',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Child offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Child offline',
@@ -1549,6 +1560,16 @@ describe('list-query replay', () => {
         id: 'offline-replay-temp-create-resolution-chain-store',
         getSessionKey: () =>
           'offline-replay-temp-create-resolution-chain-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () =>
+            'offline-replay-temp-create-resolution-chain-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1556,15 +1577,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () =>
-                'offline-replay-temp-create-resolution-chain-session',
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -1613,7 +1625,7 @@ describe('list-query replay', () => {
       'queue the temp create and a dependent edit while offline',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',
@@ -1862,6 +1874,15 @@ describe('list-query replay', () => {
       {
         id: 'offline-replay-temp-create-discard-store',
         getSessionKey: () => 'offline-replay-temp-create-discard-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-replay-temp-create-discard-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1869,14 +1890,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-replay-temp-create-discard-session',
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -1929,7 +1942,7 @@ describe('list-query replay', () => {
       'queue a temp create and a dependent edit while offline',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',
@@ -2051,6 +2064,15 @@ describe('list-query replay', () => {
       },
       {
         getSessionKey: () => 'offline-replay-temp-list-query-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-replay-temp-list-query-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -2058,14 +2080,6 @@ describe('list-query replay', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-replay-temp-list-query-session',
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -2111,7 +2125,7 @@ describe('list-query replay', () => {
       'queue a temp create while offline',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',

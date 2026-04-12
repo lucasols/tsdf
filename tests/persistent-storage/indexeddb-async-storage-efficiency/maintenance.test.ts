@@ -2,12 +2,14 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
-import { createOfflineSession } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
 import { clearSessionProtectedKeysSnapshot } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import type { AsyncStorageNamespaceScope } from '../../../src/persistentStorage/types';
+import { createStoreManager } from '../../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import { normalizeError } from '../../mocks/testEnvUtils';
 import { advanceTime } from '../../utils/genericTestUtils';
 import {
   getIndexedDbNamespaceSnapshot,
@@ -140,7 +142,7 @@ function corruptEntryRow(args: {
       args.scope.sessionKey,
       args.scope.storeName,
       args.scope.kind,
-      args.key ?? 'document',
+      args.key ?? DOCUMENT_PERSISTED_ENTRY_KEY,
     ],
     (current) => ({
       ...(typeof current === 'object' && current !== null
@@ -227,7 +229,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       2.009s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
       2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
       2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.016s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
+      2.016s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["d", "@scope"]
       ""
     `);
     expect(
@@ -314,7 +316,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['["sess1","fresh-doc","document"]', 'document']
+              - key: ['["sess1","fresh-doc","document"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -483,8 +485,8 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
       2.016s | 📖 scope-state entries+namespacePolicies scope=["sess2","expired-doc","document"] -> keys=1 exists=yes valid=yes
       2.016s | 📖 scope-state entries+namespacePolicies scope=["sess2","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.019s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["document", "@scope"]
-      2.022s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess2","expired-doc","document"] keys=["document", "@scope"]
+      2.019s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["d", "@scope"]
+      2.022s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess2","expired-doc","document"] keys=["d", "@scope"]
       ""
     `);
   });
@@ -528,10 +530,10 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       'scope=["sess-fail","failed-doc","document"] -> keys=1 exists=yes valid=yes',
     );
     expect(firstCleanupOperations).toContain(
-      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-sibling","sibling-doc","document"] keys=["document", "@scope"]',
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-sibling","sibling-doc","document"] keys=["d", "@scope"]',
     );
     expect(firstCleanupOperations).not.toContain(
-      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["document", "@scope"]',
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["d", "@scope"]',
     );
 
     localStorage.removeItem(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY);
@@ -558,7 +560,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       siblingEntryExistsAfterRetryCleanup: '❌'
     `);
     expect(retryCleanupOperations).toContain(
-      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["document", "@scope"]',
+      '🗑️ tx(entries, namespacePolicies).delete scope=["sess-fail","failed-doc","document"] keys=["d", "@scope"]',
     );
   });
 
@@ -641,7 +643,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             name: 'entries'
             rowCount: 1
             rows:
-              - key: ['["sess1","valid-doc","document"]', 'document']
+              - key: ['["sess1","valid-doc","document"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -750,7 +752,7 @@ describe('indexeddb async storage efficiency: maintenance', () => {
             rows:
               - key: ['["sess1","mixed-list-query","listQuery.item"]', '"projects||1']
                 value: 'JSON object | 0.2 kb'
-              - key: ['["sess1","valid-doc","document"]', 'document']
+              - key: ['["sess1","valid-doc","document"]', 'd']
                 value: 'JSON object | 0.2 kb'
           - autoIncrement: '❌'
             indexes: []
@@ -913,16 +915,17 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       {
         id: 'protected-doc',
         getSessionKey: () => dottedSessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => dottedSessionKey,
+          offlineSession: { network: offlineNetwork.config },
+        }),
         testScenario: 'loaded',
         __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         persistentStorage: {
           adapter: mockAdapter.adapter,
           schema: wrappedDocumentSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => dottedSessionKey,
-              config: { network: offlineNetwork.config },
-            }),
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
@@ -1045,7 +1048,12 @@ describe('indexeddb async storage efficiency: maintenance', () => {
       i: string;
       o?: number;
     }>(reloadedAdapter, {
-      key: ['user@example.com', 'protected-doc', 'document', 'document'],
+      key: [
+        'user@example.com',
+        'protected-doc',
+        'document',
+        DOCUMENT_PERSISTED_ENTRY_KEY,
+      ],
       storeName: 'entries',
     });
     expect(typeof protectedDocumentEntry?.a).toBe('number');

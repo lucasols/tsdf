@@ -1,7 +1,6 @@
 import { createCache, type Cache } from '@ls-stack/utils/cache';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
-import { asPossiblyUndefined } from '@ls-stack/utils/typingFnUtils';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getNamespaceId,
@@ -16,6 +15,11 @@ import {
   parseFileNameInfo,
   resolveHashedPayloadRecordKeyFromValue,
 } from './opfsFileNaming';
+import {
+  getDirectoryHandleIfExists,
+  getFileHandleIfExists,
+  getNavigatorStorageDirectory,
+} from './opfsHelpers';
 import type {
   AsyncStorageDiscoveredScope,
   AsyncStorageDriver,
@@ -25,36 +29,6 @@ import type {
 
 const OPFS_DIR_HANDLE_CACHE_MAX_SIZE = 500;
 const OPFS_FILE_HANDLE_CACHE_MAX_SIZE = 10_000;
-async function getNavigatorStorageDirectory(): Promise<FileSystemDirectoryHandle> {
-  const storage = asPossiblyUndefined(globalThis.navigator)?.storage;
-  if (storage?.getDirectory === undefined) {
-    throw new Error('[TSDF] OPFS is unavailable in this environment.');
-  }
-
-  return storage.getDirectory();
-}
-
-async function getDirectoryHandleIfExists(
-  parent: FileSystemDirectoryHandle,
-  name: string,
-): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    return await parent.getDirectoryHandle(name);
-  } catch {
-    return null;
-  }
-}
-
-async function getFileHandleIfExists(
-  parent: FileSystemDirectoryHandle,
-  name: string,
-): Promise<FileSystemFileHandle | null> {
-  try {
-    return await parent.getFileHandle(name);
-  } catch {
-    return null;
-  }
-}
 
 type OpfsDirectoryCache = Cache<FileSystemDirectoryHandle | null>;
 type OpfsFileCache = Cache<FileSystemFileHandle | null>;
@@ -818,14 +792,11 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       await options.cacheContext.dirCache.getAsync(sessionDirPath);
     if (cachedSessionDir !== undefined) return cachedSessionDir;
 
-    const sessionDir = await getDirectoryHandleIfExists(
-      root,
-      encodedSessionKey,
+    return options.cacheContext.dirCache.getOrInsertAsync(
+      sessionDirPath,
+      async () => getDirectoryHandleIfExists(root, encodedSessionKey),
+      { skipCachingWhen: (dir) => dir === null },
     );
-    if (sessionDir !== null) {
-      options.cacheContext.dirCache.set(sessionDirPath, sessionDir);
-    }
-    return sessionDir;
   }
 
   async #getStoreDir(
@@ -854,14 +825,11 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       await options.cacheContext.dirCache.getAsync(storeDirPath);
     if (cachedStoreDir !== undefined) return cachedStoreDir;
 
-    const storeDir = await getDirectoryHandleIfExists(
-      sessionDir,
-      encodedStoreName,
+    return options.cacheContext.dirCache.getOrInsertAsync(
+      storeDirPath,
+      async () => getDirectoryHandleIfExists(sessionDir, encodedStoreName),
+      { skipCachingWhen: (dir) => dir === null },
     );
-    if (storeDir !== null) {
-      options.cacheContext.dirCache.set(storeDirPath, storeDir);
-    }
-    return storeDir;
   }
 
   async #getFileHandle(
@@ -891,11 +859,11 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       await options.cacheContext.fileCache.getAsync(filePath);
     if (cachedFileHandle !== undefined) return cachedFileHandle;
 
-    const fileHandle = await getFileHandleIfExists(options.storeDir, fileName);
-    if (fileHandle !== null) {
-      options.cacheContext.fileCache.set(filePath, fileHandle);
-    }
-    return fileHandle;
+    return options.cacheContext.fileCache.getOrInsertAsync(
+      filePath,
+      async () => getFileHandleIfExists(options.storeDir, fileName),
+      { skipCachingWhen: (fileHandle) => fileHandle === null },
+    );
   }
 
   async #listScopedFiles(

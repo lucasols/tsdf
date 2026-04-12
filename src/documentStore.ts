@@ -26,6 +26,7 @@ import type {
   TestSessionKeyChangedEvent,
 } from './internal/testTimelineTypes';
 import { IsOffScreenContext } from './isOffScreenContext';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from './persistentStorage/documentEntryKey';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import {
   createOfflineEntityLookup,
@@ -58,6 +59,7 @@ import {
   type OfflineResolutionRecordForOperation,
   type ParsedOfflineResolutionConflictResultForOperation,
 } from './persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from './persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type {
   DocumentPersistentStorageConfig,
@@ -178,7 +180,7 @@ const EMPTY_DOCUMENT_OFFLINE_OPERATIONS = {};
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
-  AnyOfflineOperationDefinition
+  AnyOfflineOperationDefinition<__LEGIT_ANY__>
 > &
   ([State] extends [never] ? never : unknown);
 
@@ -463,7 +465,7 @@ export function createDocumentStore<
                   sessionKey,
                   storeName: id,
                   kind: 'document',
-                  key: 'document',
+                  key: DOCUMENT_PERSISTED_ENTRY_KEY,
                 }),
               ];
             },
@@ -995,6 +997,7 @@ export function createDocumentStore<
 
   type DocumentOnlineMutationArgs<T> = DocumentMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type DocumentOfflineMutationArgs<T> = DocumentMutationArgs<T> & {
@@ -1007,6 +1010,7 @@ export function createDocumentStore<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -1045,6 +1049,7 @@ export function createDocumentStore<
     dontShowErrorToast,
     revalidateOnSuccess,
     offline,
+    upload,
   }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
@@ -1059,6 +1064,9 @@ export function createDocumentStore<
 
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
+    const optimisticRollbackSnapshot = optimisticUpdate
+      ? klona(store.state.data)
+      : undefined;
 
     const directMutation = () =>
       mutation({ updateState, currentState: store.state.data });
@@ -1084,6 +1092,7 @@ export function createDocumentStore<
                 unknown
               >(offlineController),
               offline,
+              upload,
               directMutation,
             })
         : async () => ({
@@ -1096,11 +1105,18 @@ export function createDocumentStore<
         }
       },
       onError: (exception) => {
+        if (optimisticUpdate) {
+          runWithBroadcastConsistency('confirmed', () => {
+            store.setKey('data', optimisticRollbackSnapshot ?? null, {
+              action: 'rollback-mutation-error',
+            });
+            publishDocumentSnapshot();
+          });
+        }
+
         if (onMutationError) {
           onMutationError(exception, { dontShowToast: dontShowErrorToast });
         }
-
-        invalidateData();
 
         return toStoreMutationError(exception, errorNormalizer);
       },

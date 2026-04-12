@@ -1,14 +1,14 @@
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createOfflineSession } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   flushAllTimers,
   pick,
@@ -52,17 +52,16 @@ describe('offline fetching scenarios', () => {
     const sessionKey = 'offline-fetching-document-scheduled';
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     });
 
@@ -99,17 +98,16 @@ describe('offline fetching scenarios', () => {
     const sessionKey = 'offline-fetching-document-await-cold';
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'idle',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     });
 
@@ -135,17 +133,16 @@ describe('offline fetching scenarios', () => {
     const sessionKey = 'offline-fetching-document-await-concurrent';
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     });
 
@@ -199,17 +196,16 @@ describe('offline fetching scenarios', () => {
     const env = createDocumentStoreTestEnv(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'idle',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     });
 
@@ -246,10 +242,10 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this cold-boot hydration test also
     // protects the persisted document shape it depends on.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.32 kb)
-      └ offline-fetching-document-async-storage-only (0.31 kb)
-        └ offline-fetching-document-async-storage-only (0.22 kb)
-          ├ d._i.r.json (0.10 kb)
+      "tsdf (0.30 kb)
+      └ offline-fetching-document-async-storage-only (0.29 kb)
+        └ offline-fetching-document-async-storage-only (0.21 kb)
+          ├ d._i.r.json (0.08 kb)
           └ d.e.p.json (0.04 kb)"
     `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d._i.r.json`))
@@ -264,17 +260,16 @@ describe('offline fetching scenarios', () => {
     const env = createDocumentStoreTestEnv(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'idle',
       persistentStorage: {
         adapter: opfsPersistentStorage,
         schema: docSchema,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     });
 
@@ -306,18 +301,17 @@ describe('offline fetching scenarios', () => {
       { 'users||1': { name: 'Ada' } },
       {
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -372,18 +366,17 @@ describe('offline fetching scenarios', () => {
       { 'users||1': { name: 'Ada' } },
       {
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'idle',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -431,18 +424,17 @@ describe('offline fetching scenarios', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'idle',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -517,18 +509,17 @@ describe('offline fetching scenarios', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'idle',
         persistentStorage: {
           adapter: opfsPersistentStorage,
           schema: collectionSchema,
           payloadSchema: rc_string,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -564,19 +555,18 @@ describe('offline fetching scenarios', () => {
       { users: [{ id: 1, name: 'Ada' }] },
       {
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -663,19 +653,18 @@ describe('offline fetching scenarios', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'idle',
         persistentStorage: {
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -784,19 +773,18 @@ describe('offline fetching scenarios', () => {
       {
         id: storeName,
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'idle',
         persistentStorage: {
           adapter: opfsPersistentStorage,
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );
@@ -840,19 +828,18 @@ describe('offline fetching scenarios', () => {
       { users: [{ id: 1, name: 'Ada' }] },
       {
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'idle',
         persistentStorage: {
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
-          offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: network.config },
-            }),
-            operations: {},
-          },
+          offline: { operations: {} },
         },
       },
     );

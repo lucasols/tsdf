@@ -6,6 +6,7 @@ import {
   parseCompactLocalStorageEntry,
   type CompactLocalStorageEntryValue,
 } from './compactLocalStorageEntry';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import {
   getManagedLocalStorageRuntimeConfig,
   isManagedLocalStorageEntryOfflineProtected,
@@ -14,6 +15,7 @@ import {
 } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type { OfflineNetworkModeConfig } from './offline/types';
+import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   indexedDbPersistentStorage,
@@ -356,7 +358,8 @@ export function createPersistentStorageHandle<T>(
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
-  const asyncEntryKey = asyncNamespace?.entryKey ?? 'document';
+  const asyncEntryKey =
+    asyncNamespace?.entryKey ?? DOCUMENT_PERSISTED_ENTRY_KEY;
   const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1201,7 +1204,7 @@ export function createProtectedStorageKey(args: {
   key: string;
 }): string {
   if ((args.backend ?? 'localStorage') === 'localStorage') {
-    if (args.kind === 'document' && args.key === 'document') {
+    if (args.kind === 'document' && args.key === DOCUMENT_PERSISTED_ENTRY_KEY) {
       return getStorageKeyForStore(args.sessionKey, args.storeName);
     }
 
@@ -1235,16 +1238,17 @@ export async function clearSessionStorage(
 ): Promise<void> {
   if (adapter === 'local-sync') {
     localPersistentStorage.clearSession(sessionKey);
-    return;
+  } else {
+    await adapter.clearSession(sessionKey);
+    await runLocalStorageMutation(() => {
+      const sessionOfflineStatusKey = getStorageKey(sessionKey, '_o_.s');
+      localPersistentStorage.clearManifest(
+        localPersistentStorage.getManifestKeyForSingle(sessionOfflineStatusKey),
+      );
+    });
   }
 
-  await adapter.clearSession(sessionKey);
-  await runLocalStorageMutation(() => {
-    const sessionOfflineStatusKey = getStorageKey(sessionKey, '_o_.s');
-    localPersistentStorage.clearManifest(
-      localPersistentStorage.getManifestKeyForSingle(sessionOfflineStatusKey),
-    );
-  });
+  await clearRegisteredOfflineUploadStorage(sessionKey);
 }
 
 /** Clears all persistent storage entries for a given session key across built-in adapters. */
@@ -1271,7 +1275,13 @@ export function refreshLocalStorageTimestamp(
   });
 }
 
-/** Resets expiration scan tracking. Exported for test cleanup. */
+/**
+ * Resets persistent-storage maintenance and expiration-tracking state.
+ *
+ * Exported for test cleanup, but restart-style tests should prefer
+ * `resetSessionForTests()` from `tests/utils/resetSessionForTests.ts` so this
+ * low-level reset stays coordinated with the other session/runtime resets.
+ */
 export function resetExpirationScanTracking(): void {
   cancelScheduledLocalStorageMaintenance?.();
   cancelScheduledLocalStorageMaintenance = null;

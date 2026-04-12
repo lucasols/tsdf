@@ -6,18 +6,16 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   clearSessionStorage,
-  createOfflineSession,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
-import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -31,6 +29,7 @@ import {
   getParsedLocalStorageValue,
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type CreateListQueryUserOperations,
   deleteItemInputSchema,
@@ -102,15 +101,16 @@ function createOfflineDocumentEnv({
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario,
     persistentStorage: {
       adapter,
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -155,6 +155,11 @@ function createOfflinePartialListQueryEnv({
   >(offlineStorageUsersTable, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario,
     partialResources: partialResourcesConfig,
     persistentStorage: {
@@ -163,10 +168,6 @@ function createOfflinePartialListQueryEnv({
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           createUser: {
             inputSchema: collectionCreateInputSchema,
@@ -230,6 +231,11 @@ function createOfflinePendingItemsListQueryEnv({
   >(offlineStorageUsersTable, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario,
     persistentStorage: {
       adapter,
@@ -237,10 +243,6 @@ function createOfflinePendingItemsListQueryEnv({
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           patchUserName: {
             inputSchema: userPatchSchema,
@@ -280,23 +282,17 @@ function createOfflinePendingItemsListQueryEnv({
 }
 
 beforeEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('local-sync offline persistence keeps the raw localStorage keys and JSON payloads transparent', async () => {
@@ -312,15 +308,16 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -365,12 +362,12 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ├ _m (0.64 kb)
       │ ├ g (0.04 kb)
       │ └ r (0.59 kb)
-      │   ├ n:offline-sync-format-session.offline-sync-format-doc (0.35 kb)
-      │   │ ├ oe.m (0.09 kb)
-      │   │ └ oq.m (0.16 kb)
-      │   └ s:offline-sync-format-session (0.24 kb)
-      │     ├ _o_.s.m (0.06 kb)
-      │     └ offline-sync-format-doc.m (0.12 kb)
+      │   ├ n:offline-sync-format-session.offline-sync-format-doc (0.34 kb)
+      │   │ ├ oe.m (0.08 kb)
+      │   │ └ oq.m (0.15 kb)
+      │   └ s:offline-sync-format-session (0.25 kb)
+      │     ├ _o_.s.m (0.07 kb)
+      │     └ offline-sync-format-doc.m (0.13 kb)
       └ offline-sync-format-session (0.81 kb)
         ├ _o_.s (0.09 kb)
         └ offline-sync-format-doc (0.66 kb)
@@ -384,7 +381,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - a: 1735689600000
+        d: { a: 1735689600000 }
     `);
     expect(
       getParsedLocalStorageValue(
@@ -392,7 +389,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689601000, o: '✅' }
+        d: { a: 1735689601000, o: '✅' }
     `);
     expect(
       getParsedLocalStorageValue(
@@ -400,7 +397,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689600000, k: 'document' }
+        document: { a: 1735689600000 }
     `);
     expect(
       getParsedLocalStorageValue(
@@ -408,7 +405,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689600000, k: 'offline-sync-format-doc:1735689600000:4fzzzxjy' }
+        offline-sync-format-doc:1735689600000:4fzzzxjy: { a: 1735689600000 }
     `);
     expect(getParsedLocalStorageValue('tsdf.offline-sync-format-session._o_.s'))
       .toMatchInlineSnapshot(`
@@ -485,7 +482,7 @@ test('local-sync offline persistence rehydrates queued data in a new browser ses
   await flushAllTimers();
 
   // Simulate a fresh browser session booting with only persisted storage.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedEnv = createOfflineDocumentEnv({
     adapter: 'local-sync',
@@ -568,7 +565,7 @@ test('local-sync offline persistence replays queued data when a new browser sess
   await flushAllTimers();
 
   // Simulate reopening the app after connectivity recovered elsewhere.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
   act(() => {
     network.goOnline();
   });
@@ -650,7 +647,7 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
     'go offline and queue a temp create; the optimistic row has data but no loadedFields metadata',
   ]);
   await act(async () => {
-    await firstEnv.apiStore.performMutation(null, {
+    await firstEnv.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         firstEnv.apiStore.addItemToState(
           'temp:Linus offline',
@@ -678,14 +675,14 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
     time  |
     10ms  | 🔴 >list-fetch-started
     810ms | 🔴 <list-fetch-finished (value: {"count":2})
-    2.91s | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
+    3.1s  | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
     .     | offline:createUser queued
     "
   `);
 
   // Reboot the app while the temp row only exists through persisted fallback
   // state plus offline entity metadata.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedEnv = createOfflinePartialListQueryEnv({
     sessionKey,
@@ -816,7 +813,7 @@ test('local-sync idle offline boot hydrates pending offline items from storage w
   await flushAllTimers();
 
   // Restart the app into a fresh idle store while the browser is still offline.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedEnv = createOfflinePendingItemsListQueryEnv({
     adapter: 'local-sync',
@@ -932,7 +929,7 @@ test('async OPFS idle offline boot hydrates pending offline items from storage w
 
   // Reboot into an idle store so the hook has to restore state from persisted
   // OPFS records instead of from any mounted query.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedEnv = createOfflinePendingItemsListQueryEnv({
     adapter: opfsPersistentStorage,
@@ -978,8 +975,8 @@ test('async OPFS idle offline boot hydrates pending offline items from storage w
     time | pending-deletes | pending-items |
     0    | -               | -             | -- restart offline with OPFS storage and mount only usePendingOfflineItems; the async preload should recover the same pending state
     .    | (none)          | (none)        | [pending-items, pending-deletes] ui-initialized
-    9ms  | users||2        | (none)        | [pending-deletes] ui-changed
-    15ms | users||2        | Ada queued    | [pending-items] ui-changed
+    12ms | users||2        | (none)        | [pending-deletes] ui-changed
+    17ms | users||2        | Ada queued    | [pending-items] ui-changed
     "
   `);
 
@@ -1000,15 +997,16 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: opfsPersistentStorage,
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1049,10 +1047,10 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     await flushAllTimers();
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (1.21 kb)
-      ├ offline-opfs-format-session (1.14 kb)
-      │ └ offline-opfs-format-doc (1.09 kb)
-      │   ├ d._i.r.json (0.11 kb)
+      "tsdf (1.20 kb)
+      ├ offline-opfs-format-session (1.13 kb)
+      │ └ offline-opfs-format-doc (1.08 kb)
+      │   ├ d._i.r.json (0.10 kb)
       │   ├ d.e.p.json (0.04 kb)
       │   ├ oe._i.r.json (0.10 kb)
       │   ├ oe.document.p.json (0.20 kb)
@@ -1061,9 +1059,11 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       └ tsdf._am.g* (0.06 kb)"
     `);
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.33 kb)
+      "tsdf (0.38 kb)
       ├ _am.g (0.05 kb)
-      ├ _m.r.s:offline-opfs-format-session._o_.s.m (0.13 kb)
+      ├ _m (0.18 kb)
+      │ ├ g (0.04 kb)
+      │ └ r.s:offline-opfs-format-session._o_.s.m (0.13 kb)
       └ offline-opfs-format-session._o_.s (0.14 kb)"
     `);
 
@@ -1165,7 +1165,7 @@ test('the default OPFS offline persistence rehydrates queued data in a new brows
   await flushAllTimers();
 
   // Simulate a fresh browser session booting with only persisted storage.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedEnv = createOfflineDocumentEnv({
     adapter: opfsPersistentStorage,
@@ -1249,7 +1249,7 @@ test('the default OPFS offline persistence replays queued data when a new browse
   await flushAllTimers();
 
   // Simulate reopening the app after connectivity recovered elsewhere.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
   act(() => {
     network.goOnline();
   });
@@ -1336,7 +1336,7 @@ test('clearing an OPFS-backed session also clears the shared offline status snap
   );
 
   // Simulate a fresh app boot that only has persisted state to inspect.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   // After logout, the shared offline session should look fully reset as well.
   expect(localStorage.getItem(`tsdf.${sessionKey}._o_.s`)).toBeNull();

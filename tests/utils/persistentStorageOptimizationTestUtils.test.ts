@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { getPayloadRecordKey } from '../../src/persistentStorage/asyncStorageShared';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import { buildFileName } from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
@@ -68,7 +69,9 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       namespaceIndexFile.createWritable(),
     );
     await resolveAfterAllTimers(
-      writable.write(JSON.stringify({ e: { document: { a: 3 } } })),
+      writable.write(
+        JSON.stringify({ e: { [DOCUMENT_PERSISTED_ENTRY_KEY]: { a: 3 } } }),
+      ),
     );
     await resolveAfterAllTimers(writable.close());
     await resolveAfterAllTimers(storeDir.removeEntry('d.e.p.json'));
@@ -85,7 +88,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/docs/d._i.r.json (namespace index)
       7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.09 kb
       12ms | ✍️ #2 tsdf/sess1/docs/d._i.r.json
-           |    └ (namespace index) | 0.05 kb -> 0.05 kb
+           |    └ (namespace index) | 0.04 kb -> 0.04 kb
       14ms | 🗑️ #1 ✅ tsdf/sess1/docs/d.e.p.json (entry data)
       15ms | end
       "
@@ -251,6 +254,41 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     `);
   });
 
+  test('timelineString does not warn when a missing open is followed by create', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        created: false,
+        exists: false,
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'openFile',
+      },
+      {
+        created: true,
+        exists: false,
+        path,
+        startedTime: 2,
+        time: 3,
+        type: 'ensureFile',
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 👁️ #1 file-open ❌ tsdf/sess1/docs/d._i.r.json (namespace index)
+      2ms  | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index)
+      3ms  | end
+      "
+    `);
+  });
+
   test('timelineString warns for consecutive unchanged OPFS reads within 10ms', () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope('docs', 'sess1');
@@ -288,9 +326,9 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json
-           |    └ (namespace index) | 0.05 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.04 kb ⚠️ REPEATED READ <10ms UNCHANGED
       10ms | end
       "
     `);
@@ -333,8 +371,8 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
-      10ms | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
+      10ms | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       11ms | end
       "
     `);
@@ -378,7 +416,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.03 kb
       10ms | end
       "
@@ -430,10 +468,10 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       5ms  | 👁️ #1 file-open ✅ tsdf/sess1/docs/d._i.r.json (namespace index)
       9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json
-           |    └ (namespace index) | 0.05 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.04 kb ⚠️ REPEATED READ <10ms UNCHANGED
       10ms | end
       "
     `);

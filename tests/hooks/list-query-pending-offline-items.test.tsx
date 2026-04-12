@@ -3,16 +3,16 @@ import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
-  createOfflineSession,
   type DefineListQueryOfflineOperations,
   type DefineOfflineOperation,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   deleteItemInputSchema,
   userPatchSchema,
@@ -71,6 +71,11 @@ test('usePendingOfflineItems exposes visible queued items, pending deletes, filt
     },
     {
       getSessionKey: () => 'pending-offline-items-live',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'pending-offline-items-live',
+        offlineSession: { network: network.config },
+      }),
       testScenario: { loaded: { tables: ['users'] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -78,10 +83,6 @@ test('usePendingOfflineItems exposes visible queued items, pending deletes, filt
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'pending-offline-items-live',
-            config: { network: network.config },
-          }),
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
@@ -256,6 +257,11 @@ test('usePendingOfflineItems can opt resolution-required visible items back in',
     { users: [{ id: 1, name: 'Ada' }] },
     {
       getSessionKey: () => 'pending-offline-items-resolution-item',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'pending-offline-items-resolution-item',
+        offlineSession: { network: network.config },
+      }),
       testScenario: { loaded: { tables: ['users'] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -263,10 +269,6 @@ test('usePendingOfflineItems can opt resolution-required visible items back in',
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'pending-offline-items-resolution-item',
-            config: { network: network.config },
-          }),
           operations: {
             conflictUser: {
               inputSchema: userPatchSchema,
@@ -374,6 +376,16 @@ test('usePendingOfflineItems can opt resolution-required deletes back into delet
     { users: [{ id: 1, name: 'Ada' }] },
     {
       getSessionKey: () => 'pending-offline-items-resolution-delete',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'pending-offline-items-resolution-delete',
+        offlineSession: {
+          network: network.config,
+          replayRetry: { intervalMs: 1, maxFailures: 1 },
+          classifyRetryableFailure: (error, ctx) =>
+            ctx.phase === 'sync' && error instanceof Error,
+        },
+      }),
       testScenario: { loaded: { tables: ['users'] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -381,15 +393,6 @@ test('usePendingOfflineItems can opt resolution-required deletes back into delet
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'pending-offline-items-resolution-delete',
-            config: {
-              network: network.config,
-              replayRetry: { intervalMs: 1, maxFailures: 1 },
-              classifyRetryableFailure: (error, ctx) =>
-                ctx.phase === 'sync' && error instanceof Error,
-            },
-          }),
           operations: {
             deleteUser: {
               inputSchema: deleteItemInputSchema,

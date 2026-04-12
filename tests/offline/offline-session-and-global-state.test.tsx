@@ -4,20 +4,21 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
-  createOfflineSession,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   useGlobalOfflineEntities,
   useGlobalOfflineStatus,
 } from '../../src/main';
 import { readManagedLocalStorageSingleEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
+import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 import {
   type CreateListQueryUserOperations,
@@ -43,19 +44,17 @@ import {
 let network = createOfflineNetworkMock();
 
 beforeEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('persistent storage without offline config keeps the existing online flow even when the browser reports offline', async () => {
@@ -109,6 +108,19 @@ function getGlobalOfflineStatusSummary(sessionKey: string) {
   ]);
 }
 
+function createManagedOfflineSession(args: {
+  getSessionKey: () => string | false;
+  config: OfflineSessionConfig;
+}) {
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: args.getSessionKey,
+    offlineSession: args.config,
+  });
+
+  return { storeManager, offlineSession: storeManager };
+}
+
 // Protects against stale offline entities leaking after logout: when the session
 // key becomes unavailable, the store must unregister from the previous session.
 test('stores unregister their previous offline session when the session key becomes unavailable', async () => {
@@ -118,15 +130,16 @@ test('stores unregister their previous offline session when the session key beco
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'offline-session-cleanup-doc',
     getSessionKey: () => currentSessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => currentSessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => currentSessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -201,15 +214,16 @@ test('logging back into the same session replays durable offline mutations queue
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => currentSessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => currentSessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => currentSessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -312,14 +326,14 @@ test('logging back into the same session replays durable offline mutations queue
     .     | "value:2 pending:no"  | 🔴 >fetch-started
     810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
     .     | "value:1 pending:no"  | ui-changed
-    1.81s | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
+    2s    | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
     .     | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
     .     | "value:1 pending:no"  | scheduled-fetch-triggered
-    1.82s | "value:1 pending:yes" | ui-changed
-    .     | "value:1 pending:yes" | offline:updateValue replay-started
+    2.01s | "value:1 pending:yes" | ui-changed
     .     | "value:1 pending:yes" | 🟠 >fetch-started
-    2.62s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
-    3.02s | "value:1 pending:yes" | server-data-changed (value: 2)
+    .     | "value:1 pending:yes" | offline:updateValue replay-started
+    2.81s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
+    3.21s | "value:1 pending:yes" | server-data-changed (value: 2)
     .     | "value:1 pending:yes" | offline:updateValue replay-finished
     .     | "value:2 pending:no"  | ui-changed
     "
@@ -362,6 +376,15 @@ test('a global offline view sees the same blocked temp item as the store after r
     {
       id: 'offline-session-temp-create-dependencies-store',
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -369,14 +392,6 @@ test('a global offline view sees the same blocked temp item as the store after r
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-            },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -430,7 +445,7 @@ test('a global offline view sees the same blocked temp item as the store after r
     'queue a temp create and then edit the same temp item while still offline',
   ]);
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',
@@ -584,15 +599,16 @@ test('offline mutations fail fast when no session key is available', async () =>
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -683,15 +699,16 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -877,16 +894,15 @@ test('global offline status is shared across stores in the same session', async 
   // The document store joins the shared session first.
   createDocumentStoreTestEnv(1, {
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: { enabled: true } },
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: { enabled: true } },
-        }),
-        operations: {},
-      },
+      offline: { operations: {} },
     },
   });
 
@@ -896,17 +912,16 @@ test('global offline status is shared across stores in the same session', async 
     { 'users||1': { name: 'User 1' } },
     {
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: { enabled: true } },
+      }),
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
-        offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: { enabled: true } },
-          }),
-          operations: {},
-        },
+        offline: { operations: {} },
       },
     },
   );
@@ -939,25 +954,34 @@ test('global offline status is shared across stores in the same session', async 
 
 test('stores sharing a session key reject incompatible offline session configs', () => {
   const sessionKey = 'incompatible-offline-session';
-  const matchingSession = createOfflineSession({
+  const matchingConfig = {
+    network: { enabled: true },
+  } satisfies OfflineSessionConfig;
+  const incompatibleConfig = {
+    network: { enabled: true },
+    outage: { enabled: true, recoveryCheck: () => false },
+  } satisfies OfflineSessionConfig;
+  createManagedOfflineSession({
     getSessionKey: () => sessionKey,
-    config: { network: { enabled: true } },
+    config: matchingConfig,
   });
-  const incompatibleSession = createOfflineSession({
+  const { offlineSession: incompatibleSession } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
-    config: {
-      network: { enabled: true },
-      outage: { enabled: true, recoveryCheck: () => false },
-    },
+    config: incompatibleConfig,
   });
 
   createDocumentStoreTestEnv(1, {
     id: 'incompatible-offline-session-a',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: matchingConfig,
+    }),
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { session: matchingSession, operations: {} },
+      offline: { operations: {} },
     },
   });
 
@@ -985,15 +1009,16 @@ test('global and per-store offline entity selectors aggregate queued work across
     > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1158,15 +1183,16 @@ test('global offline entities stay empty after restart until a store mounts', as
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1204,7 +1230,7 @@ test('global offline entities stay empty after restart until a store mounts', as
   await flushAllTimers();
 
   // Simulate a fresh app boot before any store mounts.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   // Before any store has re-registered, the global aggregate should still be empty.
   expect(
@@ -1230,15 +1256,16 @@ test('global offline entities stay empty after restart until a store mounts', as
   >(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'idle',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1276,7 +1303,7 @@ test('global offline entities stay empty after restart until a store mounts', as
 test('queued mutations from multiple stores in one session share a single global replay order', async () => {
   network.setOffline();
   const sessionKey = 'shared-session-queue-order';
-  const offlineSession = createOfflineSession({
+  const { storeManager } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -1287,12 +1314,12 @@ test('queued mutations from multiple stores in one session share a single global
     > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: offlineSession,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1374,7 +1401,7 @@ test('queued mutations from multiple stores in one session share a single global
 test('reconnect replays queued mutations from multiple stores one at a time in global enqueue order', async () => {
   network.setOffline();
   const sessionKey = 'shared-session-replay-order';
-  const offlineSession = createOfflineSession({
+  const { storeManager } = createManagedOfflineSession({
     getSessionKey: () => sessionKey,
     config: { network: network.config },
   });
@@ -1387,12 +1414,12 @@ test('reconnect replays queued mutations from multiple stores one at a time in g
     > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: args.storeName,
       getSessionKey: () => sessionKey,
+      storeManager,
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: offlineSession,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1569,15 +1596,16 @@ test('a store initialized while an earlier shared-session replay is already in f
     > = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: args.storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: args.testScenario ?? 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -1660,7 +1688,7 @@ test('a store initialized while an earlier shared-session replay is already in f
   `);
 
   // Reboot into a fresh browser session that starts online.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
   act(() => {
     network.goOnline();
   });

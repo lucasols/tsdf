@@ -1,7 +1,6 @@
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
-import { createOfflineSession } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
 import {
@@ -9,7 +8,9 @@ import {
   getManagedLocalStorageManifestKeyForSingle,
 } from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
+import { createStoreManager } from '../../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import { normalizeError } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../../utils/networkMock';
 import {
@@ -80,8 +81,8 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index)
       .    | 🔑[4] #6 ✅ external-cache
       .    | 🔑[5] #7 ✅ feature-flag
-      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.05 kb
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.05 kb
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.06 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
@@ -138,7 +139,7 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index)
       .    | 📖 #3 ✅ tsdf._m.r.s:sess1.corrupted.m (namespace index) | 0.02 kb
       .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.corrupted.m (namespace index)
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index) | 0.05 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index) | 0.06 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.corrupted (entry data)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
@@ -206,9 +207,9 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index)
       .    | 🔑[4] #6 ✅ tsdf.sess2.fresh-doc (entry data)
       .    | 🔑[5] #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index)
-      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.05 kb
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.05 kb
-      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.05 kb
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.06 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
       .    | 🗑️ #4 ✅->❌ tsdf.sess2.expired-doc (entry data)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
@@ -317,13 +318,12 @@ describe('sync storage efficiency: maintenance', () => {
     localStorage.setItem(
       manifestKey,
       JSON.stringify({
-        e: [
-          {
+        e: {
+          [collectionScope.collection.itemKey('kept-user')]: {
             a: Date.now(),
-            k: collectionScope.collection.itemKey('kept-user'),
             p: 'kept-user',
           },
-        ],
+        },
       }),
     );
 
@@ -345,9 +345,7 @@ describe('sync storage efficiency: maintenance', () => {
 
       manifest:
         e:
-          - a: 1735689600000
-            k: '"kept-user'
-            p: 'kept-user'
+          "kept-user: { a: 1735689600000, p: 'kept-user' }
 
       orphanedItemExists: '❌'
     `);
@@ -362,7 +360,7 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[2] #4 ✅ tsdf.sess1.orphan-collection.ci."orphan-user
            |    └ (entry data, <"orphan-user>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.orphan-collection.ci.m
-           |    └ (namespace index) | 0.12 kb
+           |    └ (namespace index) | 0.11 kb
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.orphan-collection.ci."orphan-user
            |    └ (entry data, <"orphan-user>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
@@ -409,16 +407,17 @@ describe('sync storage efficiency: maintenance', () => {
       {
         id: 'protected-doc',
         getSessionKey: () => dottedSessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => dottedSessionKey,
+          offlineSession: { network: offlineNetwork.config },
+        }),
         testScenario: 'loaded',
         __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         persistentStorage: {
           adapter: 'local-sync',
           schema: wrappedDocumentSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => dottedSessionKey,
-              config: { network: offlineNetwork.config },
-            }),
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
@@ -516,17 +515,17 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index)
       .     | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
-            |    └ (namespace index) | 0.07 kb
-      .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
-            |    └ (namespace index) | 0.05 kb
-      .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
-            |    └ (namespace index) | 0.05 kb
-      .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
-            |    └ (namespace index) | 0.14 kb
-      .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
             |    └ (namespace index) | 0.08 kb
+      .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
+            |    └ (namespace index) | 0.06 kb
+      .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
+            |    └ (namespace index) | 0.06 kb
+      .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+            |    └ (namespace index) | 0.13 kb
+      .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+            |    └ (namespace index) | 0.07 kb
       .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
-            |    └ (namespace index) | 0.05 kb
+            |    └ (namespace index) | 0.06 kb
       .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
       .     | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
@@ -538,7 +537,7 @@ describe('sync storage efficiency: maintenance', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689601810, o: '✅' }
+        d: { a: 1735689601810, o: '✅' }
     `);
   });
 
@@ -557,15 +556,16 @@ describe('sync storage efficiency: maintenance', () => {
       {
         id: 'protected-doc',
         getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: offlineNetwork.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: wrappedDocumentSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => sessionKey,
-              config: { network: offlineNetwork.config },
-            }),
             operations: {
               markProtected: {
                 inputSchema: rc_object({ value: rc_number }),
@@ -629,17 +629,17 @@ describe('sync storage efficiency: maintenance', () => {
       0    | ✍️ #1 ❌->✅ tsdf.offline-session-write-skip.protected-doc.oq.protected-doc:1735689602100:zk00000y
            |    └ (entry data, <protected-doc:1735689602100:zk00000y>) | ❌ -> 0.33 kb
       .    | 📖 #2 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
-           |    └ (namespace index) | 0.14 kb
+           |    └ (namespace index) | 0.13 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
-           |    └ (namespace index) | 0.14 kb -> 0.26 kb
+           |    └ (namespace index) | 0.13 kb -> 0.24 kb
       .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.08 kb
+           |    └ (namespace index) | 0.07 kb
       .    | ✍️ #4 ✅->✅ tsdf.offline-session-write-skip.protected-doc.oe.document
            |    └ (entry data, <document>) | 0.16 kb -> 0.16 kb
       .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.08 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.07 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.08 kb -> 0.08 kb ⚠️ UNCHANGED
+           |    └ (namespace index) | 0.07 kb -> 0.07 kb ⚠️ UNCHANGED
       "
     `);
   });

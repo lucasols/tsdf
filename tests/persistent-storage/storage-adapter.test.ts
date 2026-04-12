@@ -13,6 +13,10 @@ import {
 } from 'vitest';
 import { clearSessionStorage } from '../../src/main';
 import { createAsyncStorageAdapter } from '../../src/persistentStorage/asyncStorageAdapter';
+import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from '../../src/persistentStorage/asyncStorageShared';
 import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';
 import type {
   AsyncStorageDiscoveredScope,
@@ -27,7 +31,7 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const wrappedDocumentSchema = rc_object({
@@ -46,14 +50,37 @@ const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<ListRow>, unknown>(
 const listQueryParamsSchema = rc_object({ tableId: rc_string });
 const persistentStore = createLocalStoragePersistentTestStore();
 
-function createInMemoryAsyncStorageDriver(): AsyncStorageDriver & {
+function createInMemoryAsyncStorageDriver(
+  options: { cloneValues?: boolean; readDelayMs?: number } = {},
+): AsyncStorageDriver & {
+  getCallCount: () => number;
+  getManyCallCount: () => number;
   setManyCallCount: () => number;
 } {
   const storage = new Map<
     string,
     { bucket: Map<string, unknown>; scope: AsyncStorageNamespaceScope }
   >();
+  let getCalls = 0;
+  let getManyCalls = 0;
   let setManyCalls = 0;
+
+  function cloneValue<T>(value: T): T {
+    return options.cloneValues === true ? structuredClone(value) : value;
+  }
+
+  function readValue<T>(value: T): Promise<T> {
+    const snapshot = cloneValue(value);
+    if ((options.readDelayMs ?? 0) === 0) {
+      return Promise.resolve(snapshot);
+    }
+
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(snapshot);
+      }, options.readDelayMs ?? 0);
+    });
+  }
 
   function getScopeId(scope: AsyncStorageNamespaceScope): string {
     return JSON.stringify(scope);
@@ -83,11 +110,13 @@ function createInMemoryAsyncStorageDriver(): AsyncStorageDriver & {
       return Promise.resolve();
     },
     get: (scope, key) => {
-      return Promise.resolve(getScopeBucket(scope).get(key));
+      getCalls++;
+      return readValue(getScopeBucket(scope).get(key));
     },
     getMany: (scope, keys) => {
+      getManyCalls++;
       const bucket = getScopeBucket(scope);
-      return Promise.resolve(keys.map((key) => bucket.get(key)));
+      return readValue(keys.map((key) => bucket.get(key)));
     },
     listKeys: (scope) => {
       return Promise.resolve([...getScopeBucket(scope).keys()]);
@@ -120,18 +149,78 @@ function createInMemoryAsyncStorageDriver(): AsyncStorageDriver & {
       return Promise.resolve();
     },
     set: (scope, key, value) => {
-      getScopeBucket(scope).set(key, value);
+      getScopeBucket(scope).set(key, cloneValue(value));
       return Promise.resolve();
     },
     setMany: (scope, entries) => {
       setManyCalls++;
       const bucket = getScopeBucket(scope);
       for (const entry of entries) {
-        bucket.set(entry.key, entry.value);
+        bucket.set(entry.key, cloneValue(entry.value));
       }
       return Promise.resolve();
     },
+    getCallCount: () => getCalls,
+    getManyCallCount: () => getManyCalls,
     setManyCallCount: () => setManyCalls,
+  };
+}
+
+function installMockBroadcastChannel() {
+  const OriginalBroadcastChannel = globalThis.BroadcastChannel;
+  const listenersByChannel = new Map<string, Set<MockBroadcastChannel>>();
+
+  function cloneMessage<T>(value: T): T {
+    return structuredClone(value);
+  }
+
+  class MockBroadcastChannel extends EventTarget implements BroadcastChannel {
+    readonly name: string;
+    onmessage: ((this: BroadcastChannel, ev: MessageEvent) => unknown) | null =
+      null;
+    onmessageerror:
+      | ((this: BroadcastChannel, ev: MessageEvent) => unknown)
+      | null = null;
+
+    constructor(name: string) {
+      super();
+      this.name = name;
+      const listeners = listenersByChannel.get(name) ?? new Set();
+      listeners.add(this);
+      listenersByChannel.set(name, listeners);
+    }
+
+    postMessage(message: unknown) {
+      for (const peer of listenersByChannel.get(this.name) ?? []) {
+        if (peer === this) continue;
+
+        setTimeout(() => {
+          peer.#dispatch(cloneMessage(message));
+        }, 0);
+      }
+    }
+
+    close() {
+      const listeners = listenersByChannel.get(this.name);
+      if (listeners === undefined) return;
+      listeners.delete(this);
+      if (listeners.size === 0) {
+        listenersByChannel.delete(this.name);
+      }
+    }
+
+    #dispatch(message: unknown) {
+      const event = new MessageEvent('message', { data: message });
+      this.onmessage?.call(this, event);
+      this.dispatchEvent(event);
+    }
+  }
+
+  vi.stubGlobal('BroadcastChannel', MockBroadcastChannel);
+
+  return () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal('BroadcastChannel', OriginalBroadcastChannel);
   };
 }
 
@@ -250,6 +339,529 @@ describe('persistent storage integration', () => {
 
     await flushAllTimers();
     expect(driver.setManyCallCount()).toBe(setManyCallsAfterSeed + 1);
+  });
+
+  test('async adapter drops cached index and payload reads after a sibling-tab commit broadcast', async () => {
+    const restoreBroadcastChannel = installMockBroadcastChannel();
+    const driver = createInMemoryAsyncStorageDriver();
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-cross-tab-commit',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+
+    try {
+      const adapterA = createAsyncStorageAdapter(driver);
+      const adapterB = createAsyncStorageAdapter(driver);
+      const namespaceA = adapterA.openNamespace<{ value: string }>(scope);
+      const namespaceB = adapterB.openNamespace<{ value: string }>(scope);
+
+      const seedPromise = namespaceA.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await seedPromise;
+
+      expect(await namespaceA.get('a')).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          lastAccessAt: 1735689600040
+          payloadRef: '__tsdf_payload__:a'
+          version: 1
+          writtenAt: 1735689600040
+
+        value: { value: 'first' }
+      `);
+
+      const countsAfterWarmRead = {
+        get: driver.getCallCount(),
+        getMany: driver.getManyCallCount(),
+      };
+
+      const updatePromise = namespaceB.commit({
+        upserts: [{ key: 'a', value: { value: 'second' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await updatePromise;
+      await vi.advanceTimersByTimeAsync(0);
+
+      const countsBeforeReload = {
+        get: driver.getCallCount(),
+        getMany: driver.getManyCallCount(),
+      };
+
+      const reloadedEntry = await namespaceA.get('a');
+      expect(reloadedEntry).not.toBeNull();
+      expect({
+        metadata:
+          reloadedEntry === null
+            ? null
+            : {
+                customMetadata: reloadedEntry.metadata.customMetadata,
+                key: reloadedEntry.metadata.key,
+                payloadRef: reloadedEntry.metadata.payloadRef,
+                version: reloadedEntry.metadata.version,
+              },
+        value: reloadedEntry?.value ?? null,
+      }).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          payloadRef: '__tsdf_payload__:a'
+          version: 1
+
+        value: { value: 'second' }
+      `);
+      expect(driver.getCallCount()).toBeGreaterThan(countsBeforeReload.get);
+      expect(driver.getManyCallCount()).toBeGreaterThan(
+        countsBeforeReload.getMany,
+      );
+      expect(countsAfterWarmRead).toMatchInlineSnapshot(`
+        get: 2
+        getMany: 0
+      `);
+    } finally {
+      restoreBroadcastChannel();
+    }
+  });
+
+  test('async adapter drops cached namespace state after a sibling-tab clear broadcast', async () => {
+    const restoreBroadcastChannel = installMockBroadcastChannel();
+    const driver = createInMemoryAsyncStorageDriver();
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-cross-tab-clear',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+
+    try {
+      const adapterA = createAsyncStorageAdapter(driver);
+      const adapterB = createAsyncStorageAdapter(driver);
+      const namespaceA = adapterA.openNamespace<{ value: string }>(scope);
+      const namespaceB = adapterB.openNamespace<{ value: string }>(scope);
+
+      const seedPromise = namespaceA.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await seedPromise;
+
+      expect(await namespaceA.get('a')).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          lastAccessAt: 1735689600040
+          payloadRef: '__tsdf_payload__:a'
+          version: 1
+          writtenAt: 1735689600040
+
+        value: { value: 'first' }
+      `);
+
+      const clearPromise = namespaceB.clear();
+      await clearPromise;
+      await vi.advanceTimersByTimeAsync(0);
+
+      const countsBeforeReload = {
+        get: driver.getCallCount(),
+        getMany: driver.getManyCallCount(),
+      };
+
+      expect(await namespaceA.get('a')).toBeNull();
+      expect(driver.getCallCount()).toBeGreaterThan(countsBeforeReload.get);
+      expect(driver.getManyCallCount()).toBe(countsBeforeReload.getMany);
+    } finally {
+      restoreBroadcastChannel();
+    }
+  });
+
+  test('async adapter clears cached reads when the page becomes visible again', async () => {
+    const driver = createInMemoryAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-resume-visibility',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<{ value: string }>(scope);
+
+    const originalHidden = document.hidden;
+    Object.defineProperty(document, 'hidden', {
+      value: false,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      const seedPromise = namespace.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await seedPromise;
+
+      expect(await namespace.get('a')).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          lastAccessAt: 1735689600040
+          payloadRef: '__tsdf_payload__:a'
+          version: 1
+          writtenAt: 1735689600040
+
+        value: { value: 'first' }
+      `);
+
+      await driver.setMany(scope, [
+        { key: getPayloadRecordKey('a'), value: { value: 'second' } },
+        {
+          key: ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+          value: { e: { a: { a: 1735689600040 } } },
+        },
+      ]);
+
+      expect(await namespace.get('a')).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          lastAccessAt: 1735689600040
+          payloadRef: '__tsdf_payload__:a'
+          version: 1
+          writtenAt: 1735689600040
+
+        value: { value: 'first' }
+      `);
+
+      Object.defineProperty(document, 'hidden', {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(document, 'hidden', {
+        value: false,
+        writable: true,
+        configurable: true,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+
+      expect(await namespace.get('a')).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          lastAccessAt: 1735689600040
+          payloadRef: '__tsdf_payload__:a'
+          version: 1
+          writtenAt: 1735689600040
+
+        value: { value: 'second' }
+      `);
+    } finally {
+      Object.defineProperty(document, 'hidden', {
+        value: originalHidden,
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
+
+  test('async adapter clears cached reads on pageshow', async () => {
+    const driver = createInMemoryAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-resume-pageshow',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<{ value: string }>(scope);
+
+    const seedPromise = namespace.commit({
+      upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'first' }
+    `);
+
+    await driver.setMany(scope, [
+      { key: getPayloadRecordKey('a'), value: { value: 'second' } },
+      {
+        key: ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+        value: { e: { a: { a: 1735689600040 } } },
+      },
+    ]);
+
+    window.dispatchEvent(new Event('pageshow'));
+
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'second' }
+    `);
+  });
+
+  test('async adapter ignores a stale in-flight get after a sibling-tab commit', async () => {
+    const restoreBroadcastChannel = installMockBroadcastChannel();
+    const driver = createInMemoryAsyncStorageDriver({ readDelayMs: 50 });
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-in-flight-get-race',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+
+    try {
+      const adapterA = createAsyncStorageAdapter(driver);
+      const adapterB = createAsyncStorageAdapter(driver);
+      const namespaceA = adapterA.openNamespace<{ value: string }>(scope);
+      const namespaceB = adapterB.openNamespace<{ value: string }>(scope);
+
+      // Seed the namespace so the first read starts from persisted data.
+      const seedPromise = namespaceB.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await seedPromise;
+
+      // Start a read before the sibling tab updates the same record.
+      const firstReadPromise = namespaceA.get('a');
+      await advanceTime(10);
+
+      // Commit a newer value while the original read is still waiting on storage.
+      const updatePromise = namespaceB.commit({
+        upserts: [{ key: 'a', value: { value: 'second' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await updatePromise;
+      await advanceTime(0);
+
+      // The original read can still resolve to the older snapshot it started with.
+      const firstRead = await firstReadPromise;
+      expect({
+        metadata:
+          firstRead === null
+            ? null
+            : {
+                key: firstRead.metadata.key,
+                version: firstRead.metadata.version,
+              },
+        value: firstRead?.value ?? null,
+      }).toMatchInlineSnapshot(`
+        metadata: { key: 'a', version: 1 }
+        value: { value: 'first' }
+      `);
+
+      // The follow-up read must bypass the stale async result and reload fresh storage.
+      const secondReadPromise = namespaceA.get('a');
+      await flushAllTimers();
+      const secondRead = await secondReadPromise;
+      expect({
+        metadata:
+          secondRead === null
+            ? null
+            : {
+                key: secondRead.metadata.key,
+                version: secondRead.metadata.version,
+              },
+        value: secondRead?.value ?? null,
+      }).toMatchInlineSnapshot(`
+        metadata: { key: 'a', version: 1 }
+        value: { value: 'second' }
+      `);
+    } finally {
+      restoreBroadcastChannel();
+    }
+  });
+
+  test('async adapter ignores a stale in-flight listKeys read after a sibling-tab commit', async () => {
+    const restoreBroadcastChannel = installMockBroadcastChannel();
+    const driver = createInMemoryAsyncStorageDriver({ readDelayMs: 50 });
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-in-flight-list-keys-race',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+
+    try {
+      const adapterA = createAsyncStorageAdapter(driver);
+      const adapterB = createAsyncStorageAdapter(driver);
+      const namespaceA = adapterA.openNamespace<{ value: string }>(scope);
+      const namespaceB = adapterB.openNamespace<{ value: string }>(scope);
+
+      // Seed one entry so the first key listing snapshots the older namespace index.
+      const seedPromise = namespaceB.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await seedPromise;
+
+      // Start listing keys before the sibling tab adds a new record.
+      const firstListKeysPromise = namespaceA.listKeys();
+      await advanceTime(10);
+
+      // Add a second key while the original namespace-index read is still pending.
+      const updatePromise = namespaceB.commit({
+        upserts: [{ key: 'b', value: { value: 'second' }, version: 1 }],
+      });
+      await flushAllTimers();
+      await updatePromise;
+      await advanceTime(0);
+
+      // The original listing can still resolve from the older snapshot.
+      expect(await firstListKeysPromise).toMatchInlineSnapshot(`['a']`);
+
+      // A second listing must see the sibling commit immediately instead of reusing the stale async read.
+      const secondListKeysPromise = namespaceA.listKeys();
+      await flushAllTimers();
+      expect(await secondListKeysPromise).toMatchInlineSnapshot(`['a', 'b']`);
+    } finally {
+      restoreBroadcastChannel();
+    }
+  });
+
+  test('async adapter caches a snapshot of committed payload values', async () => {
+    const driver = createInMemoryAsyncStorageDriver({ cloneValues: true });
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-commit-snapshot',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<{ nested: { count: number } }>(
+      scope,
+    );
+
+    const committedValue = { nested: { count: 1 } };
+
+    // Commit a payload object through the normal public namespace API.
+    const commitPromise = namespace.commit({
+      upserts: [{ key: 'a', value: committedValue, version: 1 }],
+    });
+    await flushAllTimers();
+    await commitPromise;
+
+    // Mutate the original object after persistence to simulate caller-owned state changing later.
+    committedValue.nested.count = 2;
+
+    // The cached value should still reflect the persisted snapshot, not the mutated input object.
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value:
+        nested: { count: 1 }
+    `);
+  });
+
+  test('async adapter returns cloned payload snapshots from the read cache', async () => {
+    const driver = createInMemoryAsyncStorageDriver({ cloneValues: true });
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-read-snapshot',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<{ nested: { count: number } }>(
+      scope,
+    );
+
+    // Seed a persisted payload so both reads go through the adapter's payload cache.
+    const seedPromise = namespace.commit({
+      upserts: [{ key: 'a', value: { nested: { count: 1 } }, version: 1 }],
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    // Read once and mutate the returned object to simulate a caller mutating cached data locally.
+    const firstEntry = await namespace.get('a');
+    if (firstEntry === null) {
+      throw new Error('Expected seeded entry to be available.');
+    }
+    firstEntry.value.nested.count = 2;
+
+    // A second read should still return the persisted snapshot instead of the mutated object.
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value:
+        nested: { count: 1 }
+    `);
+  });
+
+  test('async adapter returns cloned nested custom metadata from the read cache', async () => {
+    const driver = createInMemoryAsyncStorageDriver({ cloneValues: true });
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-read-metadata-snapshot',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<
+      { value: string },
+      { nested: { count: number }; tags: string[] }
+    >(scope);
+
+    // Seed nested metadata so repeated reads go through the namespace-index cache.
+    const seedPromise = namespace.commit({
+      upserts: [
+        {
+          key: 'a',
+          metadata: { nested: { count: 1 }, tags: ['one', 'two'] },
+          value: { value: 'first' },
+          version: 1,
+        },
+      ],
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    // Mutate nested metadata from the first read to simulate caller-owned changes.
+    const firstEntry = await namespace.get('a');
+    if (firstEntry === null) {
+      throw new Error('Expected seeded entry to be available.');
+    }
+    firstEntry.metadata.customMetadata.nested.count = 2;
+    firstEntry.metadata.customMetadata.tags.push('three');
+
+    // A second read should still return the persisted metadata snapshot.
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata:
+          nested: { count: 1 }
+          tags: ['one', 'two']
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'first' }
+    `);
   });
 
   test('document persistence still hydrates and refetches when navigator.locks is unavailable', async () => {

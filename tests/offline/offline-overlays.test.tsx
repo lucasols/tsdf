@@ -6,14 +6,14 @@ import type {
   CollectionOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
 } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
@@ -98,15 +98,16 @@ describe('document overlays', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: 'offline-doc-overlay-store',
       getSessionKey: () => 'offline-doc-overlay-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-doc-overlay-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-doc-overlay-session',
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -238,20 +239,21 @@ describe('document overlays', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       id: 'offline-doc-overlay-resolution-store',
       getSessionKey: () => 'offline-doc-overlay-resolution-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-doc-overlay-resolution-session',
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+          replayRetry: { maxFailures: 1, intervalMs: 1 },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-doc-overlay-resolution-session',
-            config: {
-              network: network.config,
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-              replayRetry: { maxFailures: 1, intervalMs: 1 },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -369,16 +371,17 @@ describe('collection overlays', () => {
       {
         id: 'offline-collection-overlay-store',
         getSessionKey: () => 'offline-collection-overlay-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-collection-overlay-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-collection-overlay-session',
-              config: { network: network.config },
-            }),
             operations: {
               renameItem: {
                 inputSchema: collectionCreateInputSchema,
@@ -486,16 +489,17 @@ describe('collection overlays', () => {
       {
         id: 'offline-collection-delete-overlay-store',
         getSessionKey: () => 'offline-collection-delete-overlay-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-collection-delete-overlay-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-collection-delete-overlay-session',
-              config: { network: network.config },
-            }),
             operations: {
               deleteItem: {
                 inputSchema: deleteItemInputSchema,
@@ -594,22 +598,22 @@ describe('collection overlays', () => {
       {
         id: 'offline-collection-overlay-resolution-store',
         getSessionKey: () => 'offline-collection-overlay-resolution-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-collection-overlay-resolution-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+            replayRetry: { maxFailures: 1, intervalMs: 1 },
+          },
+        }),
         testScenario: 'loaded',
         persistentStorage: {
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () =>
-                'offline-collection-overlay-resolution-session',
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-                replayRetry: { maxFailures: 1, intervalMs: 1 },
-              },
-            }),
             operations: {
               renameItem: {
                 inputSchema: collectionCreateInputSchema,
@@ -728,6 +732,11 @@ describe('list-query overlays', () => {
       {
         id: 'offline-overlay-patch-store',
         getSessionKey: () => 'offline-overlay-patch-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-overlay-patch-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -735,10 +744,6 @@ describe('list-query overlays', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-overlay-patch-session',
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -854,6 +859,11 @@ describe('list-query overlays', () => {
       {
         id: 'offline-list-item-overlay-store',
         getSessionKey: () => 'offline-list-item-overlay-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-list-item-overlay-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -861,10 +871,6 @@ describe('list-query overlays', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-list-item-overlay-session',
-              config: { network: network.config },
-            }),
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
@@ -999,6 +1005,11 @@ describe('list-query overlays', () => {
       {
         id: 'offline-overlay-create-store',
         getSessionKey: () => 'offline-overlay-create-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-overlay-create-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1006,10 +1017,6 @@ describe('list-query overlays', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-overlay-create-session',
-              config: { network: network.config },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -1056,7 +1063,7 @@ describe('list-query overlays', () => {
       'add a temp row optimistically to the end of the list',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus offline', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus offline',
@@ -1137,6 +1144,16 @@ describe('list-query overlays', () => {
       {
         id: 'offline-overlay-resolution-store',
         getSessionKey: () => 'offline-overlay-resolution-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-overlay-resolution-session',
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+            replayRetry: { maxFailures: 1, intervalMs: 1 },
+          },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1144,15 +1161,6 @@ describe('list-query overlays', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-overlay-resolution-session',
-              config: {
-                network: network.config,
-                classifyRetryableFailure: (error, ctx) =>
-                  classifyRetryableReplayFailure(error, ctx.phase),
-                replayRetry: { maxFailures: 1, intervalMs: 1 },
-              },
-            }),
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -1193,7 +1201,7 @@ describe('list-query overlays', () => {
       'add a temp row that will fail during replay',
     ]);
     await act(async () => {
-      await env.apiStore.performMutation(null, {
+      await env.apiStore.performMutation('temp:Linus blocked', {
         optimisticUpdate: () => {
           env.apiStore.addItemToState(
             'temp:Linus blocked',
@@ -1263,6 +1271,11 @@ describe('list-query overlays', () => {
       {
         id: 'offline-list-delete-overlay-store',
         getSessionKey: () => 'offline-list-delete-overlay-session',
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => 'offline-list-delete-overlay-session',
+          offlineSession: { network: network.config },
+        }),
         testScenario: { loaded: { queries: [usersQuery] } },
         persistentStorage: {
           adapter: 'local-sync',
@@ -1270,10 +1283,6 @@ describe('list-query overlays', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offline: {
-            session: createOfflineSession({
-              getSessionKey: () => 'offline-list-delete-overlay-session',
-              config: { network: network.config },
-            }),
             operations: {
               deleteUser: {
                 inputSchema: deleteItemInputSchema,

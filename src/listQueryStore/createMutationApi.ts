@@ -12,6 +12,7 @@ import {
 } from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import type { OfflineMutationInput } from '../persistentStorage/offline/types';
+import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
@@ -34,6 +35,8 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type PartialResourcesConfig,
+  type TSDFItemQuery,
+  type TSFDListQuery,
   type TSFDListQueryState,
 } from './types';
 
@@ -174,8 +177,39 @@ export function createMutationApi<
     | undefined
     | null;
   type MutationPayloadToUse = ItemPayload | ItemPayload[] | FilterItem;
+  type MutationItemRollbackSnapshot = {
+    itemKey: string;
+    item: ItemState | null | undefined;
+    itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+    loadedFields: string[] | undefined;
+    invalidationFields: string[] | undefined;
+    invalidationPriority: FetchType | undefined;
+    pendingInvalidationFields: string[] | undefined;
+    invalidationWasTriggered: boolean;
+  };
+  type MutationQueryRollbackSnapshot = {
+    queryKey: string;
+    query: TSFDListQuery<QueryPayload> | undefined;
+    invalidationWasTriggered: boolean;
+  };
+  type OptimisticMutationQueryContext = {
+    dynamicQueryMutationEnders: Array<() => boolean>;
+    lockedQueryKeys: Set<string>;
+    queryRollbackSnapshots: Map<string, MutationQueryRollbackSnapshot>;
+  };
 
   const storeEvents = evtmitter<ListQueryStoreStoreEvents<ItemPayload>>();
+  // Stack of Maps that collect query invalidations triggered by optimistic list
+  // updates. During an optimistic mutation, applyOptimisticListUpdates is called
+  // indirectly via user callbacks (updateItemState/addItemToState), so we cannot
+  // thread a collector parameter without changing the public API. Instead, the
+  // mutation pushes a Map onto this stack before calling the optimistic update
+  // callback and pops it in a finally block; applyOptimisticListUpdates reads
+  // the top of the stack to defer invalidations until the mutation succeeds.
+  const deferredOptimisticQueryInvalidationsStack: Map<string, QueryPayload>[] =
+    [];
+  const optimisticMutationQueryContextStack: OptimisticMutationQueryContext[] =
+    [];
 
   function resolveAffectedItems(payload: MutationPayloadToUse): ItemPayload[] {
     if (Array.isArray(payload)) return payload;
@@ -183,6 +217,126 @@ export function createMutationApi<
       return getItemsKeyArray(payload).map((item) => item.payload);
     }
     return [payload];
+  }
+
+  function restoreMutationRollbackState({
+    itemSnapshots,
+    querySnapshots,
+  }: {
+    itemSnapshots: MutationItemRollbackSnapshot[];
+    querySnapshots: MutationQueryRollbackSnapshot[];
+  }): void {
+    if (itemSnapshots.length === 0 && querySnapshots.length === 0) return;
+
+    runWithBroadcastConsistency('confirmed', () => {
+      store.produceState(
+        (draftState) => {
+          for (const snapshot of itemSnapshots) {
+            if (snapshot.item === undefined) {
+              delete draftState.items[snapshot.itemKey];
+            } else {
+              draftState.items[snapshot.itemKey] = snapshot.item;
+            }
+
+            if (snapshot.itemQuery === undefined) {
+              delete draftState.itemQueries[snapshot.itemKey];
+            } else {
+              draftState.itemQueries[snapshot.itemKey] = snapshot.itemQuery;
+            }
+
+            if (snapshot.loadedFields === undefined) {
+              delete draftState.itemLoadedFields[snapshot.itemKey];
+            } else {
+              draftState.itemLoadedFields[snapshot.itemKey] =
+                snapshot.loadedFields;
+            }
+
+            if (snapshot.invalidationFields === undefined) {
+              delete draftState.itemFieldInvalidationFields[snapshot.itemKey];
+            } else {
+              draftState.itemFieldInvalidationFields[snapshot.itemKey] =
+                snapshot.invalidationFields;
+            }
+          }
+
+          for (const snapshot of querySnapshots) {
+            if (snapshot.query === undefined) {
+              delete draftState.queries[snapshot.queryKey];
+            } else {
+              draftState.queries[snapshot.queryKey] = snapshot.query;
+            }
+          }
+        },
+        { action: 'rollback-mutation-error' },
+      );
+
+      for (const snapshot of itemSnapshots) {
+        if (snapshot.invalidationPriority === undefined) {
+          itemFieldInvalidationPriorities.delete(snapshot.itemKey);
+        } else {
+          itemFieldInvalidationPriorities.set(
+            snapshot.itemKey,
+            snapshot.invalidationPriority,
+          );
+        }
+
+        if (snapshot.pendingInvalidationFields === undefined) {
+          itemPendingInvalidationFields.delete(snapshot.itemKey);
+        } else {
+          itemPendingInvalidationFields.set(
+            snapshot.itemKey,
+            snapshot.pendingInvalidationFields,
+          );
+        }
+
+        if (snapshot.invalidationWasTriggered) {
+          itemInvalidationWasTriggered.add(snapshot.itemKey);
+        } else {
+          itemInvalidationWasTriggered.delete(snapshot.itemKey);
+        }
+
+        publishItemSnapshot(snapshot.itemKey);
+      }
+
+      for (const snapshot of querySnapshots) {
+        if (snapshot.invalidationWasTriggered) {
+          queryInvalidationWasTriggered.add(snapshot.queryKey);
+        } else {
+          queryInvalidationWasTriggered.delete(snapshot.queryKey);
+        }
+
+        publishQuerySnapshot(snapshot.queryKey);
+      }
+    });
+  }
+
+  function getCurrentOptimisticMutationQueryContext():
+    | OptimisticMutationQueryContext
+    | undefined {
+    return optimisticMutationQueryContextStack[
+      optimisticMutationQueryContextStack.length - 1
+    ];
+  }
+
+  function captureAndLockOptimisticMutationQuery(queryKey: string): void {
+    const context = getCurrentOptimisticMutationQueryContext();
+
+    if (!context) return;
+
+    if (!context.queryRollbackSnapshots.has(queryKey)) {
+      context.queryRollbackSnapshots.set(queryKey, {
+        queryKey,
+        query: klona(store.state.queries[queryKey]),
+        invalidationWasTriggered: queryInvalidationWasTriggered.has(queryKey),
+      });
+    }
+
+    if (context.lockedQueryKeys.has(queryKey)) return;
+
+    context.lockedQueryKeys.add(queryKey);
+    context.dynamicQueryMutationEnders.push(
+      getOrCreateQueryScheduler(queryKey).startMutation(queryKey),
+    );
   }
 
   const queryInvalidationWasTriggered = new Set<string>();
@@ -214,6 +368,8 @@ export function createMutationApi<
       const newInvalidationPriority = fetchTypePriority[priority];
 
       if (currentInvalidationPriority >= newInvalidationPriority) continue;
+
+      captureAndLockOptimisticMutationQuery(key);
 
       store.produceState(
         (draft) => {
@@ -423,8 +579,12 @@ export function createMutationApi<
   function applyOptimisticListUpdates(itemKeys: string[]) {
     if (!optimisticListUpdates) return;
 
-    const queriesToInvalidate: QueryPayload[] = [];
+    const queriesToInvalidate = new Map<string, QueryPayload>();
     const changedQueryKeys = new Set<string>();
+    const deferredOptimisticQueryInvalidations =
+      deferredOptimisticQueryInvalidationsStack[
+        deferredOptimisticQueryInvalidationsStack.length - 1
+      ];
 
     store.produceState((draftState) => {
       for (const itemKey of itemKeys) {
@@ -450,6 +610,8 @@ export function createMutationApi<
               if (itemShouldBeIncluded === null) continue;
 
               if (itemShouldBeIncluded) {
+                captureAndLockOptimisticMutationQuery(queryKey);
+
                 if (!queryState) {
                   draftState.queries[queryKey] = {
                     status: 'success',
@@ -468,7 +630,9 @@ export function createMutationApi<
 
                 if (queryState.items.includes(itemKey)) continue;
 
-                if (invalidateQueries) queriesToInvalidate.push(payload);
+                if (invalidateQueries) {
+                  queriesToInvalidate.set(queryKey, payload);
+                }
 
                 if (appendNewTo === 'end') {
                   queryState.items.push(itemKey);
@@ -482,8 +646,11 @@ export function createMutationApi<
                 const itemIndex = queryState.items.indexOf(itemKey);
 
                 if (itemIndex !== -1) {
-                  if (invalidateQueries)
-                    queriesToInvalidate.push(queryState.payload);
+                  captureAndLockOptimisticMutationQuery(queryKey);
+
+                  if (invalidateQueries) {
+                    queriesToInvalidate.set(queryKey, queryState.payload);
+                  }
 
                   queryState.items.splice(itemIndex, 1);
                   changedQueryKeys.add(queryKey);
@@ -497,6 +664,8 @@ export function createMutationApi<
               const queryHasItem = queryState.items.includes(itemKey);
 
               if (!queryHasItem) continue;
+
+              captureAndLockOptimisticMutationQuery(queryKey);
 
               queryState.items = sortBy(
                 queryState.items,
@@ -522,11 +691,88 @@ export function createMutationApi<
       publishQuerySnapshot(queryKey);
     }
 
-    if (queriesToInvalidate.length)
-      invalidateQueryAndItems({
-        queryPayload: queriesToInvalidate,
-        itemPayload: false,
-      });
+    if (queriesToInvalidate.size === 0) return;
+
+    if (deferredOptimisticQueryInvalidations) {
+      for (const [queryKey, queryPayload] of queriesToInvalidate) {
+        deferredOptimisticQueryInvalidations.set(queryKey, queryPayload);
+      }
+
+      return;
+    }
+
+    invalidateQueryAndItems({
+      queryPayload: [...queriesToInvalidate.values()],
+      itemPayload: false,
+    });
+  }
+
+  function getSuccessInvalidationQueryPayloads(
+    deferredOptimisticQueryInvalidations: ReadonlyMap<string, QueryPayload>,
+    revalidateQueries: FilterQuery | null,
+    shouldRevalidateOnSuccess: boolean,
+  ): QueryPayload[] {
+    const queryPayloads = new Map(deferredOptimisticQueryInvalidations);
+
+    if (shouldRevalidateOnSuccess && revalidateQueries) {
+      for (const { key, payload } of getQueriesKeyArray(revalidateQueries)) {
+        queryPayloads.set(key, payload);
+      }
+    }
+
+    return [...queryPayloads.values()];
+  }
+
+  type RevalidateOnSuccessOption =
+    | boolean
+    | 'queries'
+    | FilterQuery
+    | { queries: FilterQuery; items?: boolean };
+
+  function normalizeRevalidateOnSuccessOption(
+    revalidateOnSuccess: RevalidateOnSuccessOption | undefined,
+  ): {
+    shouldRevalidate: boolean;
+    includeItems: boolean;
+    queryFilter: FilterQuery | null;
+  } {
+    if (!revalidateOnSuccess) {
+      return {
+        shouldRevalidate: false,
+        includeItems: false,
+        queryFilter: null,
+      };
+    }
+
+    if (revalidateOnSuccess === true) {
+      return {
+        shouldRevalidate: true,
+        includeItems: true,
+        queryFilter: () => true,
+      };
+    }
+
+    if (revalidateOnSuccess === 'queries') {
+      return {
+        shouldRevalidate: true,
+        includeItems: false,
+        queryFilter: () => true,
+      };
+    }
+
+    if (typeof revalidateOnSuccess === 'function') {
+      return {
+        shouldRevalidate: true,
+        includeItems: true,
+        queryFilter: revalidateOnSuccess,
+      };
+    }
+
+    return {
+      shouldRevalidate: true,
+      includeItems: revalidateOnSuccess.items ?? true,
+      queryFilter: revalidateOnSuccess.queries,
+    };
   }
 
   function updateItemState(
@@ -624,6 +870,8 @@ export function createMutationApi<
 
               if (queryState.items.includes(itemKey)) continue;
 
+              captureAndLockOptimisticMutationQuery(key);
+
               if (options.addItemToQueries.appendTo === 'start') {
                 queryState.items.unshift(itemKey);
               } else if (options.addItemToQueries.appendTo === 'end') {
@@ -670,8 +918,9 @@ export function createMutationApi<
           delete draftState.itemLoadedFields[itemKey];
           delete draftState.itemFieldInvalidationFields[itemKey];
 
-          for (const query of Object.values(draftState.queries)) {
+          for (const [queryKey, query] of Object.entries(draftState.queries)) {
             if (query.items.includes(itemKey)) {
+              captureAndLockOptimisticMutationQuery(queryKey);
               query.items = query.items.filter((i) => i !== itemKey);
             }
           }
@@ -704,10 +953,7 @@ export function createMutationApi<
   type ListQueryMutationArgs<T> = {
     optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
     mutation: (payload: MutationPayloadToUse) => Promise<T>;
-    revalidateOnSuccess?: boolean | 'queries';
-    dontRevalidateOnError?: boolean;
-    getRelatedQueries?: FilterQuery;
-    getRevalidateOnSuccessQueries?: FilterQuery;
+    revalidateOnSuccess?: RevalidateOnSuccessOption;
     onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
     onError?: (error: StoreMutationError | MutationSkipped) => void;
     silentErrors?: boolean;
@@ -716,6 +962,7 @@ export function createMutationApi<
 
   type ListQueryOnlineMutationArgs<T> = ListQueryMutationArgs<T> & {
     offline?: undefined;
+    upload?: undefined;
   };
 
   type ListQueryOfflineMutationArgs<T> = ListQueryMutationArgs<T> & {
@@ -728,6 +975,7 @@ export function createMutationApi<
     offline: TOfflineOperations extends null
       ? never
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -771,13 +1019,11 @@ export function createMutationApi<
       mutation,
       silentErrors,
       revalidateOnSuccess,
-      dontRevalidateOnError,
-      getRelatedQueries = () => true,
-      getRevalidateOnSuccessQueries = getRelatedQueries,
       onSuccess,
       onError,
       debounce,
       offline,
+      upload,
     }: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
@@ -788,26 +1034,94 @@ export function createMutationApi<
     const payloadToUse: MutationPayloadToUse =
       payload === false || payload == null ? [] : payload;
 
+    if (
+      !import.meta.env.PROD &&
+      optimisticUpdate &&
+      (payload === false || payload == null)
+    ) {
+      throw new Error(
+        'Optimistic list-query mutations require a concrete item payload.',
+      );
+    }
+
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(
         toStoreMutationError(offlineSessionUnavailableError, errorNormalizer),
       );
     }
 
-    const affectedItems = resolveAffectedItems(payloadToUse);
+    const affectedItemEntries = optimisticUpdate
+      ? getItemsKeyArray(payloadToUse)
+      : undefined;
+    const affectedItems = affectedItemEntries
+      ? affectedItemEntries.map(({ payload: p }) => p)
+      : resolveAffectedItems(payloadToUse);
+    const normalizedRevalidateOnSuccess =
+      normalizeRevalidateOnSuccessOption(revalidateOnSuccess);
     const mutationId = getAutoIncrementId();
+
+    let itemRollbackSnapshots: MutationItemRollbackSnapshot[] = [];
+    const deferredOptimisticQueryInvalidations = new Map<
+      string,
+      QueryPayload
+    >();
+    const optimisticMutationQueryContext: OptimisticMutationQueryContext = {
+      dynamicQueryMutationEnders: [],
+      lockedQueryKeys: new Set<string>(),
+      queryRollbackSnapshots: new Map<string, MutationQueryRollbackSnapshot>(),
+    };
+
+    if (affectedItemEntries) {
+      itemRollbackSnapshots = affectedItemEntries.map(({ itemKey }) => ({
+        itemKey,
+        item: klona(store.state.items[itemKey]),
+        itemQuery: klona(store.state.itemQueries[itemKey]),
+        loadedFields: klona(store.state.itemLoadedFields[itemKey]),
+        invalidationFields: klona(
+          store.state.itemFieldInvalidationFields[itemKey],
+        ),
+        invalidationPriority: itemFieldInvalidationPriorities.get(itemKey),
+        pendingInvalidationFields: klona(
+          itemPendingInvalidationFields.get(itemKey),
+        ),
+        invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+      }));
+    }
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
     const directMutation = () => mutation(payloadToUse);
 
     const result = await performMutationWithLifecycle({
-      startMutation: () => startItemMutation(payloadToUse),
+      startMutation: () => {
+        const endBaseMutations = startItemMutation(payloadToUse);
+
+        return () => {
+          endBaseMutations();
+
+          for (const endQueryMutation of optimisticMutationQueryContext.dynamicQueryMutationEnders) {
+            endQueryMutation();
+          }
+        };
+      },
       optimisticUpdate: optimisticUpdate
-        ? () =>
-            runWithBroadcastConsistency('optimistic', () =>
-              optimisticUpdate(payloadToUse),
-            )
+        ? () => {
+            deferredOptimisticQueryInvalidationsStack.push(
+              deferredOptimisticQueryInvalidations,
+            );
+            optimisticMutationQueryContextStack.push(
+              optimisticMutationQueryContext,
+            );
+
+            try {
+              return runWithBroadcastConsistency('optimistic', () =>
+                optimisticUpdate(payloadToUse),
+              );
+            } finally {
+              optimisticMutationQueryContextStack.pop();
+              deferredOptimisticQueryInvalidationsStack.pop();
+            }
+          }
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
@@ -816,6 +1130,7 @@ export function createMutationApi<
             runHybridOfflineMutation({
               controller: offlineController,
               offline,
+              upload,
               directMutation,
             })
         : async () => ({
@@ -823,13 +1138,30 @@ export function createMutationApi<
             data: await directMutation(),
           }),
       onSuccess: (result) => {
-        if (revalidateOnSuccess && result.kind === 'online') {
+        const successInvalidationQueryPayloads =
+          result.kind === 'online'
+            ? getSuccessInvalidationQueryPayloads(
+                deferredOptimisticQueryInvalidations,
+                normalizedRevalidateOnSuccess.queryFilter,
+                normalizedRevalidateOnSuccess.shouldRevalidate,
+              )
+            : [];
+
+        if (
+          result.kind === 'online' &&
+          (normalizedRevalidateOnSuccess.shouldRevalidate ||
+            successInvalidationQueryPayloads.length > 0)
+        ) {
           invalidateQueryAndItems({
             itemPayload:
-              revalidateOnSuccess === 'queries' || affectedItems.length === 0
+              !normalizedRevalidateOnSuccess.includeItems ||
+              affectedItems.length === 0
                 ? false
                 : payloadToUse,
-            queryPayload: getRevalidateOnSuccessQueries,
+            queryPayload:
+              successInvalidationQueryPayloads.length > 0
+                ? successInvalidationQueryPayloads
+                : false,
           });
         }
 
@@ -839,16 +1171,19 @@ export function createMutationApi<
       },
       onError: (exception) => {
         const error = toStoreMutationError(exception, errorNormalizer);
+        const queryRollbackSnapshots = [
+          ...optimisticMutationQueryContext.queryRollbackSnapshots.values(),
+        ];
+
+        if (itemRollbackSnapshots.length > 0 || queryRollbackSnapshots.length) {
+          restoreMutationRollbackState({
+            itemSnapshots: itemRollbackSnapshots,
+            querySnapshots: queryRollbackSnapshots,
+          });
+        }
 
         if (!silentErrors && onMutationError) {
           onMutationError(exception, { silentErrors });
-        }
-
-        if (!dontRevalidateOnError) {
-          invalidateQueryAndItems({
-            itemPayload: affectedItems.length === 0 ? false : payloadToUse,
-            queryPayload: getRelatedQueries,
-          });
         }
 
         if (onError) {

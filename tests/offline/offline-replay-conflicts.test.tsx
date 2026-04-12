@@ -5,20 +5,20 @@ import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   type CollectionOfflineOperationDefinition,
-  createOfflineSession,
   getGlobalOfflineStatus,
   type ListQueryOfflineOperationDefinition,
   type OfflineResolutionRecord,
   useGlobalOfflineEntities,
   useGlobalOfflineResolutions,
 } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
@@ -174,15 +174,16 @@ test('offline conflicts are detected before execute, surface through selectors, 
     {
       id: 'offline-conflict-doc',
       getSessionKey: () => 'offline-conflict-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-conflict-session',
+        offlineSession: { network: { enabled: true } },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-conflict-session',
-            config: { network: { enabled: true } },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -344,15 +345,16 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
     {
       id: 'offline-conflict-requeue-doc',
       getSessionKey: () => 'offline-conflict-requeue-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-conflict-requeue-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-conflict-requeue-session',
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -478,15 +480,16 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -565,15 +568,16 @@ test('invalid persisted conflict payloads remain hydrated and decode to error th
   >(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -676,16 +680,17 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     { 'users||1': { name: 'User 1' } },
     {
       getSessionKey: () => 'offline-conflict-temp-requeue-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-conflict-temp-requeue-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-conflict-temp-requeue-session',
-            config: { network: network.config },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -874,16 +879,17 @@ test('committing a temp-entity conflict with an external result reconciles the o
     { 'users||1': { name: 'User 1' } },
     {
       getSessionKey: () => 'offline-conflict-temp-commit-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-conflict-temp-commit-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-conflict-temp-commit-session',
-            config: { network: network.config },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -1029,6 +1035,12 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
     {
       id: 'offline-replay-temp-create-conflict-chain-store',
       getSessionKey: () => 'offline-replay-temp-create-conflict-chain-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () =>
+          'offline-replay-temp-create-conflict-chain-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: { loaded: { queries: [usersQuery] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -1036,11 +1048,6 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () =>
-              'offline-replay-temp-create-conflict-chain-session',
-            config: { network: network.config },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -1097,7 +1104,7 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
     'queue the temp create and a dependent edit while offline',
   ]);
   await act(async () => {
-    await env.apiStore.performMutation(null, {
+    await env.apiStore.performMutation('temp:Linus offline', {
       optimisticUpdate: () => {
         env.apiStore.addItemToState(
           'temp:Linus offline',
@@ -1320,24 +1327,25 @@ test('mutations queued via hybrid fallback still enter the normal conflict resol
     1,
     {
       getSessionKey: () => 'hybrid-conflict-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'hybrid-conflict-session',
+        offlineSession: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          outage: {
+            enabled: true,
+            recoveryCheck: () => true,
+            recoveryProbe: quickRecoveryProbe,
+          },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'hybrid-conflict-session',
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              outage: {
-                enabled: true,
-                recoveryCheck: () => true,
-                recoveryProbe: quickRecoveryProbe,
-              },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,

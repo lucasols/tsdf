@@ -82,6 +82,7 @@ describe('async storage efficiency: list-query', () => {
       freshItemExists: '✅'
       freshQueryExists: '✅'
     `);
+    expect(operationsBreakdown).not.toContain('⚠️ DUPLICATE OPEN');
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
@@ -399,7 +400,7 @@ describe('async storage efficiency: list-query', () => {
       1.86s  | ✍️ #3 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
              |    └ (item data) | 0.00 kb -> 0.04 kb
       1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li._i.r.json
-             |    └ (items index) ⚠️ DUPLICATE OPEN
+             |    └ (items index)
       .      | ✍️ #5 tsdf/sess1/lq-query-metadata/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.03 kb
       1.865s | ✍️ #2 tsdf/sess1/lq-query-metadata/li._i.r.json
@@ -509,7 +510,7 @@ describe('async storage efficiency: list-query', () => {
       1.86s  | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data) | 0.00 kb -> 0.04 kb
       1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
-             |    └ (items index) ⚠️ DUPLICATE OPEN
+             |    └ (items index)
       .      | ✍️ #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.03 kb
       1.865s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
@@ -517,30 +518,27 @@ describe('async storage efficiency: list-query', () => {
       1.866s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.28 kb -> 0.30 kb
              ·
-      3.62s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
-             |    └ (queries index) | 0.30 kb
-             ·
-      3.663s | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      3.66s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.30 kb
       .      | 📖 #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.11 kb
-      3.666s | 🗑️ #6 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~2817177027.p.json
+      3.663s | 🗑️ #6 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~2817177027.p.json
              |    └ (query data)
       .      | 👁️ #7 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
              |    └ (query data, <{tableId:"fourth"}>)
       .      | 👁️ #8 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
              |    └ (item data, <"fourth||2>)
-      3.668s | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
+      3.665s | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.04 kb -> 0.04 kb ⚠️ UNCHANGED
-      3.669s | ✍️ #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
+      3.666s | ✍️ #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
              |    └ (query data, <{tableId:"fourth"}>) | 0.00 kb -> 0.03 kb
       .      | ✍️ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
              |    └ (item data, <"fourth||2>) | 0.00 kb -> 0.05 kb
-      3.673s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      3.67s  | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.30 kb -> 0.30 kb
       .      | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.11 kb -> 0.27 kb
-      3.675s | end
+      3.672s | end
       "
     `);
   });
@@ -578,12 +576,12 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(
       `['{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}']`,
     );
+    expect(operationsBreakdown).not.toContain('⚠️ DUPLICATE OPEN');
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
       1.85s  | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1
-             |    └ (session directory) ⚠️ DUPLICATE OPEN
+      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest
              |    └ (store directory)
       1.853s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
@@ -854,8 +852,8 @@ describe('async storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "admins||4: { a: 1735689610121, p: 'admins||4' }
-        "standalone||1: { a: 1735689610121, p: 'standalone||1' }
+        "admins||4: { a: 1735689610115, p: 'admins||4' }
+        "standalone||1: { a: 1735689610115, p: 'standalone||1' }
 
       s: { m: 2 }
     `);
@@ -866,23 +864,20 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         {tableId:"admins"}:
-          a: 1735689610121
+          a: 1735689610115
           p: { tableId: 'admins' }
         {tableId:"users"}:
-          a: 1735689607154
+          a: 1735689607151
           p: { tableId: 'users' }
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📖 #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.31 kb
-             ·
-      1.853s | 📖 #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+      1.85s  | 📖 #1 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb
-      .      | 📖 #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+      .      | 📖 #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
              |    └ (items index) | 0.31 kb
-      1.856s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
+      1.853s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data)
       .      | 🗑️ #4 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
              |    └ (item data, <"users||3>)
@@ -892,17 +887,17 @@ describe('async storage efficiency: list-query', () => {
              |    └ (item data)
       .      | 👁️ #7 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data)
-      1.859s | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
+      1.856s | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data) | 0.00 kb -> 0.03 kb
       .      | ✍️ #6 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
              |    └ (item data) | 0.00 kb -> 0.06 kb
       .      | ✍️ #7 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data) | 0.00 kb -> 0.08 kb
-      1.863s | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+      1.86s  | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb -> 0.28 kb
-      .      | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+      .      | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
              |    └ (items index) | 0.31 kb -> 0.25 kb
-      1.865s | end
+      1.862s | end
       "
     `);
 
@@ -1405,13 +1400,11 @@ describe('async storage efficiency: list-query', () => {
            |    └ (item data, <"users||1>)
       7ms  | 📖 #2 tsdf/sess1/lq-preload-item-state/li.h~228010772.p.json
            |    └ (item data, <"users||1>) | 0.06 kb
-      10ms | 📖 #1 tsdf/sess1/lq-preload-item-state/li._i.r.json
-           |    └ (items index) | 0.20 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      13ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
+      10ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
            |    └ (item data, <"users||2>)
-      14ms | 📖 #3 tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
+      11ms | 📖 #3 tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
            |    └ (item data, <"users||2>) | 0.07 kb
-      17ms | end
+      14ms | end
       "
     `);
 
@@ -1753,6 +1746,7 @@ describe('async storage efficiency: list-query', () => {
     );
     // The snapshot ends after the initial query+item reads, which makes the
     // skipped touches explicit for both entries.
+    expect(firstMountOperations).not.toContain('⚠️ DUPLICATE OPEN');
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
@@ -2127,23 +2121,17 @@ describe('async storage efficiency: list-query', () => {
       - ['Cached user']
       - ['Cached project']
     `);
+    expect(firstMountOperations).not.toContain('⚠️ DUPLICATE OPEN');
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      .    | 📂 dir-open ✅ tsdf/sess1 (session directory) ⚠️ DUPLICATE OPEN
       1ms  | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow
            |    └ (store directory)
-      .    | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow
-           |    └ (store directory) ⚠️ DUPLICATE OPEN
       2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
            |    └ (queries index)
-      .    | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
-           |    └ (queries index) ⚠️ DUPLICATE OPEN
       3ms  | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
            |    └ (queries index) | 0.28 kb
-      .    | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
-           |    └ (queries index) | 0.28 kb ⚠️ REPEATED READ <10ms UNCHANGED
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2044383828.p.json
@@ -2154,12 +2142,8 @@ describe('async storage efficiency: list-query', () => {
            |    └ (query data, <{tableId:"projects"}>) | 0.03 kb
       10ms | 👁️ #4 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
            |    └ (items index)
-      .    | 👁️ #4 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
-           |    └ (items index) ⚠️ DUPLICATE OPEN
       11ms | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
            |    └ (items index) | 0.21 kb
-      .    | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
-           |    └ (items index) | 0.21 kb ⚠️ REPEATED READ <10ms UNCHANGED
       14ms | 👁️ #5 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
       .    | 👁️ #6 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~2924752681.p.json
@@ -2380,16 +2364,13 @@ describe('async storage efficiency: list-query', () => {
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📖 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq._i.r.json
-             |    └ (queries index) | 0.31 kb
-             ·
-      1.853s | 📖 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
+      1.85s  | 📖 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
              |    └ (items index) | 0.30 kb
-      1.858s | ✍️ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~2924752681.p.json
+      1.855s | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~2924752681.p.json
              |    └ (item data, <"projects||1>) | 0.05 kb -> 0.05 kb ⚠️ UNCHANGED
-      1.862s | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
+      1.859s | ✍️ #1 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
              |    └ (items index) | 0.30 kb -> 0.36 kb
-      1.864s | end
+      1.861s | end
       "
     `);
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);

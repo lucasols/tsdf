@@ -10,7 +10,6 @@ import {
 import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
-  OfflineSession,
 } from '../../src/persistentStorage/offline/types';
 import type {
   CollectionPersistentStorageConfig,
@@ -75,24 +74,12 @@ type TestCollectionPersistentStorageConfig<
   D extends Record<string, unknown>,
   StorageState,
   TOfflineOperations extends TestCollectionOfflineOperationsConfig<D>,
-> = Omit<
-  CollectionPersistentStorageConfig<
-    CollectionTestItem<D>,
-    string,
-    StorageState,
-    TOfflineOperations
-  >,
-  'offline'
-> & {
-  offline?: NonNullable<
-    CollectionPersistentStorageConfig<
-      CollectionTestItem<D>,
-      string,
-      StorageState,
-      TOfflineOperations
-    >['offline']
-  > & { session?: OfflineSession };
-};
+> = CollectionPersistentStorageConfig<
+  CollectionTestItem<D>,
+  string,
+  StorageState,
+  TOfflineOperations
+>;
 
 export type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,
@@ -204,12 +191,14 @@ export function createCollectionStoreTestEnv<
     createStoreManager({
       getSessionKey: getSessionKeyOption,
       errorNormalizer: normalizeError,
-      offlineSession:
-        persistentStorageWithResolvedAdapter?.offline?.session?.getConfig() ??
-        undefined,
     });
+  if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {
+    throw new Error(
+      '[tsdf:test] Offline persistentStorage in test envs must be paired with a storeManager configured with offlineSession',
+    );
+  }
   const getSessionKey = resolvedStoreManager.getSessionKey;
-  const resolvedOfflineSession = resolvedStoreManager.getOfflineSession();
+  const resolvedOfflineConfig = resolvedStoreManager.getOfflineConfig();
 
   const { getMutationEmoji } = createEmojiCyclers();
   const offlineTimelineLogger = createOfflineTimelineTestLogger({
@@ -376,7 +365,7 @@ export function createCollectionStoreTestEnv<
                     operation,
                   })),
               adapter: resolvedPersistentStorage.adapter,
-              config: resolvedOfflineSession!.getConfig(),
+              config: resolvedOfflineConfig!,
             });
           }
         },
@@ -439,7 +428,7 @@ export function createCollectionStoreTestEnv<
               operation,
             })),
         adapter: resolvedPersistentStorage.adapter,
-        config: resolvedOfflineSession!.getConfig(),
+        config: resolvedOfflineConfig!,
       });
     }
 

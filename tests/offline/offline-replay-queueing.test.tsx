@@ -3,11 +3,15 @@ import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
-import { createOfflineSession } from '../../src/main';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-import { FetchError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import {
+  FetchError,
+  TEST_INITIAL_TIME,
+  normalizeError,
+} from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
@@ -82,16 +86,17 @@ test('collection offline create rejects queueing the same temp id twice', async 
     { 'users||1': { name: 'User 1' } },
     {
       getSessionKey: () => 'offline-temp-id-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'offline-temp-id-session',
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'offline-temp-id-session',
-            config: { network: network.config },
-          }),
           operations: {
             createUser: {
               inputSchema: collectionCreateInputSchema,
@@ -223,15 +228,16 @@ test('document offline accumulation keeps a single persisted queue entry and rep
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -400,16 +406,17 @@ test('collection offline accumulation keeps a single persisted queue entry and r
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             renameUser: {
               inputSchema: userPatchSchema,
@@ -591,6 +598,11 @@ test('list-query offline accumulation keeps a single persisted queue entry and r
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
       persistentStorage: {
         adapter: 'local-sync',
@@ -598,10 +610,6 @@ test('list-query offline accumulation keeps a single persisted queue entry and r
         itemPayloadSchema: rc_string,
         queryPayloadSchema: listQueryQueryPayloadSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
@@ -801,16 +809,17 @@ test('same-entity supersede keeps only the queued delete for a persisted collect
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             patchUserName: {
               inputSchema: userPatchSchema,
@@ -973,16 +982,17 @@ test('same-entity supersede can prune only the latest-wins operation while keepi
     {
       id: storeName,
       getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: collectionWithRoleSchema,
         payloadSchema: rc_string,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => sessionKey,
-            config: { network: network.config },
-          }),
           operations: {
             setUserName: {
               inputSchema: setUserNameInputSchema,
@@ -1162,15 +1172,16 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
     });
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'needs-confirmation-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'needs-confirmation-session',
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'needs-confirmation-session',
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1289,19 +1300,20 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'needs-confirmation-no-outage-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'needs-confirmation-no-outage-session',
+      offlineSession: {
+        network: network.config,
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'needs-confirmation-no-outage-session',
-          config: {
-            network: network.config,
-            classifyRetryableFailure: (error, ctx) =>
-              classifyRetryableReplayFailure(error, ctx.phase),
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1403,15 +1415,19 @@ test('ambiguous replay failures require manual resolution by default instead of 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'retry-default-safe-store',
     getSessionKey: () => 'retry-default-safe-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'retry-default-safe-session',
+      offlineSession: {
+        network: network.config,
+        replayRetry: { intervalMs: 1 },
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'retry-default-safe-session',
-          config: { network: network.config, replayRetry: { intervalMs: 1 } },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1485,19 +1501,20 @@ test('healthy replay failures are retried 3 times and then move into the resolut
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-exhaustion-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'retry-exhaustion-session',
+      offlineSession: {
+        network: network.config,
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'retry-exhaustion-session',
-          config: {
-            network: network.config,
-            classifyRetryableFailure: (error, ctx) =>
-              classifyRetryableReplayFailure(error, ctx.phase),
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1633,19 +1650,20 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-resolution-actions-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'retry-resolution-actions-session',
+      offlineSession: {
+        network: network.config,
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'retry-resolution-actions-session',
-          config: {
-            network: network.config,
-            classifyRetryableFailure: (error, ctx) =>
-              classifyRetryableReplayFailure(error, ctx.phase),
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -1901,36 +1919,37 @@ test('outage-classified replay failures do not count toward retry exhaustion', a
   // the outage failure doesn't consume from it while the healthy failure does.
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-outage-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'retry-outage-session',
+      offlineSession: {
+        network: { enabled: true },
+        classifyFailure: (error, ctx) =>
+          ctx.phase === 'sync' &&
+          error instanceof Error &&
+          error.message === 'outage'
+            ? 'outage'
+            : 'ignore',
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+        outage: {
+          enabled: true,
+          recoveryCheck,
+          recoveryProbe: {
+            initialIntervalMs: 50,
+            maxIntervalMs: 50,
+            backoffMultiplier: 1,
+            jitterRatio: 0,
+          },
+        },
+        replayRetry: { maxFailures: 2 },
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'retry-outage-session',
-          config: {
-            network: { enabled: true },
-            classifyFailure: (error, ctx) =>
-              ctx.phase === 'sync' &&
-              error instanceof Error &&
-              error.message === 'outage'
-                ? 'outage'
-                : 'ignore',
-            classifyRetryableFailure: (error, ctx) =>
-              classifyRetryableReplayFailure(error, ctx.phase),
-            outage: {
-              enabled: true,
-              recoveryCheck,
-              recoveryProbe: {
-                initialIntervalMs: 50,
-                maxIntervalMs: 50,
-                backoffMultiplier: 1,
-                jitterRatio: 0,
-              },
-            },
-            replayRetry: { maxFailures: 2 },
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2006,19 +2025,20 @@ test('going offline again resets the healthy replay failure budget', async () =>
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'retry-budget-reset-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'retry-budget-reset-session',
+      offlineSession: {
+        network: network.config,
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'retry-budget-reset-session',
-          config: {
-            network: network.config,
-            classifyRetryableFailure: (error, ctx) =>
-              classifyRetryableReplayFailure(error, ctx.phase),
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2168,16 +2188,16 @@ test('new mutations queue separately instead of merging into entries that may ha
   // entry that may have already been applied on the server.
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'offline-needs-confirmation-accumulation-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'offline-needs-confirmation-accumulation-session',
+      offlineSession: { network: { enabled: true } },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () =>
-            'offline-needs-confirmation-accumulation-session',
-          config: { network: { enabled: true } },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2268,15 +2288,16 @@ test('supersede does not discard entries that may have already been applied on t
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2398,15 +2419,16 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'online-needs-confirmation-retry-session',
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => 'online-needs-confirmation-retry-session',
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => 'online-needs-confirmation-retry-session',
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2507,15 +2529,16 @@ test('session switches do not leave replayed queue entries in the old namespace'
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: 'replay-session-switch-doc',
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2584,15 +2607,16 @@ test('document offline mutations are queued durably and replay when the browser 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: { network: network.config },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2727,24 +2751,25 @@ test('accumulation still merges entries when the queue starts from a hybrid fall
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     id: storeName,
     getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        network: network.config,
+        classifyFailure: (error, ctx) =>
+          classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+        outage: {
+          enabled: true,
+          recoveryCheck: () => false,
+          recoveryProbe: quickRecoveryProbe,
+        },
+      },
+    }),
     testScenario: 'loaded',
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
       offline: {
-        session: createOfflineSession({
-          getSessionKey: () => sessionKey,
-          config: {
-            network: network.config,
-            classifyFailure: (error, ctx) =>
-              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-            outage: {
-              enabled: true,
-              recoveryCheck: () => false,
-              recoveryProbe: quickRecoveryProbe,
-            },
-          },
-        }),
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -2851,28 +2876,29 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
     1,
     {
       getSessionKey: () => 'hybrid-retry-exhaustion-session',
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => 'hybrid-retry-exhaustion-session',
+        offlineSession: {
+          network: network.config,
+          classifyFailure: (error, ctx) =>
+            classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+          outage: {
+            enabled: true,
+            recoveryCheck: () => true,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          // Low retry budget so the test exhausts it quickly.
+          replayRetry: { maxFailures: 2, intervalMs: 500 },
+        },
+      }),
       testScenario: 'loaded',
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,
         offline: {
-          session: createOfflineSession({
-            getSessionKey: () => 'hybrid-retry-exhaustion-session',
-            config: {
-              network: network.config,
-              classifyFailure: (error, ctx) =>
-                classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
-              classifyRetryableFailure: (error, ctx) =>
-                classifyRetryableReplayFailure(error, ctx.phase),
-              outage: {
-                enabled: true,
-                recoveryCheck: () => true,
-                recoveryProbe: quickRecoveryProbe,
-              },
-              // Low retry budget so the test exhausts it quickly.
-              replayRetry: { maxFailures: 2, intervalMs: 500 },
-            },
-          }),
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,

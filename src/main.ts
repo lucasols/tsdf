@@ -99,6 +99,19 @@ export type {
 } from './persistentStorage/types';
 
 export type {
+  OfflineMutationUploadsInput,
+  OfflineOperationUploadsContext,
+  OfflineSessionUploadsConfig,
+  OfflineStoredUploadRecord,
+  OfflineUpload,
+  OfflineUploadAdapter,
+  OfflineUploadProgress,
+  OfflineUploadSource,
+  OfflineUploadState,
+  OfflineUploadTransportContext,
+} from './persistentStorage/offlineUploadTypes';
+
+export type {
   OfflineAccumulationConfig,
   OfflineAccumulationMergeContext,
   CollectionOfflineOperationDefinition,
@@ -150,7 +163,6 @@ export { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
 
 export {
-  createOfflineSession,
   getGlobalOfflineEntities,
   getGlobalOfflineResolutions,
   getGlobalOfflineStatus,
@@ -174,3 +186,4 @@ export {
 } from './persistentStorage/storageAdapter';
 
 export { createAsyncStorageAdapter } from './persistentStorage/asyncStorageAdapter';
+export { opfsOfflineUploadAdapter } from './persistentStorage/opfsOfflineUploadAdapter';

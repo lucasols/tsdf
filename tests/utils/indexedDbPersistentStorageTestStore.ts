@@ -2,6 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   createIndexedDbPersistentStorageForTests,
   type IndexedDbPersistentStorageOperation,
@@ -271,7 +272,7 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
 
   if (withoutPrefix.endsWith('._o_.p')) {
     return {
-      key: 'document',
+      key: DOCUMENT_PERSISTED_ENTRY_KEY,
       scope: {
         kind: 'document',
         sessionKey: withoutPrefix.slice(0, -'._o_.p'.length),
@@ -323,7 +324,7 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
   if (lastSeparatorIndex <= 0) return null;
 
   return {
-    key: 'document',
+    key: DOCUMENT_PERSISTED_ENTRY_KEY,
     scope: {
       kind: 'document',
       sessionKey: withoutPrefix.slice(0, lastSeparatorIndex),
@@ -1339,7 +1340,7 @@ export function createIndexedDbPersistentStorageTestStore(
     } satisfies AsyncStorageNamespaceScope;
     const documentStorageKey = getLogicalStorageKey(
       documentNamespace,
-      'document',
+      DOCUMENT_PERSISTED_ENTRY_KEY,
     );
 
     function collectionItemStorageKey(payload: string): string {

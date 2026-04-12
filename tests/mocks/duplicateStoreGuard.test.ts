@@ -10,7 +10,7 @@ test('document envs reject duplicate store ids in the default test tab', () => {
   expect(() => {
     createDocumentStoreTestEnv(1, { id: 'dup-doc', testBrowserTabId: 'tab-a' });
     createDocumentStoreTestEnv(1, { id: 'dup-doc', testBrowserTabId: 'tab-a' });
-  }).toThrowError(
+  }).toThrow(
     '[tests] Duplicate document store "dup-doc" created in the same test tab. Reuse the existing env, choose a different id, or bind each env to a different focus controller when simulating multiple tabs.',
   );
 });
@@ -25,7 +25,7 @@ test('collection envs reject duplicate store ids in the default test tab', () =>
       { a: { name: 'A' } },
       { id: 'dup-collection', testBrowserTabId: 'tab-a' },
     );
-  }).toThrowError(
+  }).toThrow(
     '[tests] Duplicate collection store "dup-collection" created in the same test tab. Reuse the existing env, choose a different id, or bind each env to a different focus controller when simulating multiple tabs.',
   );
 });
@@ -40,7 +40,7 @@ test('list query envs reject duplicate store ids in the default test tab', () =>
       { users: [] },
       { id: 'dup-list-query', testBrowserTabId: 'tab-a' },
     );
-  }).toThrowError(
+  }).toThrow(
     '[tests] Duplicate listQuery store "dup-list-query" created in the same test tab. Reuse the existing env, choose a different id, or bind each env to a different focus controller when simulating multiple tabs.',
   );
 });

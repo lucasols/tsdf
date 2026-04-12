@@ -1,3 +1,4 @@
+import type { OfflineMutationUploadsInput } from '../offlineUploadTypes';
 import type {
   OfflineMutationInput,
   OfflineOperationSchemaShape,
@@ -24,9 +25,10 @@ export type OfflineAwareMutationController<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
   canQueueMutation: () => boolean;
-  prepareForMutation: <TName extends keyof TOperations & string>(
-    args: OfflineMutationInput<TOperations, TName>,
-  ) => Promise<PreparedOfflineMutation>;
+  prepareForMutation: <TName extends keyof TOperations & string>(args: {
+    offline: OfflineMutationInput<TOperations, TName>;
+    upload?: OfflineMutationUploadsInput;
+  }) => Promise<PreparedOfflineMutation>;
 };
 
 export async function runHybridOfflineMutation<
@@ -36,17 +38,21 @@ export async function runHybridOfflineMutation<
 >({
   controller,
   offline,
+  upload,
   directMutation,
 }: {
   controller?: OfflineAwareMutationController<TOperations> | null;
   offline?: OfflineMutationInput<TOperations, TName> | undefined;
+  upload?: OfflineMutationUploadsInput | undefined;
   directMutation: () => Promise<T>;
 }): Promise<OfflineMutationResult<T>> {
   if (!offline || !controller) {
-    return { kind: 'online', data: await directMutation() };
+    throw new Error(
+      'runHybridOfflineMutation requires an offline mutation and controller',
+    );
   }
 
-  const prepared = await controller.prepareForMutation(offline);
+  const prepared = await controller.prepareForMutation({ offline, upload });
 
   if (prepared.initialAction === 'queue') {
     await prepared.queueMutation();

@@ -6,6 +6,7 @@ import {
   getPayloadRecordKey,
   PAYLOAD_RECORD_PREFIX,
 } from '../../src/persistentStorage/asyncStorageShared';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   buildFileName,
   decodePathSegment,
@@ -152,7 +153,7 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
         storeName: withoutPrefix.slice(lastSeparatorIndex + 1),
         kind: 'document',
       },
-      key: 'document',
+      key: DOCUMENT_PERSISTED_ENTRY_KEY,
     };
   }
 
@@ -1290,7 +1291,7 @@ export function createOpfsPersistentStorageTestStore(
     } satisfies AsyncStorageNamespaceScope;
     const documentStorageKey = getLogicalStorageKey(
       documentNamespace,
-      'document',
+      DOCUMENT_PERSISTED_ENTRY_KEY,
     );
 
     function collectionItemStorageKey(payload: string): string {

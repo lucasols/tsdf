@@ -5,6 +5,7 @@ import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../../src/persistentStorage/offline/sessionCoordinator';
 import {
   clearSessionProtectedKeysSnapshot,
@@ -485,7 +486,7 @@ function serializeProtectedStorageKey(storageKey: string): string {
   }
 
   return serializeProtectedRef({
-    key: 'document',
+    key: DOCUMENT_PERSISTED_ENTRY_KEY,
     kind: 'document',
     sessionKey: storageKey.split('.').slice(1, -1).join('.'),
     storeName: storageKey.split('.').at(-1) ?? '',

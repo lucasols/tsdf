@@ -1,6 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { serializeProtectedRef } from '../../src/persistentStorage/asyncStorageAdapter';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   createIndexedDbPersistentStorageForTests,
   type IndexedDbPersistentStorageOperation,
@@ -330,7 +331,12 @@ describe('indexeddb persistent storage adapter', () => {
     const entry = await getParsedIndexedDbRecordData<Record<string, unknown>>(
       mockAdapter,
       {
-        key: ['sess1', 'generic-reader', 'document', 'document'],
+        key: [
+          'sess1',
+          'generic-reader',
+          'document',
+          DOCUMENT_PERSISTED_ENTRY_KEY,
+        ],
         storeName: 'entries',
       },
     );
