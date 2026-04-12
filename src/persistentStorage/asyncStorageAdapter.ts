@@ -481,24 +481,24 @@ function cloneNamespaceIndexReadState(
   };
 }
 
-const CACHE_INVALIDATION_REASONS = [
-  'clear',
-  'commit',
-  'remove',
-  'startup-cleanup',
-] as const;
-
-const CACHE_INVALIDATION_REASONS_SET: ReadonlySet<string> = new Set(
-  CACHE_INVALIDATION_REASONS,
-);
-
 type AsyncStorageCacheInvalidationReason =
-  (typeof CACHE_INVALIDATION_REASONS)[number];
+  | 'clear'
+  | 'commit'
+  | 'remove'
+  | 'startup-cleanup';
 
-function isCacheInvalidationReason(
+function parseCacheInvalidationReason(
   value: unknown,
-): value is AsyncStorageCacheInvalidationReason {
-  return typeof value === 'string' && CACHE_INVALIDATION_REASONS_SET.has(value);
+): AsyncStorageCacheInvalidationReason | null {
+  switch (value) {
+    case 'clear':
+    case 'commit':
+    case 'remove':
+    case 'startup-cleanup':
+      return value;
+    default:
+      return null;
+  }
 }
 
 type AsyncStorageCacheInvalidationMessage = {
@@ -533,13 +533,13 @@ function parseAsyncStorageCacheInvalidationMessage(
   const kind = parseAsyncStorageNamespaceKind(scopeRecord.kind);
   if (kind === null) return null;
 
-  const rawReason = record.reason;
-  if (!isCacheInvalidationReason(rawReason)) return null;
+  const reason = parseCacheInvalidationReason(record.reason);
+  if (reason === null) return null;
 
   return {
     kind: 'namespace-invalidated',
     protocolVersion: 1,
-    reason: rawReason,
+    reason,
     scope: {
       kind,
       sessionKey: scopeRecord.sessionKey,

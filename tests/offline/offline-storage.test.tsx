@@ -17,7 +17,7 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -937,6 +937,7 @@ test('async OPFS idle offline boot hydrates pending offline items from storage w
   // Reboot into an idle store so the hook has to restore state from persisted
   // OPFS records instead of from any mounted query.
   __resetSessionOfflineCoordinatorRegistryForTests();
+  opfsPersistentStorage.resetForTests?.();
 
   const restartedEnv = createOfflinePendingItemsListQueryEnv({
     adapter: opfsPersistentStorage,
@@ -982,7 +983,8 @@ test('async OPFS idle offline boot hydrates pending offline items from storage w
     time | pending-deletes | pending-items |
     0    | -               | -             | -- restart offline with OPFS storage and mount only usePendingOfflineItems; the async preload should recover the same pending state
     .    | (none)          | (none)        | [pending-items, pending-deletes] ui-initialized
-    1ms  | users||2        | Ada queued    | [pending-deletes, pending-items] ui-changed
+    12ms | users||2        | (none)        | [pending-deletes] ui-changed
+    17ms | users||2        | Ada queued    | [pending-items] ui-changed
     "
   `);
 
