@@ -118,6 +118,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       ""
       2.007s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-expiration","collection.item"]]
       2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
+      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
       2.017s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-expiration","collection.item"] keys=["\\"expired-user", "\\"expired-user-2"]
       2.022s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-expiration","collection.item"] keys=1
       ""
@@ -125,43 +126,43 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 1
-          rows:
-            - key: ['sess1', 'collection-expiration', 'collection.item', '"fresh-user']
-              value: 'JSON object | 0.4 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'collection-expiration', 'collection.item', '"fresh-user']
+                value: 'JSON object | 0.4 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 0
+            rows: []
+        version: 1
+      `);
 
     expect(
       await readCollectionEntryRow({
@@ -403,8 +404,28 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     // Drain the startup-scheduled cleanup before capturing the maxItems flush.
     await settleStartupBackgroundScan(mockAdapter);
+    let payloadsAfterStartup = (
+      await collectionScope.collection.listStoredPayloads()
+    ).sort();
 
-    // Adding a fourth item should capture one write plus a two-item cleanup sequence.
+    // IndexedDB cleanup can finish a little later than the generic startup helper
+    // because fake-indexeddb work drains through queued tasks instead of OPFS file ops.
+    for (
+      let attempt = 0;
+      JSON.stringify(payloadsAfterStartup) !== JSON.stringify(['b', 'c']) &&
+      attempt < 10;
+      attempt++
+    ) {
+      await settleIndexedDbStorageCapture(mockAdapter);
+      payloadsAfterStartup = (
+        await collectionScope.collection.listStoredPayloads()
+      ).sort();
+    }
+
+    // Startup cleanup should already have enforced maxItems before the later write.
+    expect(payloadsAfterStartup).toMatchInlineSnapshot(`['b', 'c']`);
+
+    // Adding a fourth item should now capture one write plus a one-item cleanup sequence.
     const readCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
@@ -417,8 +438,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-max-items-metadata","collection.item"] order=lru-desc -> ["\\"c", "\\"b", "\\"a"]
-      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-max-items-metadata","collection.item"] put=["\\"d"] delete=["\\"b", "\\"a"] touch=[] static-policy
+      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-max-items-metadata","collection.item"] order=lru-desc -> ["\\"c", "\\"b"]
+      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-max-items-metadata","collection.item"] put=["\\"d"] delete=["\\"b"] touch=[] static-policy
       ""
     `);
   });
@@ -469,47 +490,47 @@ describe('indexeddb async storage efficiency: collection', () => {
 
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 2
-          rows:
-            - key: ['sess1', 'col-expired-during-max-items', 'collection.item', '"c']
-              value: 'JSON object | 0.4 kb'
-            - key: ['sess1', 'col-expired-during-max-items', 'collection.item', '"d']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 1
-          rows:
-            - key: ['sess1', 'col-expired-during-max-items', 'collection.item']
-              value: 'JSON object | 0.2 kb'
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 2
+            rows:
+              - key: ['sess1', 'col-expired-during-max-items', 'collection.item', '"c']
+                value: 'JSON object | 0.4 kb'
+              - key: ['sess1', 'col-expired-during-max-items', 'collection.item', '"d']
+                value: 'JSON object | 0.3 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'col-expired-during-max-items', 'collection.item']
+                value: 'JSON object | 0.2 kb'
+        version: 1
+      `);
   });
 
   test('repeated overflowing collection updates evict inline without scheduling background maintenance', async () => {
@@ -582,8 +603,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
     expect(await resolveAfterIndexedDbStorage(preloadPromise, mockAdapter))
       .toMatchInlineSnapshot(`
-      - { payload: '1', preloaded: '✅' }
-    `);
+        - { payload: '1', preloaded: '✅' }
+      `);
     const preloadPromise2 = env.apiStore.preloadItemFromStorage('2');
     expect(
       await resolveAfterIndexedDbStorage(preloadPromise2, mockAdapter),
@@ -858,24 +879,24 @@ describe('indexeddb async storage efficiency: collection', () => {
         ).filter(([key]) => key !== 'a'),
       ),
     ).toMatchInlineSnapshot(`
+      d:
         d:
-          d:
-            value: { id: '1', name: 'Edited during write' }
-          p: '1'
+          value: { id: '1', name: 'Edited during write' }
+        p: '1'
 
-        k: '"1'
-        m: { p: '1' }
-        n: 'col-mutation-retry-during-write'
-        o: 0
-        s: 'sess1'
-        t: 'collection.item'
-        v: 1
-      `);
+      k: '"1'
+      m: { p: '1' }
+      n: 'col-mutation-retry-during-write'
+      o: 0
+      s: 'sess1'
+      t: 'collection.item'
+      v: 1
+    `);
     expect(mutationOperations).toMatchInlineSnapshot(`
-        ""
-        1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
-        ""
-      `);
+      ""
+      1.044s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      ""
+    `);
   }, 5000);
 
   test('deleteItemState removes the persisted collection entry through the namespace manifest only', async () => {

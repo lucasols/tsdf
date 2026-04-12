@@ -1348,76 +1348,80 @@ export function createIndexedDbPersistentStorageTestStore(
     };
   }
 
-  const adapter: AsyncStorageAdapter = {
-    kind: 'async',
-    openNamespace<
-      TValue,
-      TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
-    >(
-      scope: AsyncStorageNamespaceScope,
-    ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
-      const namespace = baseAdapter.openNamespace<TValue, TCustomMetadata>(
-        scope,
-      );
-      return {
-        async get(key, options) {
-          await flushWrites();
-          return namespace.get(key, options);
-        },
-        async getMany(keys, options) {
-          await flushWrites();
-          return namespace.getMany(keys, options);
-        },
-        async listKeys() {
-          await flushWrites();
-          return namespace.listKeys();
-        },
-        async commit(args) {
-          await flushWrites();
-          return namespace.commit(args);
-        },
-        async listMetadata(args) {
-          await flushWrites();
-          return namespace.listMetadata(args);
-        },
-        ...(namespace.listMetadataByFilter === undefined
-          ? {}
-          : {
-              async listMetadataByFilter(args) {
-                await flushWrites();
-                return (await namespace.listMetadataByFilter?.(args)) ?? [];
-              },
-            }),
-        async clear() {
-          await flushWrites();
-          return namespace.clear();
-        },
-      } satisfies AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
-    },
-    async readProtectedStorageKeys(sessionKey) {
-      await flushWrites();
-      return baseAdapter.readProtectedStorageKeys(sessionKey);
-    },
-    async syncSessionProtectedKeys(
+  const adapter = baseAdapter;
+  const baseOpenNamespace = baseAdapter.openNamespace.bind(baseAdapter);
+  const baseReadProtectedStorageKeys =
+    baseAdapter.readProtectedStorageKeys.bind(baseAdapter);
+  const baseSyncSessionProtectedKeys =
+    baseAdapter.syncSessionProtectedKeys.bind(baseAdapter);
+  const baseClearSession = baseAdapter.clearSession.bind(baseAdapter);
+  const baseResetForTests = baseAdapter.resetForTests?.bind(baseAdapter);
+
+  adapter.openNamespace = function openNamespaceForTests<
+    TValue,
+    TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+  ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
+    const namespace = baseOpenNamespace<TValue, TCustomMetadata>(scope);
+    return {
+      async get(key, options) {
+        await flushWrites();
+        return namespace.get(key, options);
+      },
+      async getMany(keys, options) {
+        await flushWrites();
+        return namespace.getMany(keys, options);
+      },
+      async listKeys() {
+        await flushWrites();
+        return namespace.listKeys();
+      },
+      async commit(args) {
+        await flushWrites();
+        return namespace.commit(args);
+      },
+      async listMetadata(args) {
+        await flushWrites();
+        return namespace.listMetadata(args);
+      },
+      ...(namespace.listMetadataByFilter === undefined
+        ? {}
+        : {
+            async listMetadataByFilter(args) {
+              await flushWrites();
+              return (await namespace.listMetadataByFilter?.(args)) ?? [];
+            },
+          }),
+      async clear() {
+        await flushWrites();
+        return namespace.clear();
+      },
+    } satisfies AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
+  };
+  adapter.readProtectedStorageKeys = async (sessionKey) => {
+    await flushWrites();
+    return baseReadProtectedStorageKeys(sessionKey);
+  };
+  adapter.syncSessionProtectedKeys = async (
+    sessionKey,
+    protectedKeys,
+    previousProtectedKeys,
+  ) => {
+    await flushWrites();
+    return baseSyncSessionProtectedKeys(
       sessionKey,
       protectedKeys,
       previousProtectedKeys,
-    ) {
-      await flushWrites();
-      return baseAdapter.syncSessionProtectedKeys(
-        sessionKey,
-        protectedKeys,
-        previousProtectedKeys,
-      );
-    },
-    async clearSession(sessionKey) {
-      await flushWrites();
-      return baseAdapter.clearSession(sessionKey);
-    },
-    resetForTests() {
-      cleanupRemoveKnownRecordsFailures.clear();
-      baseAdapter.resetForTests?.();
-    },
+    );
+  };
+  adapter.clearSession = async (sessionKey) => {
+    await flushWrites();
+    return baseClearSession(sessionKey);
+  };
+  adapter.resetForTests = () => {
+    cleanupRemoveKnownRecordsFailures.clear();
+    baseResetForTests?.();
   };
 
   function seedInitialState(): void {

@@ -292,43 +292,43 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     );
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 1
-          rows:
-            - key: ['sess1', 'fresh-doc', 'document', 'document']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'fresh-doc', 'document', 'document']
+                value: 'JSON object | 0.3 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 0
+            rows: []
+        version: 1
+      `);
   });
 
   test('startup cleanup still runs when reading offline status from localStorage throws', async () => {
@@ -620,43 +620,43 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     );
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 1
-          rows:
-            - key: ['sess1', 'valid-doc', 'document', 'document']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'valid-doc', 'document', 'document']
+                value: 'JSON object | 0.3 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 0
+            rows: []
+        version: 1
+      `);
   });
 
   test('startup cleanup keeps mixed list-query stores on record deletion when only one discovered scope is junk', async () => {
@@ -726,45 +726,45 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     );
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 2
-          rows:
-            - key: ['sess1', 'mixed-list-query', 'listQuery.item', '"projects||1']
-              value: 'JSON object | 0.4 kb'
-            - key: ['sess1', 'valid-doc', 'document', 'document']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 2
+            rows:
+              - key: ['sess1', 'mixed-list-query', 'listQuery.item', '"projects||1']
+                value: 'JSON object | 0.4 kb'
+              - key: ['sess1', 'valid-doc', 'document', 'document']
+                value: 'JSON object | 0.3 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 0
+            rows: []
+        version: 1
+      `);
   });
 
   test('startup cleanup deletes malformed collection scopes because IndexedDB rows are the namespace state', async () => {
@@ -819,41 +819,41 @@ describe('indexeddb async storage efficiency: maintenance', () => {
 
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 0
+            rows: []
+        version: 1
+      `);
   });
 
   test('offline dotted-session startup cleanup keeps stale cached entries while pruning invalid stray keys', async () => {

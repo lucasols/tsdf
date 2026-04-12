@@ -83,59 +83,59 @@ describe('indexeddb async storage efficiency: document', () => {
 
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
       .toMatchInlineSnapshot(`
-      stores:
-        - autoIncrement: '❌'
-          indexes:
-            - keyPath: ['s', 'n', 't', 'g', 'k']
-              multiEntry: '❌'
-              name: 'byScopeGroup'
-              unique: '❌'
-            - keyPath: ['s', 'n', 't', 'a', 'k']
-              multiEntry: '❌'
-              name: 'byScopeLastAccessAt'
-              unique: '❌'
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-            - keyPath: ['s', 'o', 'n', 't', 'k']
-              multiEntry: '❌'
-              name: 'bySessionOfflineProtected'
-              unique: '❌'
-          keyPath: ['s', 'n', 't', 'k']
-          name: 'entries'
-          rowCount: 1
-          rows:
-            - key: ['sess1', 'doc-remount-flow', 'document', 'document']
-              value: 'JSON object | 0.3 kb'
-        - autoIncrement: '❌'
-          indexes: []
-          keyPath: 'k'
-          name: 'meta'
-          rowCount: 0
-          rows: []
-        - autoIncrement: '❌'
-          indexes:
-            - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
-          keyPath: ['s', 'n', 't']
-          name: 'namespacePolicies'
-          rowCount: 0
-          rows: []
-      version: 1
-    `);
+        stores:
+          - autoIncrement: '❌'
+            indexes:
+              - keyPath: ['s', 'n', 't', 'g', 'k']
+                multiEntry: '❌'
+                name: 'byScopeGroup'
+                unique: '❌'
+              - keyPath: ['s', 'n', 't', 'a', 'k']
+                multiEntry: '❌'
+                name: 'byScopeLastAccessAt'
+                unique: '❌'
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+              - keyPath: ['s', 'o', 'n', 't', 'k']
+                multiEntry: '❌'
+                name: 'bySessionOfflineProtected'
+                unique: '❌'
+            keyPath: ['s', 'n', 't', 'k']
+            name: 'entries'
+            rowCount: 1
+            rows:
+              - key: ['sess1', 'doc-remount-flow', 'document', 'document']
+                value: 'JSON object | 0.3 kb'
+          - autoIncrement: '❌'
+            indexes: []
+            keyPath: 'k'
+            name: 'meta'
+            rowCount: 0
+            rows: []
+          - autoIncrement: '❌'
+            indexes:
+              - { keyPath: 's', multiEntry: '❌', name: 'bySession', unique: '❌' }
+            keyPath: ['s', 'n', 't']
+            name: 'namespacePolicies'
+            rowCount: 0
+            rows: []
+        version: 1
+      `);
 
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-      a: 1735689600000
+        a: 1735689600000
 
-      d:
         d:
-          value: { name: 'Cached document', value: 7 }
+          d:
+            value: { name: 'Cached document', value: 7 }
 
-      k: 'document'
-      n: 'doc-remount-flow'
-      o: 0
-      s: 'sess1'
-      t: 'document'
-      v: 1
-    `);
+        k: 'document'
+        n: 'doc-remount-flow'
+        o: 0
+        s: 'sess1'
+        t: 'document'
+        v: 1
+      `);
   });
 
   test('document hook hydration does not skip the touch write once the cached document falls outside the current recency bucket', async () => {
@@ -290,19 +290,19 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-      a: 1735689603001
+        a: 1735689603001
 
-      d:
         d:
-          value: { name: 'Cached document', value: 8 }
+          d:
+            value: { name: 'Cached document', value: 8 }
 
-      k: 'document'
-      n: 'doc-startup-touch-offline-marker'
-      o: 0
-      s: 'sess1'
-      t: 'document'
-      v: 1
-    `);
+        k: 'document'
+        n: 'doc-startup-touch-offline-marker'
+        o: 0
+        s: 'sess1'
+        t: 'document'
+        v: 1
+      `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-startup-touch-offline-marker","document"] keys=["document"] -> ["document"]
@@ -342,19 +342,19 @@ describe('indexeddb async storage efficiency: document', () => {
 
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-      a: 1735689600000
+        a: 1735689600000
 
-      d:
         d:
-          value: { name: 'Edited document', value: 99 }
+          d:
+            value: { name: 'Edited document', value: 99 }
 
-      k: 'document'
-      n: 'doc-mutation-flow'
-      o: 0
-      s: 'sess1'
-      t: 'document'
-      v: 1
-    `);
+        k: 'document'
+        n: 'doc-mutation-flow'
+        o: 0
+        s: 'sess1'
+        t: 'document'
+        v: 1
+      `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
       1.043s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-mutation-flow","document"] put=["document"] delete=[] touch=[]
@@ -399,19 +399,19 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-      a: 1735689600000
+        a: 1735689600000
 
-      d:
         d:
-          value: { name: 'Fresh document', value: 42 }
+          d:
+            value: { name: 'Fresh document', value: 42 }
 
-      k: 'document'
-      n: 'doc-invalidation-flow'
-      o: 0
-      s: 'sess1'
-      t: 'document'
-      v: 1
-    `);
+        k: 'document'
+        n: 'doc-invalidation-flow'
+        o: 0
+        s: 'sess1'
+        t: 'document'
+        v: 1
+      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
       1.853s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["document"] delete=[] touch=[]
@@ -474,19 +474,19 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-      a: 1735689600000
+        a: 1735689600000
 
-      d:
         d:
-          value: { name: 'Fresh document 2', value: 42 }
+          d:
+            value: { name: 'Fresh document 2', value: 42 }
 
-      k: 'document'
-      n: 'doc-coalesced-invalidations'
-      o: 0
-      s: 'sess1'
-      t: 'document'
-      v: 1
-    `);
+        k: 'document'
+        n: 'doc-coalesced-invalidations'
+        o: 0
+        s: 'sess1'
+        t: 'document'
+        v: 1
+      `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
       1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-coalesced-invalidations","document"] put=["document"] delete=[] touch=[]
@@ -532,19 +532,19 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-      a: 1735689600000
+        a: 1735689600000
 
-      d:
         d:
-          value: { name: 'Fresh document', value: 42 }
+          d:
+            value: { name: 'Fresh document', value: 42 }
 
-      k: 'document'
-      m: { o: '✅' }
-      n: 'doc-offline-marker-flow'
-      o: 1
-      s: 'sess1'
-      t: 'document'
-      v: 1
-    `);
+        k: 'document'
+        m: { o: '✅' }
+        n: 'doc-offline-marker-flow'
+        o: 1
+        s: 'sess1'
+        t: 'document'
+        v: 1
+      `);
   });
 });

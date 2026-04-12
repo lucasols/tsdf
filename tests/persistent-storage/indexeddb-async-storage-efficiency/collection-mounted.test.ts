@@ -472,9 +472,9 @@ describe('indexeddb async storage efficiency: collection', () => {
         (payload) => env.apiStore.getItemState(payload)?.data?.value,
       ),
     ).toMatchInlineSnapshot(`
-        - { id: '1', name: 'Cached user 1' }
-        - { id: '2', name: 'Cached user 2' }
-      `);
+      - { id: '1', name: 'Cached user 1' }
+      - { id: '2', name: 'Cached user 2' }
+    `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       2ms | 📖 entries.getMany scope=["sess1","col-multi-remount-flow","collection.item"] keys=["\\"1", "\\"2"] -> ["\\"1", "\\"2"]
