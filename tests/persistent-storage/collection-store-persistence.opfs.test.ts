@@ -30,6 +30,12 @@ import {
   getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../utils/persistentStorageOptimizationTestUtils';
+import {
+  getAsyncCollectionEntrySizeBytes,
+  sumPersistedEntryBytes,
+} from './persistentStorageByteBudgetTestUtils';
+
+const utf8Encoder = new TextEncoder();
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -50,6 +56,13 @@ function itemStorageKey(
 type ItemState = { id: string; name: string };
 
 type PersistedItemState = { value: ItemState };
+
+function getLogicalCollectionEntrySizeBytes(
+  payload: string,
+  data: PersistedItemState,
+): number {
+  return utf8Encoder.encode(JSON.stringify({ data, payload })).byteLength;
+}
 
 function setCachedCollectionItem(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
@@ -74,7 +87,7 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   ignoreItems?: string[] | ((payload: string) => boolean);
-  maxItems?: number;
+  maxBytes?: number;
   pinnedItems?: string[];
   serverData?: Record<string, ItemState>;
 }) {
@@ -86,7 +99,7 @@ function createEnv(options: {
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       ignoreItems: options.ignoreItems,
-      maxItems: options.maxItems,
+      maxBytes: options.maxBytes,
       pinnedItems: options.pinnedItems,
     },
   });
@@ -248,24 +261,27 @@ describe('opfs: collection store persistence', () => {
     `);
   });
 
-  test('persisted collection maxItems policy is enforced on cold startup before the store mounts', async () => {
+  test('persisted collection maxBytes policy is enforced on cold startup before the store mounts', async () => {
     const storeName = 'col-opfs-cold-policy-max-items';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({});
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const keptOlderItem = { value: { id: 'b', name: 'Older kept' } };
+    const keptNewestItem = { value: { id: 'c', name: 'Newest kept' } };
 
     collectionScope.collection.seedItem('a', {
       value: { id: 'a', name: 'Older cached' },
     });
     await advanceTime(100);
-    collectionScope.collection.seedItem('b', {
-      value: { id: 'b', name: 'Older kept' },
-    });
+    collectionScope.collection.seedItem('b', keptOlderItem);
     await advanceTime(100);
-    collectionScope.collection.seedItem('c', {
-      value: { id: 'c', name: 'Newest kept' },
+    collectionScope.collection.seedItem('c', keptNewestItem);
+    collectionScope.collection.setStaticPolicy({
+      b: sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('b', keptOlderItem),
+        getAsyncCollectionEntrySizeBytes('c', keptNewestItem),
+      ),
     });
-    collectionScope.collection.setStaticPolicy({ m: 2 });
 
     opfsPersistentStorage.resetForTests?.();
     createEnv({ storeName: 'trigger-collection', sessionKey });
@@ -282,10 +298,10 @@ describe('opfs: collection store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "b: { a: 1735689600100, p: 'b' }
-        "c: { a: 1735689600200, p: 'c' }
+        "b: { a: 1735689600100, p: 'b', z: 81 }
+        "c: { a: 1735689600200, p: 'c', z: 82 }
 
-      s: { m: 2 }
+      s: { b: 163 }
     `);
   });
 
@@ -304,7 +320,9 @@ describe('opfs: collection store persistence', () => {
     });
     collectionScope.collection.setStaticPolicy({
       k: [itemKey('pinned')],
-      m: 1,
+      b: getAsyncCollectionEntrySizeBytes('pinned', {
+        value: { id: 'pinned', name: 'Pinned older' },
+      }),
     });
 
     opfsPersistentStorage.resetForTests?.();
@@ -322,11 +340,11 @@ describe('opfs: collection store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "pinned: { a: 1735689600000, p: 'pinned' }
+        "pinned: { a: 1735689600000, p: 'pinned', z: 98 }
 
       s:
+        b: 98
         k: ['"pinned']
-        m: 1
     `);
   });
 
@@ -492,6 +510,59 @@ describe('opfs: collection store persistence', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
+    `);
+  });
+
+  test('async maxBytes eviction rewrites surviving items after a newer item is removed', async () => {
+    const storeName = 'col-opfs-rewrite-after-byte-eviction';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const olderItem = { value: { id: '1', name: 'Older kept later' } };
+    const newerItem = { value: { id: '2', name: 'Newer evicted later' } };
+    const maxBytes = sumPersistedEntryBytes(
+      getAsyncCollectionEntrySizeBytes('1', olderItem),
+      getLogicalCollectionEntrySizeBytes('2', newerItem),
+    );
+
+    expect(maxBytes).toBeLessThan(
+      sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('1', olderItem),
+        getAsyncCollectionEntrySizeBytes('2', newerItem),
+      ),
+    );
+
+    const env = createEnv({ storeName, sessionKey, maxBytes });
+
+    env.apiStore.addItemToState('1', olderItem);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.apiStore.addItemToState('2', newerItem);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(collectionScope.collection.listStoredPayloads())
+      .toMatchInlineSnapshot(`
+      ['2']
+    `);
+
+    env.apiStore.deleteItemState('2');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(collectionScope.collection.listStoredPayloads())
+      .toMatchInlineSnapshot(`
+        ['1']
+      `);
+
+    opfsPersistentStorage.resetForTests?.();
+    const readerEnv = createEnv({ storeName, sessionKey });
+
+    await expect(
+      resolveAfterAllTimers(readerEnv.apiStore.preloadItemFromStorage('1')),
+    ).resolves.toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '✅' }
     `);
   });
 

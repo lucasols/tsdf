@@ -27,6 +27,7 @@ import {
   warnIfNavigatorLockUnavailable,
 } from './navigatorLocks';
 import { OpfsAsyncStorageDriver } from './opfsAsyncStorageAdapter';
+import { serializeJsonForStorage } from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type { AsyncStorageAdapter } from './types';
 
@@ -206,7 +207,7 @@ type LocalPersistentStorage = {
   kind: 'local-sync';
   runLocked<T>(callback: () => T | Promise<T>): Promise<T>;
   readRaw(key: string): string | null;
-  write<T>(key: string, value: T): void;
+  write<T>(key: string, value: T): { rawValue: string; sizeBytes: number };
   remove(key: string, options?: LocalStorageMetadataOptions): void;
   removeByPrefix(prefix: string): void;
   listKeys(prefix: string): string[];
@@ -258,8 +259,10 @@ export const localPersistentStorage: LocalPersistentStorage = {
   /**
    * Stores a value in `localStorage` using `JSON.stringify` for persistence.
    */
-  write<T>(key: string, value: T): void {
-    getManagedLocalStorageIoWithWarning().setItem(key, JSON.stringify(value));
+  write<T>(key: string, value: T): { rawValue: string; sizeBytes: number } {
+    const serialized = serializeJsonForStorage(value);
+    getManagedLocalStorageIoWithWarning().setItem(key, serialized.rawValue);
+    return serialized;
   },
 
   /**

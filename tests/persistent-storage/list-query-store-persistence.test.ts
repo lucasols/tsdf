@@ -30,6 +30,11 @@ import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { getParsedLocalStorageValue } from '../utils/persistentStorageOptimizationTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
+import {
+  getLocalListItemEntrySizeBytes,
+  getLocalListQueryEntrySizeBytes,
+  sumPersistedEntryBytes,
+} from './persistentStorageByteBudgetTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -55,6 +60,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
+const fullLoadedFields = ['age', 'email', 'id', 'name'];
 const persistentStore = createLocalStoragePersistentTestStore();
 
 function rawItemPayload(tableId: string, id: number): string {
@@ -170,8 +176,8 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
-  maxItems?: number;
-  maxQueries?: number;
+  maxItemBytes?: number;
+  maxQueryBytes?: number;
   maxQuerySize?: number;
   pinnedItems?: string[];
   pinnedQueries?: ListQueryParams[];
@@ -207,8 +213,8 @@ function createEnv(options: {
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
       version: options.version,
-      maxItems: options.maxItems,
-      maxQueries: options.maxQueries,
+      maxItemBytes: options.maxItemBytes,
+      maxQueryBytes: options.maxQueryBytes,
       maxQuerySize: options.maxQuerySize,
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,
@@ -1376,7 +1382,7 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
-  test('when maxQueries is exceeded, the least recently read query is evicted first', async () => {
+  test('when maxQueryBytes is exceeded, the least recently read query is evicted first', async () => {
     const firstQuery = { tableId: 'first' };
     const secondQuery = { tableId: 'second' };
     const thirdQuery = { tableId: 'third' };
@@ -1390,7 +1396,10 @@ describe('localStorage: list query store persistence', () => {
     const env = createEnv({
       storeName,
       sessionKey,
-      maxQueries: 2,
+      maxQueryBytes: sumPersistedEntryBytes(
+        getLocalListQueryEntrySizeBytes(firstQuery, []),
+        getLocalListQueryEntrySizeBytes(thirdQuery, [storeItemKey('third', 1)]),
+      ),
       serverData: { third: [{ id: 1, name: 'Third' }] },
     });
 
@@ -1425,21 +1434,49 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['{tableId:"first"}', '{tableId:"third"}']`);
   });
 
-  test('when maxItems is exceeded, the least recently read item is evicted first', async () => {
+  test('when maxItemBytes is exceeded, the least recently read item is evicted first', async () => {
     const storeName = 'lq-item-lru';
     const sessionKey = 'sess1';
+    const oldestPayload = rawItemPayload('users', 1);
+    const freshPayload = rawItemPayload('users', 3);
+    const oldestItem = { id: 1, name: 'Oldest cached' };
+    const freshItem = { id: 3, name: 'Fresh' };
 
-    setCachedItem(storeName, sessionKey, 'users', 1, {
-      id: 1,
-      name: 'Oldest cached',
-    });
+    setCachedItem(storeName, sessionKey, 'users', 1, oldestItem);
     await advanceTime(100);
     setCachedItem(storeName, sessionKey, 'users', 2, {
       id: 2,
       name: 'Newer cached',
     });
 
-    const env = createEnv({ storeName, sessionKey, maxItems: 2 });
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      maxItemBytes: Math.max(
+        sumPersistedEntryBytes(
+          getLocalListItemEntrySizeBytes(oldestPayload, oldestItem),
+          getLocalListItemEntrySizeBytes(rawItemPayload('users', 2), {
+            id: 2,
+            name: 'Newer cached',
+          }),
+        ),
+        sumPersistedEntryBytes(
+          getLocalListItemEntrySizeBytes(oldestPayload, oldestItem),
+          getLocalListItemEntrySizeBytes(freshPayload, freshItem, {
+            loadedFields: fullLoadedFields,
+          }),
+        ),
+        sumPersistedEntryBytes(
+          getLocalListItemEntrySizeBytes(rawItemPayload('users', 2), {
+            id: 2,
+            name: 'Newer cached',
+          }),
+          getLocalListItemEntrySizeBytes(freshPayload, freshItem, {
+            loadedFields: fullLoadedFields,
+          }),
+        ),
+      ),
+    });
 
     const renders = createLoggerStore();
 
@@ -1462,7 +1499,7 @@ describe('localStorage: list query store persistence', () => {
 
     await advanceTime(2100);
 
-    env.apiStore.addItemToState('users||3', { id: 3, name: 'Fresh' });
+    env.apiStore.addItemToState(freshPayload, freshItem);
 
     await advanceTime(1100);
     await flushAllTimers();
@@ -1472,32 +1509,37 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
   });
 
-  test('cold persisted query items are trimmed by recency during unrelated maxItems cleanup', async () => {
+  test('cold persisted query items are trimmed by recency during unrelated maxItemBytes cleanup', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-cold-query-items';
     const sessionKey = 'sess1';
+    const newerPayload = rawItemPayload('users', 2);
+    const standalonePayload = rawItemPayload('users', 3);
+    const newerItem = { id: 2, name: 'Newer cached' };
+    const standaloneItem = { id: 3, name: 'Fresh standalone' };
 
     setCachedItem(storeName, sessionKey, 'users', 1, {
       id: 1,
       name: 'Older cached',
     });
     await advanceTime(100);
-    setCachedItem(storeName, sessionKey, 'users', 2, {
-      id: 2,
-      name: 'Newer cached',
-    });
+    setCachedItem(storeName, sessionKey, 'users', 2, newerItem);
     setCachedQuery(storeName, sessionKey, usersQuery, [
       storeItemKey('users', 1),
       storeItemKey('users', 2),
     ]);
 
-    const env = createEnv({ storeName, sessionKey, maxItems: 2 });
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      maxItemBytes: sumPersistedEntryBytes(
+        getLocalListItemEntrySizeBytes(newerPayload, newerItem),
+        getLocalListItemEntrySizeBytes(standalonePayload, standaloneItem),
+      ),
+    });
 
     // Write an unrelated standalone item without ever hydrating the cached query.
-    env.apiStore.addItemToState(rawItemPayload('users', 3), {
-      id: 3,
-      name: 'Fresh standalone',
-    });
+    env.apiStore.addItemToState(standalonePayload, standaloneItem);
 
     await advanceTime(1100);
     await flushAllTimers();
@@ -1528,8 +1570,13 @@ describe('localStorage: list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-evict',
       sessionKey: 'sess1',
-      maxItems: 1,
-      maxQueries: 1,
+      maxItemBytes: getLocalListItemEntrySizeBytes(
+        rawItemPayload('second', 1),
+        { id: 1, name: 'Second' },
+      ),
+      maxQueryBytes: getLocalListQueryEntrySizeBytes(pinnedQueryPayload, [
+        storeItemKey('second', 1),
+      ]),
       pinnedItems: [pinnedItemPayload],
       pinnedQueries: [pinnedQueryPayload],
       serverData: {
@@ -1559,8 +1606,13 @@ describe('localStorage: list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-pinned-item-only',
       sessionKey: 'sess1',
-      maxItems: 1,
-      maxQueries: 1,
+      maxItemBytes: getLocalListItemEntrySizeBytes(
+        rawItemPayload('second', 1),
+        { id: 1, name: 'Second' },
+      ),
+      maxQueryBytes: getLocalListQueryEntrySizeBytes({ tableId: 'first' }, [
+        storeItemKey('first', 1),
+      ]),
       pinnedItems: [rawItemPayload('second', 1)],
       serverData: {
         first: [{ id: 1, name: 'First' }],
@@ -1568,7 +1620,7 @@ describe('localStorage: list query store persistence', () => {
       },
     });
 
-    // Load the pinned item first, then make a different query the one that survives maxQueries.
+    // Load the pinned item first, then make a different query the one that survives maxQueryBytes cleanup.
     env.scheduleFetch('highPriority', { tableId: 'second' });
     await flushAllTimers();
     env.scheduleFetch('highPriority', { tableId: 'first' });
@@ -1584,7 +1636,7 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['"second||1']`);
   });
 
-  test('default persistence limits keep up to 500 items and 100 queries', async () => {
+  test('default persistence byte budgets keep the canonical 500 items and 100 queries', async () => {
     const storeName = 'lq-default-limits';
     const sessionKey = 'sess1';
     const serverData = Object.fromEntries(

@@ -1,5 +1,7 @@
 import type { ValidPayload } from '../utils/storeShared';
 
+const utf8Encoder = new TextEncoder();
+
 export function createShouldIgnoreItemPredicate<
   ItemPayload extends ValidPayload,
 >(
@@ -31,4 +33,74 @@ export function createEvictionComparator<T>(
     }
     return getLastAccessAt(b) - getLastAccessAt(a);
   };
+}
+
+export function getUtf8ByteSize(value: string): number {
+  return utf8Encoder.encode(value).byteLength;
+}
+
+export function serializeJsonForStorage(value: unknown): {
+  rawValue: string;
+  sizeBytes: number;
+} {
+  const rawValue = JSON.stringify(value);
+  return { rawValue, sizeBytes: getUtf8ByteSize(rawValue) };
+}
+
+export function keepEntriesWithinByteBudget<T>(args: {
+  entries: T[];
+  getKey: (entry: T) => string;
+  getLastAccessAt: (entry: T) => number;
+  getSizeBytes: (entry: T) => number;
+  isPinned: (entry: T) => boolean;
+  isProtected: (entry: T) => boolean;
+  maxBytes: number;
+}): Set<string> {
+  const keptKeys = new Set<string>();
+  let unprotectedBytes = 0;
+
+  for (const entry of args.entries) {
+    if (args.isProtected(entry)) continue;
+    unprotectedBytes += args.getSizeBytes(entry);
+  }
+
+  if (unprotectedBytes <= args.maxBytes) {
+    for (const entry of args.entries) {
+      keptKeys.add(args.getKey(entry));
+    }
+    return keptKeys;
+  }
+
+  const sortedEntries = [...args.entries].sort(
+    createEvictionComparator(
+      [args.isProtected, args.isPinned],
+      args.getLastAccessAt,
+    ),
+  );
+  let keptUnprotectedBytes = 0;
+  let keptUnprotectedEntry = false;
+
+  for (const entry of sortedEntries) {
+    const key = args.getKey(entry);
+    if (args.isProtected(entry)) {
+      keptKeys.add(key);
+      continue;
+    }
+
+    const sizeBytes = args.getSizeBytes(entry);
+    if (keptUnprotectedBytes + sizeBytes <= args.maxBytes) {
+      keptKeys.add(key);
+      keptUnprotectedBytes += sizeBytes;
+      keptUnprotectedEntry = true;
+      continue;
+    }
+
+    if (!keptUnprotectedEntry && args.maxBytes > 0) {
+      keptKeys.add(key);
+      keptUnprotectedBytes += sizeBytes;
+      keptUnprotectedEntry = true;
+    }
+  }
+
+  return keptKeys;
 }

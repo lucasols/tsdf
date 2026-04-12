@@ -518,16 +518,16 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
       payload:
         fields: ['age']
         itemId: 'users||1'
-      time: '2.83s -> 3.63s | duration: 800ms'
+      time: '6.83s -> 7.63s | duration: 800ms'
   `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | item-data                      | item-status |
-    1.81s | {"age":30,"id":1,"name":"Ada"} | success     | -- timeline-cleared
-    2.83s | {"age":30,"id":1,"name":"Ada"} | success     | -- invalidate only \`age\` while offline; the hook should stay on cached data
+    3.81s | {"age":30,"id":1,"name":"Ada"} | success     | -- timeline-cleared
+    6.83s | {"age":30,"id":1,"name":"Ada"} | success     | -- invalidate only \`age\` while offline; the hook should stay on cached data
     .     | {"age":30,"id":1,"name":"Ada"} | success     | -- remount after reconnecting; the wildcard hook should refetch the pending \`age\` field
     .     | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] >fetch-started
-    3.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"age":31})
+    7.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"age":31})
     .     | {"age":31,"id":1,"name":"Ada"} | success     | [item-data] ui-changed
     "
   `);

@@ -21,6 +21,10 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
+import {
+  getLocalCollectionEntrySizeBytes,
+  sumPersistedEntryBytes,
+} from './persistentStorageByteBudgetTestUtils';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -114,7 +118,7 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
-  maxItems?: number;
+  maxBytes?: number;
   pinnedItems?: string[];
   ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Record<string, ItemState>;
@@ -128,7 +132,7 @@ function createEnv(options: {
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       version: options.version,
-      maxItems: options.maxItems,
+      maxBytes: options.maxBytes,
       pinnedItems: options.pinnedItems,
       ignoreItems: options.ignoreItems,
       onPersistentStorageError: options.onPersistentStorageError,
@@ -456,11 +460,12 @@ describe('localStorage: collection store persistence', () => {
     ).toMatchInlineSnapshot(`['"keep:cached', '"keep:live']`);
   });
 
-  test('when maxItems is exceeded, pinnedItems keeps that payload in storage', async () => {
+  test('when maxBytes is exceeded, pinnedItems keeps that payload in storage', async () => {
+    const pinnedItem = { value: { id: 'a', name: 'Pinned and old' } };
+    const freshItem = { value: { id: 'd', name: 'Fresh' } };
+
     // Seed distinct timestamps so the kept payloads are easy to understand.
-    setCachedCollectionItem('col-max-items', 'sess1', 'a', {
-      value: { id: 'a', name: 'Pinned and old' },
-    });
+    setCachedCollectionItem('col-max-items', 'sess1', 'a', pinnedItem);
     await advanceTime(100);
     setCachedCollectionItem('col-max-items', 'sess1', 'b', {
       value: { id: 'b', name: 'Older' },
@@ -473,11 +478,14 @@ describe('localStorage: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-max-items',
       sessionKey: 'sess1',
-      maxItems: 2,
+      maxBytes: sumPersistedEntryBytes(
+        getLocalCollectionEntrySizeBytes('a', pinnedItem),
+        getLocalCollectionEntrySizeBytes('d', freshItem),
+      ),
       pinnedItems: ['a'],
     });
 
-    env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
+    env.apiStore.addItemToState('d', freshItem);
 
     await advanceTime(1100);
     await flushAllTimers();
@@ -490,10 +498,11 @@ describe('localStorage: collection store persistence', () => {
     ).toMatchInlineSnapshot(`['"a', '"d']`);
   });
 
-  test('when maxItems is exceeded, a cached item read by a hook is kept over an unread older entry', async () => {
-    setCachedCollectionItem('col-max-items-read', 'sess1', 'a', {
-      value: { id: 'a', name: 'Oldest cached' },
-    });
+  test('when maxBytes is exceeded, a cached item read by a hook is kept over an unread older entry', async () => {
+    const oldestItem = { value: { id: 'a', name: 'Oldest cached' } };
+    const freshItem = { value: { id: 'c', name: 'Fresh' } };
+
+    setCachedCollectionItem('col-max-items-read', 'sess1', 'a', oldestItem);
     await advanceTime(100);
     setCachedCollectionItem('col-max-items-read', 'sess1', 'b', {
       value: { id: 'b', name: 'Newer cached' },
@@ -502,12 +511,15 @@ describe('localStorage: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-max-items-read',
       sessionKey: 'sess1',
-      maxItems: 2,
+      maxBytes: sumPersistedEntryBytes(
+        getLocalCollectionEntrySizeBytes('a', oldestItem),
+        getLocalCollectionEntrySizeBytes('c', freshItem),
+      ),
     });
 
     const renders = createLoggerStore();
 
-    // Mounting the hook for "a" refreshes its cached timestamp before maxItems cleanup runs.
+    // Mounting the hook for "a" refreshes its cached timestamp before maxBytes cleanup runs.
     renderHook(() => {
       const { data, status } = env.apiStore.useItem('a', {
         disableRefetchOnMount: true,

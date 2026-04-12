@@ -365,16 +365,16 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
     await flushAllTimers();
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (1.45 kb)
-      ├ _m (0.64 kb)
+      "tsdf (1.51 kb)
+      ├ _m (0.69 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.59 kb)
-      │   ├ n:offline-sync-format-session.offline-sync-format-doc (0.34 kb)
-      │   │ ├ oe.m (0.08 kb)
-      │   │ └ oq.m (0.15 kb)
-      │   └ s:offline-sync-format-session (0.25 kb)
-      │     ├ _o_.s.m (0.07 kb)
-      │     └ offline-sync-format-doc.m (0.13 kb)
+      │ └ r (0.65 kb)
+      │   ├ n:offline-sync-format-session.offline-sync-format-doc (0.37 kb)
+      │   │ ├ oe.m (0.09 kb)
+      │   │ └ oq.m (0.17 kb)
+      │   └ s:offline-sync-format-session (0.28 kb)
+      │     ├ _o_.s.m (0.08 kb)
+      │     └ offline-sync-format-doc.m (0.14 kb)
       └ offline-sync-format-session (0.81 kb)
         ├ _o_.s (0.09 kb)
         └ offline-sync-format-doc (0.66 kb)
@@ -388,7 +388,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        d: { a: 1735689600000 }
+        d: { a: 1735689600000, z: 43 }
     `);
     expect(
       getParsedLocalStorageValue(
@@ -396,7 +396,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        d: { a: 1735689601000, o: '✅' }
+        d: { a: 1735689601000, o: '✅', z: 17 }
     `);
     expect(
       getParsedLocalStorageValue(
@@ -404,7 +404,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        document: { a: 1735689600000 }
+        document: { a: 1735689600000, z: 82 }
     `);
     expect(
       getParsedLocalStorageValue(
@@ -412,7 +412,7 @@ test('local-sync offline persistence keeps the raw localStorage keys and JSON pa
       ),
     ).toMatchInlineSnapshot(`
       e:
-        offline-sync-format-doc:1735689600000:4fzzzxjy: { a: 1735689600000 }
+        offline-sync-format-doc:1735689600000:4fzzzxjy: { a: 1735689600000, z: 159 }
     `);
     expect(getParsedLocalStorageValue('tsdf.offline-sync-format-session._o_.s'))
       .toMatchInlineSnapshot(`
@@ -682,7 +682,7 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
     time  |
     10ms  | 🔴 >list-fetch-started
     810ms | 🔴 <list-fetch-finished (value: {"count":2})
-    2.91s | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
+    4.91s | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
     .     | offline:createUser queued
     "
   `);
@@ -1054,21 +1054,21 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
     await flushAllTimers();
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (1.21 kb)
-      ├ offline-opfs-format-session (1.14 kb)
-      │ └ offline-opfs-format-doc (1.09 kb)
-      │   ├ d._i.r.json (0.10 kb)
+      "tsdf (1.26 kb)
+      ├ offline-opfs-format-session (1.19 kb)
+      │ └ offline-opfs-format-doc (1.13 kb)
+      │   ├ d._i.r.json (0.11 kb)
       │   ├ d.e.p.json (0.05 kb)
-      │   ├ oe._i.r.json (0.10 kb)
+      │   ├ oe._i.r.json (0.11 kb)
       │   ├ oe.document.p.json (0.20 kb)
-      │   ├ oq._i.r.json (0.17 kb)
+      │   ├ oq._i.r.json (0.19 kb)
       │   └ oq.offline-opfs-format-doc%3A1735689600003%3A4fzzzxjy.p.json (0.43 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.33 kb)
+      "tsdf (0.35 kb)
       ├ _am.g (0.05 kb)
-      ├ _m.r.s:offline-opfs-format-session._o_.s.m (0.13 kb)
+      ├ _m.r.s:offline-opfs-format-session._o_.s.m (0.15 kb)
       └ offline-opfs-format-session._o_.s (0.14 kb)"
     `);
 
@@ -1084,7 +1084,7 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689601041, o: '✅' }
+        - { a: 1735689601041, o: '✅', z: 45 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -1099,7 +1099,7 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       ),
     ).toMatchInlineSnapshot(`
       e:
-        document: { a: 1735689600098 }
+        document: { a: 1735689600098, z: 101 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -1120,7 +1120,7 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       ),
     ).toMatchInlineSnapshot(`
       e:
-        offline-opfs-format-doc:1735689600003:4fzzzxjy: { a: 1735689600044 }
+        offline-opfs-format-doc:1735689600003:4fzzzxjy: { a: 1735689600044, z: 178 }
     `);
     expect(
       getParsedOpfsFileData(

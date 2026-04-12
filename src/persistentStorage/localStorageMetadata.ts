@@ -299,22 +299,31 @@ function readStoredManifestEntryMeta(entry: Record<string, unknown>): unknown {
     return entry.m;
   }
 
-  const { a: _lastAccessAt, ...meta } = entry;
+  const { a: _lastAccessAt, z: _sizeBytes, ...meta } = entry;
   return Object.keys(meta).length === 0 ? undefined : meta;
 }
 
 type StoredManagedLocalStorageManifestEntry = {
   entryKey: string | undefined;
   lastAccessAt: number;
+  sizeBytes?: number;
   meta?: unknown;
 };
 
 function serializeStoredManifestEntry(
   entry: StoredManagedLocalStorageManifestEntry,
 ): Record<string, unknown> {
-  const serializedEntry: Record<string, unknown> = { a: entry.lastAccessAt };
+  const serializedEntry: Record<string, unknown> = {
+    a: entry.lastAccessAt,
+    ...(entry.sizeBytes !== undefined ? { z: entry.sizeBytes } : {}),
+  };
 
-  if (isObject(entry.meta) && !('a' in entry.meta) && !('m' in entry.meta)) {
+  if (
+    isObject(entry.meta) &&
+    !('a' in entry.meta) &&
+    !('m' in entry.meta) &&
+    !('z' in entry.meta)
+  ) {
     return { ...serializedEntry, ...entry.meta };
   }
 
@@ -352,7 +361,13 @@ function readParsedManifest(
   >();
 
   for (const [storedEntryKey, rawEntry] of Object.entries(rawEntries)) {
-    if (!isObject(rawEntry) || typeof rawEntry.a !== 'number') {
+    if (
+      !isObject(rawEntry) ||
+      typeof rawEntry.a !== 'number' ||
+      ('z' in rawEntry &&
+        rawEntry.z !== undefined &&
+        typeof rawEntry.z !== 'number')
+    ) {
       return null;
     }
 
@@ -367,6 +382,7 @@ function readParsedManifest(
     entries.set(entryKey, {
       entryKey,
       lastAccessAt: rawEntry.a,
+      ...(typeof rawEntry.z === 'number' ? { sizeBytes: rawEntry.z } : {}),
       meta: readStoredManifestEntryMeta(rawEntry),
     });
   }
@@ -436,6 +452,7 @@ export type ManagedLocalStorageManifestEntry<TMeta = unknown> = {
   entryKey: string | undefined;
   payloadKey: string;
   lastAccessAt: number;
+  sizeBytes?: number;
   meta?: TMeta;
 };
 
@@ -734,6 +751,7 @@ function removeManifestEntry(
 type UpsertSingleEntryParams = {
   storageKey: string;
   lastAccessAt?: number;
+  sizeBytes?: number;
   meta?: unknown;
 };
 
@@ -750,6 +768,7 @@ export function upsertManagedLocalStorageSingleEntry(
     {
       entryKey: undefined,
       lastAccessAt: params.lastAccessAt ?? Date.now(),
+      sizeBytes: params.sizeBytes,
       meta: params.meta,
     },
     io,
@@ -762,6 +781,7 @@ type UpsertNamespaceEntryParams = {
   storagePrefix: string;
   entryKey: string;
   lastAccessAt?: number;
+  sizeBytes?: number;
   meta?: unknown;
 };
 
@@ -778,6 +798,7 @@ export function upsertManagedLocalStorageNamespaceEntry(
     {
       entryKey: params.entryKey,
       lastAccessAt: params.lastAccessAt ?? Date.now(),
+      sizeBytes: params.sizeBytes,
       meta: params.meta,
     },
     io,
@@ -803,6 +824,7 @@ export function touchManagedLocalStorageNamespacePayload(
     {
       entryKey: current.entry.entryKey,
       lastAccessAt: Date.now(),
+      sizeBytes: current.entry.sizeBytes,
       meta: current.entry.meta,
     },
     io,
@@ -823,6 +845,7 @@ export function touchManagedLocalStorageSinglePayload(
     {
       entryKey: current.entry.entryKey,
       lastAccessAt: Date.now(),
+      sizeBytes: current.entry.sizeBytes,
       meta: current.entry.meta,
     },
     io,

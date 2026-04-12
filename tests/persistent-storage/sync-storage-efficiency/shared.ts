@@ -26,6 +26,47 @@ import {
 } from '../../utils/genericTestUtils';
 import { startPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 import { createLocalStoragePersistentTestStore } from '../../utils/persistentStorageTestStore';
+import * as byteBudgetTestUtils from '../persistentStorageByteBudgetTestUtils';
+
+export function sumPersistedEntryBytes(...sizes: number[]): number {
+  return byteBudgetTestUtils.sumPersistedEntryBytes(...sizes);
+}
+
+export function getLocalCollectionEntrySizeBytes<T>(
+  payload: string,
+  data: T,
+  version?: number,
+): number {
+  return byteBudgetTestUtils.getLocalCollectionEntrySizeBytes(
+    payload,
+    data,
+    version,
+  );
+}
+
+export function getLocalListItemEntrySizeBytes<T>(
+  payload: string,
+  data: T,
+  options: { loadedFields?: string[]; version?: number } = {},
+): number {
+  return byteBudgetTestUtils.getLocalListItemEntrySizeBytes(
+    payload,
+    data,
+    options,
+  );
+}
+
+export function getLocalListQueryEntrySizeBytes(
+  payload: unknown,
+  items: string[],
+  options: { hasMore?: boolean; lastAccessAt?: number; version?: number } = {},
+): number {
+  return byteBudgetTestUtils.getLocalListQueryEntrySizeBytes(
+    payload,
+    items,
+    options,
+  );
+}
 
 export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -185,7 +226,7 @@ export function listStoredCollectionItemPayloads(
 export function createCollectionEnv(options: {
   storeName: string;
   sessionKey?: string;
-  maxItems?: number;
+  maxBytes?: number;
   serverData?: Record<string, CollectionItemState>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
@@ -195,7 +236,7 @@ export function createCollectionEnv(options: {
       adapter: 'local-sync',
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
-      maxItems: options.maxItems,
+      maxBytes: options.maxBytes,
     },
   });
 }
@@ -241,8 +282,8 @@ export function listStoredKeys(prefix: string): string[] {
 export function createListQueryEnv(options: {
   storeName: string;
   sessionKey?: string;
-  maxItems?: number;
-  maxQueries?: number;
+  maxItemBytes?: number;
+  maxQueryBytes?: number;
   maxQuerySize?: number;
   serverData?: Tables<Row>;
   offsetPagination?: OffsetPaginationConfig;
@@ -258,8 +299,8 @@ export function createListQueryEnv(options: {
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
-      maxItems: options.maxItems,
-      maxQueries: options.maxQueries,
+      maxItemBytes: options.maxItemBytes,
+      maxQueryBytes: options.maxQueryBytes,
       maxQuerySize: options.maxQuerySize,
     },
   });

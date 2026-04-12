@@ -840,6 +840,7 @@ test('global offline hooks can mount before a localStorage-backed store', async 
     lastAccessAt: 1735689601000
     meta: { o: '✅' }
     payloadKey: 'tsdf.offline-global-hook-session.offline-global-hook-doc'
+    sizeBytes: 17
   `);
 
   globalHook.unmount();

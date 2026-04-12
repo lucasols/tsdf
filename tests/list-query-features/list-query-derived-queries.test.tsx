@@ -1182,8 +1182,8 @@ test('offline derived query hydration only loads the requested group from persis
   // Snapshot the persisted local-sync state so the restart coverage also
   // protects the stored query membership and item index shape.
   expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-    "tsdf (2.08 kb)
-    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.76 kb)
+    "tsdf (2.16 kb)
+    ├ _m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m (0.85 kb)
     └ derived-queries-persisted-groups.derived-queries-persisted-groups-store (1.31 kb)
       ├ li (0.73 kb)
       │ ├ "products||1 (0.12 kb)
@@ -1270,15 +1270,15 @@ test('offline derived query hydration only loads the requested group from persis
     0    | 📖 #1 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.lq.{tableId:"users"}
          |    └ (query data, <{tableId:"users"}>) | 0.17 kb
     .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.61 kb
+         |    └ (items index) | 0.69 kb
     .    | 📖 #3 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||1
          |    └ (item data, <"users||1>) | 0.10 kb
     .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.61 kb ⚠️ REPEATED READ <10ms UNCHANGED
+         |    └ (items index) | 0.69 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #4 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||2
          |    └ (item data, <"users||2>) | 0.10 kb
     .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.61 kb ⚠️ REPEATED READ <10ms UNCHANGED
+         |    └ (items index) | 0.69 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #5 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||3
          |    └ (item data, <"users||3>) | 0.10 kb
     "
@@ -1365,17 +1365,17 @@ test('offline derived query hydration with opfs preloads only the requested grou
   // Snapshot the persisted OPFS layout so the test also protects which groups
   // and exact queries were written before the offline restart.
   expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-    "tsdf (2.43 kb)
-    ├ derived-queries-opfs-groups (2.36 kb)
-    │ └ derived-queries-opfs-groups-store (2.30 kb)
-    │   ├ li._i.r.json (0.79 kb)
+    "tsdf (2.54 kb)
+    ├ derived-queries-opfs-groups (2.47 kb)
+    │ └ derived-queries-opfs-groups-store (2.42 kb)
+    │   ├ li._i.r.json (0.88 kb)
     │   ├ li.h~1937155452.p.json (0.15 kb)
     │   ├ li.h~228010772.p.json (0.14 kb)
     │   ├ li.h~3098628732.p.json (0.14 kb)
     │   ├ li.h~3224064498.p.json (0.14 kb)
     │   ├ li.h~4067562186.p.json (0.14 kb)
     │   ├ li.h~993806230.p.json (0.14 kb)
-    │   ├ lq._i.r.json (0.31 kb)
+    │   ├ lq._i.r.json (0.34 kb)
     │   ├ lq.h~2167180490.p.json (0.15 kb)
     │   └ lq.h~2902406637.p.json (0.13 kb)
     └ tsdf._am.g* (0.06 kb)"
@@ -1455,13 +1455,13 @@ test('offline derived query hydration with opfs preloads only the requested grou
     "
     time |
     0    | 📖 #1 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq._i.r.json
-         |    └ (queries index) | 0.28 kb
+         |    └ (queries index) | 0.31 kb
     .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
-         |    └ (items index) | 0.77 kb
+         |    └ (items index) | 0.86 kb
     3ms  | 📖 #3 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq.h~2902406637.p.json
          |    └ (query data, <{tableId:"users"}>) | 0.09 kb
     .    | 📖 #2 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
-         |    └ (items index) | 0.77 kb ⚠️ REPEATED READ <10ms UNCHANGED
+         |    └ (items index) | 0.86 kb ⚠️ REPEATED READ <10ms UNCHANGED
     6ms  | 📖 #4 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~228010772.p.json
          |    └ (item data, <"users||1>) | 0.10 kb
     .    | 📖 #5 tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li.h~1937155452.p.json

@@ -44,6 +44,12 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
 }
 
+const utf8Encoder = new TextEncoder();
+
+function getUtf8ByteSize(value: string): number {
+  return utf8Encoder.encode(value).byteLength;
+}
+
 function createStorageCacheEntry<T>(
   data: T,
   options: { timestamp?: number; version?: number } = {},
@@ -213,6 +219,7 @@ type ManagedMetadataRecord = {
   customMetadata: Record<string, unknown>;
   key: string;
   lastAccessAt: number;
+  sizeBytes?: number;
   version: number;
   writtenAt: number;
 };
@@ -228,9 +235,32 @@ function serializeManagedMetadataRecord(
 
   return {
     a: metadata.lastAccessAt,
+    ...(metadata.sizeBytes !== undefined ? { z: metadata.sizeBytes } : {}),
     ...(metadata.version !== 1 ? { v: metadata.version } : {}),
     ...metadata.customMetadata,
   };
+}
+
+function estimateManagedEntrySizeBytes(args: {
+  customMetadata: Record<string, unknown>;
+  lastAccessAt: number;
+  rawValue: string;
+  version: number;
+}): number {
+  return (
+    getUtf8ByteSize(args.rawValue) +
+    getUtf8ByteSize(
+      JSON.stringify(
+        serializeManagedMetadataRecord({
+          key: '__size__',
+          writtenAt: args.lastAccessAt,
+          lastAccessAt: args.lastAccessAt,
+          version: args.version,
+          customMetadata: args.customMetadata,
+        }),
+      ),
+    )
+  );
 }
 
 function parseManagedMetadataRecord(
@@ -241,7 +271,8 @@ function parseManagedMetadataRecord(
   if (
     record === null ||
     typeof record.a !== 'number' ||
-    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number') ||
+    ('z' in record && record.z !== undefined && typeof record.z !== 'number')
   ) {
     return null;
   }
@@ -256,6 +287,7 @@ function parseManagedMetadataRecord(
     key,
     writtenAt: record.a,
     lastAccessAt: record.a,
+    ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
     version: typeof record.v === 'number' ? record.v : 1,
     customMetadata,
   };
@@ -320,6 +352,9 @@ function normalizeMetadataValue(key: string, value: unknown): unknown {
       key,
       writtenAt: record.lastAccessAt,
       lastAccessAt: record.lastAccessAt,
+      ...(typeof record.sizeBytes === 'number'
+        ? { sizeBytes: record.sizeBytes }
+        : {}),
       version: record.version,
       customMetadata: getRecord(record.customMetadata) ?? {},
     });
@@ -531,17 +566,25 @@ function writeLogicalStorageEntry(
   if (parsed === null) return;
 
   const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(value);
+  const rawValue = JSON.stringify(entry.data);
   writeRawRecord(
     mockBrowserOpfs,
     parsed.scope,
     getPayloadRecordKey(parsed.key),
-    JSON.stringify(entry.data),
+    rawValue,
   );
+  const sizeBytes = estimateManagedEntrySizeBytes({
+    rawValue,
+    lastAccessAt: entry.timestamp,
+    version: entry.version ?? 1,
+    customMetadata: buildCustomMetadata(parsed.scope, entry.data),
+  });
   const nextEntries = readNamespaceIndex(mockBrowserOpfs, parsed.scope);
   nextEntries.set(parsed.key, {
     key: parsed.key,
     writtenAt: entry.timestamp,
     lastAccessAt: entry.timestamp,
+    sizeBytes,
     version: entry.version ?? 1,
     customMetadata: buildCustomMetadata(parsed.scope, entry.data),
   });
@@ -1431,9 +1474,16 @@ export function createOpfsPersistentStorageTestStore(
             },
           );
           setValue(storageKey, entry);
+          const existingMetadata = readLogicalMetadata(
+            mockBrowserOpfs,
+            storageKey,
+          );
           setMetadataValue(mockBrowserOpfs, storageKey, {
             lastAccessAt: entry.timestamp,
             version: entry.version,
+            ...(existingMetadata?.sizeBytes !== undefined
+              ? { sizeBytes: existingMetadata.sizeBytes }
+              : {}),
             customMetadata: { p: params },
           });
           return storageKey;

@@ -850,12 +850,12 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     time  | temp:Ada             |
     0     | -                    | offline:createUser queued
     .     | pending:Ada          | [temp:Ada] ui-initialized
-    1.01s | pending:Ada          | -- replay the queued temp create and persist the conflict
+    3.01s | pending:Ada          | -- replay the queued temp create and persist the conflict
     .     | pending:Ada          | offline:createUser resolution-required
     .     | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
     .     | pending:Ada resolved | [temp:Ada] ui-changed
     .     | pending:Ada resolved | offline:createUser replay-started
-    2.21s | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
+    4.21s | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
     .     | pending:Ada resolved | [users||ada-resolved] server-data-changed (value: {"name":"Ada resolved"})
     .     | pending:Ada resolved | offline:createUser replay-finished
     .     | ···                  | [temp:Ada] ui-changed
@@ -975,7 +975,7 @@ test('committing a temp-entity conflict with an external result reconciles the o
     "
     time  |
     0     | offline:createUser queued
-    1.01s | offline:createUser resolution-required
+    3.01s | offline:createUser resolution-required
     .     | -- commit the conflict using an externally accepted server result
     "
   `);

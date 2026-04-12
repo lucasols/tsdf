@@ -242,16 +242,16 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this cold-boot hydration test also
     // protects the persisted document shape it depends on.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.31 kb)
-      └ offline-fetching-document-async-storage-only (0.31 kb)
-        └ offline-fetching-document-async-storage-only (0.22 kb)
-          ├ d._i.r.json (0.08 kb)
+      "tsdf (0.33 kb)
+      └ offline-fetching-document-async-storage-only (0.32 kb)
+        └ offline-fetching-document-async-storage-only (0.23 kb)
+          ├ d._i.r.json (0.10 kb)
           └ d.e.p.json (0.05 kb)"
     `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d._i.r.json`))
       .toMatchInlineSnapshot(`
         e:
-          - a: 1735689600000
+          - { a: 1735689600000, z: 36 }
       `);
     expect(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/d.e.p.json`))
       .toMatchInlineSnapshot(`
@@ -487,17 +487,17 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this offline hydration flow also
     // protects the exact stored collection payload it consumes.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.48 kb)
-      └ offline-fetching-collection-async-storage-only (0.48 kb)
-        └ offline-fetching-collection-async-storage-only (0.39 kb)
-          ├ ci._i.r.json (0.13 kb)
+      "tsdf (0.50 kb)
+      └ offline-fetching-collection-async-storage-only (0.49 kb)
+        └ offline-fetching-collection-async-storage-only (0.40 kb)
+          ├ ci._i.r.json (0.14 kb)
           └ ci.h~228010772.p.json (0.17 kb)"
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/ci._i.r.json`),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689600000, p: 'users||1' }
+        "users||1: { a: 1735689600000, p: 'users||1', z: 98 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -738,19 +738,19 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS contents so the cold list-query hydration test
     // protects both the cached item and the exact persisted query membership.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.73 kb)
-      └ offline-fetching-list-query-async-storage-only (0.72 kb)
-        └ offline-fetching-list-query-async-storage-only (0.63 kb)
-          ├ li._i.r.json (0.13 kb)
+      "tsdf (0.75 kb)
+      └ offline-fetching-list-query-async-storage-only (0.75 kb)
+        └ offline-fetching-list-query-async-storage-only (0.66 kb)
+          ├ li._i.r.json (0.14 kb)
           ├ li.h~228010772.p.json (0.16 kb)
-          ├ lq._i.r.json (0.17 kb)
+          ├ lq._i.r.json (0.18 kb)
           └ lq.h~2902406637.p.json (0.08 kb)"
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/li._i.r.json`),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689600000, p: 'users||1' }
+        "users||1: { a: 1735689600000, p: 'users||1', z: 95 }
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/lq._i.r.json`),
@@ -759,6 +759,7 @@ describe('offline fetching scenarios', () => {
         {tableId:"users"}:
           a: 1735689600000
           p: { tableId: 'users' }
+          z: 39
     `);
     expect(
       getParsedOpfsFileData(

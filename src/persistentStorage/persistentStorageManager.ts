@@ -15,6 +15,7 @@ import {
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type { OfflineNetworkModeConfig } from './offline/types';
 import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
+import { serializeJsonForStorage } from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
@@ -473,10 +474,11 @@ export function createPersistentStorageHandle<T>(
       );
 
       await runLocalStorageMutation(() => {
-        localPersistentStorage.write(key, entry);
+        const { sizeBytes } = localPersistentStorage.write(key, entry);
         localPersistentStorage.upsertSingleEntry({
           storageKey: key,
           lastAccessAt: timestamp,
+          sizeBytes,
           meta: preserveOfflineProtectionFlag(
             sessionKey,
             key,
@@ -549,6 +551,7 @@ export type PersistentStorageNamespaceMetadata<
   customMetadata: TMetadata;
   key: string;
   lastAccessAt: number;
+  sizeBytes?: number;
   writtenAt: number;
   version: number;
 };
@@ -664,10 +667,18 @@ export function createPersistentStorageNamespaceHandle<
           touches: args.touches,
           upserts: args.upserts?.map((upsert) => ({
             key: upsert.key,
-            value: valueCodec
-              ? valueCodec.serialize(upsert.data)
-              : // WORKAROUND: In the no-codec path, persistence stores opaque caller values as unknown and only erases the generic for transport through the adapter.
-                __LEGIT_CAST__<unknown, T>(upsert.data),
+            ...(() => {
+              const value = valueCodec
+                ? valueCodec.serialize(upsert.data)
+                : // WORKAROUND: In the no-codec path, persistence stores opaque caller values as unknown and only erases the generic for transport through the adapter.
+                  __LEGIT_CAST__<unknown, T>(upsert.data);
+              const serialized = serializeJsonForStorage(value);
+              return {
+                serializedValue: serialized.rawValue,
+                sizeBytes: serialized.sizeBytes,
+                value,
+              };
+            })(),
             version: asyncVersion,
             metadata:
               upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
@@ -701,11 +712,12 @@ export function createPersistentStorageNamespaceHandle<
             version,
           );
 
-          localPersistentStorage.write(key, entry);
+          const { sizeBytes } = localPersistentStorage.write(key, entry);
           localPersistentStorage.upsertNamespaceEntry({
             storagePrefix: prefix,
             entryKey: upsert.key,
             lastAccessAt: timestamp,
+            sizeBytes,
             meta: preserveOfflineProtectionFlag(
               sessionKey,
               key,
@@ -941,6 +953,7 @@ export function createPersistentStorageNamespaceHandle<
               __LEGIT_CAST__<TMetadata, Record<string, never>>({}),
           key: entry.entryKey,
           lastAccessAt: entry.lastAccessAt,
+          sizeBytes: entry.sizeBytes,
           writtenAt: entry.lastAccessAt,
           version: asyncVersion,
         }));

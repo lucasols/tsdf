@@ -57,22 +57,22 @@ describe('sync storage efficiency: document', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (namespace index) | 0.06 kb
+           |    └ (namespace index) | 0.07 kb
       .    | 📖 #2 ✅ tsdf.sess1.doc-remount-flow (entry data) | 0.10 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (namespace index) | 0.06 kb
+           |    └ (namespace index) | 0.07 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (namespace index) | 0.06 kb -> 0.06 kb
+           |    └ (namespace index) | 0.07 kb -> 0.07 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.31 kb)
-      ├ _m (0.16 kb)
+      "tsdf (0.32 kb)
+      ├ _m (0.17 kb)
       │ ├ g (0.04 kb)
-      │ └ r.s:sess1.doc-remount-flow.m (0.11 kb)
+      │ └ r.s:sess1.doc-remount-flow.m (0.12 kb)
       └ sess1.doc-remount-flow (0.14 kb)"
     `);
 
@@ -85,7 +85,7 @@ describe('sync storage efficiency: document', () => {
     expect(getParsedLocalStorageValue('tsdf._m.r.s:sess1.doc-remount-flow.m'))
       .toMatchInlineSnapshot(`
         e:
-          d: { a: 1735689604100 }
+          d: { a: 1735689604100, z: 52 }
       `);
   });
 
@@ -120,7 +120,7 @@ describe('sync storage efficiency: document', () => {
             |    └ (entry data) | ❌ -> 0.08 kb
       .     | 📖 #1 ❌ tsdf._m.r.s:sess1.doc-remount-no-cache.m (namespace index)
       .     | ✍️ #1 ❌->✅ tsdf._m.r.s:sess1.doc-remount-no-cache.m
-            |    └ (namespace index) | ❌ -> 0.06 kb
+            |    └ (namespace index) | ❌ -> 0.07 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -226,7 +226,7 @@ describe('sync storage efficiency: document', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        d: { a: 1735689602000, o: '✅' }
+        d: { a: 1735689602000, o: '✅', z: 52 }
     `);
   });
 
@@ -269,9 +269,9 @@ describe('sync storage efficiency: document', () => {
       1s   | ✍️ #1 ✅->✅ tsdf.sess1.doc-mutation-flow
            |    └ (entry data) | 0.10 kb -> 0.10 kb
       .    | 📖 #2 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m
-           |    └ (namespace index) | 0.06 kb
+           |    └ (namespace index) | 0.07 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m
-           |    └ (namespace index) | 0.06 kb -> 0.06 kb
+           |    └ (namespace index) | 0.07 kb -> 0.07 kb
       "
     `);
   });
@@ -322,9 +322,9 @@ describe('sync storage efficiency: document', () => {
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.doc-invalidation-flow
             |    └ (entry data) | 0.10 kb -> 0.10 kb
       .     | 📖 #2 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m
-            |    └ (namespace index) | 0.06 kb
+            |    └ (namespace index) | 0.07 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m
-            |    └ (namespace index) | 0.06 kb -> 0.06 kb
+            |    └ (namespace index) | 0.07 kb -> 0.07 kb
       "
     `);
   });
@@ -392,9 +392,9 @@ describe('sync storage efficiency: document', () => {
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.doc-coalesced-invalidations
             |    └ (entry data) | 0.10 kb -> 0.11 kb
       .     | 📖 #2 ✅ tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
-            |    └ (namespace index) | 0.06 kb
+            |    └ (namespace index) | 0.07 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
-            |    └ (namespace index) | 0.06 kb -> 0.06 kb
+            |    └ (namespace index) | 0.07 kb -> 0.07 kb
       "
     `);
   });
@@ -475,7 +475,7 @@ describe('sync storage efficiency: document', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        d: { a: 1735689605910, o: '✅' }
+        d: { a: 1735689605910, o: '✅', z: 52 }
     `);
   });
 });

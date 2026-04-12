@@ -716,17 +716,17 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-    4.01s | Ada, Grace, Parent offline, Child blocked edit | -- retry parent — should cascade: parent create → child create → child edit, all with remapped ids
+    6.01s | Ada, Grace, Parent offline, Child blocked edit | -- retry parent — should cascade: parent create → child create → child edit, all with remapped ids
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    5.21s | Ada, Grace, Parent offline, Child blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Parent offline"})
+    7.21s | Ada, Grace, Parent offline, Child blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Parent offline"})
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-finished
     .     | Ada, Grace, Parent offline, Child blocked edit | [query-items, query-items] ui-changed
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser replay-started
-    6.41s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"id":4,"name":"Child offline","parentId":"users||3"})
+    8.41s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"id":4,"name":"Child offline","parentId":"users||3"})
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser replay-finished
     .     | Ada, Grace, Parent offline, Child blocked edit | [query-items, query-items] ui-changed
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-started
-    7.61s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"name":"Child blocked edit"})
+    9.61s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"name":"Child blocked edit"})
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-finished
     "
   `);
@@ -1247,9 +1247,9 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     14.21s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
     .      | Ada, Grace, Linus blocked edit | offline:createUser replay-finished
     .      | Ada, Grace, Linus blocked edit | [query-items, query-items] ui-changed
-    15.21s | Ada, Grace, Linus blocked edit | -- retry remapped child — should patch users||3 directly
+    17.21s | Ada, Grace, Linus blocked edit | -- retry remapped child — should patch users||3 directly
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
-    16.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
+    18.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
     "
   `);

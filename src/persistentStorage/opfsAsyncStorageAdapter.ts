@@ -1065,9 +1065,10 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         }
 
         const writable = await fileHandle.createWritable();
+        const rawValue = entry.serializedValue ?? JSON.stringify(entry.value);
 
         try {
-          await writable.write(JSON.stringify(entry.value));
+          await writable.write(rawValue);
         } finally {
           await writable.close();
         }
