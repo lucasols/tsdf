@@ -440,7 +440,6 @@ function sameUploadsConfig(
   return (
     left?.adapter === right?.adapter &&
     left?.upload === right?.upload &&
-    left?.onProgress === right?.onProgress &&
     (left?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY) ===
       (right?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY)
   );
@@ -1674,12 +1673,6 @@ export class SessionOfflineCoordinator {
       this.#syncUploadsState();
     } else {
       await this.#saveUploadRecord(nextRecord);
-    }
-    if (nextRecord.progress && this.#uploadsConfig?.onProgress) {
-      this.#uploadsConfig.onProgress({
-        upload: stripStoredUploadFile(nextRecord),
-        progress: nextRecord.progress,
-      });
     }
     return nextRecord;
   }

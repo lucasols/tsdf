@@ -105,7 +105,6 @@ export type {
   OfflineStoredUploadRecord,
   OfflineUpload,
   OfflineUploadAdapter,
-  OfflineUploadObserverContext,
   OfflineUploadProgress,
   OfflineUploadSource,
   OfflineUploadState,

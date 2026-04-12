@@ -62,16 +62,11 @@ export type OfflineUploadTransportContext = {
   onProgress: (progress: OfflineUploadProgress) => void;
 };
 
-export type OfflineUploadObserverContext<
-  TResolvedRef extends ValidPayload = ValidPayload,
-> = { upload: OfflineUpload<TResolvedRef>; progress: OfflineUploadProgress };
-
 export type OfflineSessionUploadsConfig<
   TResolvedRef extends ValidPayload = ValidPayload,
 > = {
   adapter: OfflineUploadAdapter;
   upload: (ctx: OfflineUploadTransportContext) => Promise<TResolvedRef>;
-  onProgress?: (ctx: OfflineUploadObserverContext<TResolvedRef>) => void;
   concurrency?: number;
 };
 
