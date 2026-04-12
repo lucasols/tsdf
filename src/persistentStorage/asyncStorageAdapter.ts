@@ -454,7 +454,7 @@ function cloneManagedMetadataRecord(
     lastAccessAt: metadata.lastAccessAt,
     version: metadata.version,
     customMetadata: metadata.customMetadata
-      ? { ...metadata.customMetadata }
+      ? klona(metadata.customMetadata)
       : undefined,
   };
 }

@@ -813,6 +813,57 @@ describe('persistent storage integration', () => {
     `);
   });
 
+  test('async adapter returns cloned nested custom metadata from the read cache', async () => {
+    const driver = createInMemoryAsyncStorageDriver({ cloneValues: true });
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-read-metadata-snapshot',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<
+      { value: string },
+      { nested: { count: number }; tags: string[] }
+    >(scope);
+
+    // Seed nested metadata so repeated reads go through the namespace-index cache.
+    const seedPromise = namespace.commit({
+      upserts: [
+        {
+          key: 'a',
+          metadata: { nested: { count: 1 }, tags: ['one', 'two'] },
+          value: { value: 'first' },
+          version: 1,
+        },
+      ],
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    // Mutate nested metadata from the first read to simulate caller-owned changes.
+    const firstEntry = await namespace.get('a');
+    if (firstEntry === null) {
+      throw new Error('Expected seeded entry to be available.');
+    }
+    firstEntry.metadata.customMetadata.nested.count = 2;
+    firstEntry.metadata.customMetadata.tags.push('three');
+
+    // A second read should still return the persisted metadata snapshot.
+    expect(await namespace.get('a')).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata:
+          nested: { count: 1 }
+          tags: ['one', 'two']
+        key: 'a'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:a'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'first' }
+    `);
+  });
+
   test('document persistence still hydrates and refetches when navigator.locks is unavailable', async () => {
     const storeName = 'doc-without-locks';
     const sessionKey = 'sess1';
