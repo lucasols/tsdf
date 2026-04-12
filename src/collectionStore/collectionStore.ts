@@ -28,8 +28,6 @@ import type {
 } from '../internal/testTimelineTypes';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import {
-  EMPTY_DIRECT_MUTATION_CONTEXT,
-  type OfflineDirectMutationContext,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
   runHybridOfflineMutation,
@@ -53,7 +51,6 @@ import {
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
   type OfflineMutationInput,
-  type OfflineOperationsUploadRef,
   type ParsedOfflineResolutionConflictResultForOperation,
   type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
@@ -1716,22 +1713,12 @@ export function createCollectionStore<
     payload: ItemPayload;
     item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
   };
-  type DirectMutationUploads = OfflineDirectMutationContext<
-    OfflineOperationsUploadRef<TOfflineOperations>
-  >['uploads'];
 
   type CollectionMutationArgs<T> = {
     optimisticUpdate?: (
       payload: CollectionMutationPayloadToUse,
     ) => void | boolean;
-    mutation: (
-      payload: CollectionMutationPayloadToUse,
-      ctx: {
-        uploads: OfflineDirectMutationContext<
-          OfflineOperationsUploadRef<TOfflineOperations>
-        >['uploads'];
-      },
-    ) => Promise<T>;
+    mutation: (payload: CollectionMutationPayloadToUse) => Promise<T>;
     onSuccess?: (
       response: Awaited<T>,
       payload: CollectionMutationPayloadToUse,
@@ -1845,8 +1832,7 @@ export function createCollectionStore<
           }))
         : [];
 
-    const directMutation = (ctx: OfflineDirectMutationContext) =>
-      mutation(payloadToUse, { uploads: ctx.uploads as DirectMutationUploads });
+    const directMutation = () => mutation(payloadToUse);
 
     const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payloadToUse),
@@ -1874,7 +1860,7 @@ export function createCollectionStore<
             })
         : async () => ({
             kind: 'online' as const,
-            data: await directMutation(EMPTY_DIRECT_MUTATION_CONTEXT),
+            data: await directMutation(),
           }),
       onSuccess: (result) => {
         if (revalidateOnSuccess && affectedItems.length > 0) {

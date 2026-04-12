@@ -513,6 +513,12 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for the session. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  resolveOfflineUpload: (id: string) => Promise<TUploadRef>;
+  /** Resolves multiple staged upload ids to their latest final refs. */
+  resolveOfflineUploads: (
+    ids: readonly string[],
+  ) => Promise<Record<string, TUploadRef>>;
   /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
   saveOfflineUpload: (args: { id: string; file: Blob | File }) => Promise<void>;
   /** Replaces a previously stored session-scoped upload. */

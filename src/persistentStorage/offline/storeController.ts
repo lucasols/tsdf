@@ -3317,26 +3317,6 @@ export function createOfflineStoreController<
     return {
       initialAction: getInitialOfflineMutationAction(current),
       queueMutation: () => queuePreparedMutations(prepared),
-      getDirectMutationContext: async () => {
-        const preparedCurrent = ensureActiveSession();
-        if (
-          !preparedCurrent ||
-          preparedCurrent.sessionKey !== prepared.currentSessionKey
-        ) {
-          throw offlineSessionUnavailableError;
-        }
-
-        return {
-          uploads: {
-            resolvedRefsById:
-              prepared.dependencyUploadIds.length === 0
-                ? {}
-                : await preparedCurrent.session.resolveUploadIds(
-                    prepared.dependencyUploadIds,
-                  ),
-          },
-        };
-      },
       handleDirectSuccess: () =>
         clearOfflineStatusOnSuccess(prepared.currentSessionKey),
       classifyError: async (error) => {

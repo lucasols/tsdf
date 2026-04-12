@@ -6,17 +6,12 @@ import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import type { TestOfflineTimelineEvent } from '../internal/testTimelineTypes';
 import {
-  EMPTY_DIRECT_MUTATION_CONTEXT,
-  type OfflineDirectMutationContext,
   type OfflineMutationResult,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
-import type {
-  OfflineMutationInput,
-  OfflineOperationsUploadRef,
-} from '../persistentStorage/offline/types';
+import type { OfflineMutationInput } from '../persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
@@ -197,9 +192,6 @@ export function createMutationApi<
     query: TSFDListQuery<QueryPayload> | undefined;
     invalidationWasTriggered: boolean;
   };
-  type DirectMutationUploads = OfflineDirectMutationContext<
-    OfflineOperationsUploadRef<TOfflineOperations>
-  >['uploads'];
   type OptimisticMutationQueryContext = {
     dynamicQueryMutationEnders: Array<() => boolean>;
     lockedQueryKeys: Set<string>;
@@ -960,14 +952,7 @@ export function createMutationApi<
 
   type ListQueryMutationArgs<T> = {
     optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
-    mutation: (
-      payload: MutationPayloadToUse,
-      ctx: {
-        uploads: OfflineDirectMutationContext<
-          OfflineOperationsUploadRef<TOfflineOperations>
-        >['uploads'];
-      },
-    ) => Promise<T>;
+    mutation: (payload: MutationPayloadToUse) => Promise<T>;
     revalidateOnSuccess?: RevalidateOnSuccessOption;
     onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
     onError?: (error: StoreMutationError | MutationSkipped) => void;
@@ -1105,8 +1090,7 @@ export function createMutationApi<
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    const directMutation = (ctx: OfflineDirectMutationContext) =>
-      mutation(payloadToUse, { uploads: ctx.uploads as DirectMutationUploads });
+    const directMutation = () => mutation(payloadToUse);
 
     const result = await performMutationWithLifecycle({
       startMutation: () => {
@@ -1151,7 +1135,7 @@ export function createMutationApi<
             })
         : async () => ({
             kind: 'online' as const,
-            data: await directMutation(EMPTY_DIRECT_MUTATION_CONTEXT),
+            data: await directMutation(),
           }),
       onSuccess: (result) => {
         const successInvalidationQueryPayloads =

@@ -1147,15 +1147,11 @@ test('online mutations can resolve staged upload ids after reconnect and use the
           draft.value = 4;
         });
       },
-      mutation: async ({ uploads }) => {
-        const resolvedRef = uploads.resolvedRefsById['asset-1'];
-        requestEvents.push(
-          `mutation:${
-            typeof resolvedRef === 'object'
-              ? JSON.stringify(resolvedRef)
-              : resolvedRef
-          }`,
-        );
+      mutation: async () => {
+        const resolvedRef: `server:${string}` = (
+          await resolveAfterAllTimers(session.resolveOfflineUpload('asset-1'))
+        ).unwrap();
+        requestEvents.push(`mutation:${resolvedRef}`);
         await env.serverMock.delayedSetData(4);
         return { value: 4, resolvedRef };
       },

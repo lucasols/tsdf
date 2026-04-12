@@ -1,4 +1,3 @@
-import type { ValidPayload } from '../../utils/storeShared';
 import type { OfflineMutationUploadsInput } from '../offlineUploadTypes';
 import type {
   OfflineMutationInput,
@@ -15,19 +14,10 @@ export type OfflineMutationResult<T> =
   | { kind: 'online'; data: Awaited<T> }
   | { kind: 'queued' };
 
-export type OfflineDirectMutationContext<
-  TUploadRef extends ValidPayload = ValidPayload,
-> = { uploads: { resolvedRefsById: Record<string, TUploadRef> } };
-
-export const EMPTY_DIRECT_MUTATION_CONTEXT: OfflineDirectMutationContext = {
-  uploads: { resolvedRefsById: {} },
-};
-
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';
   queueMutation: () => Promise<void>;
   classifyError: (error: unknown) => Promise<boolean>;
-  getDirectMutationContext: () => Promise<OfflineDirectMutationContext>;
   handleDirectSuccess: () => Promise<void>;
 };
 
@@ -54,7 +44,7 @@ export async function runHybridOfflineMutation<
   controller?: OfflineAwareMutationController<TOperations> | null;
   offline?: OfflineMutationInput<TOperations, TName> | undefined;
   upload?: OfflineMutationUploadsInput | undefined;
-  directMutation: (ctx: OfflineDirectMutationContext) => Promise<T>;
+  directMutation: () => Promise<T>;
 }): Promise<OfflineMutationResult<T>> {
   if (!offline || !controller) {
     throw new Error(
@@ -70,9 +60,7 @@ export async function runHybridOfflineMutation<
   }
 
   try {
-    const data = await directMutation(
-      await prepared.getDirectMutationContext(),
-    );
+    const data = await directMutation();
     await prepared.handleDirectSuccess();
     return { kind: 'online', data };
   } catch (error) {

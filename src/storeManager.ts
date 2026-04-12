@@ -1,3 +1,4 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   Result,
   type Result as ResultType,
@@ -40,6 +41,12 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for this manager. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  resolveOfflineUpload: (id: string) => Promise<ResultType<TUploadRef, Error>>;
+  /** Resolves multiple staged upload ids to their latest final refs. */
+  resolveOfflineUploads: (
+    ids: readonly string[],
+  ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;
   /** Saves a session-scoped upload locally for later dependency resolution. */
   saveOfflineUpload: (args: {
     id: string;
@@ -135,6 +142,22 @@ function createDisabledStoreManagerOfflineApi<
     getOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     getOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
     getOfflineUploads: () => emptyUploads,
+    resolveOfflineUpload: () =>
+      Promise.resolve(
+        Result.err(
+          new Error(
+            '[tsdf] Offline uploads are not configured for this manager',
+          ),
+        ),
+      ),
+    resolveOfflineUploads: () =>
+      Promise.resolve(
+        Result.err(
+          new Error(
+            '[tsdf] Offline uploads are not configured for this manager',
+          ),
+        ),
+      ),
     saveOfflineUpload: () => Promise.resolve(Result.ok(undefined)),
     replaceOfflineUpload: () => Promise.resolve(Result.ok(undefined)),
     loadOfflineUpload: () => Promise.resolve(Result.ok(null)),
@@ -187,6 +210,16 @@ export function createStoreManager<
         getOfflineResolutions: () =>
           resolvedOfflineSession.getOfflineResolutions(),
         getOfflineUploads: () => resolvedOfflineSession.getOfflineUploads(),
+        resolveOfflineUpload: (id: string) =>
+          resultify(
+            () => resolvedOfflineSession.resolveOfflineUpload(id),
+            normalizeStoreManagerOfflineError,
+          ),
+        resolveOfflineUploads: (ids: readonly string[]) =>
+          resultify(
+            () => resolvedOfflineSession.resolveOfflineUploads(ids),
+            normalizeStoreManagerOfflineError,
+          ),
         saveOfflineUpload: (args: { id: string; file: Blob | File }) =>
           resultify(
             () => resolvedOfflineSession.saveOfflineUpload(args),
@@ -282,9 +315,13 @@ export function resolveStoreManagerOfflineSession<
   storeName: string;
   usesOfflineStorage: boolean;
 }): OfflineSession<TUploadRef> | null {
-  const offlineSession = storeManagerOfflineSessionRegistry.get(
-    args.storeManager,
-  ) as OfflineSession<TUploadRef> | undefined;
+  // WORKAROUND: The manager registry stores sessions behind a shared
+  // non-generic weak map, and this rebind restores the caller's known upload-ref
+  // type when reading its own session back out.
+  const offlineSession = __LEGIT_CAST__<
+    OfflineSession<TUploadRef> | undefined,
+    OfflineSession | undefined
+  >(storeManagerOfflineSessionRegistry.get(args.storeManager));
   if (!args.usesOfflineStorage) return null;
 
   if (!offlineSession) {

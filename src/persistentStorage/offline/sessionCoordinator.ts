@@ -478,6 +478,27 @@ function castUploads<TUploadRef extends ValidPayload>(
   >(uploads);
 }
 
+function castResolvedUploadRef<TUploadRef extends ValidPayload>(
+  resolvedRef: ValidPayload,
+): TUploadRef {
+  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
+  // boundary, and the session API rebinds that same known-safe value back to
+  // the caller's compile-time upload-ref generic.
+  return __LEGIT_CAST__<TUploadRef, ValidPayload>(resolvedRef);
+}
+
+function castResolvedUploadRefs<TUploadRef extends ValidPayload>(
+  resolvedRefsById: Record<string, ValidPayload>,
+): Record<string, TUploadRef> {
+  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
+  // boundary, and the session API rebinds that same known-safe map back to the
+  // caller's compile-time upload-ref generic.
+  return __LEGIT_CAST__<
+    Record<string, TUploadRef>,
+    Record<string, ValidPayload>
+  >(resolvedRefsById);
+}
+
 function normalizePersistedLocalSessionSnapshot(
   sessionKey: string,
   rawSnapshot: unknown,
@@ -2321,6 +2342,30 @@ export function createOfflineSession<
 
       return castUploads<TUploadRef>(
         getActiveCoordinator(false)?.getUploads() ?? [],
+      );
+    },
+    resolveOfflineUpload: async (id) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) {
+        throw new Error(
+          `[tsdf] Offline uploads are not configured for inactive session scope "${inactiveScope}"`,
+        );
+      }
+      const resolvedRef = (await coordinator.resolveUploadIds([id]))[id];
+      if (resolvedRef === undefined) {
+        throw new Error(`Unknown offline upload "${id}"`);
+      }
+      return castResolvedUploadRef<TUploadRef>(resolvedRef);
+    },
+    resolveOfflineUploads: async (ids) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) {
+        throw new Error(
+          `[tsdf] Offline uploads are not configured for inactive session scope "${inactiveScope}"`,
+        );
+      }
+      return castResolvedUploadRefs<TUploadRef>(
+        await coordinator.resolveUploadIds(ids),
       );
     },
     saveOfflineUpload: ({ id, file }) => {
