@@ -1459,12 +1459,8 @@ test('offline derived query hydration with opfs preloads only the requested grou
     time |
     1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
     2ms  | 📂 dir-open ✅ tsdf/derived-queries-opfs-groups (session directory)
-    .    | 📂 dir-open ✅ tsdf/derived-queries-opfs-groups
-         |    └ (session directory) ⚠️ DUPLICATE OPEN
     3ms  | 📂 dir-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store
          |    └ (store directory)
-    .    | 📂 dir-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store
-         |    └ (store directory) ⚠️ DUPLICATE OPEN
     4ms  | 👁️ #1 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/lq._i.r.json
          |    └ (queries index)
     .    | 👁️ #2 file-open ✅ tsdf/derived-queries-opfs-groups/derived-queries-opfs-groups-store/li._i.r.json
