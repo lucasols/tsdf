@@ -1469,16 +1469,16 @@ export function createOpfsPersistentStorageTestStore(
             },
           );
           setValue(storageKey, entry);
-          const existingMetadata = readLogicalMetadata(
-            mockBrowserOpfs,
-            storageKey,
-          );
+          const rawValue = JSON.stringify(entry.data);
           setMetadataValue(mockBrowserOpfs, storageKey, {
             lastAccessAt: entry.timestamp,
             version: entry.version,
-            ...(existingMetadata?.sizeBytes !== undefined
-              ? { sizeBytes: existingMetadata.sizeBytes }
-              : {}),
+            sizeBytes: estimateManagedEntrySizeBytes({
+              rawValue,
+              lastAccessAt: entry.timestamp,
+              version: entry.version ?? 1,
+              customMetadata: { p: params },
+            }),
             customMetadata: { p: params },
           });
           return storageKey;

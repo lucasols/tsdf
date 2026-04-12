@@ -1636,7 +1636,7 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['"second||1']`);
   });
 
-  test('default persistence byte budgets keep the canonical 500 items and 100 queries', async () => {
+  test('default persistence byte budgets comfortably keep 125 items and 25 queries', async () => {
     const storeName = 'lq-default-limits';
     const sessionKey = 'sess1';
     const serverData = Object.fromEntries(

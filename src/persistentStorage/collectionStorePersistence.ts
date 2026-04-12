@@ -44,6 +44,7 @@ import {
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
+import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
@@ -68,7 +69,6 @@ import type {
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
-const DEFAULT_MAX_BYTES = 4_120;
 const SAVE_DEBOUNCE_MS = 1000;
 
 type CollectionPersistenceOfflineOperations<
@@ -150,7 +150,11 @@ export function setupCollectionPersistence<
   assertValidPersistentStoreName(config.storeName);
 
   const version = config.version;
-  const maxBytes = config.maxBytes ?? DEFAULT_MAX_BYTES;
+  const defaultMaxBytes = getDefaultMaxBytesForScope({
+    adapter: config.adapter,
+    scopeKind: 'collection.item',
+  });
+  const maxBytes = config.maxBytes ?? defaultMaxBytes;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
   const pinnedItemKeys = new Set(
@@ -169,7 +173,7 @@ export function setupCollectionPersistence<
     localStorageAdapter === null
       ? buildPersistedStaticPolicy(
           config.maxBytes,
-          DEFAULT_MAX_BYTES,
+          defaultMaxBytes,
           pinnedItemKeys,
         )
       : null;

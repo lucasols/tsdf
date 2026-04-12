@@ -398,7 +398,8 @@ type CollectionPersistentStorageFields<ItemPayload extends ValidPayload> = {
   payloadSchema: PersistentStorageSchema<ItemPayload>;
   /**
    * Maximum serialized payload bytes to persist for collection items.
-   * Items are evicted via LRU. Defaults to 4,120 bytes.
+   * Items are evicted via LRU. Defaults to 64 KB in `local-sync` and 128 KB
+   * in async adapters.
    */
   maxBytes?: number;
   /** Item payloads that should never be evicted from storage. */
@@ -471,9 +472,15 @@ type ListQueryPersistentStorageFields<
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Schema used to validate cached query payloads on load. */
   queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
-  /** Maximum serialized payload bytes to persist for list items. Defaults to 30,000 bytes. */
+  /**
+   * Maximum serialized payload bytes to persist for list items. Defaults to
+   * 64 KB in `local-sync` and 128 KB in async adapters.
+   */
   maxItemBytes?: number;
-  /** Maximum serialized payload bytes to persist for list queries. Defaults to 5,400 bytes. */
+  /**
+   * Maximum serialized payload bytes to persist for list queries. Defaults to
+   * 32 KB in `local-sync` and 64 KB in async adapters.
+   */
   maxQueryBytes?: number;
   /** Maximum number of items per query to persist. Defaults to 100. */
   maxQuerySize?: number;

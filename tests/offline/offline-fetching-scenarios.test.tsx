@@ -759,7 +759,7 @@ describe('offline fetching scenarios', () => {
         {tableId:"users"}:
           a: 1735689600000
           p: { tableId: 'users' }
-          z: 39
+          z: 63
     `);
     expect(
       getParsedOpfsFileData(

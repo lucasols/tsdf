@@ -1542,7 +1542,7 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(
-      `['{tableId:"users-1"}', '{tableId:"users-2"}', '{tableId:"users-3"}']`,
+      `['{tableId:"users-2"}', '{tableId:"users-3"}']`,
     );
     expect(
       getParsedOpfsFileData(
@@ -1550,18 +1550,14 @@ describe('opfs: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        {tableId:"users-1"}:
-          a: 1735689600000
-          p: { tableId: 'users-1' }
-          z: 27
         {tableId:"users-2"}:
           a: 1735689600100
           p: { tableId: 'users-2' }
-          z: 27
+          z: 53
         {tableId:"users-3"}:
           a: 1735689600200
           p: { tableId: 'users-3' }
-          z: 27
+          z: 53
 
       s: { b: 106 }
     `);
@@ -1693,7 +1689,7 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(
-      `['{tableId:"users-other"}', '{tableId:"users-pinned"}']`,
+      `['{tableId:"users-pinned"}']`,
     );
     expect(
       getParsedOpfsFileData(
@@ -1701,14 +1697,10 @@ describe('opfs: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        {tableId:"users-other"}:
-          a: 1735689600100
-          p: { tableId: 'users-other' }
-          z: 27
         {tableId:"users-pinned"}:
           a: 1735689600000
           p: { tableId: 'users-pinned' }
-          z: 27
+          z: 58
 
       s:
         b: 58

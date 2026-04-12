@@ -1,6 +1,8 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
+import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -228,73 +230,40 @@ describe('async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const defaultMaxBytes = getDefaultMaxBytesForScope({
+      adapter: 'async',
+      scopeKind: 'collection.item',
+    });
+    const largeNameSuffix = 'x'.repeat(8_192);
+    const getPayload = (index: number) =>
+      `user-${String(index).padStart(4, '0')}`;
+    const getItem = (index: number) => ({
+      value: {
+        id: getPayload(index),
+        name: `${largeNameSuffix}-${getPayload(index)}`,
+      },
+    });
+    const entrySizeBytes = getAsyncCollectionEntrySizeBytes(
+      getPayload(0),
+      getItem(0),
+    );
+    const keptEntryCount = Math.floor(defaultMaxBytes / entrySizeBytes);
+    const totalEntries = keptEntryCount + 1;
 
-    for (let index = 0; index <= 50; index++) {
-      collectionScope.collection.seedItem(String(index), {
-        value: { id: String(index), name: `Cached ${index}` },
+    for (let index = 0; index < totalEntries; index++) {
+      collectionScope.collection.seedItem(getPayload(index), getItem(index), {
+        timestamp: TEST_INITIAL_TIME.valueOf() + index,
       });
-      await advanceTime(10);
     }
 
     createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
     await waitForScheduledCleanup();
 
-    expect(
-      collectionScope.collection
-        .listStoredPayloads()
-        .sort((left, right) => left.localeCompare(right)),
-    ).toMatchInlineSnapshot(`
-      - '1'
-      - '10'
-      - '11'
-      - '12'
-      - '13'
-      - '14'
-      - '15'
-      - '16'
-      - '17'
-      - '18'
-      - '19'
-      - '2'
-      - '20'
-      - '21'
-      - '22'
-      - '23'
-      - '24'
-      - '25'
-      - '26'
-      - '27'
-      - '28'
-      - '29'
-      - '3'
-      - '30'
-      - '31'
-      - '32'
-      - '33'
-      - '34'
-      - '35'
-      - '36'
-      - '37'
-      - '38'
-      - '39'
-      - '4'
-      - '40'
-      - '41'
-      - '42'
-      - '43'
-      - '44'
-      - '45'
-      - '46'
-      - '47'
-      - '48'
-      - '49'
-      - '5'
-      - '50'
-      - '6'
-      - '7'
-      - '8'
-      - '9'
-    `);
+    const storedPayloads = collectionScope.collection.listStoredPayloads();
+
+    expect(storedPayloads).toHaveLength(keptEntryCount);
+    expect(storedPayloads).not.toContain(getPayload(0));
+    expect(storedPayloads).toContain(getPayload(totalEntries - 1));
   });
 
   test('startup cleanup combines expiration and maxBytes trimming in one sweep', async () => {

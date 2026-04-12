@@ -2,7 +2,9 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
   getLocalStorageTree,
@@ -186,6 +188,49 @@ describe('sync storage efficiency: collection', () => {
         "b: { a: 1735689600100, p: 'b', z: 56 }
         "c: { a: 1735689600200, p: 'c', z: 57 }
     `);
+  });
+
+  test('cold startup enforces the local-sync default collection maxBytes policy before the store mounts', async () => {
+    const storeName = 'collection-cold-default-max-items-sync';
+    const sessionKey = 'sess1';
+    const collectionScope = persistentStore.scope(storeName, sessionKey);
+    const defaultMaxBytes = getDefaultMaxBytesForScope({
+      adapter: 'local-sync',
+      scopeKind: 'collection.item',
+    });
+    const largeNameSuffix = 'x'.repeat(4_096);
+    const getPayload = (index: number) =>
+      `user-${String(index).padStart(4, '0')}`;
+    const getItem = (index: number) => ({
+      value: {
+        id: getPayload(index),
+        name: `${largeNameSuffix}-${getPayload(index)}`,
+      },
+    });
+    const entrySizeBytes = getLocalCollectionEntrySizeBytes(
+      getPayload(0),
+      getItem(0),
+    );
+    const keptEntryCount = Math.floor(defaultMaxBytes / entrySizeBytes);
+    const totalEntries = keptEntryCount + 1;
+
+    for (let index = 0; index < totalEntries; index++) {
+      collectionScope.collection.seedItem(getPayload(index), getItem(index), {
+        timestamp: TEST_INITIAL_TIME.valueOf() + index,
+      });
+    }
+
+    createCollectionEnv({ storeName, sessionKey });
+    await waitForScheduledCleanup();
+
+    const storedPayloads = listStoredCollectionItemPayloads(
+      storeName,
+      sessionKey,
+    );
+
+    expect(storedPayloads).toHaveLength(keptEntryCount);
+    expect(storedPayloads).not.toContain(getPayload(0));
+    expect(storedPayloads).toContain(getPayload(totalEntries - 1));
   });
 
   test('maxBytes cleanup snapshots the full manifest history', async () => {

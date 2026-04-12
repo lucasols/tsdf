@@ -50,6 +50,7 @@ import {
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
+import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
@@ -82,8 +83,6 @@ import type {
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
-const DEFAULT_MAX_ITEM_BYTES = 30_000;
-const DEFAULT_MAX_QUERY_BYTES = 5_400;
 const DEFAULT_MAX_QUERY_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 1000;
 
@@ -241,8 +240,16 @@ export function setupListQueryPersistence<
   assertValidPersistentStoreName(config.storeName);
 
   const version = config.version;
-  const maxItemBytes = config.maxItemBytes ?? DEFAULT_MAX_ITEM_BYTES;
-  const maxQueryBytes = config.maxQueryBytes ?? DEFAULT_MAX_QUERY_BYTES;
+  const defaultMaxItemBytes = getDefaultMaxBytesForScope({
+    adapter: config.adapter,
+    scopeKind: 'listQuery.item',
+  });
+  const defaultMaxQueryBytes = getDefaultMaxBytesForScope({
+    adapter: config.adapter,
+    scopeKind: 'listQuery.query',
+  });
+  const maxItemBytes = config.maxItemBytes ?? defaultMaxItemBytes;
+  const maxQueryBytes = config.maxQueryBytes ?? defaultMaxQueryBytes;
   const maxQuerySize = config.maxQuerySize ?? DEFAULT_MAX_QUERY_SIZE;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
@@ -269,7 +276,7 @@ export function setupListQueryPersistence<
     localStorageAdapter === null
       ? buildPersistedStaticPolicy(
           config.maxItemBytes,
-          DEFAULT_MAX_ITEM_BYTES,
+          defaultMaxItemBytes,
           pinnedItemKeys,
         )
       : null;
@@ -277,7 +284,7 @@ export function setupListQueryPersistence<
     localStorageAdapter === null
       ? buildPersistedStaticPolicy(
           config.maxQueryBytes,
-          DEFAULT_MAX_QUERY_BYTES,
+          defaultMaxQueryBytes,
           pinnedQueryKeys,
         )
       : null;

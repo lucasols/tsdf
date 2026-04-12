@@ -26,6 +26,7 @@ import {
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
+import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
@@ -388,11 +389,26 @@ function getDefaultStaticPolicyForScope(
 ): AsyncStorageNamespaceStaticPolicy | null {
   switch (scope.kind) {
     case 'collection.item':
-      return { maxBytes: 4_120 };
+      return {
+        maxBytes: getDefaultMaxBytesForScope({
+          adapter: 'async',
+          scopeKind: 'collection.item',
+        }),
+      };
     case 'listQuery.item':
-      return { maxBytes: 30_000 };
+      return {
+        maxBytes: getDefaultMaxBytesForScope({
+          adapter: 'async',
+          scopeKind: 'listQuery.item',
+        }),
+      };
     case 'listQuery.query':
-      return { maxBytes: 5_400 };
+      return {
+        maxBytes: getDefaultMaxBytesForScope({
+          adapter: 'async',
+          scopeKind: 'listQuery.query',
+        }),
+      };
     default:
       return null;
   }

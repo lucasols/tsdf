@@ -2,8 +2,10 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
   getLocalStorageTree,
@@ -221,6 +223,42 @@ describe('sync storage efficiency: list-query', () => {
       i: []
       p: { tableId: 'third' }
     `);
+  });
+
+  test('cold startup enforces the local-sync default list-query maxQueryBytes policy before the store mounts', async () => {
+    const storeName = 'lq-cold-default-max-queries-sync';
+    const sessionKey = 'sess1';
+    const listQueryScope = persistentStore.scope(storeName, sessionKey);
+    const defaultMaxQueryBytes = getDefaultMaxBytesForScope({
+      adapter: 'local-sync',
+      scopeKind: 'listQuery.query',
+    });
+    const largeTableIdSuffix = 'q'.repeat(8_192);
+    const getQuery = (index: number) => ({
+      tableId: `users-${String(index).padStart(4, '0')}-${largeTableIdSuffix}`,
+    });
+    const entrySizeBytes = getLocalListQueryEntrySizeBytes(getQuery(0), []);
+    const keptQueryCount = Math.floor(defaultMaxQueryBytes / entrySizeBytes);
+    const totalQueries = keptQueryCount + 4;
+
+    for (let index = 0; index < totalQueries; index++) {
+      listQueryScope.listQuery.seedQuery(getQuery(index), [], {
+        timestamp: TEST_INITIAL_TIME.valueOf() + index,
+      });
+    }
+
+    createListQueryEnv({ storeName, sessionKey });
+    await waitForScheduledCleanup();
+
+    const storedQueryKeys = listStoredKeys(
+      `tsdf.${sessionKey}.${storeName}.lq.`,
+    );
+
+    expect(storedQueryKeys.length).toBeLessThan(totalQueries);
+    expect(storedQueryKeys).not.toContain(`{tableId:"${getQuery(0).tableId}"}`);
+    expect(storedQueryKeys).toContain(
+      `{tableId:"${getQuery(totalQueries - 1).tableId}"}`,
+    );
   });
 
   test('when maxQueryBytes limit is reached a full store cleanup occurs', async () => {
