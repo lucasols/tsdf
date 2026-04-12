@@ -9,7 +9,6 @@ import {
   rc_union,
   rc_unknown,
 } from 'runcheck';
-
 import type { ValidPayload } from '../utils/storeShared';
 import type {
   OfflineStoredUploadRecord,
@@ -186,19 +185,20 @@ class OpfsOfflineUploadDriver implements OfflineUploadAdapter {
     const sessionDir = await this.#getSessionDir(sessionKey, false);
     if (!sessionDir) return [];
 
-    const records: OfflineStoredUploadRecord<TResolvedRef>[] = [];
+    // Collect directory handles first, then load records in parallel.
+    const dirHandles: FileSystemDirectoryHandle[] = [];
     for await (const [entryName, entryHandle] of sessionDir.entries()) {
       if (entryHandle.kind !== 'directory') continue;
-
-      const record = await this.#loadFromDir<TResolvedRef>(
-        await sessionDir.getDirectoryHandle(entryName),
-      );
-      if (record) {
-        records.push(record);
-      }
+      dirHandles.push(await sessionDir.getDirectoryHandle(entryName));
     }
 
-    return records.sort((left, right) => left.id.localeCompare(right.id));
+    const loadedRecords = await Promise.all(
+      dirHandles.map((dirHandle) => this.#loadFromDir<TResolvedRef>(dirHandle)),
+    );
+
+    return loadedRecords
+      .filter((record) => record !== null)
+      .sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async remove(sessionKey: string, id: string): Promise<void> {
