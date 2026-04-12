@@ -3,6 +3,7 @@ import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { isObject } from '@ls-stack/utils/typeGuards';
+import { klona } from 'klona/json';
 import {
   rc_array,
   rc_number,
@@ -430,6 +431,12 @@ type AsyncStorageManagedReadMode = 'cached' | 'fresh';
 
 type AsyncStoragePayloadReadState = { value: unknown };
 
+type AsyncStorageReadCacheGenerationSnapshot = {
+  globalGeneration: number;
+  namespaceGeneration: number;
+  namespaceId: string;
+};
+
 function cloneStaticPolicy(
   policy: AsyncStorageNamespaceStaticPolicy | null,
 ): AsyncStorageNamespaceStaticPolicy | null {
@@ -473,6 +480,10 @@ function cloneNamespaceIndexReadState(
     staticPolicy: cloneStaticPolicy(state.staticPolicy),
     valid: state.valid,
   };
+}
+
+function clonePayloadValue<TValue>(value: TValue): TValue {
+  return klona(value);
 }
 
 type AsyncStorageCacheInvalidationReason =
@@ -933,8 +944,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   #cachedPayloadReads: Cache<AsyncStoragePayloadReadState | null> = createCache(
     { maxCacheSize: ASYNC_STORAGE_PAYLOAD_CACHE_MAX_SIZE },
   );
+  #namespaceReadCacheGenerations = new Map<string, number>();
   #observedScopes = new Map<string, AsyncStorageNamespaceScope>();
   #pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
+  #readCacheGeneration = 0;
   #recentTouchedBuckets = new Map<string, string>();
   #startupCleanupScheduled = false;
 
@@ -1116,6 +1129,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       pending.cancelFlush?.();
     }
     this.clearAllCachedReads();
+    this.#namespaceReadCacheGenerations.clear();
     this.#observedScopes.clear();
     this.#pendingNamespaceCommits.clear();
     this.#recentTouchedBuckets.clear();
@@ -1369,7 +1383,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     if (knownRecordKeys != null) {
       if (!knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)) {
-        this.#invalidateCachedNamespaceIndexState(scope);
+        this.#invalidateCachedNamespace(scope);
         return {
           entries: null,
           exists: false,
@@ -1395,6 +1409,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
     }
 
+    const cacheGeneration = this.#getReadCacheGenerationSnapshot(scope);
     const state = await this.#cachedNamespaceIndexReads.getOrInsertAsync(
       namespaceKey,
       async ({ skipCaching }) => {
@@ -1403,6 +1418,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           scope,
           knownRecordKeys,
         );
+        if (!this.#isReadCacheGenerationSnapshotCurrent(cacheGeneration)) {
+          return skipCaching(nextState);
+        }
 
         return this.#shouldCacheNamespaceIndexState(nextState)
           ? cloneNamespaceIndexReadState(nextState)
@@ -1416,7 +1434,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     state: InternalManagedIndexState,
+    args: { advanceGeneration?: boolean } = {},
   ): Promise<void> {
+    if (args.advanceGeneration !== false) {
+      this.#advanceNamespaceReadCacheGeneration(scope);
+    }
+
     if (state.entries.size === 0) {
       await this.#driverRemoveManyFrom(driver, scope, [
         ASYNC_NAMESPACE_INDEX_RECORD_KEY,
@@ -1687,6 +1710,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         : Promise.resolve(),
     ]);
 
+    this.#advanceNamespaceReadCacheGeneration(scope);
+
     for (const key of removes) {
       this.#invalidateCachedPayloadValue(scope, key);
     }
@@ -1696,10 +1721,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     if (indexChanged) {
-      await this.#persistNamespaceIndexUsingDriver(this.driver, scope, {
-        entries: indexEntries,
-        staticPolicy: nextStaticPolicy,
-      });
+      await this.#persistNamespaceIndexUsingDriver(
+        this.driver,
+        scope,
+        { entries: indexEntries, staticPolicy: nextStaticPolicy },
+        { advanceGeneration: false },
+      );
     } else {
       this.#setCachedNamespaceIndexState(scope, {
         entries: currentIndexState.valid ? indexEntries : null,
@@ -1771,10 +1798,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       changed = indexState.entries.delete(key) || changed;
     }
     if (changed) {
-      await this.#persistNamespaceIndexUsingDriver(driver, scope, {
-        entries: indexState.entries,
-        staticPolicy: normalizeStaticPolicy(indexState.staticPolicy),
-      });
+      await this.#persistNamespaceIndexUsingDriver(
+        driver,
+        scope,
+        {
+          entries: indexState.entries,
+          staticPolicy: normalizeStaticPolicy(indexState.staticPolicy),
+        },
+        { advanceGeneration: false },
+      );
     }
 
     this.#broadcastNamespaceInvalidation(scope, 'remove');
@@ -1820,6 +1852,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   clearAllCachedReads(): void {
+    this.#readCacheGeneration += 1;
     this.#cachedNamespaceIndexReads.clear();
     this.#cachedPayloadReads.clear();
   }
@@ -1847,6 +1880,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
     }
 
+    const cacheGeneration = this.#getReadCacheGenerationSnapshot(scope);
     const promisesByKey = new Map<
       string,
       Promise<AsyncStoragePayloadReadState | null>
@@ -1880,7 +1914,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           payloadCacheKey,
           async ({ skipCaching }) => {
             const value = (await readPromise)[index] ?? null;
-            return value === null ? skipCaching(null) : { value };
+            const nextState =
+              value === null ? null : { value: clonePayloadValue(value) };
+            if (!this.#isReadCacheGenerationSnapshotCurrent(cacheGeneration)) {
+              return skipCaching(nextState);
+            }
+
+            return nextState === null ? skipCaching(null) : nextState;
           },
         );
         promisesByKey.set(key, keyPromise);
@@ -1890,7 +1930,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     return Promise.all(
       keys.map(async (key) => {
         const state = await promisesByKey.get(key);
-        return state?.value ?? null;
+        return state === null || state === undefined
+          ? null
+          : clonePayloadValue(state.value);
       }),
     );
   }
@@ -1915,7 +1957,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     key: string,
     state: AsyncStoragePayloadReadState,
   ): void {
-    this.#cachedPayloadReads.set(this.#getPayloadCacheKey(scope, key), state);
+    this.#cachedPayloadReads.set(this.#getPayloadCacheKey(scope, key), {
+      value: clonePayloadValue(state.value),
+    });
   }
 
   #invalidateCachedNamespaceIndexState(
@@ -1933,6 +1977,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   #invalidateCachedNamespace(scope: AsyncStorageNamespaceScope): void {
     const namespaceKey = `${getNamespaceId(scope)}::`;
+    this.#advanceNamespaceReadCacheGeneration(scope);
     this.#invalidateCachedNamespaceIndexState(scope);
 
     for (const key of this.#cachedPayloadReads[' cache'].map.keys()) {
@@ -1944,6 +1989,41 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   #getPayloadCacheKey(scope: AsyncStorageNamespaceScope, key: string): string {
     return `${getNamespaceId(scope)}::${key}`;
+  }
+
+  #getNamespaceReadCacheGeneration(namespaceId: string): number {
+    return this.#namespaceReadCacheGenerations.get(namespaceId) ?? 0;
+  }
+
+  #advanceNamespaceReadCacheGeneration(
+    scope: AsyncStorageNamespaceScope,
+  ): void {
+    const namespaceId = getNamespaceId(scope);
+    this.#namespaceReadCacheGenerations.set(
+      namespaceId,
+      this.#getNamespaceReadCacheGeneration(namespaceId) + 1,
+    );
+  }
+
+  #getReadCacheGenerationSnapshot(
+    scope: AsyncStorageNamespaceScope,
+  ): AsyncStorageReadCacheGenerationSnapshot {
+    const namespaceId = getNamespaceId(scope);
+    return {
+      globalGeneration: this.#readCacheGeneration,
+      namespaceGeneration: this.#getNamespaceReadCacheGeneration(namespaceId),
+      namespaceId,
+    };
+  }
+
+  #isReadCacheGenerationSnapshotCurrent(
+    snapshot: AsyncStorageReadCacheGenerationSnapshot,
+  ): boolean {
+    return (
+      snapshot.globalGeneration === this.#readCacheGeneration &&
+      snapshot.namespaceGeneration ===
+        this.#getNamespaceReadCacheGeneration(snapshot.namespaceId)
+    );
   }
 
   #shouldCacheNamespaceIndexState(
