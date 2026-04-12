@@ -12,7 +12,7 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
-import { Result } from 't-result';
+import { Result, unknownToError } from 't-result';
 import type { ValidPayload } from '../../utils/storeShared';
 import type {
   OfflineAttachedUploadIds,
@@ -353,12 +353,6 @@ function buildEntityId(
   entityKey: string,
 ): string {
   return `${sessionKey}:${storeName}:${entityKey}`;
-}
-
-function toMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  return 'Unknown error';
 }
 
 function getQueueOrder(entry: {
@@ -3208,7 +3202,7 @@ export function createOfflineStoreController<
 
         refreshDerivedState(current);
       } catch (error) {
-        const lastError = { message: toMessage(error) };
+        const lastError = { message: unknownToError(error).message };
         const classification = await current.session.classifyFailure(error, {
           phase: 'sync',
           storeType,
