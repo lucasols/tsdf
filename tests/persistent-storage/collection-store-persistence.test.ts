@@ -550,6 +550,48 @@ describe('localStorage: collection store persistence', () => {
     ).toMatchInlineSnapshot(`['"a', '"c']`);
   });
 
+  test('when the newest entry alone exceeds maxBytes, cleanup keeps older entries that still fit', async () => {
+    const keptItem = { value: { id: 'a', name: 'Fits' } };
+    const oversizedItem = {
+      value: {
+        id: 'b',
+        name: 'This cached value is intentionally much larger than the budget',
+      },
+    };
+    const maxBytes = getLocalCollectionEntrySizeBytes('a', keptItem);
+
+    expect(
+      getLocalCollectionEntrySizeBytes('b', oversizedItem),
+    ).toBeGreaterThan(maxBytes);
+
+    // Seed a small persisted entry first so the later oversized write has an
+    // older candidate that still satisfies the byte budget.
+    setCachedCollectionItem(
+      'col-max-bytes-oversized-hot',
+      'sess1',
+      'a',
+      keptItem,
+    );
+
+    const env = createEnv({
+      storeName: 'col-max-bytes-oversized-hot',
+      sessionKey: 'sess1',
+      maxBytes,
+    });
+
+    env.apiStore.addItemToState('b', oversizedItem);
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      listStoredItemPayloads('col-max-bytes-oversized-hot', 'sess1'),
+    ).toMatchInlineSnapshot(`['a']`);
+    expect(
+      listStoredItemKeys('col-max-bytes-oversized-hot', 'sess1'),
+    ).toMatchInlineSnapshot(`['"a']`);
+  });
+
   test('preload hydrates cached local items without reporting an error', async () => {
     const onPersistentStorageError = vi.fn();
     setCachedCollectionItem('col-preload-local', 'sess1', '1', {

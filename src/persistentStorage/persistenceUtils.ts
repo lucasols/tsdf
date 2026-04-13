@@ -102,7 +102,6 @@ export function keepEntriesWithinByteBudget<T>(args: {
     return args.getLastAccessAt(b) - args.getLastAccessAt(a);
   });
   let keptUnprotectedBytes = 0;
-  let keptUnprotectedEntry = false;
 
   for (const entry of sortedEntries) {
     const key = args.getKey(entry);
@@ -112,17 +111,15 @@ export function keepEntriesWithinByteBudget<T>(args: {
     }
 
     const sizeBytes = args.getSizeBytes(entry);
-    if (keptUnprotectedBytes + sizeBytes <= args.maxBytes) {
+    if (args.isPinned(entry)) {
       keptKeys.add(key);
       keptUnprotectedBytes += sizeBytes;
-      keptUnprotectedEntry = true;
       continue;
     }
 
-    if (!keptUnprotectedEntry && args.maxBytes > 0) {
+    if (keptUnprotectedBytes + sizeBytes <= args.maxBytes) {
       keptKeys.add(key);
       keptUnprotectedBytes += sizeBytes;
-      keptUnprotectedEntry = true;
     }
   }
 

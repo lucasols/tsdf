@@ -566,6 +566,42 @@ describe('opfs: collection store persistence', () => {
     `);
   });
 
+  test('async maxBytes eviction skips a newer entry that cannot fit by itself', async () => {
+    const storeName = 'col-opfs-skip-oversized-hot-entry';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const keptItem = { value: { id: '1', name: 'Fits' } };
+    const oversizedItem = {
+      value: {
+        id: '2',
+        name: 'This cached value is intentionally much larger than the budget',
+      },
+    };
+    const maxBytes = getAsyncCollectionEntrySizeBytes('1', keptItem);
+
+    expect(
+      getAsyncCollectionEntrySizeBytes('2', oversizedItem),
+    ).toBeGreaterThan(maxBytes);
+
+    const env = createEnv({ storeName, sessionKey, maxBytes });
+
+    env.apiStore.addItemToState('1', keptItem);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // Persist an oversized hot entry next. The byte budget should keep the
+    // older small entry instead of leaving storage above budget.
+    env.apiStore.addItemToState('2', oversizedItem);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(collectionScope.collection.listStoredPayloads())
+      .toMatchInlineSnapshot(`
+        ['1']
+      `);
+  });
+
   test('deleteItemState removes deleted items from persisted storage', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({});
     const storeName = 'col-opfs-delete-persisted-item';
