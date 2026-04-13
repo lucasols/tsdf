@@ -19,7 +19,12 @@ import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { isOfflineModeStatusValue } from './offline/types';
-import { createEvictionComparator } from './persistenceUtils';
+import {
+  getSerializedStringSize,
+  keepEntriesWithinByteBudget,
+  serializeJsonForStorage,
+} from './persistenceUtils';
+import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
@@ -115,11 +120,43 @@ function setOfflineProtectionMetadata(
     : undefined;
 }
 
+export function mergeManagedAsyncStorageCustomMetadata(args: {
+  currentCustomMetadata?: Record<string, unknown>;
+  key: string;
+  nextCustomMetadata?: Record<string, unknown>;
+  protectedKeysSnapshotSet?: Set<string> | null;
+  scope: AsyncStorageNamespaceScope;
+}): Record<string, unknown> | undefined {
+  const merged = {
+    ...(args.currentCustomMetadata ?? {}),
+    ...(args.nextCustomMetadata ?? {}),
+  };
+  const mergedCustomMetadata =
+    Object.keys(merged).length > 0 ? merged : undefined;
+
+  if (args.protectedKeysSnapshotSet !== null) {
+    return setOfflineProtectionMetadata(
+      mergedCustomMetadata,
+      args.protectedKeysSnapshotSet?.has(
+        serializeProtectedRef({ ...args.scope, key: args.key }),
+      ) === true ||
+        isOfflineProtectedMetadata(args.nextCustomMetadata) ||
+        isOfflineProtectedMetadata(args.currentCustomMetadata),
+    );
+  }
+
+  return setOfflineProtectionMetadata(
+    mergedCustomMetadata,
+    isOfflineProtectedMetadata(args.nextCustomMetadata) ||
+      isOfflineProtectedMetadata(args.currentCustomMetadata),
+  );
+}
 const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
 const ASYNC_METADATA_VERSION_KEY = 'v';
+const ASYNC_METADATA_SIZE_BYTES_KEY = 'z';
 const persistedStaticPolicySchema = rc_object({
+  b: rc_number.optionalKey(),
   k: rc_array(rc_string).optionalKey(),
-  m: rc_number.optionalKey(),
 });
 
 function getInlineCustomMetadata(
@@ -128,7 +165,8 @@ function getInlineCustomMetadata(
   const customMetadataEntries = Object.entries(record).filter(
     ([key]) =>
       key !== ASYNC_METADATA_LAST_ACCESS_AT_KEY &&
-      key !== ASYNC_METADATA_VERSION_KEY,
+      key !== ASYNC_METADATA_VERSION_KEY &&
+      key !== ASYNC_METADATA_SIZE_BYTES_KEY,
   );
   if (customMetadataEntries.length === 0) return undefined;
 
@@ -138,6 +176,7 @@ function getInlineCustomMetadata(
 type InternalManagedMetadataRecord = {
   customMetadata?: Record<string, unknown>;
   lastAccessAt: number;
+  sizeBytes?: number;
   version: number;
 };
 
@@ -148,7 +187,8 @@ function parseInternalManagedMetadataRecord(
   if (
     record === null ||
     typeof record.a !== 'number' ||
-    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number') ||
+    ('z' in record && record.z !== undefined && typeof record.z !== 'number')
   ) {
     return null;
   }
@@ -157,6 +197,7 @@ function parseInternalManagedMetadataRecord(
 
   return {
     lastAccessAt: record.a,
+    ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
     version: typeof record.v === 'number' ? record.v : 1,
     ...(customMetadata ? { customMetadata } : {}),
   };
@@ -167,6 +208,9 @@ function serializeInternalManagedMetadataRecord(
 ): Record<string, unknown> {
   const serialized: Record<string, unknown> = {
     [ASYNC_METADATA_LAST_ACCESS_AT_KEY]: metadata.lastAccessAt,
+    ...(metadata.sizeBytes !== undefined
+      ? { [ASYNC_METADATA_SIZE_BYTES_KEY]: metadata.sizeBytes }
+      : {}),
     ...(metadata.version !== 1
       ? { [ASYNC_METADATA_VERSION_KEY]: metadata.version }
       : {}),
@@ -177,14 +221,38 @@ function serializeInternalManagedMetadataRecord(
 
   if (
     ASYNC_METADATA_LAST_ACCESS_AT_KEY in customMetadata ||
-    ASYNC_METADATA_VERSION_KEY in customMetadata
+    ASYNC_METADATA_VERSION_KEY in customMetadata ||
+    ASYNC_METADATA_SIZE_BYTES_KEY in customMetadata
   ) {
     throw new Error(
-      '[TSDF] Async storage custom metadata cannot use reserved keys "a" or "v".',
+      '[TSDF] Async storage custom metadata cannot use reserved keys "a", "v", or "z".',
     );
   }
 
   return { ...serialized, ...customMetadata };
+}
+
+export function estimateManagedAsyncStorageEntrySizeBytes(args: {
+  customMetadata?: Record<string, unknown>;
+  lastAccessAt: number;
+  serializedValue: string;
+  version: number;
+}): number {
+  return (
+    getSerializedStringSize(args.serializedValue) +
+    getSerializedStringSize(
+      JSON.stringify(
+        serializeInternalManagedMetadataRecord({
+          lastAccessAt: args.lastAccessAt,
+          sizeBytes: undefined,
+          version: args.version,
+          ...(args.customMetadata
+            ? { customMetadata: args.customMetadata }
+            : {}),
+        }),
+      ),
+    )
+  );
 }
 
 function parseIndexEntries(
@@ -208,19 +276,18 @@ function parseIndexEntries(
 
   return entries;
 }
-
 /**
  * Builds a persisted static policy from config values, omitting fields that
  * match the provided default. Returns null when no overrides are needed.
  */
 export function buildPersistedStaticPolicy(
-  maxEntries: number | undefined,
-  defaultMaxEntries: number,
+  maxBytes: number | undefined,
+  defaultMaxBytes: number,
   pinnedKeys: ReadonlySet<string>,
 ): AsyncStorageNamespaceStaticPolicy | null {
   return normalizeStaticPolicy({
-    ...(maxEntries !== undefined && maxEntries !== defaultMaxEntries
-      ? { maxEntries }
+    ...(maxBytes !== undefined && maxBytes !== defaultMaxBytes
+      ? { maxBytes }
       : {}),
     ...(pinnedKeys.size > 0 ? { pinnedKeys: [...pinnedKeys] } : {}),
   });
@@ -231,12 +298,12 @@ function parseStaticPolicy(
 ): AsyncStorageNamespaceStaticPolicy | null {
   const parsed = rc_parse(value, persistedStaticPolicySchema).unwrapOrNull();
   if (parsed === null) return null;
-  if (parsed.m !== undefined && (!Number.isInteger(parsed.m) || parsed.m < 0)) {
+  if (parsed.b !== undefined && (!Number.isInteger(parsed.b) || parsed.b < 0)) {
     return null;
   }
 
   return normalizeStaticPolicy({
-    ...(parsed.m !== undefined ? { maxEntries: parsed.m } : {}),
+    ...(parsed.b !== undefined ? { maxBytes: parsed.b } : {}),
     ...(parsed.k !== undefined ? { pinnedKeys: parsed.k } : {}),
   });
 }
@@ -247,7 +314,7 @@ function serializeStaticPolicy(
   if (policy === null) return undefined;
 
   return {
-    ...(policy.maxEntries !== undefined ? { m: policy.maxEntries } : {}),
+    ...(policy.maxBytes !== undefined ? { b: policy.maxBytes } : {}),
     ...(policy.pinnedKeys !== undefined && policy.pinnedKeys.length > 0
       ? { k: policy.pinnedKeys }
       : {}),
@@ -282,11 +349,26 @@ function getDefaultStaticPolicyForScope(
 ): AsyncStorageNamespaceStaticPolicy | null {
   switch (scope.kind) {
     case 'collection.item':
-      return { maxEntries: 50 };
+      return {
+        maxBytes: getDefaultMaxBytesForScope({
+          adapter: 'async',
+          scopeKind: 'collection.item',
+        }),
+      };
     case 'listQuery.item':
-      return { maxEntries: 500 };
+      return {
+        maxBytes: getDefaultMaxBytesForScope({
+          adapter: 'async',
+          scopeKind: 'listQuery.item',
+        }),
+      };
     case 'listQuery.query':
-      return { maxEntries: 100 };
+      return {
+        maxBytes: getDefaultMaxBytesForScope({
+          adapter: 'async',
+          scopeKind: 'listQuery.query',
+        }),
+      };
     default:
       return null;
   }
@@ -305,10 +387,10 @@ function normalizePersistedStaticPolicyForScope(
   const defaultPolicy = getDefaultStaticPolicyForScope(scope);
 
   return normalizeStaticPolicy({
-    maxEntries:
-      persistedStaticPolicy.maxEntries !== undefined &&
-      persistedStaticPolicy.maxEntries !== defaultPolicy?.maxEntries
-        ? persistedStaticPolicy.maxEntries
+    maxBytes:
+      persistedStaticPolicy.maxBytes !== undefined &&
+      persistedStaticPolicy.maxBytes !== defaultPolicy?.maxBytes
+        ? persistedStaticPolicy.maxBytes
         : undefined,
     pinnedKeys: persistedStaticPolicy.pinnedKeys,
   });
@@ -327,8 +409,7 @@ function getEffectiveStaticPolicyForScope(
   if (defaultPolicy === null) return normalizedPersistedPolicy;
 
   return normalizeStaticPolicy({
-    maxEntries:
-      normalizedPersistedPolicy?.maxEntries ?? defaultPolicy.maxEntries,
+    maxBytes: normalizedPersistedPolicy?.maxBytes ?? defaultPolicy.maxBytes,
     pinnedKeys: normalizedPersistedPolicy?.pinnedKeys,
   });
 }
@@ -475,7 +556,7 @@ function cloneStaticPolicy(
 ): AsyncStorageNamespaceStaticPolicy | null {
   if (policy === null) return null;
   return {
-    maxEntries: policy.maxEntries,
+    maxBytes: policy.maxBytes,
     pinnedKeys: policy.pinnedKeys ? [...policy.pinnedKeys] : undefined,
   };
 }
@@ -485,6 +566,7 @@ function cloneManagedMetadataRecord(
 ): AsyncStorageManagedMetadataRecord {
   return {
     lastAccessAt: metadata.lastAccessAt,
+    sizeBytes: metadata.sizeBytes,
     version: metadata.version,
     customMetadata: metadata.customMetadata
       ? klona(metadata.customMetadata)
@@ -1753,6 +1835,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       payloadRef: getPayloadRecordKey(key),
       writtenAt: metadata.lastAccessAt,
       lastAccessAt: metadata.lastAccessAt,
+      sizeBytes: metadata.sizeBytes,
       version: metadata.version,
       customMetadata: metadata.customMetadata ?? {},
     };
@@ -1775,13 +1858,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           nextCustomMetadata,
           currentCustomMetadata,
         ) =>
-          this.#mergeOfflineProtectionMetadata(
-            scope,
+          mergeManagedAsyncStorageCustomMetadata({
+            currentCustomMetadata,
             key,
             nextCustomMetadata,
-            currentCustomMetadata,
-            getSessionProtectedKeysSnapshot(scope.sessionKey),
-          ),
+            protectedKeysSnapshotSet: getSessionProtectedKeysSnapshot(
+              scope.sessionKey,
+            ),
+            scope,
+          }),
       });
       this.#advanceNamespaceReadCacheGeneration(scope);
       this.#invalidateCachedNamespaceIndexState(scope);
@@ -1838,29 +1923,46 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     for (const upsert of upserts) {
       const existingMetadata = indexEntries.get(upsert.key);
-      const customMetadata = this.#mergeOfflineProtectionMetadata(
-        scope,
-        upsert.key,
-        upsert.metadata,
-        existingMetadata?.customMetadata,
+      const customMetadata = mergeManagedAsyncStorageCustomMetadata({
+        currentCustomMetadata: existingMetadata?.customMetadata,
+        key: upsert.key,
+        nextCustomMetadata: upsert.metadata,
         protectedKeysSnapshotSet,
-      );
+        scope,
+      });
       const nextLastAccessAt =
         touchesByKey.get(upsert.key) ?? existingMetadata?.lastAccessAt ?? now;
+      const serializedValue =
+        upsert.serializedValue !== undefined
+          ? { rawValue: upsert.serializedValue }
+          : serializeJsonForStorage(upsert.value);
+      const nextSizeBytes =
+        scope.kind !== 'document'
+          ? estimateManagedAsyncStorageEntrySizeBytes({
+              customMetadata,
+              lastAccessAt: nextLastAccessAt,
+              serializedValue: serializedValue.rawValue,
+              version: upsert.version,
+            })
+          : undefined;
       const nextMetadata: InternalManagedMetadataRecord = {
         lastAccessAt: nextLastAccessAt,
         version: upsert.version,
+        ...(nextSizeBytes !== undefined ? { sizeBytes: nextSizeBytes } : {}),
         ...(customMetadata ? { customMetadata } : {}),
       };
 
       setEntries.push({
         key: getPayloadRecordKey(upsert.key),
+        serializedValue: serializedValue.rawValue,
+        ...(nextSizeBytes !== undefined ? { sizeBytes: nextSizeBytes } : {}),
         value: upsert.value,
       });
 
       if (
         existingMetadata !== undefined &&
         existingMetadata.lastAccessAt === nextMetadata.lastAccessAt &&
+        existingMetadata.sizeBytes === nextMetadata.sizeBytes &&
         existingMetadata.version === nextMetadata.version &&
         deepEqual(existingMetadata.customMetadata, nextMetadata.customMetadata)
       ) {
@@ -1922,38 +2024,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     this.#broadcastNamespaceInvalidation(scope, 'commit');
-  }
-
-  #mergeOfflineProtectionMetadata(
-    scope: AsyncStorageNamespaceScope,
-    key: string,
-    nextCustomMetadata: Record<string, unknown> | undefined,
-    currentCustomMetadata: Record<string, unknown> | undefined,
-    protectedKeysSnapshotSet: Set<string> | null,
-  ): Record<string, unknown> | undefined {
-    const merged = {
-      ...(currentCustomMetadata ?? {}),
-      ...(nextCustomMetadata ?? {}),
-    };
-    const mergedCustomMetadata =
-      Object.keys(merged).length > 0 ? merged : undefined;
-
-    if (protectedKeysSnapshotSet !== null) {
-      return setOfflineProtectionMetadata(
-        mergedCustomMetadata,
-        protectedKeysSnapshotSet.has(
-          serializeProtectedRef({ ...scope, key }),
-        ) ||
-          isOfflineProtectedMetadata(nextCustomMetadata) ||
-          isOfflineProtectedMetadata(currentCustomMetadata),
-      );
-    }
-
-    return setOfflineProtectionMetadata(
-      mergedCustomMetadata,
-      isOfflineProtectedMetadata(nextCustomMetadata) ||
-        isOfflineProtectedMetadata(currentCustomMetadata),
-    );
   }
 
   async #removeManagedKeysUsingDriver(
@@ -2894,6 +2964,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       itemKey: string;
       lastAccessAt: number;
       protected: boolean;
+      sizeBytes: number;
     }> = [];
 
     for (const [key, metadata] of indexState.entries.entries()) {
@@ -2917,6 +2988,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         itemKey: key,
         lastAccessAt: metadata.lastAccessAt,
         protected: isProtected,
+        sizeBytes: metadata.sizeBytes ?? 0,
       });
     }
 
@@ -2926,37 +2998,22 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       }
     }
 
-    if (
-      effectiveStaticPolicy?.maxEntries !== undefined &&
-      candidateEntries.length > effectiveStaticPolicy.maxEntries
-    ) {
-      const unprotectedCount = candidateEntries.filter(
-        ({ protected: isProtected }) => !isProtected,
-      ).length;
+    if (effectiveStaticPolicy?.maxBytes !== undefined) {
+      const pinnedKeys = new Set(effectiveStaticPolicy.pinnedKeys ?? []);
+      const keptKeys = keepEntriesWithinByteBudget({
+        entries: candidateEntries,
+        getKey: (entry) => entry.itemKey,
+        getLastAccessAt: (entry) => entry.lastAccessAt,
+        getSizeBytes: (entry) => entry.sizeBytes,
+        isPinned: (entry) => pinnedKeys.has(entry.itemKey),
+        isProtected: (entry) => entry.protected,
+        maxBytes: effectiveStaticPolicy.maxBytes,
+      });
 
-      if (unprotectedCount > effectiveStaticPolicy.maxEntries) {
-        const pinnedKeys = new Set(effectiveStaticPolicy.pinnedKeys ?? []);
-        candidateEntries.sort(
-          createEvictionComparator(
-            [
-              (entry) => entry.protected,
-              (entry) => pinnedKeys.has(entry.itemKey),
-            ],
-            (entry) => entry.lastAccessAt,
-          ),
-        );
-
-        const keptKeys = new Set(
-          candidateEntries
-            .slice(0, effectiveStaticPolicy.maxEntries)
-            .map(({ itemKey }) => itemKey),
-        );
-
-        for (const { itemKey } of candidateEntries) {
-          if (keptKeys.has(itemKey)) continue;
-          payloadRecordKeysToRemove.add(getPayloadRecordKey(itemKey));
-          nextEntries.delete(itemKey);
-        }
+      for (const { itemKey } of candidateEntries) {
+        if (keptKeys.has(itemKey)) continue;
+        payloadRecordKeysToRemove.add(getPayloadRecordKey(itemKey));
+        nextEntries.delete(itemKey);
       }
     }
 

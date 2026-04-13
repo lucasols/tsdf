@@ -255,7 +255,7 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 
-  test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
+  test('startup hydration touch preserves an offline marker added by another tab', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
@@ -268,12 +268,28 @@ describe('indexeddb async storage efficiency: document', () => {
     );
 
     const env = createDocumentEnv({ storeName, sessionKey });
+    await settleStartupBackgroundScan(mockAdapter);
 
-    // Simulate another tab marking the document as offline-protected before the touch runs.
+    // Simulate another tab marking the document as offline-protected before the
+    // touch runs.
     setProtectedKeysSnapshot(sessionKey, [storageKey]);
+    await mockAdapter.indexedDb.mutateRawRow(
+      'entries',
+      [`["${sessionKey}","${storeName}","d"]`, DOCUMENT_PERSISTED_ENTRY_KEY],
+      (current) => {
+        if (
+          typeof current !== 'object' ||
+          current === null ||
+          !('a' in current)
+        ) {
+          return current;
+        }
+
+        return { ...current, o: 1 };
+      },
+    );
 
     // Mount the stale cached document so hydration schedules a metadata touch.
-    await settleStartupBackgroundScan(mockAdapter);
     const touchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     const hook = renderHook(() =>
@@ -297,6 +313,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Cached document', value: 8 }
 
         i: '["sess1","doc-startup-touch-offline-marker","d"]'
+        o: 1
       `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""

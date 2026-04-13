@@ -31,6 +31,42 @@ import {
   getCurrentIndexedDbPersistentStorageTestStore,
   resetCurrentIndexedDbPersistentStorageTestStore,
 } from '../../utils/indexedDbPersistentStorageTestStore';
+import * as byteBudgetTestUtils from '../persistentStorageByteBudgetTestUtils';
+
+export function sumPersistedEntryBytes(...sizes: number[]): number {
+  return byteBudgetTestUtils.sumPersistedEntryBytes(...sizes);
+}
+
+export function getAsyncCollectionEntrySizeBytes<T>(
+  payload: string,
+  data: T,
+): number {
+  return byteBudgetTestUtils.getAsyncCollectionEntrySizeBytes(payload, data);
+}
+
+export function getAsyncListItemEntrySizeBytes<T>(
+  payload: string,
+  data: T,
+  options: { loadedFields?: string[] } = {},
+): number {
+  return byteBudgetTestUtils.getAsyncListItemEntrySizeBytes(
+    payload,
+    data,
+    options,
+  );
+}
+
+export function getAsyncListQueryEntrySizeBytes(
+  payload: unknown,
+  items: string[],
+  options: { hasMore?: boolean } = {},
+): number {
+  return byteBudgetTestUtils.getAsyncListQueryEntrySizeBytes(
+    payload,
+    items,
+    options,
+  );
+}
 
 export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -357,6 +393,7 @@ export function createDocumentEnv(options: {
 export type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
+  maxBytes?: number;
   maxItems?: number;
   pinnedItems?: string[];
   serverData?: Record<string, CollectionItemState>;
@@ -370,7 +407,7 @@ export function createCollectionEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       adapter: mockAdapter.adapter,
-      maxItems: options.maxItems,
+      maxBytes: options.maxBytes ?? options.maxItems,
       payloadSchema: rc_string,
       pinnedItems: options.pinnedItems,
       schema: wrappedCollectionItemSchema,
@@ -390,6 +427,8 @@ export function storeItemKey(tableId: string, id: number): string {
 
 export function createListQueryEnv(options: {
   defaultQuerySize?: number;
+  maxItemBytes?: number;
+  maxQueryBytes?: number;
   maxItems?: number;
   maxQueries?: number;
   maxQuerySize?: number;
@@ -410,8 +449,8 @@ export function createListQueryEnv(options: {
     persistentStorage: {
       adapter: mockAdapter.adapter,
       itemPayloadSchema: rc_string,
-      maxItems: options.maxItems,
-      maxQueries: options.maxQueries,
+      maxItemBytes: options.maxItemBytes ?? options.maxItems,
+      maxQueryBytes: options.maxQueryBytes ?? options.maxQueries,
       maxQuerySize: options.maxQuerySize,
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,

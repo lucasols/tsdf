@@ -243,7 +243,7 @@ describe('async storage efficiency: document', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 
-  test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
+  test('startup hydration touch preserves an offline marker added by another tab', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -269,9 +269,13 @@ describe('async storage efficiency: document', () => {
 
     // Simulate another tab marking the document as offline-protected before the touch runs.
     await syncEntriesOfflineProtectedFromSiblingTab(sessionKey, [storageKey]);
+    documentScope.document.setMetadata({
+      a: Date.now() - 7 * 60 * 60 * 1000,
+      o: true,
+    });
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       e:
-        - { a: 1735664400000, o: '✅' }
+        - { a: 1735664403022, o: '✅' }
     `);
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);

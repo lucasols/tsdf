@@ -163,7 +163,7 @@ describe('sync storage efficiency: document', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 
-  test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
+  test('startup hydration touch preserves an offline marker added by another tab', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
 

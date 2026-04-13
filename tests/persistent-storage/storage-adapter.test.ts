@@ -427,6 +427,7 @@ describe('persistent storage integration', () => {
         key: 'a'
         lastAccessAt: 1735689600040
         payloadRef: '__tsdf_payload__:a'
+        sizeBytes: 32
         version: 1
         writtenAt: 1735689600040
 
@@ -440,6 +441,7 @@ describe('persistent storage integration', () => {
         key: 'b'
         lastAccessAt: 1735689600040
         payloadRef: '__tsdf_payload__:b'
+        sizeBytes: 32
         version: 1
         writtenAt: 1735689600040
 
@@ -478,6 +480,7 @@ describe('persistent storage integration', () => {
           key: 'a'
           lastAccessAt: 1735689600040
           payloadRef: '__tsdf_payload__:a'
+          sizeBytes: 36
           version: 1
           writtenAt: 1735689600040
 
@@ -563,6 +566,7 @@ describe('persistent storage integration', () => {
           key: 'a'
           lastAccessAt: 1735689600040
           payloadRef: '__tsdf_payload__:a'
+          sizeBytes: 36
           version: 1
           writtenAt: 1735689600040
 
@@ -616,6 +620,7 @@ describe('persistent storage integration', () => {
           key: 'a'
           lastAccessAt: 1735689600040
           payloadRef: '__tsdf_payload__:a'
+          sizeBytes: 36
           version: 1
           writtenAt: 1735689600040
 
@@ -636,6 +641,7 @@ describe('persistent storage integration', () => {
           key: 'a'
           lastAccessAt: 1735689600040
           payloadRef: '__tsdf_payload__:a'
+          sizeBytes: 36
           version: 1
           writtenAt: 1735689600040
 
@@ -696,6 +702,7 @@ describe('persistent storage integration', () => {
         key: 'a'
         lastAccessAt: 1735689600040
         payloadRef: '__tsdf_payload__:a'
+        sizeBytes: 36
         version: 1
         writtenAt: 1735689600040
 
@@ -874,6 +881,7 @@ describe('persistent storage integration', () => {
         key: 'a'
         lastAccessAt: 1735689600040
         payloadRef: '__tsdf_payload__:a'
+        sizeBytes: 41
         version: 1
         writtenAt: 1735689600040
 
@@ -915,6 +923,7 @@ describe('persistent storage integration', () => {
         key: 'a'
         lastAccessAt: 1735689600040
         payloadRef: '__tsdf_payload__:a'
+        sizeBytes: 41
         version: 1
         writtenAt: 1735689600040
 
@@ -967,6 +976,7 @@ describe('persistent storage integration', () => {
         key: 'a'
         lastAccessAt: 1735689600040
         payloadRef: '__tsdf_payload__:a'
+        sizeBytes: 78
         version: 1
         writtenAt: 1735689600040
 
@@ -1089,6 +1099,7 @@ describe('persistent storage integration', () => {
           key: 'a'
           lastAccessAt: 1735689600040
           payloadRef: '__tsdf_payload__:a'
+          sizeBytes: 36
           version: 1
           writtenAt: 1735689600040
 

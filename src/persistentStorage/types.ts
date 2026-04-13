@@ -58,6 +58,7 @@ export type AsyncStorageEntryMetadataBase = {
   payloadRef: string;
   writtenAt: number;
   lastAccessAt: number;
+  /** Serialized JSON size used for persistence budgeting for this entry. */
   sizeBytes?: number;
   version: number;
 };
@@ -74,7 +75,14 @@ export type AsyncStorageNamespaceGetResult<
 export type AsyncStorageNamespaceCommitUpsert<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
-> = { key: string; value: TValue; version: number; metadata?: TCustomMetadata };
+> = {
+  key: string;
+  value: TValue;
+  serializedValue?: string;
+  sizeBytes?: number;
+  version: number;
+  metadata?: TCustomMetadata;
+};
 
 export type AsyncStorageNamespaceCommitTouch = {
   key: string;
@@ -82,7 +90,7 @@ export type AsyncStorageNamespaceCommitTouch = {
 };
 
 export type AsyncStorageNamespaceStaticPolicy = {
-  maxEntries?: number;
+  maxBytes?: number;
   pinnedKeys?: string[];
 };
 
@@ -100,7 +108,12 @@ export type AsyncStorageMaintenanceState = {
   lastSuccessfulCleanupAt: number | null;
 };
 
-export type AsyncStorageDriverSetEntry = { key: string; value: unknown };
+export type AsyncStorageDriverSetEntry = {
+  key: string;
+  value: unknown;
+  serializedValue?: string;
+  sizeBytes?: number;
+};
 
 export type AsyncStorageDiscoveredScope = {
   /** Known raw record keys for this scope. `null` if keys were not enumerated during discovery. */
@@ -387,8 +400,13 @@ type CollectionOfflineOperationsConfig<
 type CollectionPersistentStorageFields<ItemPayload extends ValidPayload> = {
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
-  /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
-  maxItems?: number;
+  /**
+   * Maximum serialized JSON size to persist for collection items. Budgeting
+   * uses the serialized string length, not browser quota bytes. Items are
+   * evicted via LRU. Defaults to 64 KB in `local-sync` and 128 KB in async
+   * adapters.
+   */
+  maxBytes?: number;
   /** Item payloads that should never be evicted from storage. */
   pinnedItems?: ItemPayload[];
   /**
@@ -459,10 +477,18 @@ type ListQueryPersistentStorageFields<
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Schema used to validate cached query payloads on load. */
   queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
-  /** Maximum number of items to persist. Defaults to 500. */
-  maxItems?: number;
-  /** Maximum number of queries to persist. Defaults to 100. */
-  maxQueries?: number;
+  /**
+   * Maximum serialized JSON size to persist for list items. Budgeting uses the
+   * serialized string length, not browser quota bytes. Defaults to 64 KB in
+   * `local-sync` and 128 KB in async adapters.
+   */
+  maxItemBytes?: number;
+  /**
+   * Maximum serialized JSON size to persist for list queries. Budgeting uses
+   * the serialized string length, not browser quota bytes. Defaults to 32 KB
+   * in `local-sync` and 64 KB in async adapters.
+   */
+  maxQueryBytes?: number;
   /** Maximum number of items per query to persist. Defaults to 100. */
   maxQuerySize?: number;
   /** Item payloads that should never be evicted from storage. */

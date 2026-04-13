@@ -2,6 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
+import { estimateManagedAsyncStorageEntrySizeBytes } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
   encodePersistedAsyncNamespaceKind,
   getPersistedNamespaceId,
@@ -12,6 +13,7 @@ import {
   type IndexedDbPersistentStorageOperation,
   type IndexedDbPersistentStorageOptions,
 } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
+import { serializeJsonForStorage } from '../../src/persistentStorage/persistenceUtils';
 import type {
   AsyncStorageDriver,
   AsyncStorageNamespaceHandle,
@@ -26,7 +28,7 @@ const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
 const INDEXED_DB_META_STORE = 'meta';
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 
-type IndexedDbPersistedStaticPolicy = { k?: string[]; m?: number };
+type IndexedDbPersistedStaticPolicy = { b?: number; k?: string[] };
 
 type IndexedDbNamespacePolicyRecord = {
   p: IndexedDbPersistedStaticPolicy | null;
@@ -211,6 +213,7 @@ function isValidEntryRecord(value: unknown): boolean {
     'o',
     'p',
     'v',
+    'z',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     return false;
@@ -222,6 +225,7 @@ function isValidEntryRecord(value: unknown): boolean {
     typeof record.a === 'number' &&
     'd' in record &&
     (record.v === undefined || typeof record.v === 'number') &&
+    (record.z === undefined || typeof record.z === 'number') &&
     (record.m === undefined || getRecord(record.m) !== null) &&
     (record.g === undefined || typeof record.g === 'string') &&
     (record.o === undefined || record.o === 1) &&
@@ -411,6 +415,7 @@ type IndexedDbEntryRecord = {
   o?: 1;
   p?: unknown;
   v?: number;
+  z?: number;
 };
 
 function compactEntryValue(
@@ -487,11 +492,15 @@ function normalizeTestStaticPolicy(
   policy: Record<string, unknown>,
 ): AsyncStorageNamespaceStaticPolicy {
   return {
-    ...(typeof policy.m === 'number'
-      ? { maxEntries: policy.m }
-      : typeof policy.maxEntries === 'number'
-        ? { maxEntries: policy.maxEntries }
-        : {}),
+    ...(typeof policy.b === 'number'
+      ? { maxBytes: policy.b }
+      : typeof policy.maxBytes === 'number'
+        ? { maxBytes: policy.maxBytes }
+        : typeof policy.m === 'number'
+          ? { maxBytes: policy.m }
+          : typeof policy.maxEntries === 'number'
+            ? { maxBytes: policy.maxEntries }
+            : {}),
     ...(Array.isArray(policy.k)
       ? {
           pinnedKeys: policy.k.flatMap((value) =>
@@ -526,11 +535,15 @@ export function serializeTestStaticPolicy(
   const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(policy);
 
   return {
-    ...(typeof record.m === 'number'
-      ? { m: record.m }
-      : typeof record.maxEntries === 'number'
-        ? { m: record.maxEntries }
-        : {}),
+    ...(typeof record.b === 'number'
+      ? { b: record.b }
+      : typeof record.maxBytes === 'number'
+        ? { b: record.maxBytes }
+        : typeof record.m === 'number'
+          ? { b: record.m }
+          : typeof record.maxEntries === 'number'
+            ? { b: record.maxEntries }
+            : {}),
     ...(Array.isArray(record.k)
       ? {
           k: record.k.flatMap((value) =>
@@ -557,6 +570,7 @@ export type ManagedMetadataRecord = {
   customMetadata: Record<string, unknown>;
   key: string;
   lastAccessAt: number;
+  sizeBytes?: number;
   version: number;
   writtenAt: number;
 };
@@ -564,8 +578,19 @@ export type ManagedMetadataRecord = {
 export function serializeManagedMetadataRecord(
   metadata: ManagedMetadataRecord,
 ): Record<string, unknown> {
+  if (
+    'a' in metadata.customMetadata ||
+    'v' in metadata.customMetadata ||
+    'z' in metadata.customMetadata
+  ) {
+    throw new Error(
+      '[TSDF] Async storage custom metadata cannot use reserved keys "a", "v", or "z".',
+    );
+  }
+
   return {
     a: metadata.lastAccessAt,
+    ...(metadata.sizeBytes !== undefined ? { z: metadata.sizeBytes } : {}),
     ...(metadata.version !== 1 ? { v: metadata.version } : {}),
     ...metadata.customMetadata,
   };
@@ -579,14 +604,15 @@ function parseManagedMetadataRecord(
   if (
     record === null ||
     typeof record.a !== 'number' ||
-    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number') ||
+    ('z' in record && record.z !== undefined && typeof record.z !== 'number')
   ) {
     return null;
   }
 
   const customMetadata = Object.fromEntries(
     Object.entries(record).filter(
-      ([entryKey]) => entryKey !== 'a' && entryKey !== 'v',
+      ([entryKey]) => entryKey !== 'a' && entryKey !== 'v' && entryKey !== 'z',
     ),
   );
 
@@ -594,6 +620,7 @@ function parseManagedMetadataRecord(
     customMetadata,
     key,
     lastAccessAt: record.a,
+    ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
     version: typeof record.v === 'number' ? record.v : 1,
     writtenAt: record.a,
   };
@@ -618,6 +645,9 @@ function normalizeMetadataValue(key: string, value: unknown): unknown {
       customMetadata: getRecord(record.customMetadata) ?? {},
       key,
       lastAccessAt: record.lastAccessAt,
+      ...(typeof record.sizeBytes === 'number'
+        ? { sizeBytes: record.sizeBytes }
+        : {}),
       version: record.version,
       writtenAt: record.lastAccessAt,
     });
@@ -676,6 +706,23 @@ function normalizeLogicalPayload(
     default:
       return value;
   }
+}
+
+function estimateEntrySizeBytes(args: {
+  customMetadata?: Record<string, unknown>;
+  lastAccessAt: number;
+  scope: AsyncStorageNamespaceScope;
+  value: unknown;
+  version: number;
+}): number {
+  const compactValue = compactEntryValue(args.scope, args.value);
+
+  return estimateManagedAsyncStorageEntrySizeBytes({
+    customMetadata: args.customMetadata,
+    lastAccessAt: args.lastAccessAt,
+    serializedValue: serializeJsonForStorage(compactValue.d).rawValue,
+    version: args.version,
+  });
 }
 
 function openRequestAsPromise<T>(request: IDBRequest): Promise<T> {
@@ -1032,6 +1079,7 @@ export function createIndexedDbPersistentStorageTestStore(
       customMetadata?: Record<string, unknown>;
       key: string;
       lastAccessAt: number;
+      sizeBytes?: number;
       value: unknown;
       version: number;
     },
@@ -1049,6 +1097,17 @@ export function createIndexedDbPersistentStorageTestStore(
         const { extraMetadata, group, offlineProtected, payload } =
           splitCustomMetadata(args.customMetadata);
         const compactValue = compactEntryValue(scope, args.value);
+        const sizeBytes =
+          scope.kind === 'document'
+            ? undefined
+            : (args.sizeBytes ??
+              estimateEntrySizeBytes({
+                customMetadata: args.customMetadata,
+                lastAccessAt: args.lastAccessAt,
+                scope,
+                value: args.value,
+                version: args.version,
+              }));
 
         entryStore.put(
           {
@@ -1060,6 +1119,7 @@ export function createIndexedDbPersistentStorageTestStore(
             ...(offlineProtected === true ? { o: 1 as const } : {}),
             ...(payload !== undefined ? { p: payload } : {}),
             ...(args.version !== 1 ? { v: args.version } : {}),
+            ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
           } satisfies IndexedDbEntryRecord,
           getEntryPrimaryKey(scope, args.key),
         );
@@ -1095,6 +1155,7 @@ export function createIndexedDbPersistentStorageTestStore(
       customMetadata: getCustomMetadataFromEntryRecord(record),
       key,
       lastAccessAt: record.a,
+      ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
       version: record.v ?? 1,
       writtenAt: record.a,
     };
@@ -1302,13 +1363,21 @@ export function createIndexedDbPersistentStorageTestStore(
 
     const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(value);
     const customMetadata = buildCustomMetadata(parsed.scope, entry.data);
+    const version = entry.version ?? 1;
     enqueueWrite(async () => {
       await putEntryRecord(parsed.scope, {
         customMetadata,
         key: parsed.key,
         lastAccessAt: entry.timestamp,
+        sizeBytes: estimateEntrySizeBytes({
+          customMetadata,
+          lastAccessAt: entry.timestamp,
+          scope: parsed.scope,
+          value: entry.data,
+          version,
+        }),
         value: entry.data,
-        version: entry.version ?? 1,
+        version,
       });
     });
   }
@@ -1319,15 +1388,25 @@ export function createIndexedDbPersistentStorageTestStore(
 
     enqueueWrite(async () => {
       const existing = getEntryRecord(parsed.scope, parsed.key);
+      const customMetadata =
+        existing === null
+          ? buildCustomMetadata(parsed.scope, value)
+          : getCustomMetadataFromEntryRecord(existing);
+      const lastAccessAt = existing?.a ?? Date.now();
+      const version = existing?.v ?? 1;
       await putEntryRecord(parsed.scope, {
-        customMetadata:
-          existing === null
-            ? buildCustomMetadata(parsed.scope, value)
-            : getCustomMetadataFromEntryRecord(existing),
+        customMetadata,
         key: parsed.key,
-        lastAccessAt: existing?.a ?? Date.now(),
+        lastAccessAt,
+        sizeBytes: estimateEntrySizeBytes({
+          customMetadata,
+          lastAccessAt,
+          scope: parsed.scope,
+          value,
+          version,
+        }),
         value,
-        version: existing?.v ?? 1,
+        version,
       });
     });
   }
@@ -1343,12 +1422,22 @@ export function createIndexedDbPersistentStorageTestStore(
       const normalized = normalizeMetadataValue(parsed.key, value);
       const metadata = parseManagedMetadataRecord(normalized, parsed.key);
       if (metadata === null) return;
+      const existingValue = expandEntryValue(parsed.scope, existing);
 
       await putEntryRecord(parsed.scope, {
         customMetadata: metadata.customMetadata,
         key: parsed.key,
         lastAccessAt: metadata.lastAccessAt,
-        value: expandEntryValue(parsed.scope, existing),
+        sizeBytes:
+          metadata.sizeBytes ??
+          estimateEntrySizeBytes({
+            customMetadata: metadata.customMetadata,
+            lastAccessAt: metadata.lastAccessAt,
+            scope: parsed.scope,
+            value: existingValue,
+            version: metadata.version,
+          }),
+        value: existingValue,
         version: metadata.version,
       });
     });
@@ -1561,6 +1650,7 @@ export function createIndexedDbPersistentStorageTestStore(
             storageKey,
             createStorageCacheEntry(
               {
+                p: params,
                 ...(queryOptions.hasMore === true ? { h: true } : {}),
                 i: items.map(normalizeQueryItemRef),
               },
@@ -1570,11 +1660,6 @@ export function createIndexedDbPersistentStorageTestStore(
               },
             ),
           );
-          setMetadataValue(storageKey, {
-            customMetadata: { p: params },
-            lastAccessAt: queryOptions.timestamp ?? Date.now(),
-            version: queryOptions.version ?? 1,
-          });
           return storageKey;
         },
         setItemStaticPolicy: (policy) =>

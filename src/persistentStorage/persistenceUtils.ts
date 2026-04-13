@@ -51,22 +51,77 @@ export function createShouldIgnoreItemPredicate<
   return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
 }
 
-/**
- * Creates a comparator for eviction sorting. Entries matching earlier tiers
- * are kept first (sorted to the front). Within the same tier, entries with
- * more recent `lastAccessAt` are kept first.
- */
-export function createEvictionComparator<T>(
-  tiers: Array<(entry: T) => boolean>,
-  getLastAccessAt: (entry: T) => number,
-): (a: T, b: T) => number {
-  return (a, b) => {
-    for (const tier of tiers) {
-      const aInTier = tier(a);
-      const bInTier = tier(b);
-      if (aInTier && !bInTier) return -1;
-      if (!aInTier && bInTier) return 1;
+export function getSerializedStringSize(value: string): number {
+  return value.length;
+}
+
+export function serializeJsonForStorage(value: unknown): {
+  rawValue: string;
+  sizeBytes: number;
+} {
+  const rawValue = JSON.stringify(value);
+  return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
+}
+
+export function keepEntriesWithinByteBudget<T>(args: {
+  entries: T[];
+  getKey: (entry: T) => string;
+  getLastAccessAt: (entry: T) => number;
+  getSizeBytes: (entry: T) => number;
+  isPinned: (entry: T) => boolean;
+  isProtected: (entry: T) => boolean;
+  maxBytes: number;
+}): Set<string> {
+  const keptKeys = new Set<string>();
+  let unprotectedBytes = 0;
+
+  for (const entry of args.entries) {
+    if (args.isProtected(entry)) continue;
+    unprotectedBytes += args.getSizeBytes(entry);
+  }
+
+  if (unprotectedBytes <= args.maxBytes) {
+    for (const entry of args.entries) {
+      keptKeys.add(args.getKey(entry));
     }
-    return getLastAccessAt(b) - getLastAccessAt(a);
-  };
+    return keptKeys;
+  }
+
+  // Sort entries for eviction: protected first, then pinned, then by lastAccessAt (MRU first)
+  const sortedEntries = [...args.entries].sort((a, b) => {
+    const aProtected = args.isProtected(a);
+    const bProtected = args.isProtected(b);
+    if (aProtected && !bProtected) return -1;
+    if (!aProtected && bProtected) return 1;
+
+    const aPinned = args.isPinned(a);
+    const bPinned = args.isPinned(b);
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+
+    return args.getLastAccessAt(b) - args.getLastAccessAt(a);
+  });
+  let keptUnprotectedBytes = 0;
+
+  for (const entry of sortedEntries) {
+    const key = args.getKey(entry);
+    if (args.isProtected(entry)) {
+      keptKeys.add(key);
+      continue;
+    }
+
+    const sizeBytes = args.getSizeBytes(entry);
+    if (args.isPinned(entry)) {
+      keptKeys.add(key);
+      keptUnprotectedBytes += sizeBytes;
+      continue;
+    }
+
+    if (keptUnprotectedBytes + sizeBytes <= args.maxBytes) {
+      keptKeys.add(key);
+      keptUnprotectedBytes += sizeBytes;
+    }
+  }
+
+  return keptKeys;
 }

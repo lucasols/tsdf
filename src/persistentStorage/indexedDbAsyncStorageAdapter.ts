@@ -1,6 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
-import { createAsyncStorageAdapter } from './asyncStorageAdapter';
+import {
+  createAsyncStorageAdapter,
+  estimateManagedAsyncStorageEntrySizeBytes,
+} from './asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   compareMetadata,
@@ -13,6 +16,7 @@ import {
   parseAsyncStorageRecordKey,
   serializeProtectedRef,
 } from './asyncStorageShared';
+import { serializeJsonForStorage } from './persistenceUtils';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,
@@ -37,6 +41,7 @@ const INDEXED_DB_MAINTENANCE_META_KEY = 'maintenance';
 type IndexedDbManagedMetadataRecord = {
   customMetadata?: Record<string, unknown>;
   lastAccessAt: number;
+  sizeBytes?: number;
   version: number;
 };
 
@@ -278,6 +283,7 @@ type IndexedDbEntryRecord = {
   o?: 1;
   p?: unknown;
   v?: number;
+  z?: number;
 };
 
 function getCustomMetadataFromEntryRecord(
@@ -298,6 +304,7 @@ function toMetadataRecord(
 
   return {
     lastAccessAt: record.a,
+    ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
     version: record.v ?? 1,
     ...(customMetadata ? { customMetadata } : {}),
   };
@@ -312,6 +319,7 @@ function toPublicMetadata(
     key,
     lastAccessAt: record.a,
     payloadRef: getPayloadRecordKey(key),
+    ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
     version: record.v ?? 1,
     writtenAt: record.a,
   };
@@ -328,6 +336,7 @@ const INDEXED_DB_ENTRY_RECORD_KEYS = new Set([
   'o',
   'p',
   'v',
+  'z',
 ]);
 
 const INDEXED_DB_NAMESPACE_POLICY_RECORD_KEYS = new Set(['p', 's']);
@@ -344,7 +353,7 @@ function toEntryRecordValue(value: unknown): IndexedDbEntryRecord {
   return __LEGIT_CAST__<IndexedDbEntryRecord, unknown>(value);
 }
 
-type IndexedDbPersistedStaticPolicy = { k?: string[]; m?: number };
+type IndexedDbPersistedStaticPolicy = { b?: number; k?: string[] };
 
 type IndexedDbNamespacePolicyRecord = {
   p: IndexedDbPersistedStaticPolicy | null;
@@ -366,16 +375,16 @@ function parseIndexedDbPersistedStaticPolicy(
   if (!isObject(value)) return undefined;
 
   const record = toRecordValue(value);
-  if (Object.keys(record).some((key) => key !== 'k' && key !== 'm')) {
+  if (Object.keys(record).some((key) => key !== 'b' && key !== 'k')) {
     return undefined;
   }
 
-  const rawMaxEntries = record.m;
+  const rawMaxBytes = record.b;
   if (
-    rawMaxEntries !== undefined &&
-    (typeof rawMaxEntries !== 'number' ||
-      !Number.isInteger(rawMaxEntries) ||
-      rawMaxEntries < 0)
+    rawMaxBytes !== undefined &&
+    (typeof rawMaxBytes !== 'number' ||
+      !Number.isInteger(rawMaxBytes) ||
+      rawMaxBytes < 0)
   ) {
     return undefined;
   }
@@ -385,7 +394,7 @@ function parseIndexedDbPersistedStaticPolicy(
   if (validatedPinnedKeys === null) return undefined;
 
   return normalizeStaticPolicy({
-    ...(typeof record.m === 'number' ? { maxEntries: record.m } : {}),
+    ...(typeof record.b === 'number' ? { maxBytes: record.b } : {}),
     ...(validatedPinnedKeys !== undefined
       ? { pinnedKeys: validatedPinnedKeys }
       : {}),
@@ -399,8 +408,8 @@ function serializeIndexedDbPersistedStaticPolicy(
   if (normalizedPolicy === null) return null;
 
   return {
-    ...(normalizedPolicy.maxEntries !== undefined
-      ? { m: normalizedPolicy.maxEntries }
+    ...(normalizedPolicy.maxBytes !== undefined
+      ? { b: normalizedPolicy.maxBytes }
       : {}),
     ...(normalizedPolicy.pinnedKeys !== undefined &&
     normalizedPolicy.pinnedKeys.length > 0
@@ -437,6 +446,7 @@ function isValidEntryRecord(record: unknown): boolean {
     typeof recordValue.a === 'number' &&
     'd' in recordValue &&
     (recordValue.v === undefined || typeof recordValue.v === 'number') &&
+    (recordValue.z === undefined || typeof recordValue.z === 'number') &&
     (recordValue.m === undefined || isObject(recordValue.m)) &&
     (recordValue.g === undefined || typeof recordValue.g === 'string') &&
     (recordValue.o === undefined || recordValue.o === 1) &&
@@ -482,6 +492,22 @@ function compactEntryValue(
 ): Pick<IndexedDbEntryRecord, 'd' | 'f' | 'h'> {
   void scope;
   return { d: value };
+}
+
+function estimateIndexedDbManagedEntrySizeBytes(args: {
+  customMetadata?: Record<string, unknown>;
+  lastAccessAt: number;
+  serializedValue?: string;
+  value: unknown;
+  version: number;
+}): number {
+  return estimateManagedAsyncStorageEntrySizeBytes({
+    customMetadata: args.customMetadata,
+    lastAccessAt: args.lastAccessAt,
+    serializedValue:
+      args.serializedValue ?? serializeJsonForStorage(args.value).rawValue,
+    version: args.version,
+  });
 }
 
 function expandEntryValue(
@@ -655,6 +681,9 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           {
             a: metadata.lastAccessAt,
             ...(metadata.version !== 1 ? { v: metadata.version } : {}),
+            ...(metadata.sizeBytes !== undefined
+              ? { z: metadata.sizeBytes }
+              : {}),
             ...(metadata.customMetadata ?? {}),
           },
         ]),
@@ -1099,6 +1128,16 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         splitCustomMetadata(customMetadata);
       const nextLastAccessAt =
         touchTimestamps.get(upsert.key) ?? existing?.a ?? now;
+      const sizeBytes =
+        scope.kind !== 'document'
+          ? estimateIndexedDbManagedEntrySizeBytes({
+              customMetadata,
+              lastAccessAt: nextLastAccessAt,
+              serializedValue: upsert.serializedValue,
+              value: upsert.value,
+              version: upsert.version,
+            })
+          : undefined;
       const compactValue = compactEntryValue(scope, upsert.value);
       await openRequestAsPromise(
         entryStore.put(
@@ -1111,6 +1150,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
             ...(offlineProtected === true ? { o: 1 as const } : {}),
             ...(payload !== undefined ? { p: payload } : {}),
             ...(upsert.version !== 1 ? { v: upsert.version } : {}),
+            ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
           } satisfies IndexedDbEntryRecord,
           createEntryPrimaryKey(scope, upsert.key),
         ),
@@ -1350,6 +1390,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           ...(payload === undefined ? { p: undefined } : {}),
           ...(metadata.version !== 1 ? { v: metadata.version } : {}),
           ...(metadata.version === 1 ? { v: undefined } : {}),
+          ...(metadata.sizeBytes !== undefined
+            ? { z: metadata.sizeBytes }
+            : {}),
+          ...(metadata.sizeBytes === undefined ? { z: undefined } : {}),
         } satisfies IndexedDbEntryRecord,
         createEntryPrimaryKey(scope, key),
       );
@@ -1577,6 +1621,15 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     const { extraMetadata, group, offlineProtected, payload } =
       splitCustomMetadata(args.customMetadata);
+    const sizeBytes =
+      scope.kind !== 'document'
+        ? estimateIndexedDbManagedEntrySizeBytes({
+            customMetadata: args.customMetadata,
+            lastAccessAt: args.lastAccessAt,
+            value: args.value,
+            version: args.version,
+          })
+        : undefined;
     const compactValue = compactEntryValue(scope, args.value);
     entryStore.put(
       {
@@ -1588,6 +1641,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         ...(offlineProtected === true ? { o: 1 as const } : {}),
         ...(payload !== undefined ? { p: payload } : {}),
         ...(args.version !== 1 ? { v: args.version } : {}),
+        ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
       } satisfies IndexedDbEntryRecord,
       createEntryPrimaryKey(scope, args.key),
     );
@@ -1627,12 +1681,16 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
       const customMetadata = Object.fromEntries(
         Object.entries(rawMetadataRecord).filter(
-          ([metadataKey]) => metadataKey !== 'a' && metadataKey !== 'v',
+          ([metadataKey]) =>
+            metadataKey !== 'a' && metadataKey !== 'v' && metadataKey !== 'z',
         ),
       );
       entries.set(key, {
         ...(Object.keys(customMetadata).length > 0 ? { customMetadata } : {}),
         lastAccessAt: rawMetadataRecord.a,
+        ...(typeof rawMetadataRecord.z === 'number'
+          ? { sizeBytes: rawMetadataRecord.z }
+          : {}),
         version:
           typeof rawMetadataRecord.v === 'number' ? rawMetadataRecord.v : 1,
       });

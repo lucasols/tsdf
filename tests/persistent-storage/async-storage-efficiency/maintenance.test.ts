@@ -583,10 +583,10 @@ describe('async storage efficiency: maintenance', () => {
     createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.68 kb)
-      └ sess1 (0.67 kb)
-        ├ mixed-list-query (0.47 kb)
-        │ ├ li._i.r.json (0.14 kb)
+      "tsdf (0.69 kb)
+      └ sess1 (0.68 kb)
+        ├ mixed-list-query (0.48 kb)
+        │ ├ li._i.r.json (0.16 kb)
         │ ├ li.h~2924752681.p.json (0.10 kb)
         │ ├ lq._i.r.json (0.13 kb)
         │ └ lq.h~2044383828.p.json (0.08 kb)
@@ -635,7 +635,7 @@ describe('async storage efficiency: maintenance', () => {
       .      | 🗂️ list-dir-entries tsdf/sess1/valid-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.005s | 📖 #1 tsdf/sess1/mixed-list-query/li._i.r.json
-             |    └ (items index) | 0.12 kb
+             |    └ (items index) | 0.13 kb
       2.008s | 📖 #2 tsdf/sess1/mixed-list-query/lq._i.r.json
              |    └ (queries index) | 0.10 kb
       2.011s | 📖 #3 tsdf/sess1/valid-doc/d._i.r.json (namespace index) | 0.06 kb
@@ -646,10 +646,10 @@ describe('async storage efficiency: maintenance', () => {
       "
     `);
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.54 kb)
-      ├ sess1 (0.47 kb)
-      │ ├ mixed-list-query (0.27 kb)
-      │ │ ├ li._i.r.json (0.14 kb)
+      "tsdf (0.55 kb)
+      ├ sess1 (0.48 kb)
+      │ ├ mixed-list-query (0.28 kb)
+      │ │ ├ li._i.r.json (0.16 kb)
       │ │ └ li.h~2924752681.p.json (0.10 kb)
       │ └ valid-doc (0.19 kb)
       │   ├ d._i.r.json (0.08 kb)
@@ -704,7 +704,7 @@ describe('async storage efficiency: maintenance', () => {
       2.004s | 🗂️ list-dir-entries tsdf/sess1/orphan-collection
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1706329294.p.json","file:ci.h~2293725328.p.json"]
       2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
-             |    └ (namespace index) | 0.11 kb
+             |    └ (namespace index) | 0.13 kb
       2.008s | 🗑️ #2 ✅ tsdf/sess1/orphan-collection/ci.h~2293725328.p.json
              |    └ (entry data)
       2.009s | end
@@ -712,17 +712,17 @@ describe('async storage efficiency: maintenance', () => {
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.38 kb)
-      ├ sess1 (0.31 kb)
-      │ └ orphan-collection (0.30 kb)
-      │   ├ ci._i.r.json (0.13 kb)
+      "tsdf (0.40 kb)
+      ├ sess1 (0.33 kb)
+      │ └ orphan-collection (0.32 kb)
+      │   ├ ci._i.r.json (0.15 kb)
       │   └ ci.h~1706329294.p.json (0.13 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
     expect(getParsedOpfsFileData('tsdf/sess1/orphan-collection/ci._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          "kept-user: { a: 1735689600000, p: 'kept-user' }
+          "kept-user: { a: 1735689600000, p: 'kept-user', z: 82 }
       `);
   });
 
@@ -914,9 +914,9 @@ describe('async storage efficiency: maintenance', () => {
       .     | 📖 #3 tsdf/user%40example.com/protected-doc/d._i.r.json
             |    └ (namespace index) | 0.08 kb
       .     | 📖 #4 tsdf/user%40example.com/protected-doc/oe._i.r.json
-            |    └ (namespace index) | 0.07 kb
+            |    └ (namespace index) | 0.09 kb
       .     | 📖 #5 tsdf/user%40example.com/protected-doc/oq._i.r.json
-            |    └ (namespace index) | 0.13 kb
+            |    └ (namespace index) | 0.14 kb
       .     | 📖 #6 tsdf/user%40example.com/unprotected-doc/d._i.r.json
             |    └ (namespace index) | 0.06 kb
       138ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray

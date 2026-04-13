@@ -1,6 +1,8 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { estimateManagedAsyncStorageEntrySizeBytes } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { advanceTime } from '../../utils/genericTestUtils';
 import {
   getIndexedDbStructureSnapshot,
@@ -12,12 +14,14 @@ import {
   createCollectionEnv,
   createDocumentEnv,
   flushInvalidationPersistence,
+  getAsyncCollectionEntrySizeBytes,
   resolveAfterIndexedDbStorage,
   setProtectedKeysSnapshot,
   settleIndexedDbStorage,
   settleIndexedDbStorageCapture,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
+  sumPersistedEntryBytes,
   waitForIndexedDbCondition,
   waitForScheduledCleanup,
 } from './shared';
@@ -195,6 +199,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","collection-expiration","ci"]'
       p: 'fresh-user'
+      z: 85
     `);
   });
 
@@ -203,20 +208,23 @@ describe('indexeddb async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const olderKeptItem = { value: { id: 'b', name: 'Older cached' } };
+    const newestKeptItem = { value: { id: 'c', name: 'Newest cached' } };
 
     // Seed an over-limit cache so the startup maintenance pass has to trim it.
     collectionScope.collection.seedItem('a', {
       value: { id: 'a', name: 'Oldest cached' },
     });
     await advanceTime(100);
-    collectionScope.collection.seedItem('b', {
-      value: { id: 'b', name: 'Older cached' },
-    });
+    collectionScope.collection.seedItem('b', olderKeptItem);
     await advanceTime(100);
-    collectionScope.collection.seedItem('c', {
-      value: { id: 'c', name: 'Newest cached' },
+    collectionScope.collection.seedItem('c', newestKeptItem);
+    collectionScope.collection.setStaticPolicy({
+      b: sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('b', olderKeptItem),
+        getAsyncCollectionEntrySizeBytes('c', newestKeptItem),
+      ),
     });
-    collectionScope.collection.setStaticPolicy({ m: 2 });
 
     // Startup should only schedule the cleanup work.
     const startupOperationCapture =
@@ -251,7 +259,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      p: { m: 2 }
+      p: { b: 139 }
       s: 'sess1'
     `);
   });
@@ -261,73 +269,41 @@ describe('indexeddb async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const defaultMaxBytes = getDefaultMaxBytesForScope({
+      adapter: 'async',
+      scopeKind: 'collection.item',
+    });
+    const largeNameSuffix = 'x'.repeat(8_192);
+    const getPayload = (index: number) =>
+      `user-${String(index).padStart(4, '0')}`;
+    const getItem = (index: number) => ({
+      value: {
+        id: getPayload(index),
+        name: `${largeNameSuffix}-${getPayload(index)}`,
+      },
+    });
+    const entrySizeBytes = getAsyncCollectionEntrySizeBytes(
+      getPayload(0),
+      getItem(0),
+    );
+    const keptEntryCount = Math.floor(defaultMaxBytes / entrySizeBytes);
+    const totalEntries = keptEntryCount + 1;
 
-    for (let index = 0; index <= 50; index++) {
-      collectionScope.collection.seedItem(String(index), {
-        value: { id: String(index), name: `Cached ${index}` },
+    for (let index = 0; index < totalEntries; index++) {
+      collectionScope.collection.seedItem(getPayload(index), getItem(index), {
+        timestamp: Date.now() + index,
       });
-      await advanceTime(10);
     }
 
     createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
     await waitForScheduledCleanup();
 
-    expect(
-      (await collectionScope.collection.listStoredPayloads()).sort(
-        (left, right) => left.localeCompare(right),
-      ),
-    ).toMatchInlineSnapshot(`
-      - '1'
-      - '10'
-      - '11'
-      - '12'
-      - '13'
-      - '14'
-      - '15'
-      - '16'
-      - '17'
-      - '18'
-      - '19'
-      - '2'
-      - '20'
-      - '21'
-      - '22'
-      - '23'
-      - '24'
-      - '25'
-      - '26'
-      - '27'
-      - '28'
-      - '29'
-      - '3'
-      - '30'
-      - '31'
-      - '32'
-      - '33'
-      - '34'
-      - '35'
-      - '36'
-      - '37'
-      - '38'
-      - '39'
-      - '4'
-      - '40'
-      - '41'
-      - '42'
-      - '43'
-      - '44'
-      - '45'
-      - '46'
-      - '47'
-      - '48'
-      - '49'
-      - '5'
-      - '50'
-      - '6'
-      - '7'
-      - '8'
-      - '9'
-    `);
+    const storedPayloads =
+      await collectionScope.collection.listStoredPayloads();
+
+    expect(storedPayloads).toHaveLength(keptEntryCount);
+    expect(storedPayloads).not.toContain(getPayload(0));
+    expect(storedPayloads).toContain(getPayload(totalEntries - 1));
   });
 
   test('startup cleanup combines expiration and maxItems trimming in one sweep', async () => {
@@ -336,6 +312,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const newerKeptItem = { value: { id: 'c', name: 'Newer cached' } };
+    const newestKeptItem = { value: { id: 'd', name: 'Newest cached' } };
 
     collectionScope.collection.seedItem(
       'a',
@@ -347,14 +325,15 @@ describe('indexeddb async storage efficiency: collection', () => {
       value: { id: 'b', name: 'Older cached' },
     });
     await advanceTime(100);
-    collectionScope.collection.seedItem('c', {
-      value: { id: 'c', name: 'Newer cached' },
-    });
+    collectionScope.collection.seedItem('c', newerKeptItem);
     await advanceTime(100);
-    collectionScope.collection.seedItem('d', {
-      value: { id: 'd', name: 'Newest cached' },
+    collectionScope.collection.seedItem('d', newestKeptItem);
+    collectionScope.collection.setStaticPolicy({
+      b: sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('c', newerKeptItem),
+        getAsyncCollectionEntrySizeBytes('d', newestKeptItem),
+      ),
     });
-    collectionScope.collection.setStaticPolicy({ m: 2 });
 
     const startupOperationCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
@@ -399,11 +378,27 @@ describe('indexeddb async storage efficiency: collection', () => {
     collectionScope.collection.seedItem('c', {
       value: { id: 'c', name: 'Newer cached' },
     });
+    const olderKeptItem = { value: { id: 'b', name: 'Older cached' } };
+    const newerKeptItem = { value: { id: 'c', name: 'Newer cached' } };
+    const freshItem = { value: { id: 'd', name: 'Fresh' } };
 
     // Startup should only queue the background scan.
     const startupOperationCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
-    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: Math.max(
+        sumPersistedEntryBytes(
+          getAsyncCollectionEntrySizeBytes('b', olderKeptItem),
+          getAsyncCollectionEntrySizeBytes('c', newerKeptItem),
+        ),
+        sumPersistedEntryBytes(
+          getAsyncCollectionEntrySizeBytes('c', newerKeptItem),
+          getAsyncCollectionEntrySizeBytes('d', freshItem),
+        ),
+      ),
+    });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
 
@@ -457,7 +452,16 @@ describe('indexeddb async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
-    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 3 });
+    const freshCachedItem = { value: { id: 'c', name: 'Fresh cached' } };
+    const freshLiveItem = { value: { id: 'd', name: 'Fresh' } };
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('c', freshCachedItem),
+        getAsyncCollectionEntrySizeBytes('d', freshLiveItem),
+      ),
+    });
 
     // Drain startup cleanup first so the later expiration removal is attributable to the maxItems path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -474,9 +478,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       { timestamp: expiredTimestamp },
     );
     await advanceTime(100);
-    collectionScope.collection.seedItem('c', {
-      value: { id: 'c', name: 'Fresh cached' },
-    });
+    collectionScope.collection.seedItem('c', freshCachedItem);
 
     const readCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
@@ -519,7 +521,7 @@ describe('indexeddb async storage efficiency: collection', () => {
               - key: ['["sess1","col-expired-during-max-items","ci"]', '"c']
                 value: 'JSON object | 0.3 kb'
               - key: ['["sess1","col-expired-during-max-items","ci"]', '"d']
-                value: 'JSON object | 0.2 kb'
+                value: 'JSON object | 0.3 kb'
           - autoIncrement: '❌'
             indexes: []
             keyPath: 'k'
@@ -534,9 +536,75 @@ describe('indexeddb async storage efficiency: collection', () => {
             rowCount: 1
             rows:
               - key: ['sess1', 'col-expired-during-max-items', 'ci']
-                value: 'JSON object | 0.0 kb'
+                value: 'JSON object | 0.1 kb'
         version: 1
       `);
+  });
+
+  test('real indexeddb commits store metadata-inclusive sizeBytes', async () => {
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'collection-real-z-bytes',
+      kind: 'collection.item',
+    } as const;
+    const namespace = mockAdapter.adapter.openNamespace<
+      { value: string },
+      { p?: string; tag?: string }
+    >(scope);
+    const firstValue = { value: 'first' };
+    const secondValue = { value: 'second' };
+
+    // Cover both production call shapes: payload-only size from the higher
+    // namespace helper, and a direct commit with no caller-provided size.
+    await resolveAfterIndexedDbStorage(
+      namespace.commit({
+        upserts: [
+          {
+            key: 'a',
+            metadata: { p: 'a' },
+            sizeBytes: JSON.stringify(firstValue).length,
+            value: firstValue,
+            version: 1,
+          },
+          {
+            key: 'b',
+            metadata: { tag: 'second' },
+            value: secondValue,
+            version: 1,
+          },
+        ],
+      }),
+      mockAdapter,
+    );
+
+    const metadataEntries = await resolveAfterIndexedDbStorage(
+      namespace.listMetadata({ order: 'key' }),
+      mockAdapter,
+    );
+    expect(metadataEntries).toHaveLength(2);
+
+    const [firstEntry, secondEntry] = metadataEntries;
+    if (firstEntry === undefined || secondEntry === undefined) {
+      throw new Error('Expected IndexedDB metadata entries to be available.');
+    }
+
+    expect(firstEntry.sizeBytes).toBe(
+      estimateManagedAsyncStorageEntrySizeBytes({
+        customMetadata: { p: 'a' },
+        lastAccessAt: firstEntry.lastAccessAt,
+        serializedValue: JSON.stringify(firstValue),
+        version: 1,
+      }),
+    );
+    expect(secondEntry.sizeBytes).toBe(
+      estimateManagedAsyncStorageEntrySizeBytes({
+        customMetadata: { tag: 'second' },
+        lastAccessAt: secondEntry.lastAccessAt,
+        serializedValue: JSON.stringify(secondValue),
+        version: 1,
+      }),
+    );
   });
 
   test('repeated overflowing collection updates evict inline without scheduling background maintenance', async () => {
@@ -553,7 +621,28 @@ describe('indexeddb async storage efficiency: collection', () => {
       value: { id: 'b', name: 'Newer cached' },
     });
 
-    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: Math.max(
+        sumPersistedEntryBytes(
+          getAsyncCollectionEntrySizeBytes('a', {
+            value: { id: 'a', name: 'Oldest cached' },
+          }),
+          getAsyncCollectionEntrySizeBytes('b', {
+            value: { id: 'b', name: 'Newer cached' },
+          }),
+        ),
+        sumPersistedEntryBytes(
+          getAsyncCollectionEntrySizeBytes('c', {
+            value: { id: 'c', name: 'Third' },
+          }),
+          getAsyncCollectionEntrySizeBytes('d', {
+            value: { id: 'd', name: 'Fourth' },
+          }),
+        ),
+      ),
+    });
 
     // Drain the startup maintenance so the capture only covers the repeated inline overflow path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -724,10 +813,12 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-mutation-flow","ci"]'
       p: '1'
+      z: 68
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.002s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-mutation-flow","collection.item"] order=lru-desc -> ["\\"1"]
+      1.048s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -784,17 +875,19 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689606142
+      a: 1735689606144
 
       d:
         value: { id: '1', name: 'Edited after delete' }
 
       i: '["sess1","col-mutation-retry-after-delete","ci"]'
       p: '1'
+      z: 76
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-after-delete","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.001s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-mutation-retry-after-delete","collection.item"] order=lru-desc -> []
+      1.047s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-after-delete","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -865,17 +958,19 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689606142
+      a: 1735689606144
 
       d:
         value: { id: '1', name: 'Edited during write' }
 
       i: '["sess1","col-mutation-retry-during-write","ci"]'
       p: '1'
+      z: 76
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
-      1.045s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.001s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-mutation-retry-during-write","collection.item"] order=lru-desc -> []
+      1.047s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-mutation-retry-during-write","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   }, 5000);
@@ -909,6 +1004,7 @@ describe('indexeddb async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`['2']`);
     expect(deleteOperations).toMatchInlineSnapshot(`
       ""
+      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-delete-flow","collection.item"] order=lru-desc -> ["\\"2", "\\"1"]
       1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-delete-flow","collection.item"] put=[] delete=["\\"1"] touch=[] static-policy
       ""
     `);
@@ -975,10 +1071,12 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess-invalidation-flow","col-invalidation-flow","ci"]'
       p: '1'
+      z: 67
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
-      1.855s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] order=lru-desc -> ["\\"1"]
+      1.858s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
   });
@@ -1042,6 +1140,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       i: '["sess1","col-offline-marker-flow","ci"]'
       o: 1
       p: '1'
+      z: 76
     `);
   });
 
@@ -1123,9 +1222,11 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-coalesced-invalidations","ci"]'
       p: '1'
+      z: 69
     `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
+      1.81s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-coalesced-invalidations","collection.item"] order=lru-desc -> ["\\"1"]
       1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-coalesced-invalidations","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
@@ -1292,10 +1393,12 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-remount-no-cache","ci"]'
       p: '1'
+      z: 69
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","col-remount-no-cache","collection.item"] keys=["\\"1"] -> []
+      1.811s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-remount-no-cache","collection.item"] order=lru-desc -> []
       1.851s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-no-cache","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);

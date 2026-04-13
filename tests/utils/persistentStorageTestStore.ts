@@ -24,6 +24,8 @@ import type {
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 
+const utf8Encoder = new TextEncoder();
+
 type StorageSeedOptions = { timestamp?: number; version?: number };
 
 type ListQuerySeedItemOptions = StorageSeedOptions & {
@@ -76,6 +78,14 @@ function readRequiredEntry<T>(
   }
 
   return entry;
+}
+
+function getStoredValueSizeBytes(
+  storage: PersistentTestStoreStorage,
+  key: string,
+): number | undefined {
+  const raw = storage.getRaw(key);
+  return raw === null ? undefined : utf8Encoder.encode(raw).byteLength;
 }
 
 export type PersistentTestStoreScope = {
@@ -232,6 +242,7 @@ function createPersistentTestStore(
             upsertManagedLocalStorageSingleEntry({
               storageKey: documentStorageKey,
               lastAccessAt: entryTimestamp,
+              clearSizeBytes: true,
             });
           }
 
@@ -326,6 +337,7 @@ function createPersistentTestStore(
               storagePrefix: `tsdf.${sessionKey}.${storeName}.ci.`,
               entryKey: collectionItemKey(payload),
               lastAccessAt: entryTimestamp,
+              sizeBytes: getStoredValueSizeBytes(storage, key),
               meta: { p: payload },
             });
           }
@@ -431,6 +443,7 @@ function createPersistentTestStore(
               storagePrefix: `tsdf.${sessionKey}.${storeName}.li.`,
               entryKey: itemKey,
               lastAccessAt: entryTimestamp,
+              sizeBytes: getStoredValueSizeBytes(storage, storageKey),
               meta: { p: payload },
             });
           }

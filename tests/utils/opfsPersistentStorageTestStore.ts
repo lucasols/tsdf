@@ -16,6 +16,7 @@ import {
   parseFileNameInfo,
   resolveHashedPayloadRecordKeyFromValue,
 } from '../../src/persistentStorage/opfsFileNaming';
+import { getSerializedStringSize } from '../../src/persistentStorage/persistenceUtils';
 import type {
   AsyncStorageNamespaceScope,
   StorageCacheEntry,
@@ -246,6 +247,7 @@ type ManagedMetadataRecord = {
   customMetadata: Record<string, unknown>;
   key: string;
   lastAccessAt: number;
+  sizeBytes?: number;
   version: number;
   writtenAt: number;
 };
@@ -261,9 +263,32 @@ function serializeManagedMetadataRecord(
 
   return {
     a: metadata.lastAccessAt,
+    ...(metadata.sizeBytes !== undefined ? { z: metadata.sizeBytes } : {}),
     ...(metadata.version !== 1 ? { v: metadata.version } : {}),
     ...metadata.customMetadata,
   };
+}
+
+function estimateManagedEntrySizeBytes(args: {
+  customMetadata: Record<string, unknown>;
+  lastAccessAt: number;
+  rawValue: string;
+  version: number;
+}): number {
+  return (
+    getSerializedStringSize(args.rawValue) +
+    getSerializedStringSize(
+      JSON.stringify(
+        serializeManagedMetadataRecord({
+          key: '__size__',
+          writtenAt: args.lastAccessAt,
+          lastAccessAt: args.lastAccessAt,
+          version: args.version,
+          customMetadata: args.customMetadata,
+        }),
+      ),
+    )
+  );
 }
 
 function parseManagedMetadataRecord(
@@ -274,7 +299,8 @@ function parseManagedMetadataRecord(
   if (
     record === null ||
     typeof record.a !== 'number' ||
-    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number') ||
+    ('z' in record && record.z !== undefined && typeof record.z !== 'number')
   ) {
     return null;
   }
@@ -289,6 +315,7 @@ function parseManagedMetadataRecord(
     key,
     writtenAt: record.a,
     lastAccessAt: record.a,
+    ...(typeof record.z === 'number' ? { sizeBytes: record.z } : {}),
     version: typeof record.v === 'number' ? record.v : 1,
     customMetadata,
   };
@@ -353,6 +380,9 @@ function normalizeMetadataValue(key: string, value: unknown): unknown {
       key,
       writtenAt: record.lastAccessAt,
       lastAccessAt: record.lastAccessAt,
+      ...(typeof record.sizeBytes === 'number'
+        ? { sizeBytes: record.sizeBytes }
+        : {}),
       version: record.version,
       customMetadata: getRecord(record.customMetadata) ?? {},
     });
@@ -572,18 +602,31 @@ function writeLogicalStorageEntry(
   if (parsed === null) return;
 
   const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(value);
+  const rawValue = JSON.stringify(
+    compactLogicalPayload(parsed.scope, entry.data),
+  );
   writeRawRecord(
     mockBrowserOpfs,
     parsed.scope,
     getPayloadRecordKey(parsed.key),
-    JSON.stringify(compactLogicalPayload(parsed.scope, entry.data)),
+    rawValue,
   );
+  const sizeBytes =
+    parsed.scope.kind === 'document'
+      ? undefined
+      : estimateManagedEntrySizeBytes({
+          rawValue,
+          lastAccessAt: entry.timestamp,
+          version: entry.version ?? 1,
+          customMetadata: buildCustomMetadata(parsed.scope, entry.data),
+        });
   const nextEntries = readNamespaceIndex(mockBrowserOpfs, parsed.scope);
   nextEntries.set(parsed.key, {
     key: parsed.key,
     writtenAt: entry.timestamp,
     lastAccessAt: entry.timestamp,
     version: entry.version ?? 1,
+    ...(sizeBytes !== undefined ? { sizeBytes } : {}),
     customMetadata: buildCustomMetadata(parsed.scope, entry.data),
   });
   writeNamespaceIndex(mockBrowserOpfs, parsed.scope, nextEntries);
@@ -1472,9 +1515,21 @@ export function createOpfsPersistentStorageTestStore(
             },
           );
           setValue(storageKey, entry);
+          const rawValue = JSON.stringify(
+            compactLogicalPayload(listQueryQueryNamespace, entry.data),
+          );
           setMetadataValue(mockBrowserOpfs, storageKey, {
             lastAccessAt: entry.timestamp,
             version: entry.version,
+            sizeBytes: estimateManagedEntrySizeBytes({
+              rawValue,
+              lastAccessAt: entry.timestamp,
+              version: entry.version ?? 1,
+              customMetadata: {
+                ...(queryOptions.hasMore === true ? { h: true } : {}),
+                p: params,
+              },
+            }),
             customMetadata: {
               ...(queryOptions.hasMore === true ? { h: true } : {}),
               p: params,

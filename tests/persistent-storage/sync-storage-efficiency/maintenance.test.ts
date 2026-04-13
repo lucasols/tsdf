@@ -521,9 +521,9 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
             |    └ (namespace index) | 0.06 kb
       .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
-            |    └ (namespace index) | 0.13 kb
+            |    └ (namespace index) | 0.14 kb
       .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
-            |    └ (namespace index) | 0.07 kb
+            |    └ (namespace index) | 0.09 kb
       .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index) | 0.06 kb
       .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
@@ -629,17 +629,17 @@ describe('sync storage efficiency: maintenance', () => {
       0    | ✍️ #1 ❌->✅ tsdf.offline-session-write-skip.protected-doc.oq.protected-doc:1735689602100:zk00000y
            |    └ (entry data, <protected-doc:1735689602100:zk00000y>) | ❌ -> 0.33 kb
       .    | 📖 #2 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
-           |    └ (namespace index) | 0.13 kb
+           |    └ (namespace index) | 0.14 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
-           |    └ (namespace index) | 0.13 kb -> 0.24 kb
+           |    └ (namespace index) | 0.14 kb -> 0.28 kb
       .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.07 kb
+           |    └ (namespace index) | 0.09 kb
       .    | ✍️ #4 ✅->✅ tsdf.offline-session-write-skip.protected-doc.oe.document
            |    └ (entry data, <document>) | 0.16 kb -> 0.16 kb
       .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.07 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.09 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.07 kb -> 0.07 kb ⚠️ UNCHANGED
+           |    └ (namespace index) | 0.09 kb -> 0.09 kb ⚠️ UNCHANGED
       "
     `);
   });

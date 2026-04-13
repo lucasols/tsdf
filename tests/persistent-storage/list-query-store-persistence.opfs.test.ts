@@ -1,3 +1,4 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
@@ -44,6 +45,13 @@ import {
   getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../utils/persistentStorageOptimizationTestUtils';
+import {
+  getAsyncListItemEntrySizeBytes,
+  getAsyncListQueryEntrySizeBytes,
+  sumPersistedEntryBytes,
+} from './persistentStorageByteBudgetTestUtils';
+
+const utf8Encoder = new TextEncoder();
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -69,12 +77,17 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
+const fullLoadedFields = ['age', 'email', 'id', 'name'];
+
+function getLogicalListItemEntrySizeBytes(payload: string, data: Row): number {
+  return utf8Encoder.encode(JSON.stringify({ data, payload })).byteLength;
+}
 
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
-  maxItems?: number;
-  maxQueries?: number;
+  maxItemBytes?: number;
+  maxQueryBytes?: number;
   maxQuerySize?: number;
   ignoreItems?: string[] | ((payload: string) => boolean);
   pinnedItems?: string[];
@@ -95,8 +108,8 @@ function createEnv(options: {
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
-      maxItems: options.maxItems,
-      maxQueries: options.maxQueries,
+      maxItemBytes: options.maxItemBytes,
+      maxQueryBytes: options.maxQueryBytes,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,
       pinnedItems: options.pinnedItems,
@@ -1181,7 +1194,7 @@ describe('opfs: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['"users||2']`);
   });
 
-  test('cold persisted query items can be evicted during unrelated maxItems cleanup and later hydrate with missing items filtered out', async () => {
+  test('cold persisted query items can be evicted during unrelated maxItemBytes cleanup and later hydrate with missing items filtered out', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-cold-query-items';
     const sessionKey = 'sess1';
@@ -1196,7 +1209,44 @@ describe('opfs: list query store persistence', () => {
       listQueryScope.itemKey('users', 1),
       listQueryScope.itemKey('users', 2),
     ]);
-    const writerEnv = createEnv({ storeName, sessionKey, maxItems: 2 });
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      maxItemBytes: Math.max(
+        sumPersistedEntryBytes(
+          getAsyncListItemEntrySizeBytes('users||1', {
+            id: 1,
+            name: 'Older cached',
+          }),
+          getAsyncListItemEntrySizeBytes('users||2', {
+            id: 2,
+            name: 'Newer cached',
+          }),
+        ),
+        sumPersistedEntryBytes(
+          getAsyncListItemEntrySizeBytes('users||1', {
+            id: 1,
+            name: 'Older cached',
+          }),
+          getAsyncListItemEntrySizeBytes(
+            'users||3',
+            { id: 3, name: 'Fresh standalone' },
+            { loadedFields: fullLoadedFields },
+          ),
+        ),
+        sumPersistedEntryBytes(
+          getAsyncListItemEntrySizeBytes('users||2', {
+            id: 2,
+            name: 'Newer cached',
+          }),
+          getAsyncListItemEntrySizeBytes(
+            'users||3',
+            { id: 3, name: 'Fresh standalone' },
+            { loadedFields: fullLoadedFields },
+          ),
+        ),
+      ),
+    });
 
     writerEnv.apiStore.addItemToState('users||3', {
       id: 3,
@@ -1220,7 +1270,40 @@ describe('opfs: list query store persistence', () => {
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      maxItems: 2,
+      maxItemBytes: Math.max(
+        sumPersistedEntryBytes(
+          getAsyncListItemEntrySizeBytes('users||1', {
+            id: 1,
+            name: 'Older cached',
+          }),
+          getAsyncListItemEntrySizeBytes('users||2', {
+            id: 2,
+            name: 'Newer cached',
+          }),
+        ),
+        sumPersistedEntryBytes(
+          getAsyncListItemEntrySizeBytes('users||1', {
+            id: 1,
+            name: 'Older cached',
+          }),
+          getAsyncListItemEntrySizeBytes(
+            'users||3',
+            { id: 3, name: 'Fresh standalone' },
+            { loadedFields: fullLoadedFields },
+          ),
+        ),
+        sumPersistedEntryBytes(
+          getAsyncListItemEntrySizeBytes('users||2', {
+            id: 2,
+            name: 'Newer cached',
+          }),
+          getAsyncListItemEntrySizeBytes(
+            'users||3',
+            { id: 3, name: 'Fresh standalone' },
+            { loadedFields: fullLoadedFields },
+          ),
+        ),
+      ),
       serverData: {
         users: [
           { id: 1, name: 'Older cached' },
@@ -1327,20 +1410,27 @@ describe('opfs: list query store persistence', () => {
     `);
   });
 
-  test('persisted list item maxItems policy is enforced on cold startup before the store mounts', async () => {
+  test('persisted list item maxItemBytes policy is enforced on cold startup before the store mounts', async () => {
     const storeName = 'lq-opfs-cold-policy-max-items';
     const sessionKey = 'sess1';
     const { listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
+    const keptOlderItem = { id: 2, name: 'Older kept' };
+    const keptNewestItem = { id: 3, name: 'Newest kept' };
 
     listQueryScope.seedItem('users', 1, { id: 1, name: 'Older cached' });
     await advanceTime(100);
-    listQueryScope.seedItem('users', 2, { id: 2, name: 'Older kept' });
+    listQueryScope.seedItem('users', 2, keptOlderItem);
     await advanceTime(100);
-    listQueryScope.seedItem('users', 3, { id: 3, name: 'Newest kept' });
-    listQueryScope.setItemStaticPolicy({ m: 2 });
+    listQueryScope.seedItem('users', 3, keptNewestItem);
+    listQueryScope.setItemStaticPolicy({
+      b: sumPersistedEntryBytes(
+        getAsyncListItemEntrySizeBytes('users||2', keptOlderItem),
+        getAsyncListItemEntrySizeBytes('users||3', keptNewestItem),
+      ),
+    });
 
     opfsPersistentStorage.resetForTests?.();
     createEnv({ storeName: 'trigger-list-query', sessionKey });
@@ -1356,14 +1446,71 @@ describe('opfs: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "users||2: { a: 1735689600100, p: 'users||2' }
-        "users||3: { a: 1735689600200, p: 'users||3' }
+        "users||2: { a: 1735689600100, p: 'users||2', z: 62 }
+        "users||3: { a: 1735689600200, p: 'users||3', z: 63 }
 
-      s: { m: 2 }
+      s: { b: 125 }
     `);
   });
 
-  test('persisted list query maxQueries policy is enforced on cold startup before the store mounts', async () => {
+  test('maxItemBytes rewrites the surviving standalone item after a newer item is removed', async () => {
+    const storeName = 'lq-opfs-rewrite-after-item-byte-eviction';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+    const olderPayload = 'users||1';
+    const newerPayload = 'users||2';
+    const olderItem = { id: 1, name: 'Older kept later' };
+    const newerItem = { id: 2, name: 'Newer evicted later' };
+    const maxItemBytes = sumPersistedEntryBytes(
+      getAsyncListItemEntrySizeBytes(olderPayload, olderItem),
+      getLogicalListItemEntrySizeBytes(newerPayload, newerItem),
+    );
+
+    expect(maxItemBytes).toBeLessThan(
+      sumPersistedEntryBytes(
+        getAsyncListItemEntrySizeBytes(olderPayload, olderItem),
+        getAsyncListItemEntrySizeBytes(newerPayload, newerItem),
+      ),
+    );
+
+    const env = createEnv({ storeName, sessionKey, maxItemBytes });
+
+    env.apiStore.addItemToState(olderPayload, olderItem);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.apiStore.addItemToState(newerPayload, newerItem);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||2']
+    `);
+
+    env.apiStore.deleteItemState(newerPayload);
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||1']
+    `);
+
+    opfsPersistentStorage.resetForTests?.();
+    const readerEnv = createEnv({ storeName, sessionKey });
+
+    await expect(
+      resolveAfterAllTimers(
+        readerEnv.apiStore.preloadItemFromStorage(olderPayload),
+      ),
+    ).resolves.toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+  });
+
+  test('persisted list query maxQueryBytes policy is enforced on cold startup before the store mounts', async () => {
     const storeName = 'lq-opfs-cold-policy-max-queries';
     const sessionKey = 'sess1';
     const firstQuery = { tableId: 'users-1' };
@@ -1379,16 +1526,21 @@ describe('opfs: list query store persistence', () => {
     listQueryScope.seedQuery(secondQuery, []);
     await advanceTime(100);
     listQueryScope.seedQuery(thirdQuery, []);
-    listQueryScope.setQueryStaticPolicy({ m: 2 });
+    listQueryScope.setQueryStaticPolicy({
+      b: sumPersistedEntryBytes(
+        getAsyncListQueryEntrySizeBytes(secondQuery, []),
+        getAsyncListQueryEntrySizeBytes(thirdQuery, []),
+      ),
+    });
 
     opfsPersistentStorage.resetForTests?.();
     createEnv({ storeName: 'trigger-list-query', sessionKey });
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
-      ['{tableId:"users-2"}', '{tableId:"users-3"}']
-    `);
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(
+      `['{tableId:"users-2"}', '{tableId:"users-3"}']`,
+    );
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-cold-policy-max-queries/lq._i.r.json',
@@ -1398,11 +1550,74 @@ describe('opfs: list query store persistence', () => {
         {tableId:"users-2"}:
           a: 1735689600100
           p: { tableId: 'users-2' }
+          z: 47
         {tableId:"users-3"}:
           a: 1735689600200
           p: { tableId: 'users-3' }
+          z: 47
 
-      s: { m: 2 }
+      s: { b: 94 }
+    `);
+  });
+
+  test('maxQueryBytes keeps the two newest async-written queries when they exactly fit', async () => {
+    const storeName = 'lq-opfs-inline-query-byte-budget';
+    const sessionKey = 'sess1';
+    const firstQuery = { tableId: 'first' };
+    const secondQuery = { tableId: 'second' };
+    const thirdQuery = { tableId: 'third' };
+    const secondItemKey = getCompositeKey('second||1');
+    const thirdItemKey = getCompositeKey('third||1');
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      maxQueryBytes: sumPersistedEntryBytes(
+        getAsyncListQueryEntrySizeBytes(secondQuery, [secondItemKey]),
+        getAsyncListQueryEntrySizeBytes(thirdQuery, [thirdItemKey]),
+      ),
+      serverData: {
+        first: [{ id: 1, name: 'First' }],
+        second: [{ id: 1, name: 'Second' }],
+        third: [{ id: 1, name: 'Third' }],
+      },
+    });
+
+    writerEnv.scheduleFetch('highPriority', firstQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    writerEnv.scheduleFetch('highPriority', secondQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    opfsPersistentStorage.resetForTests?.();
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      maxQueryBytes: sumPersistedEntryBytes(
+        getAsyncListQueryEntrySizeBytes(secondQuery, [secondItemKey]),
+        getAsyncListQueryEntrySizeBytes(thirdQuery, [thirdItemKey]),
+      ),
+      serverData: {
+        first: [{ id: 1, name: 'First' }],
+        second: [{ id: 1, name: 'Second' }],
+        third: [{ id: 1, name: 'Third' }],
+      },
+    });
+
+    readerEnv.scheduleFetch('highPriority', thirdQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"second"}', '{tableId:"third"}']
     `);
   });
 
@@ -1419,7 +1634,10 @@ describe('opfs: list query store persistence', () => {
     listQueryScope.seedItem('users', 2, { id: 2, name: 'Newer other' });
     listQueryScope.setItemStaticPolicy({
       k: [listQueryScope.itemKey('users', 1)],
-      m: 1,
+      b: getAsyncListItemEntrySizeBytes('users||1', {
+        id: 1,
+        name: 'Pinned older',
+      }),
     });
 
     opfsPersistentStorage.resetForTests?.();
@@ -1436,11 +1654,11 @@ describe('opfs: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689600000, p: 'users||1' }
+        "users||1: { a: 1735689600000, p: 'users||1', z: 64 }
 
       s:
+        b: 64
         k: ['"users||1']
-        m: 1
     `);
   });
 
@@ -1459,7 +1677,7 @@ describe('opfs: list query store persistence', () => {
     listQueryScope.seedQuery(otherQuery, []);
     listQueryScope.setQueryStaticPolicy({
       k: [listQueryScope.queryKey(pinnedQuery)],
-      m: 1,
+      b: getAsyncListQueryEntrySizeBytes(pinnedQuery, []),
     });
 
     opfsPersistentStorage.resetForTests?.();
@@ -1467,9 +1685,9 @@ describe('opfs: list query store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
-      ['{tableId:"users-pinned"}']
-    `);
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(
+      `['{tableId:"users-pinned"}']`,
+    );
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-cold-policy-pinned-query/lq._i.r.json',
@@ -1479,10 +1697,11 @@ describe('opfs: list query store persistence', () => {
         {tableId:"users-pinned"}:
           a: 1735689600000
           p: { tableId: 'users-pinned' }
+          z: 52
 
       s:
+        b: 52
         k: ['{tableId:"users-pinned"}']
-        m: 1
     `);
   });
 

@@ -10,7 +10,9 @@ import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   ASYNC_STORAGE_MAX_AGE_MS,
   buildPersistedStaticPolicy,
+  estimateManagedAsyncStorageEntrySizeBytes,
   getProtectedKeysFromMetadata,
+  mergeManagedAsyncStorageCustomMetadata,
   readAsyncStorageNamespaceIndexStateUsingDriver,
   registerAsyncStartupStoreCleanup,
   serializeProtectedRef,
@@ -22,6 +24,7 @@ import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getPayloadRecordKey,
 } from './asyncStorageShared';
+import { createCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type {
@@ -37,10 +40,12 @@ import {
   type ParsedPersistedCollectionItemData,
 } from './parsePersistedData';
 import {
-  createEvictionComparator,
   createShouldIgnoreItemPredicate,
+  keepEntriesWithinByteBudget,
+  serializeJsonForStorage,
   createTimedKeySet,
 } from './persistenceUtils';
+import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
@@ -65,7 +70,6 @@ import type {
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
-const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
 
 type CollectionPersistenceOfflineOperations<
@@ -147,7 +151,11 @@ export function setupCollectionPersistence<
   assertValidPersistentStoreName(config.storeName);
 
   const version = config.version;
-  const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
+  const defaultMaxBytes = getDefaultMaxBytesForScope({
+    adapter: config.adapter,
+    scopeKind: 'collection.item',
+  });
+  const maxBytes = config.maxBytes ?? defaultMaxBytes;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
   const pinnedItemKeys = new Set(
@@ -165,8 +173,8 @@ export function setupCollectionPersistence<
   const persistedStaticPolicy =
     localStorageAdapter === null
       ? buildPersistedStaticPolicy(
-          config.maxItems,
-          DEFAULT_MAX_ITEMS,
+          config.maxBytes,
+          defaultMaxBytes,
           pinnedItemKeys,
         )
       : null;
@@ -212,6 +220,44 @@ export function setupCollectionPersistence<
       valueCodec: itemStorageValueCodec,
     },
   );
+  function getAsyncNamespaceScope():
+    | (AsyncStorageNamespaceScope & { kind: 'collection.item' })
+    | null {
+    if (asyncStorageAdapter === null) return null;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return null;
+
+    return { kind: 'collection.item', sessionKey, storeName: config.storeName };
+  }
+
+  function estimateAsyncEntrySizeBytes(args: {
+    itemKey: string;
+    lastAccessAt: number;
+    protectedKeysSnapshotSet?: Set<string> | null;
+    value: PersistedCollectionItemData<unknown>;
+    currentCustomMetadata?: Record<string, unknown>;
+  }): number {
+    const asyncNamespaceScope = getAsyncNamespaceScope();
+    if (asyncNamespaceScope === null) {
+      return JSON.stringify(args.value).length;
+    }
+
+    const serializedValue = serializeJsonForStorage(args.value.data);
+    const customMetadata = mergeManagedAsyncStorageCustomMetadata({
+      currentCustomMetadata: args.currentCustomMetadata,
+      key: args.itemKey,
+      nextCustomMetadata: { p: args.value.payload },
+      protectedKeysSnapshotSet: args.protectedKeysSnapshotSet,
+      scope: asyncNamespaceScope,
+    });
+
+    return estimateManagedAsyncStorageEntrySizeBytes({
+      customMetadata,
+      lastAccessAt: args.lastAccessAt,
+      serializedValue: serializedValue.rawValue,
+      version: version ?? 1,
+    });
+  }
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
     null;
@@ -221,6 +267,7 @@ export function setupCollectionPersistence<
   let suppressedPersistedStateFlushes = 0;
   const pendingPreloads = new Map<string, Promise<boolean>>();
   const persistedSnapshotByKey = new Map<string, string>();
+  const persistedSizeBytesByKey = new Map<string, number>();
   const hydratedPersistedKeys = new Set<string>();
   const syncHydrationMissCache = createTimedKeySet();
   let knownPersistedKeys: Set<string> | null = null;
@@ -320,30 +367,30 @@ export function setupCollectionPersistence<
 
     const effectiveStaticPolicy =
       persistedStaticPolicy ?? indexState.staticPolicy;
-    if (
-      effectiveStaticPolicy?.maxEntries !== undefined &&
-      nextEntries.size > effectiveStaticPolicy.maxEntries
-    ) {
+    if (effectiveStaticPolicy?.maxBytes !== undefined) {
+      const protectedItemKeys = getProtectedKeysFromMetadata(
+        [...nextEntries.entries()].map(([key, metadata]) => ({
+          customMetadata: metadata.customMetadata,
+          key,
+        })),
+      );
       const candidateEntries = [...nextEntries.entries()].map(
         ([itemKey, metadata]) => ({
           itemKey,
           lastAccessAt: metadata.lastAccessAt,
-          pinned: pinnedItemKeys.has(itemKey),
+          protected: protectedItemKeys.has(itemKey),
+          sizeBytes: rememberPersistedMetadataSize(itemKey, metadata.sizeBytes),
         }),
       );
-
-      candidateEntries.sort(
-        createEvictionComparator(
-          [(entry) => entry.pinned],
-          (entry) => entry.lastAccessAt,
-        ),
-      );
-
-      const keptKeys = new Set(
-        candidateEntries
-          .slice(0, effectiveStaticPolicy.maxEntries)
-          .map(({ itemKey }) => itemKey),
-      );
+      const keptKeys = keepEntriesWithinByteBudget({
+        entries: candidateEntries,
+        getKey: (entry) => entry.itemKey,
+        getLastAccessAt: (entry) => entry.lastAccessAt,
+        getSizeBytes: (entry) => entry.sizeBytes,
+        isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
+        isProtected: (entry) => entry.protected,
+        maxBytes: effectiveStaticPolicy.maxBytes,
+      });
 
       for (const { itemKey } of candidateEntries) {
         if (keptKeys.has(itemKey)) continue;
@@ -382,19 +429,75 @@ export function setupCollectionPersistence<
     return knownPersistedKeys;
   }
 
+  function rememberPersistedMetadataSize(
+    itemKey: string,
+    sizeBytes: number | undefined,
+  ): number {
+    const resolvedSizeBytes = sizeBytes ?? persistedSizeBytesByKey.get(itemKey);
+    if (resolvedSizeBytes !== undefined) {
+      persistedSizeBytesByKey.set(itemKey, resolvedSizeBytes);
+      return resolvedSizeBytes;
+    }
+
+    return 0;
+  }
+
+  function getLocalStorageEntrySizeBytes(
+    value: PersistedCollectionItemData<unknown>,
+  ): number {
+    return serializeJsonForStorage(
+      createCompactLocalStorageEntry(
+        { d: value.data, p: value.payload },
+        version,
+      ),
+    ).sizeBytes;
+  }
+
+  function getKnownPersistedBytes(
+    itemKeys: ReadonlySet<string> | null,
+  ): number | null {
+    if (itemKeys === null) return null;
+
+    let totalBytes = 0;
+    for (const itemKey of itemKeys) {
+      const sizeBytes = persistedSizeBytesByKey.get(itemKey);
+      if (sizeBytes === undefined) return null;
+      totalBytes += sizeBytes;
+    }
+
+    return totalBytes;
+  }
+
   function rememberHydratedItem(
     itemKey: string,
     persisted: PersistedCollectionItemData<unknown>,
   ): void {
     hydratedPersistedKeys.add(itemKey);
     syncHydrationMissCache.clear(itemKey);
-    persistedSnapshotByKey.set(itemKey, JSON.stringify(persisted));
+    const snapshot = JSON.stringify(persisted);
+    persistedSnapshotByKey.set(itemKey, snapshot);
+    if (localStorageAdapter !== null) {
+      persistedSizeBytesByKey.set(
+        itemKey,
+        getLocalStorageEntrySizeBytes(persisted),
+      );
+    } else {
+      persistedSizeBytesByKey.set(
+        itemKey,
+        estimateAsyncEntrySizeBytes({
+          itemKey,
+          lastAccessAt: Date.now(),
+          value: persisted,
+        }),
+      );
+    }
     knownPersistedKeys?.add(itemKey);
   }
 
   function forgetPersistedItem(itemKey: string): void {
     hydratedPersistedKeys.delete(itemKey);
     persistedSnapshotByKey.delete(itemKey);
+    persistedSizeBytesByKey.delete(itemKey);
     knownPersistedKeys?.delete(itemKey);
   }
 
@@ -703,18 +806,13 @@ export function setupCollectionPersistence<
         ),
       );
 
-      if (
-        !hasIgnoreItemFilter &&
-        metadataEntries.filter(
-          (entry) => !protectedItemKeys.has(entry.entryKey),
-        ).length <= maxItems
-      ) {
-        return;
-      }
-
       const metadataEntriesWithPayload = metadataEntries.map((entry) => ({
         itemKey: entry.entryKey,
         lastAccessAt: entry.lastAccessAt,
+        sizeBytes: rememberPersistedMetadataSize(
+          entry.entryKey,
+          entry.sizeBytes,
+        ),
         payload: validateWithSchema(
           config.payloadSchema,
           readManifestPayloadMeta(entry.meta),
@@ -733,8 +831,10 @@ export function setupCollectionPersistence<
 
       const persistedEntries = filterAndMap(
         metadataEntriesWithPayload,
-        ({ itemKey, lastAccessAt, payload }) =>
-          payload === null ? false : { itemKey, lastAccessAt, payload },
+        ({ itemKey, lastAccessAt, payload, sizeBytes }) =>
+          payload === null
+            ? false
+            : { itemKey, lastAccessAt, payload, sizeBytes },
       );
 
       const filteredEntries = persistedEntries.filter(
@@ -754,26 +854,15 @@ export function setupCollectionPersistence<
         }
       }
 
-      if (filteredEntries.length <= maxItems) {
-        knownPersistedKeys = new Set(
-          filteredEntries.map(({ itemKey }) => itemKey),
-        );
-        return;
-      }
-
-      filteredEntries.sort(
-        createEvictionComparator(
-          [
-            (e) => protectedItemKeys.has(e.itemKey),
-            (e) => pinnedItemKeys.has(e.itemKey),
-          ],
-          (e) => e.lastAccessAt,
-        ),
-      );
-
-      const keptKeys = new Set(
-        filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
-      );
+      const keptKeys = keepEntriesWithinByteBudget({
+        entries: filteredEntries,
+        getKey: (entry) => entry.itemKey,
+        getLastAccessAt: (entry) => entry.lastAccessAt,
+        getSizeBytes: (entry) => entry.sizeBytes,
+        isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
+        isProtected: (entry) => protectedItemKeys.has(entry.itemKey),
+        maxBytes,
+      });
 
       await Promise.all(
         filteredEntries
@@ -806,6 +895,7 @@ export function setupCollectionPersistence<
       itemKey: string;
       lastAccessAt: number;
       payload: ItemPayload;
+      sizeBytes: number;
     }[] = [];
 
     for (const entry of metadataEntries) {
@@ -821,6 +911,7 @@ export function setupCollectionPersistence<
           itemKey: entry.key,
           lastAccessAt: entry.lastAccessAt,
           payload,
+          sizeBytes: rememberPersistedMetadataSize(entry.key, entry.sizeBytes),
         });
       }
     }
@@ -848,37 +939,15 @@ export function setupCollectionPersistence<
       ({ payload }) => !shouldIgnoreItem(payload),
     );
 
-    if (
-      !hasIgnoreItemFilter &&
-      filteredEntries.filter(({ itemKey }) => !protectedItemKeys.has(itemKey))
-        .length <= maxItems
-    ) {
-      knownPersistedKeys = new Set(
-        filteredEntries.map(({ itemKey }) => itemKey),
-      );
-      return;
-    }
-
-    if (filteredEntries.length <= maxItems) {
-      knownPersistedKeys = new Set(
-        filteredEntries.map(({ itemKey }) => itemKey),
-      );
-      return;
-    }
-
-    filteredEntries.sort(
-      createEvictionComparator(
-        [
-          (e) => protectedItemKeys.has(e.itemKey),
-          (e) => pinnedItemKeys.has(e.itemKey),
-        ],
-        (e) => e.lastAccessAt,
-      ),
-    );
-
-    const keptKeys = new Set(
-      filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
-    );
+    const keptKeys = keepEntriesWithinByteBudget({
+      entries: filteredEntries,
+      getKey: (entry) => entry.itemKey,
+      getLastAccessAt: (entry) => entry.lastAccessAt,
+      getSizeBytes: (entry) => entry.sizeBytes,
+      isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
+      isProtected: (entry) => protectedItemKeys.has(entry.itemKey),
+      maxBytes,
+    });
 
     await Promise.all(
       filteredEntries
@@ -924,6 +993,7 @@ export function setupCollectionPersistence<
         string,
         {
           snapshot: string;
+          sizeBytes: number;
           value: PersistedCollectionItemData<ItemState | StorageState>;
         }
       >();
@@ -943,15 +1013,10 @@ export function setupCollectionPersistence<
         if (hydratedItem === undefined) continue;
         stateEntries.push([itemKey, hydratedItem]);
       }
-      const persistableStateEntryCount = stateEntries.filter(
-        ([, item]) => item?.data && !shouldIgnoreItem(item.payload),
-      ).length;
+      const knownPersistedBytes = getKnownPersistedBytes(knownPersistedKeys);
       const shouldTrackAsyncOverflow =
         localStorageAdapter === null &&
-        (config.maxItems !== undefined ||
-          (knownPersistedKeys?.size ?? 0) > maxItems ||
-          hydratedPersistedKeys.size > maxItems ||
-          persistableStateEntryCount > maxItems);
+        (knownPersistedBytes === null || knownPersistedBytes > maxBytes);
       const previousOverflowMetadataEntries =
         knownPersistedKeys === null && shouldTrackAsyncOverflow
           ? await listAllPersistentStorageNamespaceMetadata(namespace, {
@@ -1011,6 +1076,14 @@ export function setupCollectionPersistence<
 
         pendingUpserts.set(itemKey, {
           snapshot: nextSnapshot,
+          sizeBytes:
+            localStorageAdapter === null
+              ? estimateAsyncEntrySizeBytes({
+                  itemKey,
+                  lastAccessAt: Date.now(),
+                  value: nextValue,
+                })
+              : getLocalStorageEntrySizeBytes(nextValue),
           value: nextValue,
         });
       }
@@ -1026,9 +1099,7 @@ export function setupCollectionPersistence<
       if (
         localStorageAdapter === null &&
         !hasIgnoreItemFilter &&
-        previousPersistedKeys !== null &&
-        previousPersistedKeys.size - pendingRemoves.size + pendingUpserts.size >
-          maxItems
+        previousPersistedKeys !== null
       ) {
         const sessionKey = config.getSessionKey();
         if (sessionKey !== false) {
@@ -1048,6 +1119,7 @@ export function setupCollectionPersistence<
             itemKey: string;
             lastAccessAt: number;
             protected: boolean;
+            sizeBytes: number;
           }> = [];
 
           for (const entry of metadataEntries) {
@@ -1072,10 +1144,21 @@ export function setupCollectionPersistence<
               itemKey: entry.key,
               lastAccessAt: entry.lastAccessAt,
               protected: protectedItemKeys.has(entry.key),
+              sizeBytes: rememberPersistedMetadataSize(
+                entry.key,
+                entry.sizeBytes,
+              ),
             });
           }
 
-          for (const itemKey of pendingUpserts.keys()) {
+          for (const [itemKey, pendingUpsert] of pendingUpserts.entries()) {
+            pendingUpsert.sizeBytes = estimateAsyncEntrySizeBytes({
+              itemKey,
+              lastAccessAt: commitTimestamp,
+              protectedKeysSnapshotSet: protectedRefs,
+              value: pendingUpsert.value,
+              currentCustomMetadata: metadataByKey.get(itemKey)?.customMetadata,
+            });
             candidateEntries.push({
               itemKey,
               lastAccessAt: commitTimestamp,
@@ -1089,6 +1172,7 @@ export function setupCollectionPersistence<
                     storeName: config.storeName,
                   }),
                 ) === true,
+              sizeBytes: pendingUpsert.sizeBytes,
             });
           }
 
@@ -1111,23 +1195,16 @@ export function setupCollectionPersistence<
             ({ itemKey }) => !pendingRemoves.has(itemKey),
           );
 
-          if (remainingCandidates.length > maxItems) {
-            remainingCandidates.sort(
-              createEvictionComparator(
-                [
-                  (entry) => entry.protected,
-                  (entry) => pinnedItemKeys.has(entry.itemKey),
-                ],
-                (entry) => entry.lastAccessAt,
-              ),
-            );
-
-            const keptKeys = new Set(
-              remainingCandidates
-                .slice(0, maxItems)
-                .map(({ itemKey }) => itemKey),
-            );
-
+          const keptKeys = keepEntriesWithinByteBudget({
+            entries: remainingCandidates,
+            getKey: (entry) => entry.itemKey,
+            getLastAccessAt: (entry) => entry.lastAccessAt,
+            getSizeBytes: (entry) => entry.sizeBytes,
+            isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
+            isProtected: (entry) => entry.protected,
+            maxBytes,
+          });
+          if (keptKeys.size !== remainingCandidates.length) {
             for (const { itemKey } of remainingCandidates) {
               if (keptKeys.has(itemKey)) continue;
 
@@ -1156,6 +1233,7 @@ export function setupCollectionPersistence<
       }
       for (const [itemKey, entry] of pendingUpserts.entries()) {
         persistedSnapshotByKey.set(itemKey, entry.snapshot);
+        persistedSizeBytesByKey.set(itemKey, entry.sizeBytes);
         hydratedPersistedKeys.add(itemKey);
         syncHydrationMissCache.clear(itemKey);
       }
@@ -1172,9 +1250,12 @@ export function setupCollectionPersistence<
       }
 
       if (localStorageAdapter !== null && maintenanceManifestKey !== null) {
+        const nextKnownPersistedBytes =
+          getKnownPersistedBytes(knownPersistedKeys);
         if (
           hasIgnoreItemFilter ||
-          (knownPersistedKeys !== null && knownPersistedKeys.size > maxItems)
+          nextKnownPersistedBytes === null ||
+          nextKnownPersistedBytes > maxBytes
         ) {
           scheduleLocalStorageMaintenance({
             forceManifestKeys: [maintenanceManifestKey],
@@ -1185,11 +1266,13 @@ export function setupCollectionPersistence<
 
       const sessionKey = config.getSessionKey();
       if (sessionKey !== false && localStorageAdapter === null) {
+        const nextKnownPersistedBytes =
+          getKnownPersistedBytes(knownPersistedKeys);
         if (
           hasIgnoreItemFilter ||
           (!optimizedOverflow &&
-            knownPersistedKeys !== null &&
-            knownPersistedKeys.size > maxItems)
+            (nextKnownPersistedBytes === null ||
+              nextKnownPersistedBytes > maxBytes))
         ) {
           scheduleAsyncStorageMaintenance(
             `collection:${sessionKey}:${config.storeName}`,
@@ -1247,6 +1330,7 @@ export function setupCollectionPersistence<
     hydratedPersistedKeys.clear();
     syncHydrationMissCache.clearAll();
     knownPersistedKeys = null;
+    persistedSizeBytesByKey.clear();
     suppressedPersistedStateFlushes = 0;
     clearSaveTimer();
     unsubscribe?.();
@@ -1274,6 +1358,7 @@ export function setupCollectionPersistence<
     knownPersistedKeys = null;
     suppressedPersistedStateFlushes = 0;
     persistedSnapshotByKey.clear();
+    persistedSizeBytesByKey.clear();
     hydratedPersistedKeys.clear();
     syncHydrationMissCache.clearAll();
     await namespace.clear();

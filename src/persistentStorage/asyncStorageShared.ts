@@ -134,11 +134,11 @@ export function normalizeStaticPolicy(
 ): AsyncStorageNamespaceStaticPolicy | null {
   if (policy === undefined || policy === null) return null;
 
-  const maxEntries =
-    typeof policy.maxEntries === 'number' &&
-    Number.isInteger(policy.maxEntries) &&
-    policy.maxEntries >= 0
-      ? policy.maxEntries
+  const maxBytes =
+    typeof policy.maxBytes === 'number' &&
+    Number.isInteger(policy.maxBytes) &&
+    policy.maxBytes >= 0
+      ? policy.maxBytes
       : undefined;
   const pinnedKeys = Array.isArray(policy.pinnedKeys)
     ? [...new Set(policy.pinnedKeys)].sort((left, right) =>
@@ -146,12 +146,12 @@ export function normalizeStaticPolicy(
       )
     : [];
 
-  if (maxEntries === undefined && pinnedKeys.length === 0) {
+  if (maxBytes === undefined && pinnedKeys.length === 0) {
     return null;
   }
 
   return {
-    ...(maxEntries !== undefined ? { maxEntries } : {}),
+    ...(maxBytes !== undefined ? { maxBytes } : {}),
     ...(pinnedKeys.length > 0 ? { pinnedKeys } : {}),
   };
 }

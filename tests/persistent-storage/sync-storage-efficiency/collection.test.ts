@@ -2,7 +2,9 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
   getLocalStorageTree,
@@ -12,11 +14,13 @@ import {
 import {
   captureHookRemount,
   createCollectionEnv,
+  getLocalCollectionEntrySizeBytes,
   flushInvalidationPersistence,
   listStoredCollectionItemPayloads,
   persistentStore,
   setCachedCollectionItem,
   settleStartupBackgroundScan,
+  sumPersistedEntryBytes,
   setupSyncStorageEfficiencyTestSuite,
   waitForScheduledCleanup,
 } from './shared';
@@ -80,22 +84,22 @@ describe('sync storage efficiency: collection', () => {
       .    | 🔑[3] #5 ✅ tsdf.sess1.collection-expiration.ci."fresh-user
            |    └ (entry data, <"fresh-user>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
-           |    └ (namespace index) | 0.34 kb
+           |    └ (namespace index) | 0.38 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user
            |    └ (entry data, <"expired-user>)
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2
            |    └ (entry data, <"expired-user-2>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
-           |    └ (namespace index) | 0.34 kb -> 0.12 kb
+           |    └ (namespace index) | 0.38 kb -> 0.13 kb
       "
     `);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.45 kb)
-      ├ _m (0.22 kb)
+      "tsdf (0.46 kb)
+      ├ _m (0.24 kb)
       │ ├ g (0.04 kb)
-      │ └ r.n:sess1.collection-expiration.ci.m (0.18 kb)
+      │ └ r.n:sess1.collection-expiration.ci.m (0.19 kb)
       └ sess1.collection-expiration.ci."fresh-user (0.22 kb)"
     `);
 
@@ -105,7 +109,7 @@ describe('sync storage efficiency: collection', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "fresh-user: { a: 1735689600000, p: 'fresh-user' }
+        "fresh-user: { a: 1735689600000, p: 'fresh-user', z: 72 }
     `);
 
     expect(getParsedLocalStorageValue(freshItemKey)).toMatchInlineSnapshot(`
@@ -116,26 +120,31 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
-  test('startup cleanup enforces maxItems against preloaded persisted entries', async () => {
+  test('startup cleanup enforces maxBytes against preloaded persisted entries', async () => {
     const storeName = 'collection-startup-max-items';
     const sessionKey = 'sess1';
+    const olderKeptItem = { value: { id: 'b', name: 'Older cached' } };
+    const newestKeptItem = { value: { id: 'c', name: 'Newest cached' } };
 
     // Seed an over-limit cache so the startup maintenance pass has to trim it.
     setCachedCollectionItem(storeName, sessionKey, 'a', {
       value: { id: 'a', name: 'Oldest cached' },
     });
     await advanceTime(100);
-    setCachedCollectionItem(storeName, sessionKey, 'b', {
-      value: { id: 'b', name: 'Older cached' },
-    });
+    setCachedCollectionItem(storeName, sessionKey, 'b', olderKeptItem);
     await advanceTime(100);
-    setCachedCollectionItem(storeName, sessionKey, 'c', {
-      value: { id: 'c', name: 'Newest cached' },
-    });
+    setCachedCollectionItem(storeName, sessionKey, 'c', newestKeptItem);
 
     // Startup should only schedule the cleanup work.
     const startupOperationCapture = startPersistentStorageOperationCapture();
-    createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: sumPersistedEntryBytes(
+        getLocalCollectionEntrySizeBytes('b', olderKeptItem),
+        getLocalCollectionEntrySizeBytes('c', newestKeptItem),
+      ),
+    });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
 
@@ -162,12 +171,12 @@ describe('sync storage efficiency: collection', () => {
       .    | 🔑[3] #5 ✅ tsdf.sess1.collection-startup-max-items.ci."c
            |    └ (entry data, <"c>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
-           |    └ (namespace index) | 0.21 kb
+           |    └ (namespace index) | 0.25 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-startup-max-items.ci."a
            |    └ (entry data, <"a>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
-           |    └ (namespace index) | 0.21 kb -> 0.15 kb
+           |    └ (namespace index) | 0.25 kb -> 0.17 kb
       "
     `);
     expect(
@@ -176,38 +185,90 @@ describe('sync storage efficiency: collection', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "b: { a: 1735689600100, p: 'b' }
-        "c: { a: 1735689600200, p: 'c' }
+        "b: { a: 1735689600100, p: 'b', z: 56 }
+        "c: { a: 1735689600200, p: 'c', z: 57 }
     `);
   });
 
-  test('maxItems cleanup snapshots the full manifest history', async () => {
-    setCachedCollectionItem('col-max-items-metadata', 'sess1', 'a', {
-      value: { id: 'a', name: 'Oldest cached' },
+  test('cold startup enforces the local-sync default collection maxBytes policy before the store mounts', async () => {
+    const storeName = 'collection-cold-default-max-items-sync';
+    const sessionKey = 'sess1';
+    const collectionScope = persistentStore.scope(storeName, sessionKey);
+    const defaultMaxBytes = getDefaultMaxBytesForScope({
+      adapter: 'local-sync',
+      scopeKind: 'collection.item',
     });
+    const largeNameSuffix = 'x'.repeat(4_096);
+    const getPayload = (index: number) =>
+      `user-${String(index).padStart(4, '0')}`;
+    const getItem = (index: number) => ({
+      value: {
+        id: getPayload(index),
+        name: `${largeNameSuffix}-${getPayload(index)}`,
+      },
+    });
+    const entrySizeBytes = getLocalCollectionEntrySizeBytes(
+      getPayload(0),
+      getItem(0),
+    );
+    const keptEntryCount = Math.floor(defaultMaxBytes / entrySizeBytes);
+    const totalEntries = keptEntryCount + 1;
+
+    for (let index = 0; index < totalEntries; index++) {
+      collectionScope.collection.seedItem(getPayload(index), getItem(index), {
+        timestamp: TEST_INITIAL_TIME.valueOf() + index,
+      });
+    }
+
+    createCollectionEnv({ storeName, sessionKey });
+    await waitForScheduledCleanup();
+
+    const storedPayloads = listStoredCollectionItemPayloads(
+      storeName,
+      sessionKey,
+    );
+
+    expect(storedPayloads).toHaveLength(keptEntryCount);
+    expect(storedPayloads).not.toContain(getPayload(0));
+    expect(storedPayloads).toContain(getPayload(totalEntries - 1));
+  });
+
+  test('maxBytes cleanup snapshots the full manifest history', async () => {
+    const oldestItem = { value: { id: 'a', name: 'Oldest cached' } };
+    const newerItem = { value: { id: 'b', name: 'Newer cached' } };
+    const freshItem = { value: { id: 'c', name: 'Fresh' } };
+
+    setCachedCollectionItem('col-max-items-metadata', 'sess1', 'a', oldestItem);
     await advanceTime(100);
-    setCachedCollectionItem('col-max-items-metadata', 'sess1', 'b', {
-      value: { id: 'b', name: 'Newer cached' },
-    });
+    setCachedCollectionItem('col-max-items-metadata', 'sess1', 'b', newerItem);
 
     // Startup should only queue the background scan.
     const startupOperationCapture = startPersistentStorageOperationCapture();
     const env = createCollectionEnv({
       storeName: 'col-max-items-metadata',
       sessionKey: 'sess1',
-      maxItems: 2,
+      maxBytes: Math.max(
+        sumPersistedEntryBytes(
+          getLocalCollectionEntrySizeBytes('a', oldestItem),
+          getLocalCollectionEntrySizeBytes('b', newerItem),
+        ),
+        sumPersistedEntryBytes(
+          getLocalCollectionEntrySizeBytes('b', newerItem),
+          getLocalCollectionEntrySizeBytes('c', freshItem),
+        ),
+      ),
     });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
 
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
-    // Drain the startup-scheduled global scan before capturing the maxItems flush.
+    // Drain the startup-scheduled global scan before capturing the maxBytes flush.
     await settleStartupBackgroundScan();
 
     // Adding a third item should capture the write path plus the idle-scheduled cleanup sequence.
     const readCapture = startPersistentStorageOperationCapture();
-    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
+    env.apiStore.addItemToState('c', freshItem);
     await advanceTime(1100);
     await flushAllTimers();
     await waitForScheduledCleanup();
@@ -222,27 +283,27 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.15 kb
-      .    | ✍️ #2 ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c
+      1s   | ✍️ #1 ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c
            |    └ (entry data, <"c>) | ❌ -> 0.10 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.15 kb -> 0.21 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+           |    └ (namespace index) | 0.17 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+           |    └ (namespace index) | 0.17 kb -> 0.25 kb
            ·
-      3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.21 kb
+      3s   | 📖 #2 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+           |    └ (namespace index) | 0.25 kb
       .    | 🗑️ #3 ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a
            |    └ (entry data, <"a>)
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
-           |    └ (namespace index) | 0.21 kb -> 0.15 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+           |    └ (namespace index) | 0.25 kb -> 0.17 kb
       "
     `);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.54 kb)
-      ├ _m (0.26 kb)
+      "tsdf (0.56 kb)
+      ├ _m (0.29 kb)
       │ ├ g (0.04 kb)
-      │ └ r.n:sess1.col-max-items-metadata.ci.m (0.21 kb)
+      │ └ r.n:sess1.col-max-items-metadata.ci.m (0.24 kb)
       └ sess1.col-max-items-metadata.ci (0.27 kb)
         ├ "b (0.11 kb)
         └ "c (0.10 kb)"
@@ -250,18 +311,38 @@ describe('sync storage efficiency: collection', () => {
   });
 
   test('multiple overflowing collection updates before idle maintenance trigger a single cleanup pass', async () => {
-    setCachedCollectionItem('col-coalesced-maintenance', 'sess1', 'a', {
-      value: { id: 'a', name: 'Oldest cached' },
-    });
+    const oldestItem = { value: { id: 'a', name: 'Oldest cached' } };
+    const newerItem = { value: { id: 'b', name: 'Newer cached' } };
+    const thirdItem = { value: { id: 'c', name: 'Third' } };
+    const fourthItem = { value: { id: 'd', name: 'Fourth' } };
+
+    setCachedCollectionItem(
+      'col-coalesced-maintenance',
+      'sess1',
+      'a',
+      oldestItem,
+    );
     await advanceTime(100);
-    setCachedCollectionItem('col-coalesced-maintenance', 'sess1', 'b', {
-      value: { id: 'b', name: 'Newer cached' },
-    });
+    setCachedCollectionItem(
+      'col-coalesced-maintenance',
+      'sess1',
+      'b',
+      newerItem,
+    );
 
     const env = createCollectionEnv({
       storeName: 'col-coalesced-maintenance',
       sessionKey: 'sess1',
-      maxItems: 2,
+      maxBytes: Math.max(
+        sumPersistedEntryBytes(
+          getLocalCollectionEntrySizeBytes('a', oldestItem),
+          getLocalCollectionEntrySizeBytes('b', newerItem),
+        ),
+        sumPersistedEntryBytes(
+          getLocalCollectionEntrySizeBytes('c', thirdItem),
+          getLocalCollectionEntrySizeBytes('d', fourthItem),
+        ),
+      ),
     });
 
     // Drain the startup maintenance so the capture only covers the coalesced overflow path.
@@ -270,11 +351,11 @@ describe('sync storage efficiency: collection', () => {
     const readCapture = startPersistentStorageOperationCapture();
 
     // First overflow schedules idle maintenance, but does not run it yet.
-    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Third' } });
+    env.apiStore.addItemToState('c', thirdItem);
     await advanceTime(1100);
 
     // A second overflow lands before the idle callback fires and should reuse that same cleanup.
-    env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fourth' } });
+    env.apiStore.addItemToState('d', fourthItem);
     await advanceTime(1100);
 
     // Advance just far enough to fire the already-scheduled idle maintenance once.
@@ -291,28 +372,28 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.15 kb
-      .    | ✍️ #2 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."c
+      1s   | ✍️ #1 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."c
            |    └ (entry data, <"c>) | ❌ -> 0.10 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.15 kb -> 0.21 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+           |    └ (namespace index) | 0.17 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+           |    └ (namespace index) | 0.17 kb -> 0.25 kb
            ·
       2.1s | ✍️ #3 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."d
            |    └ (entry data, <"d>) | ❌ -> 0.10 kb
-      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.21 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.21 kb -> 0.28 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+           |    └ (namespace index) | 0.25 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+           |    └ (namespace index) | 0.25 kb -> 0.33 kb
            ·
-      3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.28 kb
-      .    | 🗑️ #4 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."b
-           |    └ (entry data, <"b>)
-      .    | 🗑️ #5 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."a
+      3s   | 📖 #2 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+           |    └ (namespace index) | 0.33 kb
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."a
            |    └ (entry data, <"a>)
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
-           |    └ (namespace index) | 0.28 kb -> 0.15 kb
+      .    | 🗑️ #5 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."b
+           |    └ (entry data, <"b>)
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+           |    └ (namespace index) | 0.33 kb -> 0.17 kb
       "
     `);
   });
@@ -353,14 +434,14 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
-           |    └ (namespace index) | 0.08 kb
+           |    └ (namespace index) | 0.09 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-direct-get-item-state.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
-           |    └ (namespace index) | 0.08 kb
+           |    └ (namespace index) | 0.09 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
-           |    └ (namespace index) | 0.08 kb -> 0.08 kb
+           |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
   });
@@ -454,7 +535,7 @@ describe('sync storage efficiency: collection', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689604100, o: '✅', p: '1' }
+        "1: { a: 1735689604100, o: '✅', p: '1', z: 55 }
     `);
   });
 
@@ -495,12 +576,12 @@ describe('sync storage efficiency: collection', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
-           |    └ (namespace index) | 0.08 kb
-      .    | ✍️ #2 ✅->✅ tsdf.sess1.col-mutation-flow.ci."1
+      1s   | ✍️ #1 ✅->✅ tsdf.sess1.col-mutation-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
-           |    └ (namespace index) | 0.08 kb -> 0.08 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
+           |    └ (namespace index) | 0.09 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
+           |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
   });
@@ -536,9 +617,9 @@ describe('sync storage efficiency: collection', () => {
       time |
       1s   | 🗑️ #1 ✅->❌ tsdf.sess1.col-delete-flow.ci."1 (entry data, <"1>)
       .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
-           |    └ (namespace index) | 0.15 kb
+           |    └ (namespace index) | 0.17 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
-           |    └ (namespace index) | 0.15 kb -> 0.08 kb
+           |    └ (namespace index) | 0.17 kb -> 0.09 kb
       "
     `);
   });
@@ -589,12 +670,12 @@ describe('sync storage efficiency: collection', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
-            |    └ (namespace index) | 0.08 kb
-      .     | ✍️ #2 ✅->✅ tsdf.sess1.col-invalidation-flow.ci."1
+      1.81s | ✍️ #1 ✅->✅ tsdf.sess1.col-invalidation-flow.ci."1
             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
-            |    └ (namespace index) | 0.08 kb -> 0.08 kb
+      .     | 📖 #2 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
+            |    └ (namespace index) | 0.09 kb
+      .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
+            |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
   });
@@ -674,7 +755,7 @@ describe('sync storage efficiency: collection', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689605910, o: '✅', p: '1' }
+        "1: { a: 1735689605910, o: '✅', p: '1', z: 54 }
     `);
   });
 
@@ -741,12 +822,12 @@ describe('sync storage efficiency: collection', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
-            |    └ (namespace index) | 0.08 kb
-      .     | ✍️ #2 ✅->✅ tsdf.sess1.col-coalesced-invalidations.ci."1
+      1.81s | ✍️ #1 ✅->✅ tsdf.sess1.col-coalesced-invalidations.ci."1
             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
-            |    └ (namespace index) | 0.08 kb -> 0.08 kb
+      .     | 📖 #2 ✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
+            |    └ (namespace index) | 0.09 kb
+      .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
+            |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
   });
@@ -780,14 +861,14 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.08 kb
+           |    └ (namespace index) | 0.09 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.08 kb
+           |    └ (namespace index) | 0.09 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.08 kb -> 0.08 kb
+           |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -830,7 +911,7 @@ describe('sync storage efficiency: collection', () => {
       .     | ✍️ #2 ❌->✅ tsdf.sess1.col-remount-no-cache.ci."1
             |    └ (entry data, <"1>) | ❌ -> 0.11 kb
       .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
-            |    └ (namespace index) | ❌ -> 0.08 kb
+            |    └ (namespace index) | ❌ -> 0.09 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -870,22 +951,22 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.15 kb
+           |    └ (namespace index) | 0.17 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-multi-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.17 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #3 ✅ tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (entry data, <"2>) | 0.11 kb
            ·
       2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.15 kb
+           |    └ (namespace index) | 0.17 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.15 kb -> 0.15 kb
+           |    └ (namespace index) | 0.17 kb -> 0.17 kb
       .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.15 kb
+           |    └ (namespace index) | 0.17 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.15 kb -> 0.15 kb
+           |    └ (namespace index) | 0.17 kb -> 0.17 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

@@ -35,6 +35,42 @@ import {
 } from '../../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
+import * as byteBudgetTestUtils from '../persistentStorageByteBudgetTestUtils';
+
+export function sumPersistedEntryBytes(...sizes: number[]): number {
+  return byteBudgetTestUtils.sumPersistedEntryBytes(...sizes);
+}
+
+export function getAsyncCollectionEntrySizeBytes<T>(
+  payload: string,
+  data: T,
+): number {
+  return byteBudgetTestUtils.getAsyncCollectionEntrySizeBytes(payload, data);
+}
+
+export function getAsyncListItemEntrySizeBytes<T>(
+  payload: string,
+  data: T,
+  options: { loadedFields?: string[] } = {},
+): number {
+  return byteBudgetTestUtils.getAsyncListItemEntrySizeBytes(
+    payload,
+    data,
+    options,
+  );
+}
+
+export function getAsyncListQueryEntrySizeBytes(
+  payload: unknown,
+  items: string[],
+  options: { hasMore?: boolean } = {},
+): number {
+  return byteBudgetTestUtils.getAsyncListQueryEntrySizeBytes(
+    payload,
+    items,
+    options,
+  );
+}
 
 export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -153,7 +189,7 @@ export function createDocumentEnv(options: {
 export type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
-  maxItems?: number;
+  maxBytes?: number;
   pinnedItems?: string[];
   serverData?: Record<string, CollectionItemState>;
   sessionKey?: string;
@@ -166,7 +202,7 @@ export function createCollectionEnv(options: {
       adapter: opfsPersistentStorage,
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
-      maxItems: options.maxItems,
+      maxBytes: options.maxBytes,
       pinnedItems: options.pinnedItems,
     },
   });
@@ -182,8 +218,8 @@ export function storeItemKey(tableId: string, id: number): string {
 
 export function createListQueryEnv(options: {
   defaultQuerySize?: number;
-  maxItems?: number;
-  maxQueries?: number;
+  maxItemBytes?: number;
+  maxQueryBytes?: number;
   maxQuerySize?: number;
   offsetPagination?: OffsetPaginationConfig;
   pinnedItems?: string[];
@@ -202,8 +238,8 @@ export function createListQueryEnv(options: {
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
-      maxItems: options.maxItems,
-      maxQueries: options.maxQueries,
+      maxItemBytes: options.maxItemBytes,
+      maxQueryBytes: options.maxQueryBytes,
       maxQuerySize: options.maxQuerySize,
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,

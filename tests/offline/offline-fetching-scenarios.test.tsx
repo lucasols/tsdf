@@ -486,17 +486,17 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS state so this offline hydration flow also
     // protects the exact stored collection payload it consumes.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.44 kb)
-      └ offline-fetching-collection-async-storage-only (0.44 kb)
-        └ offline-fetching-collection-async-storage-only (0.35 kb)
-          ├ ci._i.r.json (0.13 kb)
+      "tsdf (0.46 kb)
+      └ offline-fetching-collection-async-storage-only (0.45 kb)
+        └ offline-fetching-collection-async-storage-only (0.36 kb)
+          ├ ci._i.r.json (0.14 kb)
           └ ci.h~228010772.p.json (0.13 kb)"
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/ci._i.r.json`),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689600000, p: 'users||1' }
+        "users||1: { a: 1735689600000, p: 'users||1', z: 77 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -732,19 +732,19 @@ describe('offline fetching scenarios', () => {
     // Snapshot the seeded OPFS contents so the cold list-query hydration test
     // protects both the cached item and the exact persisted query membership.
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.67 kb)
-      └ offline-fetching-list-query-async-storage-only (0.67 kb)
-        └ offline-fetching-list-query-async-storage-only (0.58 kb)
-          ├ li._i.r.json (0.13 kb)
+      "tsdf (0.70 kb)
+      └ offline-fetching-list-query-async-storage-only (0.69 kb)
+        └ offline-fetching-list-query-async-storage-only (0.60 kb)
+          ├ li._i.r.json (0.14 kb)
           ├ li.h~228010772.p.json (0.12 kb)
-          ├ lq._i.r.json (0.17 kb)
+          ├ lq._i.r.json (0.18 kb)
           └ lq.h~2902406637.p.json (0.07 kb)"
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/li._i.r.json`),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689600000, p: 'users||1' }
+        "users||1: { a: 1735689600000, p: 'users||1', z: 74 }
     `);
     expect(
       getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/lq._i.r.json`),
@@ -753,6 +753,7 @@ describe('offline fetching scenarios', () => {
         {tableId:"users"}:
           a: 1735689600000
           p: { tableId: 'users' }
+          z: 57
     `);
     expect(
       getParsedOpfsFileData(
