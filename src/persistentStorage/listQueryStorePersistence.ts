@@ -28,6 +28,7 @@ import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
+import { createCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type {
@@ -542,6 +543,23 @@ export function setupListQueryPersistence<
     return `${prefix}${queryKey}`;
   }
 
+  function getLocalStorageItemEntrySizeBytes(
+    value: PersistedListQueryItemData<unknown>,
+  ): number {
+    return serializeJsonForStorage(
+      createCompactLocalStorageEntry(
+        {
+          d: value.data,
+          p: value.payload,
+          ...(value.loadedFields !== undefined
+            ? { lf: value.loadedFields }
+            : {}),
+        },
+        version,
+      ),
+    ).sizeBytes;
+  }
+
   function readLocalStorageQueryEntry(
     queryKey: string,
   ): ManagedQueryEntry | undefined {
@@ -628,7 +646,7 @@ export function setupListQueryPersistence<
           existingOfflineProtected,
         );
 
-        localStorageAdapter.write(
+        const { sizeBytes } = localStorageAdapter.write(
           storageKey,
           createCompactListQueryLocalStorageEntry({
             lastAccessAt: timestamp,
@@ -639,6 +657,7 @@ export function setupListQueryPersistence<
             version,
           }),
         );
+        rememberQueryMetadataSize(queryKey, sizeBytes);
         recordLocalStorageTouch(storageKey, timestamp);
       });
     } catch (error) {
@@ -694,7 +713,7 @@ export function setupListQueryPersistence<
       const entry = readLocalStorageQueryEntry(queryKey);
       if (!entry) return false;
 
-      localStorageAdapter.write(
+      const { sizeBytes } = localStorageAdapter.write(
         storageKey,
         createCompactListQueryLocalStorageEntry({
           lastAccessAt: Date.now(),
@@ -705,6 +724,7 @@ export function setupListQueryPersistence<
           version,
         }),
       );
+      rememberQueryMetadataSize(queryKey, sizeBytes);
 
       return true;
     });
@@ -937,7 +957,10 @@ export function setupListQueryPersistence<
     const snapshot = JSON.stringify(persisted);
     itemSnapshotByKey.set(itemKey, snapshot);
     if (localStorageAdapter !== null) {
-      itemSizeBytesByKey.set(itemKey, getSerializedStringSize(snapshot));
+      itemSizeBytesByKey.set(
+        itemKey,
+        getLocalStorageItemEntrySizeBytes(persisted),
+      );
     } else {
       const nextCustomMetadata: ItemEntryNamespaceMetadata = {
         p: persisted.payload,
@@ -975,12 +998,16 @@ export function setupListQueryPersistence<
   function rememberHydratedQuery(
     queryKey: string,
     persisted: PersistedListQueryData,
+    localSizeBytes?: number,
   ): void {
     hydratedPersistedQueryKeys.add(queryKey);
     const snapshot = JSON.stringify(persisted);
     querySnapshotByKey.set(queryKey, snapshot);
     if (localStorageAdapter !== null) {
-      querySizeBytesByKey.set(queryKey, getSerializedStringSize(snapshot));
+      querySizeBytesByKey.set(
+        queryKey,
+        localSizeBytes ?? getSerializedStringSize(snapshot),
+      );
     } else {
       querySizeBytesByKey.set(
         queryKey,
@@ -1234,11 +1261,15 @@ export function setupListQueryPersistence<
     scheduleIdleCleanup(() => {
       void touchLocalStorageQueryEntry(queryKey);
     });
-    rememberHydratedQuery(queryKey, {
-      payload: persistedQuery.payload,
-      items: persistedQuery.items,
-      hasMore: persistedQuery.hasMore,
-    });
+    rememberHydratedQuery(
+      queryKey,
+      {
+        payload: persistedQuery.payload,
+        items: persistedQuery.items,
+        hasMore: persistedQuery.hasMore,
+      },
+      getSerializedStringSize(rawEntry),
+    );
     return persistedQuery;
   }
 
@@ -2184,14 +2215,16 @@ export function setupListQueryPersistence<
         }
 
         querySnapshotByKey.set(queryKey, nextSnapshot);
-        querySizeBytesByKey.set(
-          queryKey,
-          estimateAsyncQueryEntrySizeBytes({
-            lastAccessAt: Date.now(),
+        if (localStorageAdapter === null) {
+          querySizeBytesByKey.set(
             queryKey,
-            value: nextValue,
-          }),
-        );
+            estimateAsyncQueryEntrySizeBytes({
+              lastAccessAt: Date.now(),
+              queryKey,
+              value: nextValue,
+            }),
+          );
+        }
         hydratedPersistedQueryKeys.add(queryKey);
         tasks.push(saveLocalStorageQueryEntry(queryKey, nextValue));
       }
@@ -2273,20 +2306,27 @@ export function setupListQueryPersistence<
         }
 
         itemSnapshotByKey.set(itemKey, nextSnapshot);
-        itemSizeBytesByKey.set(
-          itemKey,
-          estimateAsyncItemEntrySizeBytes({
+        if (localStorageAdapter === null) {
+          itemSizeBytesByKey.set(
             itemKey,
-            lastAccessAt: Date.now(),
-            nextCustomMetadata: {
-              p: itemQuery.payload,
-              ...(getItemDerivedGroup
-                ? { g: getItemDerivedGroup(item, itemQuery.payload) }
-                : {}),
-            },
-            value: nextValue,
-          }),
-        );
+            estimateAsyncItemEntrySizeBytes({
+              itemKey,
+              lastAccessAt: Date.now(),
+              nextCustomMetadata: {
+                p: itemQuery.payload,
+                ...(getItemDerivedGroup
+                  ? { g: getItemDerivedGroup(item, itemQuery.payload) }
+                  : {}),
+              },
+              value: nextValue,
+            }),
+          );
+        } else {
+          itemSizeBytesByKey.set(
+            itemKey,
+            getLocalStorageItemEntrySizeBytes(nextValue),
+          );
+        }
         hydratedPersistedItemKeys.add(itemKey);
         tasks.push(itemNamespace.save(itemKey, nextValue));
       }
@@ -2318,13 +2358,19 @@ export function setupListQueryPersistence<
       }
 
       if (localStorageAdapter !== null) {
+        const nextKnownPersistedItemBytes = getKnownPersistedItemBytes(
+          knownPersistedItemKeys,
+        );
+        const nextKnownPersistedQueryBytes = getKnownPersistedQueryBytes(
+          knownPersistedQueryKeys,
+        );
         if (
           maintenanceCallbackKey !== null &&
           (hasIgnoreItemFilter ||
-            removedItemKeys.size > 0 ||
-            removedQueryKeys.size > 0 ||
-            nextItemKeys.size > 0 ||
-            nextQueryKeys.size > 0)
+            nextKnownPersistedItemBytes === null ||
+            nextKnownPersistedQueryBytes === null ||
+            nextKnownPersistedItemBytes > maxItemBytes ||
+            nextKnownPersistedQueryBytes > maxQueryBytes)
         ) {
           scheduleLocalStorageMaintenance({
             forceManifestKeys: [maintenanceCallbackKey],

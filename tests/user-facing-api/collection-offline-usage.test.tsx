@@ -740,7 +740,7 @@ test('direct collection store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-collection-offline-session'
-    updatedAt: 1735689610010
+    updatedAt: 1735689608010
   `);
 
   const onlineRenameResult = await act(async () => {

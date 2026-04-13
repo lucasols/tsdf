@@ -555,9 +555,6 @@ describe('sync storage efficiency: collection', () => {
            |    └ (namespace index) | 0.09 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
            |    └ (namespace index) | 0.09 kb -> 0.09 kb
-           ·
-      3s   | 📖 #2 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
-           |    └ (namespace index) | 0.09 kb
       "
     `);
   });
@@ -596,9 +593,6 @@ describe('sync storage efficiency: collection', () => {
            |    └ (namespace index) | 0.17 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
            |    └ (namespace index) | 0.17 kb -> 0.09 kb
-           ·
-      3s   | 📖 #2 ✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
-           |    └ (namespace index) | 0.09 kb
       "
     `);
   });
@@ -655,9 +649,6 @@ describe('sync storage efficiency: collection', () => {
             |    └ (namespace index) | 0.09 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
             |    └ (namespace index) | 0.09 kb -> 0.09 kb
-            ·
-      3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
-            |    └ (namespace index) | 0.09 kb
       "
     `);
   });
@@ -810,9 +801,6 @@ describe('sync storage efficiency: collection', () => {
             |    └ (namespace index) | 0.09 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
             |    └ (namespace index) | 0.09 kb -> 0.09 kb
-            ·
-      3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
-            |    └ (namespace index) | 0.09 kb
       "
     `);
   });
@@ -901,9 +889,6 @@ describe('sync storage efficiency: collection', () => {
             |    └ (entry data, <"1>) | ❌ -> 0.11 kb
       .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index) | ❌ -> 0.09 kb
-            ·
-      3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
-            |    └ (namespace index) | 0.09 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

@@ -962,18 +962,18 @@ describe('list-query overlays', () => {
       0     | Ada          | no      | [item-name, pending] ui-initialized
       10ms  | Ada          | no      | 🔴 [users||1] >fetch-started
       810ms | Ada          | no      | 🔴 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
-      3.81s | Ada          | no      | [users||1] scheduled-fetch-triggered
-      3.82s | Ada          | no      | 🟠 [users||1] >fetch-started
-      4.62s | Ada          | no      | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
-      7.62s | Ada          | no      | -- queue an optimistic item edit while offline
+      2s    | Ada          | no      | [users||1] scheduled-fetch-triggered
+      2.01s | Ada          | no      | 🟠 [users||1] >fetch-started
+      2.81s | Ada          | no      | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
+      3.81s | Ada          | no      | -- queue an optimistic item edit while offline
       .     | Ada pending  | yes     | [item-name, pending] ui-changed
       .     | Ada pending  | yes     | offline:patchUserName queued
       .     | Ada pending  | yes     | -- reconnect — direct item refetch must not restore stale value
       .     | Ada pending  | yes     | [users||1] scheduled-fetch-triggered
       .     | Ada pending  | yes     | offline:patchUserName replay-started
-      7.63s | Ada pending  | yes     | 🟡 [users||1] >fetch-started
-      8.43s | Ada pending  | yes     | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
-      9.62s | Ada pending  | yes     | -- replay settles — item shows replayed value
+      3.82s | Ada pending  | yes     | 🟡 [users||1] >fetch-started
+      4.62s | Ada pending  | yes     | 🟡 [users||1] <fetch-finished (value: {"id":1,"name":"Ada"})
+      5.81s | Ada pending  | yes     | -- replay settles — item shows replayed value
       .     | Ada pending  | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
       .     | Ada pending  | yes     | offline:patchUserName replay-finished
       .     | Ada replayed | no      | [item-name, pending] ui-changed

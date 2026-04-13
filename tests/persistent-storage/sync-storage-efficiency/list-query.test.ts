@@ -516,13 +516,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>)
       .     | ✍️ #1 ❌->✅ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>) | ❌ -> 0.22 kb
-            ·
-      3.81s | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-empty-query-manifest.li.m (items index)
-      .     | 🔑[0] #3 ✅ tsdf._m.g (global maintenance)
-      .     | 🔑[1] #1 ✅ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
-            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>)
-      .     | 📖 #1 ✅ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
-            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>) | 0.22 kb
       "
     `);
   });
@@ -631,18 +624,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (items index) | 0.12 kb
       .     | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.12 kb -> 0.18 kb
-            ·
-      3.81s | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.18 kb
-      .     | 🔑[0] #2 ✅ tsdf.sess1.lq-query-becomes-empty.li."users||1
-            |    └ (item data, <"users||1>)
-      .     | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index)
-      .     | 🔑[2] #1 ✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>)
-      .     | 🔑[3] #4 ✅ tsdf._m.g (global maintenance)
-      .     | 📖 #1 ✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>) | 0.10 kb
       "
     `);
   });
@@ -980,21 +961,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
       .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
            |    └ (items index) | 0.23 kb -> 0.18 kb
-           ·
-      3s   | 📖 #4 ✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
-           |    └ (items index) | 0.18 kb
-      .    | 🔑[0] #1 ✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>)
-      .    | 🔑[1] #2 ✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
-           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>)
-      .    | 🔑[2] #5 ✅ tsdf.sess1.lq-delete-flow.li."users||2
-           |    └ (item data, <"users||2>)
-      .    | 🔑[3] #4 ✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m (items index)
-      .    | 🔑[4] #6 ✅ tsdf._m.g (global maintenance)
-      .    | 📖 #1 ✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | 📖 #2 ✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
-           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.21 kb
       "
     `);
   });
@@ -1250,18 +1216,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb -> 0.18 kb
-            ·
-      3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.18 kb
-      .     | 🔑[0] #1 ✅ tsdf.sess1.lq-query-invalidation-flow.li."users||1
-            |    └ (item data, <"users||1>)
-      .     | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index)
-      .     | 🔑[2] #3 ✅ tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>)
-      .     | 🔑[3] #4 ✅ tsdf._m.g (global maintenance)
-      .     | 📖 #3 ✅ tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
       "
     `);
   });
@@ -1347,18 +1301,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.12 kb -> 0.18 kb
-            ·
-      3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.18 kb
-      .     | 🔑[0] #1 ✅ tsdf.sess1.lq-coalesced-invalidations.li."users||1
-            |    └ (item data, <"users||1>)
-      .     | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index)
-      .     | 🔑[2] #3 ✅ tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>)
-      .     | 🔑[3] #4 ✅ tsdf._m.g (global maintenance)
-      .     | 📖 #3 ✅ tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
       "
     `);
   });
@@ -1619,18 +1561,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (item data, <"users||1>) | ❌ -> 0.10 kb
       .     | ✍️ #2 ❌->✅ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (items index) | ❌ -> 0.12 kb
-            ·
-      3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
-            |    └ (items index) | 0.12 kb
-      .     | 🔑[0] #4 ✅ tsdf._m.g (global maintenance)
-      .     | 🔑[1] #1 ✅ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>)
-      .     | 🔑[2] #3 ✅ tsdf.sess1.lq-query-remount-no-cache.li."users||1
-            |    └ (item data, <"users||1>)
-      .     | 🔑[3] #2 ✅ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
-            |    └ (items index)
-      .     | 📖 #1 ✅ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1692,14 +1622,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb -> 0.18 kb
-            ·
-      3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.18 kb
-      .     | 🔑[0] #1 ✅ tsdf.sess1.lq-item-invalidation-flow.li."users||1
-            |    └ (item data, <"users||1>)
-      .     | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index)
-      .     | 🔑[2] #3 ✅ tsdf._m.g (global maintenance)
       "
     `);
   });
@@ -1797,14 +1719,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (items index)
       .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index) | ❌ -> 0.12 kb
-            ·
-      3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
-            |    └ (items index) | 0.12 kb
-      .     | 🔑[0] #3 ✅ tsdf._m.g (global maintenance)
-      .     | 🔑[1] #2 ✅ tsdf.sess1.lq-item-remount-no-cache.li."users||1
-            |    └ (item data, <"users||1>)
-      .     | 🔑[2] #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
-            |    └ (items index)
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -2000,17 +1914,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.12 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.12 kb -> 0.18 kb
-           ·
-      3s   | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.18 kb
-      .    | 🔑[0] #1 ✅ tsdf.sess1.lq-mutation-flow.li."users||1
-           |    └ (item data, <"users||1>)
-      .    | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (items index)
-      .    | 🔑[2] #3 ✅ tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>)
-      .    | 🔑[3] #4 ✅ tsdf._m.g (global maintenance)
-      .    | 📖 #3 ✅ tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
       "
     `);
   });

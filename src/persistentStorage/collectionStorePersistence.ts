@@ -24,6 +24,7 @@ import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getPayloadRecordKey,
 } from './asyncStorageShared';
+import { createCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type {
@@ -40,7 +41,6 @@ import {
 } from './parsePersistedData';
 import {
   createShouldIgnoreItemPredicate,
-  getSerializedStringSize,
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
@@ -440,6 +440,17 @@ export function setupCollectionPersistence<
     return 0;
   }
 
+  function getLocalStorageEntrySizeBytes(
+    value: PersistedCollectionItemData<unknown>,
+  ): number {
+    return serializeJsonForStorage(
+      createCompactLocalStorageEntry(
+        { d: value.data, p: value.payload },
+        version,
+      ),
+    ).sizeBytes;
+  }
+
   function getKnownPersistedBytes(
     itemKeys: ReadonlySet<string> | null,
   ): number | null {
@@ -463,7 +474,10 @@ export function setupCollectionPersistence<
     const snapshot = JSON.stringify(persisted);
     persistedSnapshotByKey.set(itemKey, snapshot);
     if (localStorageAdapter !== null) {
-      persistedSizeBytesByKey.set(itemKey, getSerializedStringSize(snapshot));
+      persistedSizeBytesByKey.set(
+        itemKey,
+        getLocalStorageEntrySizeBytes(persisted),
+      );
     } else {
       persistedSizeBytesByKey.set(
         itemKey,
@@ -1055,11 +1069,14 @@ export function setupCollectionPersistence<
 
         pendingUpserts.set(itemKey, {
           snapshot: nextSnapshot,
-          sizeBytes: estimateAsyncEntrySizeBytes({
-            itemKey,
-            lastAccessAt: Date.now(),
-            value: nextValue,
-          }),
+          sizeBytes:
+            localStorageAdapter === null
+              ? estimateAsyncEntrySizeBytes({
+                  itemKey,
+                  lastAccessAt: Date.now(),
+                  value: nextValue,
+                })
+              : getLocalStorageEntrySizeBytes(nextValue),
           value: nextValue,
         });
       }
@@ -1225,10 +1242,12 @@ export function setupCollectionPersistence<
       }
 
       if (localStorageAdapter !== null && maintenanceManifestKey !== null) {
+        const nextKnownPersistedBytes =
+          getKnownPersistedBytes(knownPersistedKeys);
         if (
           hasIgnoreItemFilter ||
-          pendingRemoves.size > 0 ||
-          pendingUpserts.size > 0
+          nextKnownPersistedBytes === null ||
+          nextKnownPersistedBytes > maxBytes
         ) {
           scheduleLocalStorageMaintenance({
             forceManifestKeys: [maintenanceManifestKey],
