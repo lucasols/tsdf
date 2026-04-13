@@ -2,15 +2,17 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
-import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+  parsePersistedAsyncNamespaceKind,
+} from '../../src/persistentStorage/asyncStorageShared';
+import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
+import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getPayloadRecordKey,
   OPFS_ROOT_DIR,
-  parseFileNameKindAlias,
   parseRecordKey,
   parseRecordKindAlias,
 } from '../../src/persistentStorage/opfsFileNaming';
@@ -694,7 +696,9 @@ function resolvePlaceholderHashedOpfsFilePath(filePath: string): string {
   const parsedFileName = OPFS_FILE_NAME_REGEX.exec(fileName);
   if (parsedFileName?.groups === undefined) return filePath;
 
-  const kind = parseFileNameKindAlias(parsedFileName.groups.kindPart ?? '');
+  const kind = parsePersistedAsyncNamespaceKind(
+    parsedFileName.groups.kindPart ?? '',
+  );
   const recordKind = parseRecordKindAlias(
     parsedFileName.groups.recordPart ?? '',
   );
@@ -1419,6 +1423,7 @@ function buildOpfsOperationCaptureResult(
   const verboseTimelineEntries: Array<{
     endTime: number;
     operation: MockOpfsOperation;
+    openedHandle: boolean;
     openKey: string | null;
     readSnapshot: ReadTimelineSnapshot | null;
     time: number;
@@ -1444,6 +1449,11 @@ function buildOpfsOperationCaptureResult(
 
     verboseTimelineEntries.push({
       endTime: Math.max(0, operation.time - captureStartedAt),
+      openedHandle:
+        operation.type === 'ensureDir' ||
+        operation.type === 'ensureFile' ||
+        ((operation.type === 'openDir' || operation.type === 'openFile') &&
+          operation.exists),
       openKey:
         operation.type === 'openDir' || operation.type === 'ensureDir'
           ? `dir:${stripOpfsRootPrefix(operation.path)}`
@@ -1480,7 +1490,7 @@ function buildOpfsOperationCaptureResult(
 
   for (const entry of sortedVerboseTimelineEntries) {
     const warning =
-      entry.openKey !== null
+      entry.openKey !== null && entry.openedHandle
         ? seenOpenKeys.has(entry.openKey)
           ? DUPLICATE_OPEN_WARNING
           : undefined
@@ -1496,7 +1506,7 @@ function buildOpfsOperationCaptureResult(
       time: entry.time,
     });
 
-    if (entry.openKey !== null) {
+    if (entry.openKey !== null && entry.openedHandle) {
       seenOpenKeys.add(entry.openKey);
     }
     if (entry.readSnapshot !== null) {

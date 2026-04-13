@@ -28,16 +28,10 @@ export function getAsyncCollectionEntrySizeBytes<T>(
   data: T,
 ): number {
   return (
-    getSerializedStringSize(JSON.stringify({ d: data, p: payload })) +
+    getSerializedStringSize(JSON.stringify(data)) +
     getSerializedStringSize(
       JSON.stringify({ a: getDefaultTimestamp(), p: payload }),
     )
-  );
-}
-
-function getAsyncMetadataSizeBytes(payload: unknown): number {
-  return getSerializedStringSize(
-    JSON.stringify({ a: getDefaultTimestamp(), p: payload }),
   );
 }
 
@@ -68,15 +62,16 @@ export function getAsyncListItemEntrySizeBytes<T>(
   options: { loadedFields?: string[] } = {},
 ): number {
   return (
+    getSerializedStringSize(JSON.stringify(data)) +
     getSerializedStringSize(
       JSON.stringify({
-        d: data,
+        a: getDefaultTimestamp(),
         p: payload,
         ...(options.loadedFields !== undefined
-          ? { lf: options.loadedFields }
+          ? { f: options.loadedFields }
           : {}),
       }),
-    ) + getAsyncMetadataSizeBytes(payload)
+    )
   );
 }
 
@@ -105,11 +100,13 @@ export function getAsyncListQueryEntrySizeBytes(
   options: { hasMore?: boolean } = {},
 ): number {
   return (
+    getSerializedStringSize(JSON.stringify(items)) +
     getSerializedStringSize(
       JSON.stringify({
-        i: items,
+        a: getDefaultTimestamp(),
         ...(options.hasMore === true ? { h: true } : {}),
+        p: payload,
       }),
-    ) + getAsyncMetadataSizeBytes(payload)
+    )
   );
 }

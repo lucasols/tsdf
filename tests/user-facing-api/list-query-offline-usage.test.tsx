@@ -17,11 +17,11 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 
 const userSchema = rc_object({ id: rc_number, name: rc_string });
@@ -68,13 +68,13 @@ function getUserEntityKey(id: number) {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 const validListQueryTempEntity: NonNullable<
@@ -946,7 +946,7 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
   listHook.unmount();
 
   // Simulate a fresh app boot with only the pending-items hook mounted.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
   listQueryStore = createStore();
 
   const pendingHook = renderHook(() => listQueryStore.usePendingOfflineItems());

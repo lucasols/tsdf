@@ -10,7 +10,6 @@ import {
   useGlobalOfflineStatus,
 } from '../../src/main';
 import { readManagedLocalStorageSingleEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -19,6 +18,7 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 import {
   type CreateListQueryUserOperations,
@@ -44,19 +44,17 @@ import {
 let network = createOfflineNetworkMock();
 
 beforeEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('persistent storage without offline config keeps the existing online flow even when the browser reports offline', async () => {
@@ -328,14 +326,14 @@ test('logging back into the same session replays durable offline mutations queue
     .     | "value:2 pending:no"  | 🔴 >fetch-started
     810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
     .     | "value:1 pending:no"  | ui-changed
-    1.81s | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
+    2s    | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
     .     | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
     .     | "value:1 pending:no"  | scheduled-fetch-triggered
-    1.82s | "value:1 pending:yes" | ui-changed
+    2.01s | "value:1 pending:yes" | ui-changed
     .     | "value:1 pending:yes" | 🟠 >fetch-started
     .     | "value:1 pending:yes" | offline:updateValue replay-started
-    2.62s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
-    3.02s | "value:1 pending:yes" | server-data-changed (value: 2)
+    2.81s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
+    3.21s | "value:1 pending:yes" | server-data-changed (value: 2)
     .     | "value:1 pending:yes" | offline:updateValue replay-finished
     .     | "value:2 pending:no"  | ui-changed
     "
@@ -1233,7 +1231,7 @@ test('global offline entities stay empty after restart until a store mounts', as
   await flushAllTimers();
 
   // Simulate a fresh app boot before any store mounts.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   // Before any store has re-registered, the global aggregate should still be empty.
   expect(
@@ -1691,7 +1689,7 @@ test('a store initialized while an earlier shared-session replay is already in f
   `);
 
   // Reboot into a fresh browser session that starts online.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
   act(() => {
     network.goOnline();
   });

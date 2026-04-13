@@ -629,7 +629,7 @@ export function createCollectionStore<
                 createProtectedStorageKey({
                   backend:
                     resolvedPersistentStorageConfig.adapter !== 'local-sync'
-                      ? 'opfs'
+                      ? 'async'
                       : 'localStorage',
                   sessionKey,
                   storeName: id,

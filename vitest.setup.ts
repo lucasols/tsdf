@@ -1,8 +1,7 @@
 import { format } from 'node:util';
-
 import { compactSnapshot } from '@ls-stack/utils/testUtils';
+import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
-
 import { __resetSessionOfflineCoordinatorRegistryForTests } from './src/persistentStorage/offline/sessionCoordinator';
 
 process.env.NODE_ENV = 'development';

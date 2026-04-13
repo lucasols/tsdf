@@ -330,14 +330,14 @@ describe('opfs: converted list query store persistence', () => {
         'tsdf/sess1/lq-opfs-save-error/li.<"users||1>.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      d: { label: 'Cached', rowId: 1 }
-      p: 'users||1'
+      label: 'Cached'
+      rowId: 1
     `);
     const storedQuery = getParsedOpfsFileData(
       'tsdf/sess1/lq-opfs-save-error/lq.<{tableId:"users"}>.p.json',
     );
 
-    expect(storedQuery).toMatchInlineSnapshot(`i: ['"users||1']`);
+    expect(storedQuery).toMatchInlineSnapshot(`['"users||1']`);
     expect(storedQuery).not.toHaveProperty('p');
     expect(storedQuery).not.toHaveProperty('h');
     expect(getParsedOpfsFileData('tsdf/sess1/lq-opfs-save-error/lq._i.r.json'))
@@ -346,7 +346,7 @@ describe('opfs: converted list query store persistence', () => {
           {tableId:"users"}:
             a: 1735689601861
             p: { tableId: 'users' }
-            z: 63
+            z: 57
       `);
   });
 });

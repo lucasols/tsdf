@@ -298,10 +298,10 @@ describe('opfs: collection store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "b: { a: 1735689600100, p: 'b', z: 81 }
-        "c: { a: 1735689600200, p: 'c', z: 82 }
+        "b: { a: 1735689600100, p: 'b', z: 67 }
+        "c: { a: 1735689600200, p: 'c', z: 68 }
 
-      s: { b: 163 }
+      s: { b: 135 }
     `);
   });
 
@@ -340,10 +340,10 @@ describe('opfs: collection store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "pinned: { a: 1735689600000, p: 'pinned', z: 98 }
+        "pinned: { a: 1735689600000, p: 'pinned', z: 79 }
 
       s:
-        b: 98
+        b: 79
         k: ['"pinned']
     `);
   });

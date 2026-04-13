@@ -439,10 +439,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ #5 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item data, <"fourth||2>) | ❌ -> 0.09 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.12 kb -> 0.23 kb
+            |    └ (items index) | 0.12 kb -> 0.29 kb
             ·
       3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.23 kb
+            |    └ (items index) | 0.29 kb
       .     | 🔑[0] #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
       .     | 🔑[1] #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
@@ -593,7 +593,11 @@ describe('sync storage efficiency: list-query', () => {
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(
       `
         e:
-          "users||1: { a: 1735689605910, p: 'users||1', z: 83 }
+          "users||1:
+            a: 1735689605910
+            f: ['age', 'email', 'id', 'name']
+            p: 'users||1'
+            z: 83
       `,
     );
     expect(
@@ -626,10 +630,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.12 kb
       .     | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
             ·
       3.81s | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | 🔑[0] #2 ✅ tsdf.sess1.lq-query-becomes-empty.li."users||1
             |    └ (item data, <"users||1>)
       .     | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
@@ -975,10 +979,10 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-delete-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
       .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
-           |    └ (items index) | 0.23 kb -> 0.12 kb
+           |    └ (items index) | 0.23 kb -> 0.18 kb
            ·
       3s   | 📖 #4 ✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
-           |    └ (items index) | 0.12 kb
+           |    └ (items index) | 0.18 kb
       .    | 🔑[0] #1 ✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>)
       .    | 🔑[1] #2 ✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
@@ -1245,10 +1249,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
             ·
       3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | 🔑[0] #1 ✅ tsdf.sess1.lq-query-invalidation-flow.li."users||1
             |    └ (item data, <"users||1>)
       .     | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
@@ -1342,10 +1346,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
             ·
       3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | 🔑[0] #1 ✅ tsdf.sess1.lq-coalesced-invalidations.li."users||1
             |    └ (item data, <"users||1>)
       .     | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
@@ -1455,12 +1459,18 @@ describe('sync storage efficiency: list-query', () => {
         `tsdf.${sessionKey}.${storeName}.li.`,
       )?.meta,
     ).toMatchInlineSnapshot(`
+      f: ['age', 'email', 'id', 'name']
       o: '✅'
       p: 'users||1'
     `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689605910, o: '✅', p: 'users||1', z: 82 }
+        "users||1:
+          a: 1735689605910
+          f: ['age', 'email', 'id', 'name']
+          o: '✅'
+          p: 'users||1'
+          z: 82
         "users||2: { a: 1735689605910, p: 'users||2', z: 50 }
     `);
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
@@ -1681,10 +1691,10 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb -> 0.12 kb
+            |    └ (items index) | 0.12 kb -> 0.18 kb
             ·
       3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | 🔑[0] #1 ✅ tsdf.sess1.lq-item-invalidation-flow.li."users||1
             |    └ (item data, <"users||1>)
       .     | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
@@ -1989,10 +1999,10 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.12 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.12 kb -> 0.12 kb
+           |    └ (items index) | 0.12 kb -> 0.18 kb
            ·
       3s   | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.12 kb
+           |    └ (items index) | 0.18 kb
       .    | 🔑[0] #1 ✅ tsdf.sess1.lq-mutation-flow.li."users||1
            |    └ (item data, <"users||1>)
       .    | 🔑[1] #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (items index)

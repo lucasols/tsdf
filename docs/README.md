@@ -14,20 +14,20 @@ TSDF provides three store types for different data patterns:
 
 ## Features
 
-| Feature                                                 | Applicable stores      | Description                                                          |
-| ------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------- |
-| [React Hooks](./hooks.md)                               | All                    | `useDocument`, `useItem`, `useListQuery`, and more                   |
-| [Fetch Scheduling](./fetch-scheduling.md)               | All                    | Priority levels, throttling, coalescing, and batching                |
-| [Browser Tabs Sync](./browser-tabs-sync.md)             | All                    | Cross-tab fetch deduplication and snapshot synchronization           |
-| [Mutations](./mutations.md)                             | All                    | Data mutations with optimistic updates and revalidation              |
-| [Invalidation](./invalidation.md)                       | All                    | Mark data as stale and trigger refetches                             |
-| [Batch Fetching](./batch-fetching.md)                   | Collection, List Query | Fetch multiple items in a single request                             |
-| [Real-Time Updates](./real-time-updates.md)             | All                    | WebSocket/SSE integration with adaptive throttling                   |
-| [Persistent Storage](./persistent-storage.md)           | All                    | Restore cached data from localStorage or OPFS between sessions       |
-| [Optimistic List Updates](./optimistic-list-updates.md) | List Query             | Auto-sort/filter queries when item state changes                     |
-| [Partial Resources](./partial-resources.md)             | List Query             | Fetch only specific fields, with per-field invalidation              |
-| [Offset Pagination](./offset-pagination.md)             | List Query             | Offset/limit-based pagination with chunked invalidation              |
-| [Shared Types](./shared-types.md)                       | All                    | Common types (`StoreError`, `FetchType`, `IsOffScreenContext`, etc.) |
+| Feature                                                 | Applicable stores      | Description                                                                |
+| ------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+| [React Hooks](./hooks.md)                               | All                    | `useDocument`, `useItem`, `useListQuery`, and more                         |
+| [Fetch Scheduling](./fetch-scheduling.md)               | All                    | Priority levels, throttling, coalescing, and batching                      |
+| [Browser Tabs Sync](./browser-tabs-sync.md)             | All                    | Cross-tab fetch deduplication and snapshot synchronization                 |
+| [Mutations](./mutations.md)                             | All                    | Data mutations with optimistic updates and revalidation                    |
+| [Invalidation](./invalidation.md)                       | All                    | Mark data as stale and trigger refetches                                   |
+| [Batch Fetching](./batch-fetching.md)                   | Collection, List Query | Fetch multiple items in a single request                                   |
+| [Real-Time Updates](./real-time-updates.md)             | All                    | WebSocket/SSE integration with adaptive throttling                         |
+| [Persistent Storage](./persistent-storage.md)           | All                    | Restore cached data from localStorage, IndexedDB, or OPFS between sessions |
+| [Optimistic List Updates](./optimistic-list-updates.md) | List Query             | Auto-sort/filter queries when item state changes                           |
+| [Partial Resources](./partial-resources.md)             | List Query             | Fetch only specific fields, with per-field invalidation                    |
+| [Offset Pagination](./offset-pagination.md)             | List Query             | Offset/limit-based pagination with chunked invalidation                    |
+| [Shared Types](./shared-types.md)                       | All                    | Common types (`StoreError`, `FetchType`, `IsOffScreenContext`, etc.)       |
 
 Notable additions:
 

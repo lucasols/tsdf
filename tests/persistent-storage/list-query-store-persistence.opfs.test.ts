@@ -532,9 +532,7 @@ describe('opfs: list query store persistence', () => {
       readerEnv.store.state.itemLoadedFields[
         listQueryScope.itemKey('users', 1)
       ],
-    ).toMatchInlineSnapshot(`
-      ['id', 'name']
-    `);
+    ).toMatchInlineSnapshot(`['id', 'name']`);
   });
 
   test('partial-resource persistence stores each item with its own loaded fields', async () => {
@@ -573,18 +571,17 @@ describe('opfs: list query store persistence', () => {
         `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
       ),
     ).toMatchInlineSnapshot(`
-      d: { id: 1, name: 'Alice' }
-      lf: ['id', 'name']
-      p: 'users||1'
+      id: 1
+      name: 'Alice'
     `);
     expect(
       getParsedOpfsFileData(
         `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 2)}>.p.json`,
       ),
     ).toMatchInlineSnapshot(`
-      d: { age: 42, id: 2, name: 'Bob' }
-      lf: ['age', 'id', 'name']
-      p: 'users||2'
+      age: 42
+      id: 2
+      name: 'Bob'
     `);
   });
 
@@ -698,9 +695,9 @@ describe('opfs: list query store persistence', () => {
         `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
       ),
     ).toMatchInlineSnapshot(`
-      d: { email: 'cached@site.test', id: 1, name: 'Fresh' }
-      lf: ['id', 'name']
-      p: 'users||1'
+      email: 'cached@site.test'
+      id: 1
+      name: 'Fresh'
     `);
   });
 
@@ -1182,7 +1179,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
 
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
@@ -1194,7 +1191,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||2']`);
   });
 
   test('cold persisted query items can be evicted during unrelated maxItemBytes cleanup and later hydrate with missing items filtered out', async () => {
@@ -1268,7 +1265,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-cold-query-items/lq.%7BtableId%3A%22users%22%7D.p.json',
       ),
-    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
 
     const readerEnv = createEnv({
       storeName,
@@ -1449,10 +1446,10 @@ describe('opfs: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "users||2: { a: 1735689600100, p: 'users||2', z: 83 }
-        "users||3: { a: 1735689600200, p: 'users||3', z: 84 }
+        "users||2: { a: 1735689600100, p: 'users||2', z: 62 }
+        "users||3: { a: 1735689600200, p: 'users||3', z: 63 }
 
-      s: { b: 167 }
+      s: { b: 125 }
     `);
   });
 
@@ -1553,13 +1550,13 @@ describe('opfs: list query store persistence', () => {
         {tableId:"users-2"}:
           a: 1735689600100
           p: { tableId: 'users-2' }
-          z: 53
+          z: 47
         {tableId:"users-3"}:
           a: 1735689600200
           p: { tableId: 'users-3' }
-          z: 53
+          z: 47
 
-      s: { b: 106 }
+      s: { b: 94 }
     `);
   });
 
@@ -1657,10 +1654,10 @@ describe('opfs: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689600000, p: 'users||1', z: 85 }
+        "users||1: { a: 1735689600000, p: 'users||1', z: 64 }
 
       s:
-        b: 85
+        b: 64
         k: ['"users||1']
     `);
   });
@@ -1700,10 +1697,10 @@ describe('opfs: list query store persistence', () => {
         {tableId:"users-pinned"}:
           a: 1735689600000
           p: { tableId: 'users-pinned' }
-          z: 58
+          z: 52
 
       s:
-        b: 58
+        b: 52
         k: ['{tableId:"users-pinned"}']
     `);
   });
@@ -1916,10 +1913,7 @@ describe('opfs: list query store persistence', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/lq-opfs-max-query-size/lq.%7BtableId%3A%22users%22%7D.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      h: '✅'
-      i: ['"users||1', '"users||2']
-    `);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
     expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 1))).toBe(
       true,
     );

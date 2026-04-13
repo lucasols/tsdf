@@ -6,11 +6,9 @@ import {
   type GlobalOfflineEntity,
   useGlobalOfflineEntities,
 } from '../../src/main';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   flushAllTimers,
@@ -19,6 +17,7 @@ import {
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import type { UpdateValueOperations } from './offlineReplayTestShared';
 import { docMutationInputSchema, docSchema } from './offlineTestShared';
 
@@ -186,25 +185,19 @@ function summarizeOfflineEntities(
 }
 
 beforeEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
   didCreateOpfsPersistentStore = false;
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
-  __resetSessionOfflineCoordinatorRegistryForTests();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
   didCreateOpfsPersistentStore = false;
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsPersistentStorage.resetForTests?.();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('mixed adapters persist independent offline document state in one shared session', async () => {
@@ -259,7 +252,7 @@ test('mixed persisted session keeps global offline entities empty until stores r
   await seedMixedOfflineSession();
 
   // Simulate a fresh app boot that only has persisted offline state available.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   // Shared global entity aggregates are rebuilt by real stores as they hydrate.
   // A passive global hook should not fabricate duplicated persisted entities
@@ -284,7 +277,7 @@ test('mixed adapters rehydrate cached values from their own backends and replay 
   await seedMixedOfflineSession();
 
   // Simulate the next browser session starting from persisted storage only.
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedStoreManager = createSharedStoreManager(mixedSessionKey);
   const restartedLocalEnv = createMixedOfflineDocumentEnv({

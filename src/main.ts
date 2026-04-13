@@ -178,8 +178,11 @@ export {
 } from './persistentStorage/persistentStorageManager';
 
 export {
+  createIndexedDbPersistentStorage,
+  indexedDbPersistentStorage,
   localPersistentStorage,
   opfsPersistentStorage,
+  type IndexedDbPersistentStorageOptions,
 } from './persistentStorage/storageAdapter';
 
 export { createAsyncStorageAdapter } from './persistentStorage/asyncStorageAdapter';

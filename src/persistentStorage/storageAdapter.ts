@@ -1,5 +1,9 @@
 import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
+  createIndexedDbPersistentStorage as createIndexedDbPersistentStorageInternal,
+  type IndexedDbPersistentStorageOptions as IndexedDbPersistentStorageOptionsInternal,
+} from './indexedDbAsyncStorageAdapter';
+import {
   clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
   directManagedLocalStorageIo,
@@ -414,3 +418,15 @@ export const localPersistentStorage: LocalPersistentStorage = {
 
 export const opfsPersistentStorage: AsyncStorageAdapter =
   createAsyncStorageAdapter(new OpfsAsyncStorageDriver());
+
+export const indexedDbPersistentStorage: AsyncStorageAdapter =
+  createIndexedDbPersistentStorageInternal();
+
+export type IndexedDbPersistentStorageOptions =
+  IndexedDbPersistentStorageOptionsInternal;
+
+export function createIndexedDbPersistentStorage(
+  options: IndexedDbPersistentStorageOptions = {},
+): AsyncStorageAdapter {
+  return createIndexedDbPersistentStorageInternal(options);
+}

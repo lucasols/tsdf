@@ -9,13 +9,9 @@ import {
   createStoreManager,
   opfsOfflineUploadAdapter,
 } from '../../src/main';
-import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { encodePathSegment } from '../../src/persistentStorage/opfsFileNaming';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import {
-  createMockBrowserOpfs,
-  resetMockBrowserOpfsForTests,
-} from '../mocks/mockBrowserOpfs';
+import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
@@ -28,6 +24,7 @@ import {
   getOpfsDirTree,
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -47,19 +44,13 @@ beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
   network = createOfflineNetworkMock();
   network.install();
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsOfflineUploadAdapter.resetForTests?.();
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests({ clearStorage: true });
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  localStorage.clear();
-  resetMockBrowserOpfsForTests();
-  opfsOfflineUploadAdapter.resetForTests?.();
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests({ clearStorage: true });
 });
 
 test('useOfflineUploads keeps manual uploads pending across reconnect until a dependency consumes them', async () => {
@@ -501,7 +492,7 @@ test('document direct uploads survive restart and replay with restored files eve
   // Simulate a full app restart so the mutation and upload must be restored
   // from storage instead of surviving in memory.
   uploadHook.unmount();
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedStoreManager = createStoreManager({
     getSessionKey: () => sessionKey,
@@ -742,10 +733,10 @@ test('queued direct uploads keep same logical field names isolated per mutation'
     expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
       "tsdf-uploads (1.40 kb)
       └ offline-direct-upload-collision-session (1.37 kb)
-        ├ offline-direct-upload-collision-doc:1735689600003:eeeeeeee:avatar (0.66 kb)
+        ├ offline-direct-upload-collision-doc:1735689602000:eeeeeeee:avatar (0.66 kb)
         │ ├ binary.blob (0.06 kb)
         │ └ metadata.json (0.47 kb)
-        └ offline-direct-upload-collision-doc:1735689600012:i:avatar (0.64 kb)
+        └ offline-direct-upload-collision-doc:1735689602009:i:avatar (0.64 kb)
           ├ binary.blob (0.06 kb)
           └ metadata.json (0.46 kb)"
     `);
@@ -807,7 +798,7 @@ test('clearSessionStorage removes registered offline uploads for local-sync sess
   // were stored separately from the main local-sync persistent state.
   await resolveAfterAllTimers(clearSessionStorage(sessionKey, 'local-sync'));
 
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedSession = createStoreManager({
     getSessionKey: () => sessionKey,
@@ -856,7 +847,7 @@ test('uploads named metadata.json still rehydrate their original bytes after res
     )
   ).unwrap();
 
-  __resetSessionOfflineCoordinatorRegistryForTests();
+  resetSessionForTests();
 
   const restartedSession = createStoreManager({
     getSessionKey: () => sessionKey,
@@ -1011,7 +1002,7 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
       'tsdf-uploads/offline-upload-dependency-session/asset-1/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689600003
+    c: 1735689602000
     i: 'asset-1'
     k: 'offline-upload-dependency-session'
     l: 1
@@ -1019,7 +1010,7 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
     n: 'dependency.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689600003
+    u: 1735689602000
     z: 15
   `);
   expect(

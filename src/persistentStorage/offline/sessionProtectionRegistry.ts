@@ -16,3 +16,20 @@ export function getSessionProtectedKeysSnapshot(
 export function clearSessionProtectedKeysSnapshot(sessionKey: string): void {
   protectedKeysBySession.delete(sessionKey);
 }
+
+/**
+ * Test-only primitive for resetting cached protected-key snapshots.
+ *
+ * Prefer calling `resetSessionForTests()` from
+ * `tests/utils/resetSessionForTests.ts` so restart-style tests reset the full
+ * session/runtime boundary instead of invoking this low-level reset directly.
+ */
+export function __resetSessionProtectedKeysSnapshotForTests(): void {
+  if (!import.meta.env.TEST) {
+    throw new Error(
+      '[tsdf] __resetSessionProtectedKeysSnapshotForTests is test-only',
+    );
+  }
+
+  protectedKeysBySession.clear();
+}

@@ -156,7 +156,7 @@ export type AsyncStorageDriver = {
   /** Bulk remove for multiple keys in a single call. */
   removeMany(scope: AsyncStorageNamespaceScope, keys: string[]): Promise<void>;
   /** @internal Test-only reset hook used by TSDF internals. */
-  __resetForTests?(): void;
+  __resetForTests?(): void | Promise<void>;
 };
 
 export type AsyncStorageNamespaceHandle<
@@ -178,6 +178,10 @@ export type AsyncStorageNamespaceHandle<
     args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<void>;
   listMetadata(args?: {
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
+  listMetadataByFilter?(args: {
+    filter: { equals: unknown; key: string };
     order?: AsyncStorageMetadataOrder;
   }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
   clear(): Promise<void>;
