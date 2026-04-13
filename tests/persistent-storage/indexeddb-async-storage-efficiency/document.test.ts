@@ -136,7 +136,6 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Cached document', value: 7 }
 
         i: '["sess1","doc-remount-flow","d"]'
-        z: 65
       `);
   });
 
@@ -256,7 +255,7 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 
-  test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
+  test('startup hydration touch preserves an offline marker added by another tab', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
     const mockAdapter = createIndexedDbPersistentStorageTestStore();
@@ -269,12 +268,28 @@ describe('indexeddb async storage efficiency: document', () => {
     );
 
     const env = createDocumentEnv({ storeName, sessionKey });
+    await settleStartupBackgroundScan(mockAdapter);
 
-    // Simulate another tab marking the document as offline-protected before the touch runs.
+    // Simulate another tab marking the document as offline-protected before the
+    // touch runs.
     setProtectedKeysSnapshot(sessionKey, [storageKey]);
+    await mockAdapter.indexedDb.mutateRawRow(
+      'entries',
+      [`["${sessionKey}","${storeName}","d"]`, DOCUMENT_PERSISTED_ENTRY_KEY],
+      (current) => {
+        if (
+          typeof current !== 'object' ||
+          current === null ||
+          !('a' in current)
+        ) {
+          return current;
+        }
+
+        return { ...current, o: 1 };
+      },
+    );
 
     // Mount the stale cached document so hydration schedules a metadata touch.
-    await settleStartupBackgroundScan(mockAdapter);
     const touchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     const hook = renderHook(() =>
@@ -298,7 +313,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Cached document', value: 8 }
 
         i: '["sess1","doc-startup-touch-offline-marker","d"]'
-        z: 65
+        o: 1
       `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
@@ -345,7 +360,6 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Edited document', value: 99 }
 
         i: '["sess1","doc-mutation-flow","d"]'
-        z: 66
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
@@ -397,7 +411,6 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Fresh document', value: 42 }
 
         i: '["sess1","doc-invalidation-flow","d"]'
-        z: 65
       `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -467,7 +480,6 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Fresh document 2', value: 42 }
 
         i: '["sess1","doc-coalesced-invalidations","d"]'
-        z: 67
       `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -521,7 +533,6 @@ describe('indexeddb async storage efficiency: document', () => {
 
         i: '["sess1","doc-offline-marker-flow","d"]'
         o: 1
-        z: 74
       `);
   });
 });

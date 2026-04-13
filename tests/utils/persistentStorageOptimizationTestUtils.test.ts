@@ -88,7 +88,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/docs/d._i.r.json (namespace index)
       7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.09 kb
       12ms | ✍️ #2 tsdf/sess1/docs/d._i.r.json
-           |    └ (namespace index) | 0.05 kb -> 0.04 kb
+           |    └ (namespace index) | 0.04 kb -> 0.04 kb
       14ms | 🗑️ #1 ✅ tsdf/sess1/docs/d.e.p.json (entry data)
       15ms | end
       "
@@ -326,9 +326,9 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json
-           |    └ (namespace index) | 0.05 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.04 kb ⚠️ REPEATED READ <10ms UNCHANGED
       10ms | end
       "
     `);
@@ -371,8 +371,8 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
-      10ms | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
+      10ms | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       11ms | end
       "
     `);
@@ -416,7 +416,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.03 kb
       10ms | end
       "
@@ -468,10 +468,10 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.04 kb
       5ms  | 👁️ #1 file-open ✅ tsdf/sess1/docs/d._i.r.json (namespace index)
       9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json
-           |    └ (namespace index) | 0.05 kb ⚠️ REPEATED READ <10ms UNCHANGED
+           |    └ (namespace index) | 0.04 kb ⚠️ REPEATED READ <10ms UNCHANGED
       10ms | end
       "
     `);
@@ -723,7 +723,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/docs/d._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          - { a: 0, z: 53 }
+          - a: 0
       `);
     expect(
       getParsedOpfsFileData('tsdf/sess1/docs/d.e.p.json'),

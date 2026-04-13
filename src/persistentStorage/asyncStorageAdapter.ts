@@ -1936,23 +1936,26 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         upsert.serializedValue !== undefined
           ? { rawValue: upsert.serializedValue }
           : serializeJsonForStorage(upsert.value);
-      const nextSizeBytes = estimateManagedAsyncStorageEntrySizeBytes({
-        customMetadata,
-        lastAccessAt: nextLastAccessAt,
-        serializedValue: serializedValue.rawValue,
-        version: upsert.version,
-      });
+      const nextSizeBytes =
+        scope.kind !== 'document'
+          ? estimateManagedAsyncStorageEntrySizeBytes({
+              customMetadata,
+              lastAccessAt: nextLastAccessAt,
+              serializedValue: serializedValue.rawValue,
+              version: upsert.version,
+            })
+          : undefined;
       const nextMetadata: InternalManagedMetadataRecord = {
         lastAccessAt: nextLastAccessAt,
-        sizeBytes: nextSizeBytes,
         version: upsert.version,
+        ...(nextSizeBytes !== undefined ? { sizeBytes: nextSizeBytes } : {}),
         ...(customMetadata ? { customMetadata } : {}),
       };
 
       setEntries.push({
         key: getPayloadRecordKey(upsert.key),
         serializedValue: serializedValue.rawValue,
-        sizeBytes: nextSizeBytes,
+        ...(nextSizeBytes !== undefined ? { sizeBytes: nextSizeBytes } : {}),
         value: upsert.value,
       });
 

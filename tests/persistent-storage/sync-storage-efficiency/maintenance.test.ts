@@ -81,8 +81,8 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index)
       .    | 🔑[4] #6 ✅ external-cache
       .    | 🔑[5] #7 ✅ feature-flag
-      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.07 kb
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.07 kb
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.06 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
@@ -139,7 +139,7 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index)
       .    | 📖 #3 ✅ tsdf._m.r.s:sess1.corrupted.m (namespace index) | 0.02 kb
       .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.corrupted.m (namespace index)
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index) | 0.07 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index) | 0.06 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.corrupted (entry data)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
@@ -207,9 +207,9 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index)
       .    | 🔑[4] #6 ✅ tsdf.sess2.fresh-doc (entry data)
       .    | 🔑[5] #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index)
-      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.07 kb
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.07 kb
-      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.07 kb
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.06 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
       .    | 🗑️ #4 ✅->❌ tsdf.sess2.expired-doc (entry data)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
@@ -515,17 +515,17 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
             |    └ (namespace index)
       .     | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
-            |    └ (namespace index) | 0.09 kb
+            |    └ (namespace index) | 0.08 kb
       .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
-            |    └ (namespace index) | 0.07 kb
+            |    └ (namespace index) | 0.06 kb
       .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
-            |    └ (namespace index) | 0.07 kb
+            |    └ (namespace index) | 0.06 kb
       .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
             |    └ (namespace index) | 0.14 kb
       .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
             |    └ (namespace index) | 0.09 kb
       .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
-            |    └ (namespace index) | 0.07 kb
+            |    └ (namespace index) | 0.06 kb
       .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
       .     | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
       .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
@@ -537,7 +537,7 @@ describe('sync storage efficiency: maintenance', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        d: { a: 1735689601810, o: '✅', z: 46 }
+        d: { a: 1735689601810, o: '✅' }
     `);
   });
 

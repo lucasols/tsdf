@@ -611,19 +611,22 @@ function writeLogicalStorageEntry(
     getPayloadRecordKey(parsed.key),
     rawValue,
   );
-  const sizeBytes = estimateManagedEntrySizeBytes({
-    rawValue,
-    lastAccessAt: entry.timestamp,
-    version: entry.version ?? 1,
-    customMetadata: buildCustomMetadata(parsed.scope, entry.data),
-  });
+  const sizeBytes =
+    parsed.scope.kind === 'document'
+      ? undefined
+      : estimateManagedEntrySizeBytes({
+          rawValue,
+          lastAccessAt: entry.timestamp,
+          version: entry.version ?? 1,
+          customMetadata: buildCustomMetadata(parsed.scope, entry.data),
+        });
   const nextEntries = readNamespaceIndex(mockBrowserOpfs, parsed.scope);
   nextEntries.set(parsed.key, {
     key: parsed.key,
     writtenAt: entry.timestamp,
     lastAccessAt: entry.timestamp,
-    sizeBytes,
     version: entry.version ?? 1,
+    ...(sizeBytes !== undefined ? { sizeBytes } : {}),
     customMetadata: buildCustomMetadata(parsed.scope, entry.data),
   });
   writeNamespaceIndex(mockBrowserOpfs, parsed.scope, nextEntries);

@@ -727,6 +727,7 @@ export function syncManagedLocalStorageSessionProtection(
 function upsertManifestEntry(
   manifestKey: string,
   entry: StoredManagedLocalStorageManifestEntry & {
+    clearSizeBytes?: boolean;
     mergeMeta?: (
       currentMeta: StoredManagedLocalStorageManifestEntry['meta'],
     ) => unknown;
@@ -739,7 +740,9 @@ function upsertManifestEntry(
   nextEntries.set(entry.entryKey, {
     entryKey: entry.entryKey,
     lastAccessAt: entry.lastAccessAt,
-    sizeBytes: entry.sizeBytes ?? currentEntry?.sizeBytes,
+    ...(entry.clearSizeBytes
+      ? {}
+      : { sizeBytes: entry.sizeBytes ?? currentEntry?.sizeBytes }),
     meta: entry.mergeMeta ? entry.mergeMeta(currentEntry?.meta) : entry.meta,
   });
   writeManifest(manifestKey, { entries: nextEntries }, io);
@@ -761,6 +764,7 @@ function removeManifestEntry(
 type UpsertSingleEntryParams = {
   storageKey: string;
   lastAccessAt?: number;
+  clearSizeBytes?: boolean;
   sizeBytes?: number;
   mergeMeta?: (
     currentMeta: StoredManagedLocalStorageManifestEntry['meta'],
@@ -781,6 +785,7 @@ export function upsertManagedLocalStorageSingleEntry(
     {
       entryKey: undefined,
       lastAccessAt: params.lastAccessAt ?? Date.now(),
+      clearSizeBytes: params.clearSizeBytes,
       sizeBytes: params.sizeBytes,
       mergeMeta: params.mergeMeta,
       meta: params.meta,
@@ -863,7 +868,7 @@ export function touchManagedLocalStorageSinglePayload(
     {
       entryKey: current.entry.entryKey,
       lastAccessAt: Date.now(),
-      sizeBytes: current.entry.sizeBytes,
+      clearSizeBytes: true,
       meta: current.entry.meta,
     },
     io,

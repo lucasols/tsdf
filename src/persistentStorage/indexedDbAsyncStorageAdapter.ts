@@ -1128,13 +1128,16 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         splitCustomMetadata(customMetadata);
       const nextLastAccessAt =
         touchTimestamps.get(upsert.key) ?? existing?.a ?? now;
-      const sizeBytes = estimateIndexedDbManagedEntrySizeBytes({
-        customMetadata,
-        lastAccessAt: nextLastAccessAt,
-        serializedValue: upsert.serializedValue,
-        value: upsert.value,
-        version: upsert.version,
-      });
+      const sizeBytes =
+        scope.kind !== 'document'
+          ? estimateIndexedDbManagedEntrySizeBytes({
+              customMetadata,
+              lastAccessAt: nextLastAccessAt,
+              serializedValue: upsert.serializedValue,
+              value: upsert.value,
+              version: upsert.version,
+            })
+          : undefined;
       const compactValue = compactEntryValue(scope, upsert.value);
       await openRequestAsPromise(
         entryStore.put(
@@ -1147,7 +1150,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
             ...(offlineProtected === true ? { o: 1 as const } : {}),
             ...(payload !== undefined ? { p: payload } : {}),
             ...(upsert.version !== 1 ? { v: upsert.version } : {}),
-            z: sizeBytes,
+            ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
           } satisfies IndexedDbEntryRecord,
           createEntryPrimaryKey(scope, upsert.key),
         ),
@@ -1618,12 +1621,15 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     const { extraMetadata, group, offlineProtected, payload } =
       splitCustomMetadata(args.customMetadata);
-    const sizeBytes = estimateIndexedDbManagedEntrySizeBytes({
-      customMetadata: args.customMetadata,
-      lastAccessAt: args.lastAccessAt,
-      value: args.value,
-      version: args.version,
-    });
+    const sizeBytes =
+      scope.kind !== 'document'
+        ? estimateIndexedDbManagedEntrySizeBytes({
+            customMetadata: args.customMetadata,
+            lastAccessAt: args.lastAccessAt,
+            value: args.value,
+            version: args.version,
+          })
+        : undefined;
     const compactValue = compactEntryValue(scope, args.value);
     entryStore.put(
       {
@@ -1635,7 +1641,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         ...(offlineProtected === true ? { o: 1 as const } : {}),
         ...(payload !== undefined ? { p: payload } : {}),
         ...(args.version !== 1 ? { v: args.version } : {}),
-        z: sizeBytes,
+        ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
       } satisfies IndexedDbEntryRecord,
       createEntryPrimaryKey(scope, args.key),
     );

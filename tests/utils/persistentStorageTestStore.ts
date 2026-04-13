@@ -242,7 +242,7 @@ function createPersistentTestStore(
             upsertManagedLocalStorageSingleEntry({
               storageKey: documentStorageKey,
               lastAccessAt: entryTimestamp,
-              sizeBytes: getStoredValueSizeBytes(storage, documentStorageKey),
+              clearSizeBytes: true,
             });
           }
 

@@ -1098,14 +1098,16 @@ export function createIndexedDbPersistentStorageTestStore(
           splitCustomMetadata(args.customMetadata);
         const compactValue = compactEntryValue(scope, args.value);
         const sizeBytes =
-          args.sizeBytes ??
-          estimateEntrySizeBytes({
-            customMetadata: args.customMetadata,
-            lastAccessAt: args.lastAccessAt,
-            scope,
-            value: args.value,
-            version: args.version,
-          });
+          scope.kind === 'document'
+            ? undefined
+            : (args.sizeBytes ??
+              estimateEntrySizeBytes({
+                customMetadata: args.customMetadata,
+                lastAccessAt: args.lastAccessAt,
+                scope,
+                value: args.value,
+                version: args.version,
+              }));
 
         entryStore.put(
           {
@@ -1117,7 +1119,7 @@ export function createIndexedDbPersistentStorageTestStore(
             ...(offlineProtected === true ? { o: 1 as const } : {}),
             ...(payload !== undefined ? { p: payload } : {}),
             ...(args.version !== 1 ? { v: args.version } : {}),
-            z: sizeBytes,
+            ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
           } satisfies IndexedDbEntryRecord,
           getEntryPrimaryKey(scope, args.key),
         );

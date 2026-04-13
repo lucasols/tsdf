@@ -473,11 +473,11 @@ export function createPersistentStorageHandle<T>(
       );
 
       await runLocalStorageMutation(() => {
-        const { sizeBytes } = localPersistentStorage.write(key, entry);
+        localPersistentStorage.write(key, entry);
         localPersistentStorage.upsertSingleEntry({
           storageKey: key,
           lastAccessAt: timestamp,
-          sizeBytes,
+          clearSizeBytes: true,
           mergeMeta: (currentMeta: unknown) =>
             preserveOfflineProtectionFlag(
               sessionKey,
