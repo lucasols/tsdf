@@ -690,6 +690,40 @@ describe('useQuery', () => {
     `);
   });
 
+  test('ensureIsLoaded stops forcing loading when the first query fetch fails', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+    const renders = createLoggerStore();
+
+    // Force the mount-triggered query fetch to fail before any successful load.
+    env.serverTable.setNextListFetchError('error');
+
+    renderHook(() => {
+      const selectionResult = listQueryStore.useListQuery(
+        { tableId: 'users' },
+        { ensureIsLoaded: true, itemSelector: (data) => data.name },
+      );
+
+      renders.add(
+        pick(selectionResult, ['status', 'isLoading', 'items', 'error']),
+      );
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ isLoading: ✅ ⋅ items: [] ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ isLoading: ❌
+      ⋅ items: []
+      ⋅ error: {code:500, id:fetch-error, message:error}
+      └─
+      "
+    `);
+  });
+
   test('ignore refetchingStatus by default', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
@@ -966,6 +1000,40 @@ describe('useItem', () => {
       "
       -> status: loading ⋅ isLoading: ✅ ⋅ data: User 1
       -> status: success ⋅ isLoading: ❌ ⋅ data: User 1
+      "
+    `);
+  });
+
+  test('ensureIsLoaded stops forcing loading when the first item fetch fails', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+    const renders = createLoggerStore();
+
+    // Force the mount-triggered item fetch to fail before the item has ever loaded.
+    env.serverTable.setNextFetchError('users||1', 'error');
+
+    renderHook(() => {
+      const selectionResult = listQueryStore.useItem('users||1', {
+        ensureIsLoaded: true,
+        selector: (data) => data?.name ?? null,
+      });
+
+      renders.add(
+        pick(selectionResult, ['status', 'isLoading', 'data', 'error']),
+      );
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ isLoading: ✅ ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ isLoading: ❌
+      ⋅ data: null
+      ⋅ error: {code:500, id:fetch-error, message:error}
+      └─
       "
     `);
   });

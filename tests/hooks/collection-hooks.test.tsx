@@ -799,6 +799,42 @@ describe('useItem isolated tests', () => {
     `);
   });
 
+  test('ensureIsLoaded stops forcing loading when the first fetch fails', async () => {
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
+    const renders = createLoggerStore();
+
+    // Reproduce the first-request failure path reported by users.
+    env.serverTable.setNextFetchError('1', 'error');
+
+    renderHook(() => {
+      const selectionResult = env.apiStore.useItem('1', {
+        ensureIsLoaded: true,
+      });
+
+      renders.add({
+        status: selectionResult.status,
+        payload: selectionResult.payload,
+        isLoading: selectionResult.isLoading,
+        data: selectionResult.data?.value ?? null,
+        error: selectionResult.error?.message ?? null,
+      });
+    });
+
+    await act(async () => {
+      await flushAllTimers();
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ payload: 1 ⋅ isLoading: ✅ ⋅ data: null ⋅ error: null
+      -> status: error ⋅ payload: 1 ⋅ isLoading: ❌ ⋅ data: null ⋅ error: error
+      "
+    `);
+  });
+
   test('ignore refetchingStatus by default', async () => {
     const env = createCollectionStoreTestEnv<Todo>({
       '1': defaultTodo,

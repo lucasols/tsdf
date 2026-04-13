@@ -500,6 +500,39 @@ describe('isolated tests', () => {
     `);
   });
 
+  test('ensureIsLoaded stops forcing loading when the first fetch fails', async () => {
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
+    const renders = createLoggerStore();
+
+    // Make the mount-triggered ensureIsLoaded fetch fail immediately so the hook
+    // must react to the first terminal state without relying on a later retry.
+    env.errorInNextFetch('Fetch error');
+
+    renderHook(() => {
+      const selectionResult = env.apiStore.useDocument({
+        ensureIsLoaded: true,
+      });
+
+      renders.add({
+        status: selectionResult.status,
+        isLoading: selectionResult.isLoading,
+        data: selectionResult.data?.value ?? null,
+        error: selectionResult.error?.message ?? null,
+      });
+    });
+
+    await act(async () => {
+      await flushAllTimers();
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ isLoading: ✅ ⋅ data: null ⋅ error: null
+      -> status: error ⋅ isLoading: ❌ ⋅ data: null ⋅ error: Fetch error
+      "
+    `);
+  });
+
   test('use ensureIsLoaded prop with disabled', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
