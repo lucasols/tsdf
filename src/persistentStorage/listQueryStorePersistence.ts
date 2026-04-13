@@ -45,6 +45,7 @@ import {
 import {
   createEvictionComparator,
   createShouldIgnoreItemPredicate,
+  createTimedKeySet,
 } from './persistenceUtils';
 import {
   assertValidPersistentStoreName,
@@ -401,6 +402,8 @@ export function setupListQueryPersistence<
   const querySnapshotByKey = new Map<string, string>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  const syncHydrationItemMissCache = createTimedKeySet();
+  const syncHydrationQueryMissCache = createTimedKeySet();
   let knownPersistedItemKeys: Set<string> | null = null;
   let knownPersistedQueryKeys: Set<string> | null = null;
   let maintenanceCallbackKey: string | null = null;
@@ -775,6 +778,7 @@ export function setupListQueryPersistence<
     persisted: PersistedListQueryItemData<unknown>,
   ): void {
     hydratedPersistedItemKeys.add(itemKey);
+    syncHydrationItemMissCache.clear(itemKey);
     itemSnapshotByKey.set(itemKey, JSON.stringify(persisted));
     knownPersistedItemKeys?.add(itemKey);
   }
@@ -784,6 +788,7 @@ export function setupListQueryPersistence<
     persisted: PersistedListQueryData,
   ): void {
     hydratedPersistedQueryKeys.add(queryKey);
+    syncHydrationQueryMissCache.clear(queryKey);
     querySnapshotByKey.set(queryKey, JSON.stringify(persisted));
     knownPersistedQueryKeys?.add(queryKey);
   }
@@ -883,6 +888,7 @@ export function setupListQueryPersistence<
       }
     | undefined {
     if (localStorageAdapter === null) return undefined;
+    if (syncHydrationItemMissCache.has(itemKey)) return undefined;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return undefined;
@@ -905,6 +911,7 @@ export function setupListQueryPersistence<
     );
 
     if (!cacheEntry) {
+      syncHydrationItemMissCache.remember(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -915,6 +922,7 @@ export function setupListQueryPersistence<
       dataSchema,
     );
     if (!persisted) {
+      syncHydrationItemMissCache.remember(itemKey);
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
         namespacePrefix: prefix,
@@ -925,6 +933,7 @@ export function setupListQueryPersistence<
 
     const itemState = toItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!itemState) {
+      syncHydrationItemMissCache.remember(itemKey);
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
         namespacePrefix: prefix,
@@ -989,6 +998,8 @@ export function setupListQueryPersistence<
   function readHydratedLocalStorageQuery(
     queryKey: string,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
+    if (syncHydrationQueryMissCache.has(queryKey)) return undefined;
+
     const storageKey = getLocalStorageQueryStorageKey(queryKey);
     if (storageKey === false || localStorageAdapter === null) {
       forgetPersistedQuery(queryKey);
@@ -997,12 +1008,14 @@ export function setupListQueryPersistence<
 
     const rawEntry = localStorageAdapter.readRaw(storageKey);
     if (rawEntry === null) {
+      syncHydrationQueryMissCache.remember(queryKey);
       forgetPersistedQuery(queryKey);
       return undefined;
     }
 
     const entry = parseCompactListQueryLocalStorageEntry(rawEntry);
     if (entry === null || entry.version !== version) {
+      syncHydrationQueryMissCache.remember(queryKey);
       // If the raw key exists but didn't parse or match the expected version,
       // clean it up and let later reads check storage again if needed.
       scheduleLocalStorageRemoval(storageKey, undefined);
@@ -1015,6 +1028,7 @@ export function setupListQueryPersistence<
       config.queryPayloadSchema,
     );
     if (!persistedQuery) {
+      syncHydrationQueryMissCache.remember(queryKey);
       const invalidStorageKey = getLocalStorageQueryStorageKey(queryKey);
       if (invalidStorageKey !== false) {
         scheduleLocalStorageRemoval(invalidStorageKey, undefined);
@@ -2566,6 +2580,7 @@ export function setupListQueryPersistence<
     for (const [queryKey, entry] of queryUpserts) {
       querySnapshotByKey.set(queryKey, entry.snapshot);
       hydratedPersistedQueryKeys.add(queryKey);
+      syncHydrationQueryMissCache.clear(queryKey);
     }
     for (const itemKey of removedItemKeys) {
       forgetPersistedItem(itemKey);
@@ -2573,6 +2588,7 @@ export function setupListQueryPersistence<
     for (const [itemKey, entry] of itemUpserts) {
       itemSnapshotByKey.set(itemKey, entry.snapshot);
       hydratedPersistedItemKeys.add(itemKey);
+      syncHydrationItemMissCache.clear(itemKey);
     }
 
     knownPersistedQueryKeys =
@@ -2631,6 +2647,8 @@ export function setupListQueryPersistence<
     pendingQueryPreloads.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    syncHydrationItemMissCache.clearAll();
+    syncHydrationQueryMissCache.clearAll();
     knownPersistedItemKeys = null;
     knownPersistedQueryKeys = null;
     suppressedPersistedStateFlushes = 0;
@@ -2665,6 +2683,8 @@ export function setupListQueryPersistence<
     querySnapshotByKey.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    syncHydrationItemMissCache.clearAll();
+    syncHydrationQueryMissCache.clearAll();
     await Promise.all([itemNamespace.clear(), clearLocalStorageQueries()]);
   }
 

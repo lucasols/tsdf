@@ -1,5 +1,43 @@
 import type { ValidPayload } from '../utils/storeShared';
 
+/**
+ * Creates a key set that auto-clears entries after a microtask.
+ * Used to deduplicate sync storage reads within the same event loop tick.
+ */
+export function createTimedKeySet(): {
+  has: (key: string) => boolean;
+  remember: (key: string) => void;
+  clear: (key: string) => void;
+  clearAll: () => void;
+} {
+  const keys = new Set<string>();
+  let clearScheduled = false;
+
+  function scheduleClear(): void {
+    if (clearScheduled) return;
+
+    clearScheduled = true;
+    queueMicrotask(() => {
+      clearScheduled = false;
+      keys.clear();
+    });
+  }
+
+  return {
+    has: (key: string) => keys.has(key),
+    remember: (key: string) => {
+      keys.add(key);
+      scheduleClear();
+    },
+    clear: (key: string) => {
+      keys.delete(key);
+    },
+    clearAll: () => {
+      keys.clear();
+    },
+  };
+}
+
 export function createShouldIgnoreItemPredicate<
   ItemPayload extends ValidPayload,
 >(

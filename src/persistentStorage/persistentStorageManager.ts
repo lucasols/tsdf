@@ -140,10 +140,10 @@ function preserveOfflineProtectionFlag(
   sessionKey: string,
   storageKey: string,
   nextMeta: unknown,
-  getCurrentMeta: () => unknown,
+  currentMeta: unknown,
 ): unknown {
   const currentMetaProtected =
-    isManagedLocalStorageEntryOfflineProtected(getCurrentMeta());
+    isManagedLocalStorageEntryOfflineProtected(currentMeta);
   const protectedKeys = getSessionProtectedKeysSnapshot(sessionKey);
   if (protectedKeys !== null) {
     return setManagedLocalStorageEntryOfflineProtected(
@@ -476,14 +476,13 @@ export function createPersistentStorageHandle<T>(
         localPersistentStorage.upsertSingleEntry({
           storageKey: key,
           lastAccessAt: timestamp,
-          meta: preserveOfflineProtectionFlag(
-            sessionKey,
-            key,
-            getManifestMeta?.(data),
-            () =>
-              localPersistentStorage.readSingleEntryMetadataByPayload(key)
-                ?.meta,
-          ),
+          mergeMeta: (currentMeta: unknown) =>
+            preserveOfflineProtectionFlag(
+              sessionKey,
+              key,
+              getManifestMeta?.(data),
+              currentMeta,
+            ),
         });
         recordLocalStorageTouch(key, timestamp);
       });
@@ -723,16 +722,13 @@ export function createPersistentStorageNamespaceHandle<
             storagePrefix: prefix,
             entryKey: upsert.key,
             lastAccessAt: timestamp,
-            meta: preserveOfflineProtectionFlag(
-              sessionKey,
-              key,
-              upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
-              () =>
-                localPersistentStorage.readNamespaceEntryMetadataByPayload(
-                  key,
-                  prefix,
-                )?.meta,
-            ),
+            mergeMeta: (currentMeta: unknown) =>
+              preserveOfflineProtectionFlag(
+                sessionKey,
+                key,
+                upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
+                currentMeta,
+              ),
           });
           recordLocalStorageTouch(key, timestamp);
         }

@@ -39,6 +39,7 @@ import {
 import {
   createEvictionComparator,
   createShouldIgnoreItemPredicate,
+  createTimedKeySet,
 } from './persistenceUtils';
 import {
   assertValidPersistentStoreName,
@@ -221,6 +222,7 @@ export function setupCollectionPersistence<
   const pendingPreloads = new Map<string, Promise<boolean>>();
   const persistedSnapshotByKey = new Map<string, string>();
   const hydratedPersistedKeys = new Set<string>();
+  const syncHydrationMissCache = createTimedKeySet();
   let knownPersistedKeys: Set<string> | null = null;
   let maintenanceManifestKey: string | null = null;
 
@@ -385,6 +387,7 @@ export function setupCollectionPersistence<
     persisted: PersistedCollectionItemData<unknown>,
   ): void {
     hydratedPersistedKeys.add(itemKey);
+    syncHydrationMissCache.clear(itemKey);
     persistedSnapshotByKey.set(itemKey, JSON.stringify(persisted));
     knownPersistedKeys?.add(itemKey);
   }
@@ -443,6 +446,7 @@ export function setupCollectionPersistence<
     itemKey: string,
   ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
     if (localStorageAdapter === null) return undefined;
+    if (syncHydrationMissCache.has(itemKey)) return undefined;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return undefined;
@@ -465,6 +469,7 @@ export function setupCollectionPersistence<
     );
 
     if (!cacheEntry) {
+      syncHydrationMissCache.remember(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -475,6 +480,7 @@ export function setupCollectionPersistence<
       dataSchema,
     );
     if (!persisted) {
+      syncHydrationMissCache.remember(itemKey);
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
         namespacePrefix: prefix,
@@ -485,6 +491,7 @@ export function setupCollectionPersistence<
 
     const item = toCollectionItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!item) {
+      syncHydrationMissCache.remember(itemKey);
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
         namespacePrefix: prefix,
@@ -1150,6 +1157,7 @@ export function setupCollectionPersistence<
       for (const [itemKey, entry] of pendingUpserts.entries()) {
         persistedSnapshotByKey.set(itemKey, entry.snapshot);
         hydratedPersistedKeys.add(itemKey);
+        syncHydrationMissCache.clear(itemKey);
       }
       if (previousPersistedKeys !== null) {
         knownPersistedKeys = new Set(previousPersistedKeys);
@@ -1237,6 +1245,7 @@ export function setupCollectionPersistence<
     generation++;
     pendingPreloads.clear();
     hydratedPersistedKeys.clear();
+    syncHydrationMissCache.clearAll();
     knownPersistedKeys = null;
     suppressedPersistedStateFlushes = 0;
     clearSaveTimer();
@@ -1266,6 +1275,7 @@ export function setupCollectionPersistence<
     suppressedPersistedStateFlushes = 0;
     persistedSnapshotByKey.clear();
     hydratedPersistedKeys.clear();
+    syncHydrationMissCache.clearAll();
     await namespace.clear();
   }
 

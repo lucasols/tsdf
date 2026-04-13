@@ -960,6 +960,47 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
+  test('missing list-query entries become visible again before the next task', async () => {
+    const storeName = 'lq-microtask-miss-cache';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' } satisfies ListQueryParams;
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the test only exercises the direct read path.
+    await settleStartupBackgroundScan();
+
+    // The initial misses should only dedupe repeated sync reads in the same turn.
+    expect(env.apiStore.getQueryState(usersQuery)).toBeUndefined();
+    expect(
+      env.apiStore.getItemState(rawItemPayload('users', 1)),
+    ).toBeUndefined();
+
+    // Another tab can persist the query and item before the next task runs.
+    await Promise.resolve();
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Fresh user',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, ['"users||1']);
+
+    // The next reads should hydrate from the newly persisted entries immediately.
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Fresh user'
+      `);
+  });
+
   test('direct getQueryState touch preserves offline markers added by another tab before item and query manifest updates', async () => {
     const storeName = 'lq-direct-touch-offline-marker';
     const sessionKey = 'sess1';
@@ -1450,10 +1491,6 @@ describe('sync storage efficiency: list-query', () => {
       time  |
       0     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>)
-      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>)
-      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
-            |    └ (query data, <{tableId:"users"}>)
             ·
       1.81s | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (items index)
@@ -1610,8 +1647,6 @@ describe('sync storage efficiency: list-query', () => {
       "
       time  |
       0     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
-            |    └ (items index)
-      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
       10ms  | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
