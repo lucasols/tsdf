@@ -120,3 +120,65 @@ test('browser tabs priority republishes local status on each heartbeat until clo
   vi.advanceTimersByTime(5_000);
   expect(published).toMatchInlineSnapshot(`[0, 1000, 2000]`);
 });
+
+test('browser tabs priority ignores stale remote tab status messages', () => {
+  const priority = createPriority(() => false);
+
+  // Seed the remote tab with a newer heartbeat first.
+  priority.onTabStatusMessage('remote-tab', {
+    kind: 'tab-status',
+    isFocused: true,
+    lastFocusedAt: 2_000,
+    lastPresenceAt: 2_000,
+  });
+
+  // A late stale heartbeat from the same tab must not overwrite the newer state.
+  priority.onTabStatusMessage('remote-tab', {
+    kind: 'tab-status',
+    isFocused: false,
+    lastFocusedAt: 500,
+    lastPresenceAt: 500,
+  });
+
+  expect(priority.getPriorityRank()).toBe(2);
+  expect(priority.getCoalescingWindowMs(20)).toBe(1_020);
+
+  priority.close();
+});
+
+test('browser tabs priority expires remote fetch leases after their configured ttl', () => {
+  const priority = createPriority(() => false);
+
+  priority.noteRemoteFetchStart('users', 'remote-tab', 0, 200);
+
+  expect(priority.getRemoteLeaseState('users')).toMatchInlineSnapshot(`
+    expiresAt: 10000
+    ownerTabId: 'remote-tab'
+    startedAt: 0
+  `);
+
+  vi.setSystemTime(10_001);
+
+  expect(priority.getRemoteLeaseState('users')).toBeNull();
+
+  priority.close();
+});
+
+test('browser tabs priority keeps a newer remote lease when an older success arrives later', () => {
+  const priority = createPriority(() => false);
+
+  // A remote tab starts one fetch, then starts a newer retry for the same target.
+  priority.noteRemoteFetchStart('users', 'remote-tab', 100, 200);
+  priority.noteRemoteFetchStart('users', 'remote-tab', 300, 200);
+
+  // The older success should not clear the newer in-flight lease.
+  priority.noteRemoteFetchSuccess('users', 'remote-tab', 100, 200);
+
+  expect(priority.getRemoteLeaseState('users')).toMatchInlineSnapshot(`
+    expiresAt: 10300
+    ownerTabId: 'remote-tab'
+    startedAt: 300
+  `);
+
+  priority.close();
+});

@@ -11,7 +11,7 @@ import {
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { flushAllTimers, pick } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -381,6 +381,80 @@ describe('mutation handling', () => {
 });
 
 describe('error handling in batch', () => {
+  test('missing batch results only fail the unresolved items', async () => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 1 } },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
+    );
+
+    // Request one existing item and one missing item so the batch result only
+    // contains a subset of the requested payloads.
+    env.scheduleFetch('highPriority', 'item1');
+    env.scheduleFetch('highPriority', 'missing-item');
+
+    await flushAllTimers();
+
+    // The existing item should still load successfully from the shared batch.
+    expect(env.apiStore.getItemState('item1')).toMatchInlineSnapshot(`
+      data:
+        value: { v: 1 }
+
+      error: null
+      payload: 'item1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+
+    // The missing item should fail with a targeted per-item error instead of
+    // collapsing the whole batch.
+    expect(
+      pick(env.apiStore.getItemState('missing-item'), [
+        'data',
+        'payload',
+        'refetchOnMount',
+        'status',
+        'wasLoaded',
+      ]),
+    ).toMatchInlineSnapshot(`
+      data: null
+      payload: 'missing-item'
+      refetchOnMount: '❌'
+      status: 'error'
+      wasLoaded: '❌'
+    `);
+    expect(
+      pick(env.apiStore.getItemState('missing-item')?.error, ['code', 'id']),
+    ).toMatchInlineSnapshot(`
+      code: 500
+      id: 'fetch-error'
+    `);
+    expect(env.apiStore.getItemState('missing-item')?.error?.message).toContain(
+      'missing-item',
+    );
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: '__default__'
+        duration: 800
+        itemIds: ['item1', 'missing-item']
+        offset: 0
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+        startedAt: 50
+        type: 'list'
+    `);
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","missing-item"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+  });
+
   test('batch fetch network error: all items fail with same error', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },

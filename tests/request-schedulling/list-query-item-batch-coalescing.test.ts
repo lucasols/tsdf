@@ -408,6 +408,65 @@ describe('mutation handling', () => {
 });
 
 describe('error handling in batch', () => {
+  test('missing items only fail their own item queries inside a batch', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      useBatchFetch: true,
+    });
+
+    // Request one existing item and one missing item so the batch returns a
+    // mixed success/error result instead of an all-or-nothing failure.
+    env.scheduleItemFetch('highPriority', 'table1||1');
+    env.scheduleItemFetch('highPriority', 'table1||999');
+
+    await flushAllTimers();
+
+    // The existing item should still be committed successfully from the shared batch.
+    expect(env.getItemQueryState('table1||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'table1||1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Item 1'
+    `);
+
+    // The missing item should surface its own normalized error without
+    // regressing the successful sibling item.
+    expect(env.getItemQueryState('table1||999')).toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'Item not found: table1||999' }
+      payload: 'table1||999'
+      refetchOnMount: '❌'
+      status: 'error'
+      wasLoaded: '❌'
+    `);
+    expect(env.apiStore.getItemState('table1||999')).toBeUndefined();
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: '__default__'
+        duration: 800
+        itemIds: ['table1||1', 'table1||999']
+        offset: 0
+        results:
+          - data: { id: 1, name: 'Item 1' }
+            itemId: 'table1||1'
+        startedAt: 50
+        type: 'list'
+    `);
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||999"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+  });
+
   test('batch fetch network error: all items fail with same error', async () => {
     const env = createListQueryStoreTestEnv(serverData, {
       baseCoalescingWindowMs: 50,
