@@ -206,6 +206,20 @@ export function createListQueryCacheLimits<
     return referencedItemCounts;
   }
 
+  function getEvictableQueriesSortedByLastUsed(
+    queryEntries: [string, TSFDListQuery<QueryPayload>][],
+  ): [string, TSFDListQuery<QueryPayload>][] {
+    return queryEntries
+      .filter(([queryKey, query]) => {
+        return !isQueryProtectedFromEviction(queryKey, query);
+      })
+      .sort(
+        ([queryKeyA], [queryKeyB]) =>
+          queryCacheRuntime.getLastUsed(queryKeyA) -
+          queryCacheRuntime.getLastUsed(queryKeyB),
+      );
+  }
+
   function enforceCacheLimits(): void {
     if (
       isEnforcingCacheLimits ||
@@ -218,20 +232,13 @@ export function createListQueryCacheLimits<
       const queryEntries = Object.entries(store.state.queries);
       if (queryEntries.length > maxQueries) {
         let remainingQueries = queryEntries.length;
-        const queryKeysToEvict = queryEntries
-          .filter(([queryKey, query]) => {
-            return !isQueryProtectedFromEviction(queryKey, query);
-          })
-          .sort(
-            ([queryKeyA], [queryKeyB]) =>
-              queryCacheRuntime.getLastUsed(queryKeyA) -
-              queryCacheRuntime.getLastUsed(queryKeyB),
-          )
-          .flatMap(([queryKey]) => {
-            if (remainingQueries <= maxQueries) return [];
-            remainingQueries--;
-            return [queryKey];
-          });
+        const queryKeysToEvict = getEvictableQueriesSortedByLastUsed(
+          queryEntries,
+        ).flatMap(([queryKey]) => {
+          if (remainingQueries <= maxQueries) return [];
+          remainingQueries--;
+          return [queryKey];
+        });
 
         if (queryKeysToEvict.length > 0) {
           deleteQueriesFromState(queryKeysToEvict);
@@ -250,43 +257,36 @@ export function createListQueryCacheLimits<
     let referencedItemCounts = buildReferencedItemCounts(currentQueryEntries);
     const standaloneProtectedItemKeys =
       getStandaloneProtectedItemKeys(liveItems);
-    const itemPressureQueryEvictions = currentQueryEntries
-      .filter(([queryKey, query]) => {
-        return !isQueryProtectedFromEviction(queryKey, query);
-      })
-      .sort(
-        ([queryKeyA], [queryKeyB]) =>
-          queryCacheRuntime.getLastUsed(queryKeyA) -
-          queryCacheRuntime.getLastUsed(queryKeyB),
-      )
-      .flatMap(([queryKey]) => {
-        if (liveItemCount <= maxItems) return [];
+    const itemPressureQueryEvictions = getEvictableQueriesSortedByLastUsed(
+      currentQueryEntries,
+    ).flatMap(([queryKey]) => {
+      if (liveItemCount <= maxItems) return [];
 
-        const query = store.state.queries[queryKey];
-        if (!query) return [];
+      const query = store.state.queries[queryKey];
+      if (!query) return [];
 
-        const nextReferencedItemCounts = new Map(referencedItemCounts);
-        let nextLiveItemCount = liveItemCount;
-        let wouldFreeItems = false;
-        for (const itemKey of query.items) {
-          const nextRefCount = (nextReferencedItemCounts.get(itemKey) ?? 0) - 1;
-          if (nextRefCount > 0) {
-            nextReferencedItemCounts.set(itemKey, nextRefCount);
-            continue;
-          }
-
-          nextReferencedItemCounts.delete(itemKey);
-          if (!standaloneProtectedItemKeys.has(itemKey)) {
-            nextLiveItemCount--;
-            wouldFreeItems = true;
-          }
+      const nextReferencedItemCounts = new Map(referencedItemCounts);
+      let nextLiveItemCount = liveItemCount;
+      let wouldFreeItems = false;
+      for (const itemKey of query.items) {
+        const nextRefCount = (nextReferencedItemCounts.get(itemKey) ?? 0) - 1;
+        if (nextRefCount > 0) {
+          nextReferencedItemCounts.set(itemKey, nextRefCount);
+          continue;
         }
 
-        if (!wouldFreeItems) return [];
-        referencedItemCounts = nextReferencedItemCounts;
-        liveItemCount = nextLiveItemCount;
-        return [queryKey];
-      });
+        nextReferencedItemCounts.delete(itemKey);
+        if (!standaloneProtectedItemKeys.has(itemKey)) {
+          nextLiveItemCount--;
+          wouldFreeItems = true;
+        }
+      }
+
+      if (!wouldFreeItems) return [];
+      referencedItemCounts = nextReferencedItemCounts;
+      liveItemCount = nextLiveItemCount;
+      return [queryKey];
+    });
 
     if (itemPressureQueryEvictions.length > 0) {
       deleteQueriesFromState(itemPressureQueryEvictions);

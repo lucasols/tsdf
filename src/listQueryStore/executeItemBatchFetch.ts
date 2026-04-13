@@ -15,6 +15,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { applyPartialItemMerge } from './itemFieldUtils';
 import { type PartialResourcesConfig, type TSFDListQueryState } from './types';
 
 type ItemFetchData<ItemPayload extends ValidPayload> = {
@@ -56,17 +57,7 @@ export async function executeItemBatchFetch<
     fields?: string[],
   ) {
     if (partialResources) {
-      const prev = draft.items[itemKey] ?? undefined;
-      const merged = partialResources.mergeItems(prev, data);
-      draft.items[itemKey] = reusePrevIfEqual({ current: merged, prev });
-
-      if (fields && fields.length > 0) {
-        const existingFields = draft.itemLoadedFields[itemKey] ?? [];
-        const fieldSet = new Set([...existingFields, ...fields]);
-        draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
-      } else {
-        draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
-      }
+      applyPartialItemMerge(draft, itemKey, data, fields, partialResources);
     } else {
       draft.items[itemKey] = reusePrevIfEqual({
         current: data,

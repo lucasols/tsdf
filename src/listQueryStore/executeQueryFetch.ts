@@ -16,6 +16,7 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { NormalizedFetchListFn } from './createFetchApi';
+import { applyPartialItemMerge } from './itemFieldUtils';
 import {
   type FetchListFnReturn,
   type OffsetPaginationConfig,
@@ -55,17 +56,7 @@ function applyFetchedItems<
     const itemKey = getItemKey(itemPayload);
 
     if (partialResources) {
-      const prev = draft.items[itemKey] ?? undefined;
-      const merged = partialResources.mergeItems(prev, data);
-      draft.items[itemKey] = reusePrevIfEqual({ current: merged, prev });
-
-      if (fields && fields.length > 0) {
-        const existingFields = draft.itemLoadedFields[itemKey] ?? [];
-        const fieldSet = new Set([...existingFields, ...fields]);
-        draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
-      } else {
-        draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
-      }
+      applyPartialItemMerge(draft, itemKey, data, fields, partialResources);
 
       const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
       if (invalidationFields) {

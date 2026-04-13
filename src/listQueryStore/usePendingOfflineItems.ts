@@ -115,14 +115,10 @@ export function usePendingOfflineItems<
     [preloadableItemKeys],
   );
 
-  useLayoutEffect(() => {
+  const runPreload = useCallback((): (() => void) => {
     let cancelled = false;
 
-    if (
-      !preloadItemsBeforePaint ||
-      !preloadItems ||
-      preloadableItemKeys.length < 1
-    ) {
+    if (!preloadItems || preloadableItemKeys.length < 1) {
       return () => {
         cancelled = true;
       };
@@ -136,40 +132,17 @@ export function usePendingOfflineItems<
     return () => {
       cancelled = true;
     };
-  }, [
-    preloadableItemKeys,
-    preloadItems,
-    preloadItemsBeforePaint,
-    rememberPreloadResults,
-  ]);
+  }, [preloadItems, preloadableItemKeys, rememberPreloadResults]);
+
+  useLayoutEffect(() => {
+    if (!preloadItemsBeforePaint) return;
+    return runPreload();
+  }, [preloadItemsBeforePaint, runPreload]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    if (
-      preloadItemsBeforePaint ||
-      !preloadItems ||
-      preloadableItemKeys.length < 1
-    ) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void preloadItems(preloadableItemKeys).then((results) => {
-      if (cancelled) return;
-      rememberPreloadResults(preloadableItemKeys, results);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    preloadableItemKeys,
-    preloadItems,
-    preloadItemsBeforePaint,
-    rememberPreloadResults,
-  ]);
+    if (preloadItemsBeforePaint) return;
+    return runPreload();
+  }, [preloadItemsBeforePaint, runPreload]);
 
   const resultSelector = useCallback(
     (state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>) => {
