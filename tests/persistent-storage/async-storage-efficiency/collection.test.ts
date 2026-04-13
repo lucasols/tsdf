@@ -17,10 +17,10 @@ import {
   createCollectionEnv,
   createDocumentEnv,
   flushInvalidationPersistence,
-  markEntryOfflineProtected,
   setProtectedKeysSnapshot,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
+  syncEntriesOfflineProtectedFromSiblingTab,
   waitForScheduledCleanup,
 } from './shared';
 
@@ -401,17 +401,15 @@ describe('async storage efficiency: collection', () => {
       1.003s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.17 kb
              ·
-      1.046s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.17 kb
-      1.049s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
+      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data)
-      1.052s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      1.049s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1.053s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
-      1.058s | end
+      1.055s | end
       "
     `);
 
@@ -473,19 +471,17 @@ describe('async storage efficiency: collection', () => {
       1.003s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb
              ·
-      1.046s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
-      1.049s | 🗑️ #2 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~3986551515.p.json
+      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 🗑️ #3 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data)
-      1.052s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+      1.049s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.053s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.17 kb
-      1.058s | end
+      1.055s | end
       "
     `);
   });
@@ -536,28 +532,24 @@ describe('async storage efficiency: collection', () => {
       1.003s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb
              ·
-      1.046s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.17 kb
-      1.049s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
+      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data)
-      1.052s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
+      1.049s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      1.053s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
              ·
-      2.14s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.17 kb
-      2.143s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
+      2.14s  | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
              |    └ (entry data)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      2.146s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
+      2.143s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.07 kb
-      2.15s  | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      2.147s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.17 kb -> 0.17 kb
-      2.152s | end
+      2.149s | end
       "
     `);
   });
@@ -697,11 +689,9 @@ describe('async storage efficiency: collection', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📖 #1 tsdf/sess1/col-mutation-flow/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.045s | ✍️ #2 tsdf/sess1/col-mutation-flow/ci.h~3574006234.p.json
+      1.042s | ✍️ #1 tsdf/sess1/col-mutation-flow/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.08 kb -> 0.08 kb
-      1.047s | end
+      1.044s | end
       "
     `);
   });
@@ -766,18 +756,16 @@ describe('async storage efficiency: collection', () => {
       0      | 🗑️ #1 ✅ tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
              ·
-      1.041s | 📖 #2 tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.044s | ✍️ #1 ❌ retryable-createWritable tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+      1.041s | ✍️ #1 ❌ retryable-createWritable tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | NotFoundError
-      1.045s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      1.046s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-after-delete
+      1.042s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.043s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-after-delete
              |    └ (store directory)
-      1.047s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+      1.044s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
-      1.05s  | ✍️ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+      1.047s | ✍️ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.00 kb -> 0.10 kb
-      1.052s | end
+      1.049s | end
       "
     `);
   });
@@ -815,7 +803,7 @@ describe('async storage efficiency: collection', () => {
         draft.value.name = 'Edited during write';
       });
     });
-    await advanceTime(1045);
+    await advanceTime(1041);
     const deletePromise = deleteTarget.storeDir.removeEntry(
       deleteTarget.fileName,
     );
@@ -823,7 +811,6 @@ describe('async storage efficiency: collection', () => {
     await deletePromise;
     await flushInvalidationPersistence(0);
     const mutationOperations = mutationCapture.finish().timelineString;
-
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/col-mutation-retry-during-write/ci.%221.p.json',
@@ -840,20 +827,18 @@ describe('async storage efficiency: collection', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📖 #1 tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.045s | 🗑️ #2 ✅ tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      1.041s | 🗑️ #1 ✅ tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
-      .      | ✍️ #2 ❌ retryable-close tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      1.042s | ✍️ #1 ❌ retryable-close tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | NotFoundError
-      1.047s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      1.048s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-during-write
+      1.044s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.045s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-during-write
              |    └ (store directory)
-      1.049s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      1.046s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
-      1.052s | ✍️ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      1.049s | ✍️ #1 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.00 kb -> 0.10 kb
-      1.054s | end
+      1.051s | end
       "
     `);
   });
@@ -888,13 +873,11 @@ describe('async storage efficiency: collection', () => {
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📖 #1 tsdf/sess1/col-delete-flow/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
-      1.043s | 🗑️ #2 ✅ tsdf/sess1/col-delete-flow/ci.h~3574006234.p.json
+      1.04s  | 🗑️ #1 ✅ tsdf/sess1/col-delete-flow/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
-      1.046s | ✍️ #1 tsdf/sess1/col-delete-flow/ci._i.r.json
+      1.043s | ✍️ #2 tsdf/sess1/col-delete-flow/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.08 kb
-      1.048s | end
+      1.045s | end
       "
     `);
   });
@@ -944,11 +927,9 @@ describe('async storage efficiency: collection', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.85s  | 📖 #1 tsdf/sess1/col-invalidation-flow/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.855s | ✍️ #2 tsdf/sess1/col-invalidation-flow/ci.h~3574006234.p.json
+      1.852s | ✍️ #1 tsdf/sess1/col-invalidation-flow/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.08 kb -> 0.08 kb
-      1.857s | end
+      1.854s | end
       "
     `);
   });
@@ -981,7 +962,7 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence(0);
 
     // Simulate another tab marking this cached item as offline-protected.
-    markEntryOfflineProtected(mockAdapter, storageKey);
+    await syncEntriesOfflineProtectedFromSiblingTab(sessionKey, [storageKey]);
 
     // A normal invalidation save should keep the externally-added offline marker.
     act(() => {
@@ -1071,11 +1052,9 @@ describe('async storage efficiency: collection', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.85s  | 📖 #1 tsdf/sess1/col-coalesced-invalidations/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb
-      1.855s | ✍️ #2 tsdf/sess1/col-coalesced-invalidations/ci.h~3574006234.p.json
+      1.852s | ✍️ #1 tsdf/sess1/col-coalesced-invalidations/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.08 kb -> 0.08 kb
-      1.857s | end
+      1.854s | end
       "
     `);
   });
@@ -1180,11 +1159,9 @@ describe('async storage efficiency: collection', () => {
       7ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.08 kb
            ·
-      50ms | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
-           |    └ (namespace index) | 0.08 kb
-      55ms | ✍️ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
+      52ms | ✍️ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      57ms | end
+      54ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
