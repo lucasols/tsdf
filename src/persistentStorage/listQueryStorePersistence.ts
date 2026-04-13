@@ -7,6 +7,7 @@ import type {
   TSFDListQuery,
   TSFDListQueryState,
 } from '../listQueryStore/types';
+import { createItemAliasRegistry } from '../utils/itemIdentity';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   buildPersistedStaticPolicy,
@@ -112,7 +113,7 @@ type ManagedQueryEntry = {
 };
 
 type ManagedQueryEntriesByKey = Map<string, ManagedQueryEntry>;
-type EntryNamespaceMetadata = { h?: true; p?: unknown };
+type EntryNamespaceMetadata = { al?: unknown[]; h?: true; p?: unknown };
 type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & {
   f?: string[];
   g?: unknown;
@@ -197,11 +198,13 @@ export type ListQueryPersistenceSetup<
     itemKey: string,
   ):
     | {
+        aliasPayloads: ItemPayload[];
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
         loadedFields: string[];
       }
     | undefined;
+  resolveItemKey(this: void, itemKey: string): string;
   readHydratedQuery(
     this: void,
     queryKey: string,
@@ -230,6 +233,8 @@ export function setupListQueryPersistence<
     TOfflineOperations
   >,
   options: {
+    enableItemAliases?: boolean;
+    getItemAliasPayloads?: (itemKey: string) => ItemPayload[];
     getItemKey?: (payload: ItemPayload) => string;
     getQueryKey?: (payload: QueryPayload) => string;
     getItemDerivedGroup?: (item: ItemState, itemPayload: ItemPayload) => string;
@@ -243,8 +248,11 @@ export function setupListQueryPersistence<
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const maxQueries = config.maxQueries ?? DEFAULT_MAX_QUERIES;
   const maxQuerySize = config.maxQuerySize ?? DEFAULT_MAX_QUERY_SIZE;
+  const enableItemAliases = options.enableItemAliases === true;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
+  const getItemAliasPayloads = options.getItemAliasPayloads;
+  const persistedAliasRegistry = createItemAliasRegistry(resolveItemKey);
   const resolveQueryKey =
     options.getQueryKey ??
     ((payload: QueryPayload) => getCompositeKey(payload));
@@ -299,6 +307,7 @@ export function setupListQueryPersistence<
             {
               data: value.d,
               payload: 'p' in value ? value.p : metadata?.p,
+              aliasPayloads: metadata?.al,
               ...('lf' in value && Array.isArray(value.lf)
                 ? { loadedFields: value.lf }
                 : {}),
@@ -317,6 +326,7 @@ export function setupListQueryPersistence<
             {
               data: value,
               payload: metadata.p,
+              aliasPayloads: metadata.al,
               ...(Array.isArray(metadata.f)
                 ? { loadedFields: metadata.f }
                 : {}),
@@ -369,6 +379,9 @@ export function setupListQueryPersistence<
     {
       asyncValueCodec: asyncItemStorageValueCodec,
       getManifestMeta: (data) => ({
+        ...(Array.isArray(data.aliasPayloads) && data.aliasPayloads.length > 0
+          ? { al: data.aliasPayloads }
+          : {}),
         ...(Array.isArray(data.loadedFields) ? { f: data.loadedFields } : {}),
         p: data.payload,
       }),
@@ -770,10 +783,222 @@ export function setupListQueryPersistence<
     return knownPersistedQueryKeys;
   }
 
+  function parseAliasPayloads(
+    aliasPayloads: unknown[] | undefined,
+  ): ItemPayload[] {
+    return (
+      aliasPayloads?.flatMap((aliasPayload) => {
+        const validatedAliasPayload = validateWithSchema(
+          config.itemPayloadSchema,
+          aliasPayload,
+        );
+        return validatedAliasPayload === null ? [] : [validatedAliasPayload];
+      }) ?? []
+    );
+  }
+
+  function readManifestAliasPayloads(meta: unknown): ItemPayload[] {
+    if (typeof meta !== 'object' || meta === null || !('al' in meta)) {
+      return [];
+    }
+
+    return Array.isArray(meta.al) ? parseAliasPayloads(meta.al) : [];
+  }
+
+  function readPersistedAliasNamespaceMetadata(
+    metadata: Record<string, unknown> | null,
+  ): void {
+    if (!enableItemAliases) return;
+
+    persistedAliasRegistry.clearAll();
+    if (!metadata || typeof metadata.al !== 'object' || metadata.al === null) {
+      return;
+    }
+
+    function toUnknownRecord(value: unknown): Record<string, unknown> | null {
+      if (typeof value !== 'object' || value === null) {
+        return null;
+      }
+
+      return Object.fromEntries(Object.entries(value));
+    }
+
+    const aliasEntriesRecord = toUnknownRecord(metadata.al);
+    if (aliasEntriesRecord === null) return;
+
+    const aliasPayloadsByCanonicalKey = new Map<string, ItemPayload[]>();
+
+    for (const [aliasItemKey, rawAliasEntry] of Object.entries(
+      aliasEntriesRecord,
+    )) {
+      const aliasEntry = toUnknownRecord(rawAliasEntry);
+      if (aliasEntry === null) continue;
+
+      const canonicalItemKey =
+        typeof aliasEntry.k === 'string' ? aliasEntry.k : null;
+      const aliasPayload =
+        'p' in aliasEntry
+          ? validateWithSchema(config.itemPayloadSchema, aliasEntry.p)
+          : null;
+
+      if (
+        canonicalItemKey === null ||
+        aliasPayload === null ||
+        resolveItemKey(aliasPayload) !== aliasItemKey
+      ) {
+        continue;
+      }
+
+      const existingPayloads =
+        aliasPayloadsByCanonicalKey.get(canonicalItemKey) ?? [];
+      existingPayloads.push(aliasPayload);
+      aliasPayloadsByCanonicalKey.set(canonicalItemKey, existingPayloads);
+    }
+
+    for (const [
+      canonicalItemKey,
+      aliasPayloads,
+    ] of aliasPayloadsByCanonicalKey) {
+      setPersistedItemAliases(canonicalItemKey, aliasPayloads);
+    }
+  }
+
+  function buildPersistedAliasNamespaceMetadata(
+    aliasEntries: ReadonlyArray<{
+      aliasItemKey: string;
+      aliasPayload: ItemPayload;
+      canonicalItemKey: string;
+    }>,
+  ): Record<string, unknown> | null {
+    if (!enableItemAliases || aliasEntries.length === 0) return null;
+
+    return {
+      al: Object.fromEntries(
+        [...aliasEntries]
+          .sort((left, right) =>
+            left.aliasItemKey.localeCompare(right.aliasItemKey),
+          )
+          .map(({ aliasItemKey, aliasPayload, canonicalItemKey }) => [
+            aliasItemKey,
+            { k: canonicalItemKey, p: aliasPayload },
+          ]),
+      ),
+    };
+  }
+
+  function buildNextPersistedAliasNamespaceMetadata(args: {
+    removedItemKeys: Iterable<string>;
+    upsertedItems: Iterable<{
+      aliasPayloads: readonly ItemPayload[];
+      itemKey: string;
+    }>;
+  }): { metadata: Record<string, unknown> | null; snapshot: string } {
+    const aliasEntriesByKey = new Map(
+      persistedAliasRegistry
+        .getAliasEntries()
+        .map((entry) => [entry.aliasItemKey, entry] as const),
+    );
+
+    for (const itemKey of args.removedItemKeys) {
+      for (const [aliasItemKey, entry] of aliasEntriesByKey) {
+        if (entry.canonicalItemKey === itemKey) {
+          aliasEntriesByKey.delete(aliasItemKey);
+        }
+      }
+    }
+
+    for (const { itemKey, aliasPayloads } of args.upsertedItems) {
+      for (const [aliasItemKey, entry] of aliasEntriesByKey) {
+        if (entry.canonicalItemKey === itemKey) {
+          aliasEntriesByKey.delete(aliasItemKey);
+        }
+      }
+
+      for (const aliasPayload of aliasPayloads) {
+        const aliasItemKey = resolveItemKey(aliasPayload);
+        if (aliasItemKey === itemKey) continue;
+
+        aliasEntriesByKey.set(aliasItemKey, {
+          aliasItemKey,
+          aliasPayload,
+          canonicalItemKey: itemKey,
+        });
+      }
+    }
+
+    const metadata = buildPersistedAliasNamespaceMetadata([
+      ...aliasEntriesByKey.values(),
+    ]);
+    return { metadata, snapshot: JSON.stringify(metadata) };
+  }
+
+  function setPersistedItemAliases(
+    itemKey: string,
+    aliasPayloads: readonly ItemPayload[],
+  ): void {
+    if (!enableItemAliases) return;
+    persistedAliasRegistry.setCanonicalAliases(itemKey, aliasPayloads);
+  }
+
+  function clearPersistedItemAliases(itemKey: string): void {
+    if (!enableItemAliases) return;
+    persistedAliasRegistry.clearCanonicalAliases(itemKey);
+  }
+
+  function rebuildLocalPersistedAliasIndex(): void {
+    if (!enableItemAliases) return;
+    if (localStorageAdapter === null) return;
+    if (persistedAliasIndexIsSeeded) return;
+
+    const prefix = getItemPrefix();
+    if (prefix === false) return;
+
+    persistedAliasRegistry.clearAll();
+    const manifestEntries = localStorageAdapter.listManifestEntries(prefix);
+    for (const entry of manifestEntries) {
+      setPersistedItemAliases(
+        entry.entryKey,
+        readManifestAliasPayloads(entry.meta),
+      );
+    }
+
+    persistedAliasIndexIsSeeded = true;
+  }
+
+  let persistedAliasIndexIsSeeded = false;
+  let asyncAliasIndexPromise: Promise<void> | null = null;
+  let persistedAliasNamespaceMetadataSnapshot = 'null';
+  async function ensureAsyncPersistedAliasIndex(): Promise<void> {
+    if (!enableItemAliases) return;
+    if (localStorageAdapter !== null) return;
+    if (persistedAliasIndexIsSeeded) return;
+    if (asyncAliasIndexPromise !== null) {
+      await asyncAliasIndexPromise;
+      return;
+    }
+
+    asyncAliasIndexPromise = itemNamespace
+      .readNamespaceMetadata()
+      .then((metadata) => {
+        readPersistedAliasNamespaceMetadata(metadata);
+        persistedAliasNamespaceMetadataSnapshot = JSON.stringify(metadata);
+        persistedAliasIndexIsSeeded = true;
+      })
+      .finally(() => {
+        asyncAliasIndexPromise = null;
+      });
+
+    await asyncAliasIndexPromise;
+  }
+
   function rememberHydratedItem(
     itemKey: string,
     persisted: PersistedListQueryItemData<unknown>,
   ): void {
+    setPersistedItemAliases(
+      itemKey,
+      parseAliasPayloads(persisted.aliasPayloads),
+    );
     hydratedPersistedItemKeys.add(itemKey);
     itemSnapshotByKey.set(itemKey, JSON.stringify(persisted));
     knownPersistedItemKeys?.add(itemKey);
@@ -789,6 +1014,7 @@ export function setupListQueryPersistence<
   }
 
   function forgetPersistedItem(itemKey: string): void {
+    clearPersistedItemAliases(itemKey);
     hydratedPersistedItemKeys.delete(itemKey);
     itemSnapshotByKey.delete(itemKey);
     knownPersistedItemKeys?.delete(itemKey);
@@ -834,6 +1060,7 @@ export function setupListQueryPersistence<
     snapshot: string,
   ):
     | {
+        aliasPayloads: ItemPayload[];
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
         loadedFields: string[];
@@ -845,9 +1072,12 @@ export function setupListQueryPersistence<
         config.itemPayloadSchema,
         dataSchema,
       );
-      return persisted
+      const itemState = persisted
         ? (toItemState(persisted, dataSchema, shouldIgnoreItem) ?? undefined)
         : undefined;
+      if (!persisted || !itemState) return undefined;
+
+      return { aliasPayloads: persisted.aliasPayloads ?? [], ...itemState };
     } catch {
       return undefined;
     }
@@ -857,6 +1087,7 @@ export function setupListQueryPersistence<
     itemKey: string,
   ):
     | {
+        aliasPayloads: ItemPayload[];
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
         loadedFields: string[];
@@ -877,6 +1108,7 @@ export function setupListQueryPersistence<
     itemKey: string,
   ):
     | {
+        aliasPayloads: ItemPayload[];
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
         loadedFields: string[];
@@ -940,7 +1172,7 @@ export function setupListQueryPersistence<
       }),
     );
     rememberHydratedItem(itemKey, cacheEntry.data);
-    return itemState;
+    return { aliasPayloads: persisted.aliasPayloads ?? [], ...itemState };
   }
 
   function parseHydratedQuerySnapshot(
@@ -1059,6 +1291,7 @@ export function setupListQueryPersistence<
 
   function createInitialState(baseState: State): State {
     syncMaintenanceRegistration();
+    rebuildLocalPersistedAliasIndex();
     return baseState;
   }
 
@@ -1067,19 +1300,21 @@ export function setupListQueryPersistence<
     itemKey: string,
   ):
     | {
+        aliasPayloads: ItemPayload[];
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
         loadedFields: string[];
       }
     | undefined {
+    const resolvedItemKey = persistedAliasRegistry.resolveItemKey(itemKey);
     if (localStorageAdapter !== null) {
       return (
-        readRememberedHydratedItem(itemKey) ??
-        readHydratedLocalStorageItem(itemKey)
+        readRememberedHydratedItem(resolvedItemKey) ??
+        readHydratedLocalStorageItem(resolvedItemKey)
       );
     }
 
-    const snapshot = itemSnapshotByKey.get(itemKey);
+    const snapshot = itemSnapshotByKey.get(resolvedItemKey);
     return snapshot ? parseHydratedItemSnapshot(snapshot) : undefined;
   }
 
@@ -1138,9 +1373,11 @@ export function setupListQueryPersistence<
 
   async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
-    const existingItemQuery = storeRef.state.itemQueries[itemKey];
-    const existingItem = storeRef.state.items[itemKey];
-    const existingLoadedFields = storeRef.state.itemLoadedFields[itemKey];
+    const resolvedItemKey = persistedAliasRegistry.resolveItemKey(itemKey);
+    const existingItemQuery = storeRef.state.itemQueries[resolvedItemKey];
+    const existingItem = storeRef.state.items[resolvedItemKey];
+    const existingLoadedFields =
+      storeRef.state.itemLoadedFields[resolvedItemKey];
     if (
       existingItemQuery !== undefined &&
       existingItem !== undefined &&
@@ -1151,30 +1388,33 @@ export function setupListQueryPersistence<
     if (existingItemQuery === null) return false;
 
     if (localStorageAdapter !== null) {
-      const itemState = readHydratedItem(itemKey);
+      const itemState = readHydratedItem(resolvedItemKey);
       if (!itemState) return false;
 
-      materializeHydratedItemState(itemKey, itemState);
+      materializeHydratedItemState(resolvedItemKey, itemState);
 
       return true;
     }
 
-    const existingPromise = pendingItemPreloads.get(itemKey);
+    await ensureAsyncPersistedAliasIndex();
+    const canonicalItemKey =
+      persistedAliasRegistry.resolveItemKey(resolvedItemKey);
+    const existingPromise = pendingItemPreloads.get(canonicalItemKey);
     if (existingPromise) return existingPromise;
 
     const currentGeneration = generation;
     const promise = itemNamespace
-      .load(itemKey, { touch: 'coarse' })
+      .load(canonicalItemKey, { touch: 'coarse' })
       .then((cached) =>
-        resolveAsyncPreloadedItem(itemKey, cached, currentGeneration),
+        resolveAsyncPreloadedItem(canonicalItemKey, cached, currentGeneration),
       )
       .finally(() => {
         if (currentGeneration === generation) {
-          pendingItemPreloads.delete(itemKey);
+          pendingItemPreloads.delete(canonicalItemKey);
         }
       });
 
-    pendingItemPreloads.set(itemKey, promise);
+    pendingItemPreloads.set(canonicalItemKey, promise);
     return promise;
   }
 
@@ -1183,14 +1423,17 @@ export function setupListQueryPersistence<
       return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
     }
     if (!storeRef) return itemKeys.map(() => false);
+    await ensureAsyncPersistedAliasIndex();
 
     const resultsByKey = new Map<string, Promise<boolean>>();
     const batchKeys: string[] = [];
 
     for (const itemKey of [...new Set(itemKeys)]) {
-      const existingItemQuery = storeRef.state.itemQueries[itemKey];
-      const existingItem = storeRef.state.items[itemKey];
-      const existingLoadedFields = storeRef.state.itemLoadedFields[itemKey];
+      const resolvedItemKey = persistedAliasRegistry.resolveItemKey(itemKey);
+      const existingItemQuery = storeRef.state.itemQueries[resolvedItemKey];
+      const existingItem = storeRef.state.items[resolvedItemKey];
+      const existingLoadedFields =
+        storeRef.state.itemLoadedFields[resolvedItemKey];
       if (
         existingItemQuery !== undefined &&
         existingItem !== undefined &&
@@ -1204,22 +1447,23 @@ export function setupListQueryPersistence<
         continue;
       }
 
-      const existingPromise = pendingItemPreloads.get(itemKey);
+      const existingPromise = pendingItemPreloads.get(resolvedItemKey);
       if (existingPromise !== undefined) {
         resultsByKey.set(itemKey, existingPromise);
         continue;
       }
 
-      batchKeys.push(itemKey);
+      batchKeys.push(resolvedItemKey);
     }
 
     if (batchKeys.length > 0) {
       const currentGeneration = generation;
+      const uniqueBatchKeys = [...new Set(batchKeys)];
       const batchPromise = itemNamespace
-        .loadMany(batchKeys, { touch: 'coarse' })
+        .loadMany(uniqueBatchKeys, { touch: 'coarse' })
         .then((cachedEntries) => {
           const resolved = new Map<string, boolean>();
-          for (const [index, itemKey] of batchKeys.entries()) {
+          for (const [index, itemKey] of uniqueBatchKeys.entries()) {
             resolved.set(
               itemKey,
               resolveAsyncPreloadedItem(
@@ -1232,7 +1476,7 @@ export function setupListQueryPersistence<
           return resolved;
         });
 
-      for (const itemKey of batchKeys) {
+      for (const itemKey of uniqueBatchKeys) {
         const itemPromise = batchPromise
           .then((resolved) => resolved.get(itemKey) ?? false)
           .finally(() => {
@@ -1247,7 +1491,12 @@ export function setupListQueryPersistence<
 
     return Promise.all(
       itemKeys.map(
-        (itemKey) => resultsByKey.get(itemKey) ?? Promise.resolve(false),
+        (itemKey) =>
+          resultsByKey.get(itemKey) ??
+          pendingItemPreloads.get(
+            persistedAliasRegistry.resolveItemKey(itemKey),
+          ) ??
+          Promise.resolve(false),
       ),
     );
   }
@@ -2090,10 +2339,14 @@ export function setupListQueryPersistence<
           continue;
         }
 
+        const aliasPayloads =
+          getItemAliasPayloads?.(itemKey) ??
+          persistedAliasRegistry.getAliasPayloads(itemKey);
         const nextValue = {
           data: converted.value,
           payload: itemQuery.payload,
           loadedFields,
+          ...(aliasPayloads.length > 0 ? { aliasPayloads } : {}),
         };
         const nextSnapshot = JSON.stringify(nextValue);
         if (
@@ -2360,15 +2613,20 @@ export function setupListQueryPersistence<
         continue;
       }
 
+      const aliasPayloads =
+        getItemAliasPayloads?.(itemKey) ??
+        persistedAliasRegistry.getAliasPayloads(itemKey);
       const nextValue = {
         data: converted.value,
         payload: itemQuery.payload,
         loadedFields,
+        ...(aliasPayloads.length > 0 ? { aliasPayloads } : {}),
       };
       finalItemDataByKey.set(itemKey, {
         metadata: {
           ...(Array.isArray(loadedFields) ? { f: loadedFields } : {}),
           p: itemQuery.payload,
+          ...(aliasPayloads.length > 0 ? { al: aliasPayloads } : {}),
           ...(getItemDerivedGroup
             ? { g: getItemDerivedGroup(item, itemQuery.payload) }
             : {}),
@@ -2533,6 +2791,7 @@ export function setupListQueryPersistence<
     }
 
     const commitTasks: Promise<void>[] = [];
+    let nextAliasNamespaceMetadataSnapshot: string | null = null;
     if (removedQueryKeys.length > 0 || queryUpserts.size > 0) {
       commitTasks.push(
         queryNamespace.commit({
@@ -2546,8 +2805,20 @@ export function setupListQueryPersistence<
       );
     }
     if (removedItemKeys.length > 0 || itemUpserts.size > 0) {
+      const asyncAliasNamespaceUpdate =
+        buildNextPersistedAliasNamespaceMetadata({
+          removedItemKeys,
+          upsertedItems: [...itemUpserts.entries()].map(([itemKey, entry]) => ({
+            aliasPayloads: parseAliasPayloads(entry.value.aliasPayloads),
+            itemKey,
+          })),
+        });
       commitTasks.push(
         itemNamespace.commit({
+          ...(asyncAliasNamespaceUpdate.snapshot !==
+          persistedAliasNamespaceMetadataSnapshot
+            ? { namespaceMetadata: asyncAliasNamespaceUpdate.metadata }
+            : {}),
           removes: removedItemKeys,
           staticPolicy: persistedItemStaticPolicy,
           upserts: Array.from(itemUpserts, ([key, entry]) => ({
@@ -2557,8 +2828,14 @@ export function setupListQueryPersistence<
           })),
         }),
       );
+      nextAliasNamespaceMetadataSnapshot = asyncAliasNamespaceUpdate.snapshot;
     }
     await Promise.all(commitTasks);
+
+    if (nextAliasNamespaceMetadataSnapshot !== null) {
+      persistedAliasNamespaceMetadataSnapshot =
+        nextAliasNamespaceMetadataSnapshot;
+    }
 
     for (const queryKey of removedQueryKeys) {
       forgetPersistedQuery(queryKey);
@@ -2571,8 +2848,7 @@ export function setupListQueryPersistence<
       forgetPersistedItem(itemKey);
     }
     for (const [itemKey, entry] of itemUpserts) {
-      itemSnapshotByKey.set(itemKey, entry.snapshot);
-      hydratedPersistedItemKeys.add(itemKey);
+      rememberHydratedItem(itemKey, entry.value);
     }
 
     knownPersistedQueryKeys =
@@ -2603,6 +2879,7 @@ export function setupListQueryPersistence<
 
   function attach(store: Store<State>): void {
     syncMaintenanceRegistration();
+    rebuildLocalPersistedAliasIndex();
     if (localStorageAdapter === null && asyncStorageAdapter !== null) {
       const sessionKey = config.getSessionKey();
       if (sessionKey !== false) {
@@ -2629,6 +2906,10 @@ export function setupListQueryPersistence<
     generation++;
     pendingItemPreloads.clear();
     pendingQueryPreloads.clear();
+    persistedAliasIndexIsSeeded = false;
+    asyncAliasIndexPromise = null;
+    persistedAliasNamespaceMetadataSnapshot = 'null';
+    persistedAliasRegistry.clearAll();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
     knownPersistedItemKeys = null;
@@ -2661,6 +2942,10 @@ export function setupListQueryPersistence<
     knownPersistedItemKeys = null;
     knownPersistedQueryKeys = null;
     suppressedPersistedStateFlushes = 0;
+    persistedAliasIndexIsSeeded = false;
+    asyncAliasIndexPromise = null;
+    persistedAliasNamespaceMetadataSnapshot = 'null';
+    persistedAliasRegistry.clearAll();
     itemSnapshotByKey.clear();
     querySnapshotByKey.clear();
     hydratedPersistedItemKeys.clear();
@@ -2679,6 +2964,10 @@ export function setupListQueryPersistence<
     getHydratedItemKeys: () => [...hydratedPersistedItemKeys],
     getHydratedQueryKeys: () => [...hydratedPersistedQueryKeys],
     readHydratedItem,
+    resolveItemKey: (itemKey) =>
+      enableItemAliases
+        ? persistedAliasRegistry.resolveItemKey(itemKey)
+        : itemKey,
     readHydratedQuery,
     hasAsyncPreload: localStorageAdapter === null,
     dispose,

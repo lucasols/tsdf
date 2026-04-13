@@ -29,6 +29,7 @@ const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 type IndexedDbPersistedStaticPolicy = { k?: string[]; m?: number };
 
 type IndexedDbNamespacePolicyRecord = {
+  m?: Record<string, unknown>;
   p: IndexedDbPersistedStaticPolicy | null;
   s: string;
 };
@@ -1065,6 +1066,7 @@ export function createIndexedDbPersistentStorageTestStore(
         );
         scopeStore.put(
           {
+            ...(existingScopeRecord?.m ? { m: existingScopeRecord.m } : {}),
             p: existingScopeRecord?.p ?? null,
             s: scope.sessionKey,
           } satisfies IndexedDbNamespacePolicyRecord,
@@ -1102,6 +1104,7 @@ export function createIndexedDbPersistentStorageTestStore(
 
   async function putPolicyRecord(
     scope: AsyncStorageNamespaceScope,
+    namespaceMetadata: Record<string, unknown> | null,
     staticPolicy: AsyncStorageNamespaceStaticPolicy | null,
   ): Promise<void> {
     await withReadwriteStores(
@@ -1111,6 +1114,7 @@ export function createIndexedDbPersistentStorageTestStore(
           .objectStore(INDEXED_DB_NAMESPACE_POLICY_STORE)
           .put(
             {
+              ...(namespaceMetadata !== null ? { m: namespaceMetadata } : {}),
               p: serializeTestStaticPolicy(staticPolicy),
               s: scope.sessionKey,
             } satisfies IndexedDbNamespacePolicyRecord,
@@ -1371,7 +1375,7 @@ export function createIndexedDbPersistentStorageTestStore(
     policy: Record<string, unknown>,
   ): void {
     enqueueWrite(() =>
-      putPolicyRecord(scope, normalizeTestStaticPolicy(policy)),
+      putPolicyRecord(scope, null, normalizeTestStaticPolicy(policy)),
     );
   }
 
@@ -1630,6 +1634,10 @@ export function createIndexedDbPersistentStorageTestStore(
               return (await namespace.listMetadataByFilter?.(args)) ?? [];
             },
           }),
+      async readNamespaceMetadata() {
+        await flushWrites();
+        return namespace.readNamespaceMetadata();
+      },
       async clear() {
         await flushWrites();
         return namespace.clear();

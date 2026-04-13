@@ -20,11 +20,13 @@ const persistedDocumentDataSchema = rc_object({ data: rc_unknown });
 const persistedCollectionItemDataSchema = rc_object({
   data: rc_unknown,
   payload: rc_unknown,
+  aliasPayloads: rc_array(rc_unknown).optional(),
 });
 
 const persistedListQueryItemDataSchema = rc_object({
   data: rc_unknown,
   payload: rc_unknown,
+  aliasPayloads: rc_array(rc_unknown).optional(),
   loadedFields: rc_array(rc_string).optional(),
 });
 
@@ -153,7 +155,7 @@ function parsePersistedItemDataBase<
 export type ParsedPersistedCollectionItemData<
   ItemPayload extends ValidPayload,
   TData = unknown,
-> = { data: TData; payload: ItemPayload };
+> = { aliasPayloads?: ItemPayload[]; data: TData; payload: ItemPayload };
 
 export function parsePersistedCollectionItemData<
   ItemPayload extends ValidPayload,
@@ -189,6 +191,10 @@ export function parsePersistedCollectionItemData<
     payloadSchema,
   );
   if (!parsed) return null;
+  const aliasPayloads = parsed.raw.aliasPayloads?.flatMap((candidate) => {
+    const aliasPayload = validateWithSchema(payloadSchema, candidate);
+    return aliasPayload === null ? [] : [aliasPayload];
+  });
 
   const data =
     dataSchema === undefined
@@ -196,13 +202,18 @@ export function parsePersistedCollectionItemData<
       : validatePersistedStoreDataValue(parsed.raw.data, dataSchema);
   if (data === null) return null;
 
-  return { data, payload: parsed.payload };
+  return { data, payload: parsed.payload, aliasPayloads };
 }
 
 export type ParsedTypedPersistedListQueryItemData<
   ItemPayload extends ValidPayload,
   TData,
-> = { data: TData; payload: ItemPayload; loadedFields?: string[] };
+> = {
+  aliasPayloads?: ItemPayload[];
+  data: TData;
+  payload: ItemPayload;
+  loadedFields?: string[];
+};
 
 export type ParsedPersistedListQueryItemData<ItemPayload extends ValidPayload> =
   ParsedTypedPersistedListQueryItemData<ItemPayload, unknown>;
@@ -241,6 +252,10 @@ export function parsePersistedListQueryItemData<
     payloadSchema,
   );
   if (!parsed) return null;
+  const aliasPayloads = parsed.raw.aliasPayloads?.flatMap((candidate) => {
+    const aliasPayload = validateWithSchema(payloadSchema, candidate);
+    return aliasPayload === null ? [] : [aliasPayload];
+  });
 
   const data =
     dataSchema === undefined
@@ -249,6 +264,7 @@ export function parsePersistedListQueryItemData<
   if (data === null) return null;
 
   return {
+    aliasPayloads,
     data,
     payload: parsed.payload,
     loadedFields: parsed.raw.loadedFields,

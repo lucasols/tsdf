@@ -93,6 +93,11 @@ import {
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
 import {
+  createItemAliasRegistry,
+  normalizeResolvedItemIdentity,
+  type ResolveItemIdentity,
+} from '../utils/itemIdentity';
+import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from '../utils/performMutation';
@@ -207,6 +212,7 @@ export type CollectionBrowserTabsMessage<
   | (BrowserTabsMessageMeta & {
       kind: 'collection-item-snapshot';
       itemKey: string;
+      aliasPayloads?: ItemPayload[];
       consistency: SnapshotConsistency;
       item: TSFDCollectionItem<ItemState, ItemPayload> | null;
     })
@@ -282,6 +288,8 @@ export type CollectionStoreOptions<
   /** Called when cache-limit eviction removes items from in-memory state. */
   onStateCleanup?: (cleanup: CollectionStateCleanup<ItemPayload>) => void;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
+  /** Resolves the canonical payload for a fetched item after the response is known. */
+  resolveItemIdentity?: ResolveItemIdentity<ItemState, ItemPayload>;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
@@ -376,6 +384,7 @@ export function createCollectionStore<
   revalidateOnWindowFocus,
   transportReconnectCooldownMs = 2_000,
   getCollectionItemKey: filterCollectionItemObjKey,
+  resolveItemIdentity,
   onInvalidate,
   onSchedulerEvent,
   onMutationError,
@@ -501,12 +510,36 @@ export function createCollectionStore<
     }
   }
 
+  function getRawItemKey(params: ItemPayload): string {
+    return getCompositeKey(
+      filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
+    );
+  }
+
+  const itemAliasRegistry = createItemAliasRegistry(getRawItemKey);
+
   // Persistent storage setup
   const persistence = resolvedPersistentStorageConfig
     ? setupCollectionPersistence(resolvedPersistentStorageConfig, {
-        getItemKey,
+        enableItemAliases: resolveItemIdentity !== undefined,
+        getItemAliasPayloads: (itemKey) =>
+          itemAliasRegistry.getAliasPayloads(itemKey),
+        getItemKey: getRawItemKey,
       })
     : null;
+
+  function resolveKnownItemKey(itemKey: string): string {
+    const persistedItemKey = persistence?.resolveItemKey(itemKey) ?? itemKey;
+    return itemAliasRegistry.resolveItemKey(persistedItemKey);
+  }
+
+  function getItemKey(params: ItemPayload): string {
+    return getRawItemKey(params);
+  }
+
+  function getLookupItemKey(params: ItemPayload): string {
+    return resolveKnownItemKey(getRawItemKey(params));
+  }
 
   const store = new Store<CollectionState>({
     debugName,
@@ -515,7 +548,7 @@ export function createCollectionStore<
 
       if (initialData) {
         for (const item of initialData) {
-          const itemKey = getItemKey(item.payload);
+          const itemKey = getRawItemKey(item.payload);
 
           initialState[itemKey] = {
             data: item.data,
@@ -531,12 +564,6 @@ export function createCollectionStore<
       return persistence?.createInitialState(initialState) ?? initialState;
     },
   });
-
-  function getItemKey(params: ItemPayload): string {
-    return getCompositeKey(
-      filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
-    );
-  }
 
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {
     offlineOverlaySessionKey = nextSessionKey;
@@ -573,6 +600,66 @@ export function createCollectionStore<
         };
       },
     });
+  }
+
+  function getCanonicalAliasPayloads(
+    canonicalItemKey: string,
+    extraAliasPayloads: readonly ItemPayload[] = [],
+  ): ItemPayload[] {
+    const aliasPayloadsByKey = new Map<string, ItemPayload>();
+
+    for (const aliasPayload of [
+      ...itemAliasRegistry.getAliasPayloads(canonicalItemKey),
+      ...extraAliasPayloads,
+    ]) {
+      const aliasItemKey = getRawItemKey(aliasPayload);
+      if (aliasItemKey === canonicalItemKey) continue;
+      if (!aliasPayloadsByKey.has(aliasItemKey)) {
+        aliasPayloadsByKey.set(aliasItemKey, aliasPayload);
+      }
+    }
+
+    return [...aliasPayloadsByKey.values()];
+  }
+
+  function setCanonicalItemAliases(
+    canonicalItemKey: string,
+    aliasPayloads: readonly ItemPayload[],
+  ): ItemPayload[] {
+    const nextAliasPayloads = getCanonicalAliasPayloads(
+      canonicalItemKey,
+      aliasPayloads,
+    );
+    itemAliasRegistry.setCanonicalAliases(canonicalItemKey, nextAliasPayloads);
+    return nextAliasPayloads;
+  }
+
+  function mergeFetchedCollectionItem(
+    preferredItem: CollectionItem,
+    existingItem: CollectionItem | null | undefined,
+    canonicalPayload: ItemPayload,
+  ): CollectionItem {
+    return {
+      data: preferredItem.data ?? existingItem?.data ?? null,
+      error: preferredItem.error ?? existingItem?.error ?? null,
+      status: preferredItem.status,
+      payload: klona(canonicalPayload),
+      refetchOnMount: false,
+      wasLoaded: preferredItem.wasLoaded || existingItem?.wasLoaded === true,
+    };
+  }
+
+  function getResolvedStoredPayload(payload: ItemPayload): ItemPayload {
+    const rawItemKey = getRawItemKey(payload);
+    const resolvedItemKey = resolveKnownItemKey(rawItemKey);
+
+    if (resolvedItemKey === rawItemKey) return payload;
+
+    return (
+      getItemFromStateOrPersistence(resolvedItemKey, {
+        materializeSyncState: true,
+      })?.payload ?? payload
+    );
   }
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
   // WORKAROUND: Session-only offline config omits operations, so collection stores normalize that case to an empty registry before passing it through the generic offline controller surface.
@@ -615,7 +702,7 @@ export function createCollectionStore<
                 if (normalizedRef !== null) return normalizedRef;
 
                 return {
-                  entityKey: getItemKey(
+                  entityKey: getLookupItemKey(
                     // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
                     __LEGIT_CAST__<ItemPayload, unknown>(ref),
                   ),
@@ -995,9 +1082,14 @@ export function createCollectionStore<
     if (remoteApplyDepth > 0) return;
 
     const item = store.state[itemKey] ?? null;
+    const aliasPayloads =
+      item !== null && resolveKnownItemKey(itemKey) === itemKey
+        ? itemAliasRegistry.getAliasPayloads(itemKey)
+        : [];
     const message = browserTabsSync.publish({
       kind: 'collection-item-snapshot',
       itemKey,
+      ...(aliasPayloads.length > 0 ? { aliasPayloads } : {}),
       consistency,
       item,
     });
@@ -1037,6 +1129,12 @@ export function createCollectionStore<
     message: CollectionItemSnapshotMessage<ItemState, ItemPayload>,
     candidateVersion: BrowserTabsSyncVersion,
   ): void {
+    if (message.item !== null) {
+      setCanonicalItemAliases(message.itemKey, message.aliasPayloads ?? []);
+    } else if (resolveKnownItemKey(message.itemKey) === message.itemKey) {
+      itemAliasRegistry.clearCanonicalAliases(message.itemKey);
+    }
+
     const existingItem = store.state[message.itemKey];
     const schedulerPayload = message.item?.payload ?? existingItem?.payload;
     const snapshotItem = message.item;
@@ -1196,11 +1294,110 @@ export function createCollectionStore<
       ({ requestId }) => results.get(requestId) === true,
     );
     if (successfulRequests.length > 0) {
-      touchItemsAndMaybeEnforceLimits(
-        successfulRequests.map(({ requestId }) => requestId),
+      if (resolveItemIdentity === undefined) {
+        const successfulItemKeys = successfulRequests.map(
+          ({ requestId }) => requestId,
+        );
+        touchItemsAndMaybeEnforceLimits(successfulItemKeys);
+        for (const itemKey of successfulItemKeys) {
+          publishItemSnapshot(itemKey, 'confirmed');
+        }
+        return results;
+      }
+
+      const canonicalItemKeys = new Set<string>();
+      const removedAliasKeys = new Set<string>();
+      const cleanupAliases: { itemKey: string; payload: ItemPayload }[] = [];
+      const itemKeyRewrites: {
+        previousItemKey: string;
+        nextItemKey: string;
+      }[] = [];
+      const aliasUpdates: {
+        canonicalItemKey: string;
+        aliasPayloads: ItemPayload[];
+        canonicalPayload: ItemPayload;
+      }[] = [];
+
+      store.produceState(
+        (draft) => {
+          for (const { payload, requestId } of successfulRequests) {
+            const fetchedItem = draft[requestId];
+            if (!fetchedItem?.data) continue;
+
+            const resolvedIdentity = normalizeResolvedItemIdentity({
+              data: fetchedItem.data,
+              getItemKey: getRawItemKey,
+              payload,
+              resolveItemIdentity,
+              source: 'itemFetch',
+            });
+            const canonicalItemKey = resolvedIdentity.canonicalItemKey;
+            const existingCanonicalItem =
+              canonicalItemKey === requestId
+                ? fetchedItem
+                : draft[canonicalItemKey];
+
+            draft[canonicalItemKey] = mergeFetchedCollectionItem(
+              fetchedItem,
+              existingCanonicalItem,
+              resolvedIdentity.canonicalPayload,
+            );
+            canonicalItemKeys.add(canonicalItemKey);
+
+            const extraAliasPayloads = [
+              ...resolvedIdentity.aliasPayloads,
+              ...(existingCanonicalItem &&
+              getRawItemKey(existingCanonicalItem.payload) !== canonicalItemKey
+                ? [existingCanonicalItem.payload]
+                : []),
+            ];
+            aliasUpdates.push({
+              canonicalItemKey,
+              aliasPayloads: extraAliasPayloads,
+              canonicalPayload: resolvedIdentity.canonicalPayload,
+            });
+
+            if (requestId === canonicalItemKey) continue;
+
+            draft[requestId] = null;
+            removedAliasKeys.add(requestId);
+            cleanupAliases.push({ itemKey: requestId, payload });
+            itemKeyRewrites.push({
+              previousItemKey: requestId,
+              nextItemKey: canonicalItemKey,
+            });
+          }
+        },
+        { action: 'canonicalize-item-identity' },
       );
-      for (const { requestId } of successfulRequests) {
-        publishItemSnapshot(requestId, 'confirmed');
+
+      for (const {
+        canonicalItemKey,
+        aliasPayloads,
+        canonicalPayload,
+      } of aliasUpdates) {
+        setCanonicalItemAliases(canonicalItemKey, aliasPayloads);
+        getScheduler(
+          canonicalItemKey,
+          canonicalPayload,
+        ).setLastFetchStartTimeForRequest(
+          canonicalItemKey,
+          fetchCtx.getStartTime(),
+        );
+      }
+      if (itemKeyRewrites.length > 0) {
+        rebindOfflineOverlays(itemKeyRewrites);
+      }
+
+      touchItemsAndMaybeEnforceLimits([...canonicalItemKeys]);
+      for (const itemKey of canonicalItemKeys) {
+        publishItemSnapshot(itemKey, 'confirmed');
+      }
+      for (const itemKey of removedAliasKeys) {
+        publishItemSnapshot(itemKey, 'confirmed');
+      }
+      for (const { itemKey, payload } of cleanupAliases) {
+        cleanupItemResources(itemKey, payload);
       }
     }
 
@@ -1228,6 +1425,12 @@ export function createCollectionStore<
   function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
     invalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
+    if (
+      resolveKnownItemKey(itemKey) === itemKey &&
+      store.state[itemKey] == null
+    ) {
+      itemAliasRegistry.clearCanonicalAliases(itemKey);
+    }
 
     const itemScheduler = perItemSchedulers.get(itemKey);
     if (itemScheduler) {
@@ -1279,9 +1482,12 @@ export function createCollectionStore<
     const results: ScheduleFetchResults[] = [];
 
     for (const param of payloads) {
-      const itemKey = getItemKey(param);
-      const scheduler = getScheduler(itemKey, param);
-      results.push(scheduler.scheduleFetch(itemKey, fetchType, param, options));
+      const requestItemKey = getItemKey(param);
+      const lookupItemKey = resolveKnownItemKey(requestItemKey);
+      const scheduler = getScheduler(lookupItemKey, param);
+      results.push(
+        scheduler.scheduleFetch(requestItemKey, fetchType, param, options),
+      );
     }
 
     if (multiplePayloads) return results;
@@ -1297,9 +1503,10 @@ export function createCollectionStore<
     fetchType: FetchType,
     payload: ItemPayload,
   ): void {
-    const itemKey = getItemKey(payload);
-    const scheduler = getScheduler(itemKey, payload);
-    scheduler.scheduleFetch(itemKey, fetchType, payload);
+    const requestItemKey = getItemKey(payload);
+    const lookupItemKey = resolveKnownItemKey(requestItemKey);
+    const scheduler = getScheduler(lookupItemKey, payload);
+    scheduler.scheduleFetch(requestItemKey, fetchType, payload);
   }
 
   async function awaitFetch(
@@ -1308,14 +1515,18 @@ export function createCollectionStore<
   ): Promise<
     { data: ItemState; error: null } | { data: null; error: StoreFetchError }
   > {
-    const itemId = getItemKey(params);
-    const scheduler = getScheduler(itemId, params);
+    const requestItemKey = getItemKey(params);
+    const lookupItemKey = resolveKnownItemKey(requestItemKey);
+    const scheduler = getScheduler(lookupItemKey, params);
 
-    if (persistence?.hasAsyncPreload && !Object.hasOwn(store.state, itemId)) {
-      await persistence.preloadItems([itemId]);
+    if (
+      persistence?.hasAsyncPreload &&
+      !Object.hasOwn(store.state, lookupItemKey)
+    ) {
+      await persistence.preloadItems([requestItemKey]);
     }
 
-    const result = await scheduler.awaitFetch(itemId, params, options);
+    const result = await scheduler.awaitFetch(requestItemKey, params, options);
 
     if (result === 'timeout') {
       return { data: null, error: new TimeoutStoreError() };
@@ -1325,18 +1536,19 @@ export function createCollectionStore<
       return { data: null, error: new AbortedStoreError() };
     }
 
-    let item = getItemFromStateOrPersistence(itemId, {
+    let item = getItemFromStateOrPersistence(requestItemKey, {
       materializeSyncState: true,
     });
 
     if (item?.error?.id === 'offline') {
-      const hydratedItem = persistence?.readHydratedItem(itemId);
+      const hydratedItem = persistence?.readHydratedItem(requestItemKey);
 
-      if (hydratedItem?.data) {
-        item = hydratedItem;
+      if (hydratedItem?.item.data) {
+        const resolvedItemKey = resolveKnownItemKey(requestItemKey);
+        item = hydratedItem.item;
         store.produceState(
           (draft) => {
-            draft[itemId] = hydratedItem;
+            draft[resolvedItemKey] = hydratedItem.item;
           },
           { action: 'persistent-storage-hydrate' },
         );
@@ -1358,9 +1570,10 @@ export function createCollectionStore<
     itemKey: string,
     options: { materializeSyncState?: boolean } = {},
   ): CollectionItem | null | undefined {
-    const item = store.state[itemKey];
-    if (Object.hasOwn(store.state, itemKey)) return item;
-    const hydratedItem = persistence?.readHydratedItem(itemKey);
+    const resolvedItemKey = resolveKnownItemKey(itemKey);
+    const item = store.state[resolvedItemKey];
+    if (Object.hasOwn(store.state, resolvedItemKey)) return item;
+    const hydratedItem = persistence?.readHydratedItem(resolvedItemKey);
 
     if (
       hydratedItem &&
@@ -1368,21 +1581,27 @@ export function createCollectionStore<
       persistence &&
       !persistence.hasAsyncPreload
     ) {
-      void persistence.preloadItems([itemKey]);
+      void persistence.preloadItems([resolvedItemKey]);
 
-      if (Object.hasOwn(store.state, itemKey)) {
-        return store.state[itemKey];
+      if (Object.hasOwn(store.state, resolvedItemKey)) {
+        return store.state[resolvedItemKey];
       }
     }
 
-    return hydratedItem;
+    return hydratedItem?.item;
+  }
+
+  function readHydratedCollectionItem(
+    itemKey: string,
+  ): CollectionItem | null | undefined {
+    return persistence?.readHydratedItem(resolveKnownItemKey(itemKey))?.item;
   }
 
   function getItemsKeyArray(
     params: ItemPayload[] | FilterItemsFn | ItemPayload,
   ): { itemKey: string; payload: ItemPayload }[] {
     if (Array.isArray(params)) {
-      return params.map((p) => ({ itemKey: getItemKey(p), payload: p }));
+      return params.map((p) => ({ itemKey: getLookupItemKey(p), payload: p }));
     } else if (typeof params === 'function') {
       const itemKeys = new Set([
         ...Object.keys(store.state),
@@ -1398,7 +1617,7 @@ export function createCollectionStore<
           : false;
       });
     } else {
-      return [{ payload: params, itemKey: getItemKey(params) }];
+      return [{ payload: params, itemKey: getLookupItemKey(params) }];
     }
   }
 
@@ -1474,7 +1693,7 @@ export function createCollectionStore<
       });
     }
 
-    const itemKey = getItemKey(params);
+    const itemKey = getLookupItemKey(params);
     return getItemFromStateOrPersistence(itemKey, {
       materializeSyncState: true,
     });
@@ -1496,11 +1715,9 @@ export function createCollectionStore<
       return payloads.map((payload) => ({ payload, preloaded: false }));
     }
 
-    const results = await persistence.preloadItems(
-      payloads.map((payload) => getItemKey(payload)),
-    );
+    const results = await persistence.preloadItems(payloads.map(getItemKey));
     const preloadedItemKeys = payloads.flatMap((payload, index) =>
-      results[index] ? [getItemKey(payload)] : [],
+      results[index] ? [getLookupItemKey(payload)] : [],
     );
     if (preloadedItemKeys.length > 0) {
       touchItemsAndMaybeEnforceLimits(preloadedItemKeys);
@@ -1543,16 +1760,13 @@ export function createCollectionStore<
       options,
       store,
       events,
-      getItemKey,
+      getLookupItemKey,
       getItemState,
-      persistence?.readHydratedItem,
+      persistence ? readHydratedCollectionItem : undefined,
       registerActiveItems,
       touchItems,
       persistence
-        ? (payloads) =>
-            persistence.maybeHydrateItems(
-              payloads.map((payload) => getItemKey(payload)),
-            )
+        ? (payloads) => persistence.maybeHydrateItems(payloads.map(getItemKey))
         : undefined,
       !!persistence && !persistence.hasAsyncPreload,
       scheduleAutomaticFetch,
@@ -1598,7 +1812,8 @@ export function createCollectionStore<
   }
 
   function addItemToState(fetchParams: ItemPayload, data: ItemState) {
-    const itemKey = getItemKey(fetchParams);
+    const itemKey = getLookupItemKey(fetchParams);
+    const storedPayload = getResolvedStoredPayload(fetchParams);
 
     store.produceState(
       (draft) => {
@@ -1608,7 +1823,7 @@ export function createCollectionStore<
           wasLoaded: true,
           refetchOnMount: false,
           error: null,
-          payload: klona(fetchParams),
+          payload: klona(storedPayload),
         };
       },
       { action: 'create-item-state' },
@@ -1637,6 +1852,9 @@ export function createCollectionStore<
     );
 
     for (const { itemKey, payload } of itemKeys) {
+      if (resolveKnownItemKey(itemKey) === itemKey) {
+        itemAliasRegistry.clearCanonicalAliases(itemKey);
+      }
       publishItemSnapshot(itemKey);
       cleanupItemResources(itemKey, payload);
     }
@@ -2012,6 +2230,7 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    itemAliasRegistry.clearAll();
     clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
@@ -2044,6 +2263,7 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    itemAliasRegistry.clearAll();
     clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();

@@ -171,7 +171,9 @@ export function createListQueryStoreTestEnv<
     maxItems,
     maxQueries,
     onStateCleanup,
+    resolveItemIdentity,
     getItemsBatchKey,
+    getListItemPayload,
     disableFetchItemFn,
     optimisticListUpdates,
     partialResources,
@@ -219,8 +221,21 @@ export function createListQueryStoreTestEnv<
       TPartialResources,
       TOffsetPagination
     >['onStateCleanup'];
+    resolveItemIdentity?: ListQueryStoreOptions<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination
+    >['resolveItemIdentity'];
     /** Optional function to group batch fetches by key */
     getItemsBatchKey?: (payload: string) => string | false;
+    /** Overrides the payload returned for list items while keeping item fetches keyed by the raw server id. */
+    getListItemPayload?: (args: {
+      data: TRow;
+      itemId: string;
+      tableId: string;
+    }) => string;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
       typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
@@ -377,7 +392,7 @@ export function createListQueryStoreTestEnv<
 
     return {
       items: result.items.map(({ itemId, data }) => ({
-        itemPayload: itemId,
+        itemPayload: getListItemPayload?.({ data, itemId, tableId }) ?? itemId,
         data,
       })),
       hasMore: result.hasMore,
@@ -399,6 +414,7 @@ export function createListQueryStoreTestEnv<
     maxItems,
     maxQueries,
     onStateCleanup,
+    resolveItemIdentity,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,

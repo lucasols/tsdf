@@ -115,10 +115,18 @@ export type CollectionStoreTestEnvOptions<
   maxItems?: number;
   /** Optional function to group batch fetches by key */
   getItemsBatchKey?: (payload: string) => string | false;
+  getCollectionItemKey?: CollectionStoreOptions<
+    CollectionTestItem<D>,
+    string
+  >['getCollectionItemKey'];
   onStateCleanup?: CollectionStoreOptions<
     CollectionTestItem<D>,
     string
   >['onStateCleanup'];
+  resolveItemIdentity?: CollectionStoreOptions<
+    CollectionTestItem<D>,
+    string
+  >['resolveItemIdentity'];
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
@@ -156,7 +164,9 @@ export function createCollectionStoreTestEnv<
     maxBatchSize,
     maxItems,
     getItemsBatchKey,
+    getCollectionItemKey,
     onStateCleanup,
+    resolveItemIdentity,
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
@@ -309,6 +319,8 @@ export function createCollectionStoreTestEnv<
       maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
       maxItems,
       onStateCleanup,
+      resolveItemIdentity,
+      getCollectionItemKey,
       getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
       fetchFn: async (payload, signal) => {
         const value = await serverTable.fetch(payload, signal);

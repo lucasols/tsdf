@@ -13,6 +13,7 @@ import {
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
+import type { ResolveItemIdentity } from '../../../src/utils/itemIdentity';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
 import {
   createDocumentStoreTestEnv,
@@ -359,6 +360,10 @@ export type CollectionItemState = { id: string; name: string };
 export function createCollectionEnv(options: {
   maxItems?: number;
   pinnedItems?: string[];
+  resolveItemIdentity?: ResolveItemIdentity<
+    { value: CollectionItemState },
+    string
+  >;
   serverData?: Record<string, CollectionItemState>;
   sessionKey?: string;
   storeName: string;
@@ -375,6 +380,7 @@ export function createCollectionEnv(options: {
       pinnedItems: options.pinnedItems,
       schema: wrappedCollectionItemSchema,
     },
+    resolveItemIdentity: options.resolveItemIdentity,
   });
   pendingTestEnvDisposers.push(() => env.apiStore.dispose());
   return env;
@@ -396,6 +402,7 @@ export function createListQueryEnv(options: {
   offsetPagination?: OffsetPaginationConfig;
   pinnedItems?: string[];
   pinnedQueries?: Array<{ tableId: string }>;
+  resolveItemIdentity?: ResolveItemIdentity<Row, string>;
   serverData?: Tables<Row>;
   sessionKey?: string;
   storeName: string;
@@ -418,6 +425,7 @@ export function createListQueryEnv(options: {
       queryPayloadSchema: listQueryParamsSchema,
       schema: rowSchema,
     },
+    resolveItemIdentity: options.resolveItemIdentity,
   });
   pendingTestEnvDisposers.push(() => env.apiStore.dispose());
   return env;

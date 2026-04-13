@@ -209,6 +209,16 @@ function parseIndexEntries(
   return entries;
 }
 
+function parseNamespaceMetadata(
+  value: unknown,
+): Record<string, unknown> | null | undefined {
+  if (value === undefined) return null;
+  if (value === null) return null;
+
+  const record = getRecord(value);
+  return record === null ? undefined : record;
+}
+
 /**
  * Builds a persisted static policy from config values, omitting fields that
  * match the provided default. Returns null when no overrides are needed.
@@ -256,6 +266,7 @@ function serializeStaticPolicy(
 
 type InternalManagedIndexState = {
   entries: Map<string, InternalManagedMetadataRecord>;
+  namespaceMetadata: Record<string, unknown> | null;
   staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
 };
 
@@ -271,6 +282,7 @@ function serializeIndexState(
         serializeInternalManagedMetadataRecord(metadata),
       ]),
     ),
+    ...(state.namespaceMetadata !== null ? { m: state.namespaceMetadata } : {}),
     ...(serializedStaticPolicy !== undefined
       ? { s: serializedStaticPolicy }
       : {}),
@@ -386,13 +398,18 @@ type AsyncStorageManagedDriverCapabilities = {
   ) => Promise<{
     entries: Map<string, AsyncStorageManagedMetadataRecord> | null;
     exists: boolean;
+    namespaceMetadata: Record<string, unknown> | null;
     staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
     valid: boolean;
   }>;
+  readNamespaceMetadata?: (
+    scope: AsyncStorageNamespaceScope,
+  ) => Promise<Record<string, unknown> | null>;
   persistNamespaceIndexState?: (
     scope: AsyncStorageNamespaceScope,
     state: {
       entries: Map<string, AsyncStorageManagedMetadataRecord>;
+      namespaceMetadata?: Record<string, unknown> | null;
       staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
     },
   ) => Promise<void>;
@@ -425,6 +442,7 @@ export async function readAsyncStorageNamespaceIndexStateUsingDriver(
 ): Promise<{
   entries: Map<string, AsyncStorageManagedMetadataRecord> | null;
   exists: boolean;
+  namespaceMetadata: Record<string, unknown> | null;
   staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   valid: boolean;
 }> {
@@ -437,26 +455,52 @@ export async function readAsyncStorageNamespaceIndexStateUsingDriver(
     knownRecordKeys != null &&
     !knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)
   ) {
-    return { entries: null, exists: false, staticPolicy: null, valid: true };
+    return {
+      entries: null,
+      exists: false,
+      namespaceMetadata: null,
+      staticPolicy: null,
+      valid: true,
+    };
   }
   const indexKnownToExist = knownRecordKeys != null;
 
   const rawIndex = await driver.get(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
   if (rawIndex === null) {
     return indexKnownToExist
-      ? { entries: null, exists: true, staticPolicy: null, valid: false }
-      : { entries: null, exists: false, staticPolicy: null, valid: true };
+      ? {
+          entries: null,
+          exists: true,
+          namespaceMetadata: null,
+          staticPolicy: null,
+          valid: false,
+        }
+      : {
+          entries: null,
+          exists: false,
+          namespaceMetadata: null,
+          staticPolicy: null,
+          valid: true,
+        };
   }
 
   const record = getRecord(rawIndex);
   const parsed = parseIndexEntries(rawIndex);
-  if (parsed === null) {
-    return { entries: null, exists: true, staticPolicy: null, valid: false };
+  const namespaceMetadata = parseNamespaceMetadata(record?.m);
+  if (parsed === null || namespaceMetadata === undefined) {
+    return {
+      entries: null,
+      exists: true,
+      namespaceMetadata: null,
+      staticPolicy: null,
+      valid: false,
+    };
   }
 
   return {
     entries: parsed,
     exists: true,
+    namespaceMetadata,
     staticPolicy: parseStaticPolicy(record?.s),
     valid: true,
   };
@@ -509,6 +553,8 @@ function cloneNamespaceIndexReadState(
   return {
     entries,
     exists: state.exists,
+    namespaceMetadata:
+      state.namespaceMetadata !== null ? klona(state.namespaceMetadata) : null,
     staticPolicy: cloneStaticPolicy(state.staticPolicy),
     valid: state.valid,
   };
@@ -812,6 +858,11 @@ class ManagedAsyncStorageNamespaceHandle<
     return this.adapter.listManagedMetadata<TCustomMetadata>(this.scope, args);
   }
 
+  async readNamespaceMetadata(): Promise<Record<string, unknown> | null> {
+    await this.adapter.flushPendingNamespaceCommit(this.scope);
+    return this.adapter.readManagedNamespaceMetadata(this.scope);
+  }
+
   async clear(): Promise<void> {
     await this.adapter.flushPendingNamespaceCommit(this.scope);
     await this.adapter.clearManagedNamespace(this.scope);
@@ -858,6 +909,7 @@ type StartupCleanupDeleteAction =
 type StartupCleanupScopePlan = {
   deleteAction: StartupCleanupDeleteAction | null;
   persistEntries: Map<string, InternalManagedMetadataRecord> | null;
+  persistNamespaceMetadata?: Record<string, unknown> | null;
   persistStaticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   scope: AsyncStorageNamespaceScope;
 };
@@ -891,6 +943,7 @@ type StartupCleanupDeleteActionResult =
 export type AsyncStartupCleanupScopePlan = {
   deleteKeys: string[];
   persistEntries: Map<string, AsyncStorageManagedMetadataRecord> | null;
+  persistNamespaceMetadata?: Record<string, unknown> | null;
   persistStaticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   scope: AsyncStorageNamespaceScope;
 };
@@ -942,9 +995,11 @@ export function unregisterAsyncStartupStoreCleanup(
 
 type PendingNamespaceCommit = {
   cancelFlush: (() => void) | null;
+  hasNamespaceMetadataUpdate: boolean;
   inFlightBarrierKeys: Set<string> | null;
   flushPromise: Promise<void> | null;
   hasStaticPolicyUpdate: boolean;
+  namespaceMetadata: Record<string, unknown> | null;
   removes: Set<string>;
   scope: AsyncStorageNamespaceScope;
   staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
@@ -1166,6 +1221,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           if (changed) {
             await this.#persistNamespaceIndexUsingDriver(this.driver, scope, {
               entries: indexEntries,
+              namespaceMetadata: indexState.namespaceMetadata,
               staticPolicy: normalizeStaticPolicy(indexState.staticPolicy),
             });
             this.#invalidateCachedNamespace(scope);
@@ -1254,6 +1310,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       pending.staticPolicy = args.staticPolicy ?? null;
     }
 
+    if ('namespaceMetadata' in args) {
+      pending.hasNamespaceMetadataUpdate = true;
+      pending.namespaceMetadata = args.namespaceMetadata ?? null;
+    }
+
     for (const upsert of args.upserts ?? []) {
       pending.removes.delete(upsert.key);
       pending.upserts.set(
@@ -1317,7 +1378,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     const upserts = [...pending.upserts.values()];
     const removes = [...pending.removes];
+    const hasNamespaceMetadataUpdate = pending.hasNamespaceMetadataUpdate;
     const hasStaticPolicyUpdate = pending.hasStaticPolicyUpdate;
+    const namespaceMetadata = pending.namespaceMetadata;
     const staticPolicy = pending.staticPolicy;
     const touches = [...pending.touches.entries()].map(
       ([key, lastAccessAt]) => ({ key, lastAccessAt }),
@@ -1327,7 +1390,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       ...pending.removes,
     ]);
     const waiters = [...pending.waiters];
+    pending.hasNamespaceMetadataUpdate = false;
     pending.hasStaticPolicyUpdate = false;
+    pending.namespaceMetadata = null;
     pending.upserts = new Map();
     pending.removes = new Set();
     pending.staticPolicy = null;
@@ -1340,6 +1405,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       upserts.length === 0 &&
       removes.length === 0 &&
       touches.length === 0 &&
+      !hasNamespaceMetadataUpdate &&
       !hasStaticPolicyUpdate
     ) {
       this.#pendingNamespaceCommits.delete(namespaceKey);
@@ -1352,6 +1418,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     pending.flushPromise = this.#applyManagedCommit(scope, {
       upserts,
       removes,
+      ...(hasNamespaceMetadataUpdate ? { namespaceMetadata } : {}),
       ...(hasStaticPolicyUpdate ? { staticPolicy } : {}),
       touches,
     })
@@ -1465,6 +1532,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         return {
           entries: null,
           exists: false,
+          namespaceMetadata: null,
           staticPolicy: null,
           valid: true,
         };
@@ -1511,30 +1579,50 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   async #persistNamespaceIndexUsingDriver(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
-    state: InternalManagedIndexState,
+    state: Omit<InternalManagedIndexState, 'namespaceMetadata'> & {
+      namespaceMetadata?: Record<string, unknown> | null;
+    },
     advanceGeneration = true,
   ): Promise<void> {
     if (advanceGeneration) {
       this.#advanceNamespaceReadCacheGeneration(scope);
     }
 
+    let namespaceMetadata = state.namespaceMetadata;
+    if (namespaceMetadata === undefined) {
+      const currentState = await this.#readNamespaceIndexStateUsingDriver(
+        driver,
+        scope,
+      );
+      namespaceMetadata = currentState.valid
+        ? currentState.namespaceMetadata
+        : null;
+    }
+
+    const nextState: InternalManagedIndexState = {
+      entries: state.entries,
+      namespaceMetadata,
+      staticPolicy: state.staticPolicy,
+    };
+
     const managedCapabilities = getManagedDriverCapabilities(driver);
     if (managedCapabilities?.persistNamespaceIndexState !== undefined) {
-      await managedCapabilities.persistNamespaceIndexState(scope, state);
-      if (state.entries.size === 0) {
+      await managedCapabilities.persistNamespaceIndexState(scope, nextState);
+      if (nextState.entries.size === 0) {
         this.#invalidateCachedNamespaceIndexState(scope);
       } else {
         this.#setCachedNamespaceIndexState(scope, {
-          entries: state.entries,
+          entries: nextState.entries,
           exists: true,
-          staticPolicy: state.staticPolicy,
+          namespaceMetadata: nextState.namespaceMetadata,
+          staticPolicy: nextState.staticPolicy,
           valid: true,
         });
       }
       return;
     }
 
-    if (state.entries.size === 0) {
+    if (nextState.entries.size === 0) {
       await this.#driverRemoveManyFrom(driver, scope, [
         ASYNC_NAMESPACE_INDEX_RECORD_KEY,
       ]);
@@ -1545,13 +1633,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     await this.#driverSetManyFrom(driver, scope, [
       {
         key: ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-        value: serializeIndexState(state),
+        value: serializeIndexState(nextState),
       },
     ]);
     this.#setCachedNamespaceIndexState(scope, {
-      entries: state.entries,
+      entries: nextState.entries,
       exists: true,
-      staticPolicy: state.staticPolicy,
+      namespaceMetadata: nextState.namespaceMetadata,
+      staticPolicy: nextState.staticPolicy,
       valid: true,
     });
   }
@@ -1646,6 +1735,22 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
     return this.#listManagedMetadataUsingDriver(this.driver, scope, args);
+  }
+
+  async readManagedNamespaceMetadata(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<Record<string, unknown> | null> {
+    const managedCapabilities = getManagedDriverCapabilities(this.driver);
+    if (managedCapabilities?.readNamespaceMetadata !== undefined) {
+      const metadata = await managedCapabilities.readNamespaceMetadata(scope);
+      return metadata === null ? null : klona(metadata);
+    }
+
+    const indexState = await this.#readNamespaceIndexStateUsingDriver(
+      this.driver,
+      scope,
+    );
+    return indexState.valid ? indexState.namespaceMetadata : null;
   }
 
   async #listManagedMetadataUsingDriver<
@@ -1814,6 +1919,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const setEntries: AsyncStorageDriverSetEntry[] = [];
     const removeEntries = removes.map((key) => getPayloadRecordKey(key));
     let indexChanged = false;
+    let nextNamespaceMetadata = currentIndexState.valid
+      ? currentIndexState.namespaceMetadata
+      : null;
     let nextStaticPolicy = normalizeStaticPolicy(
       currentIndexState.staticPolicy,
     );
@@ -1828,6 +1936,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
       if (!deepEqual(nextStaticPolicy, normalizedNextStaticPolicy)) {
         nextStaticPolicy = normalizedNextStaticPolicy;
+        indexChanged = true;
+      }
+    }
+
+    if ('namespaceMetadata' in args) {
+      const normalizedNextNamespaceMetadata = args.namespaceMetadata ?? null;
+      if (!deepEqual(nextNamespaceMetadata, normalizedNextNamespaceMetadata)) {
+        nextNamespaceMetadata = normalizedNextNamespaceMetadata;
         indexChanged = true;
       }
     }
@@ -1909,13 +2025,18 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       await this.#persistNamespaceIndexUsingDriver(
         this.driver,
         scope,
-        { entries: indexEntries, staticPolicy: nextStaticPolicy },
+        {
+          entries: indexEntries,
+          namespaceMetadata: nextNamespaceMetadata,
+          staticPolicy: nextStaticPolicy,
+        },
         false,
       );
     } else {
       this.#setCachedNamespaceIndexState(scope, {
         entries: currentIndexState.valid ? indexEntries : null,
         exists: currentIndexState.exists,
+        namespaceMetadata: nextNamespaceMetadata,
         staticPolicy: currentIndexState.staticPolicy,
         valid: currentIndexState.valid,
       });
@@ -1988,6 +2109,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         if (changed) {
           await this.#persistNamespaceIndexUsingDriver(driver, scope, {
             entries: indexState.entries,
+            namespaceMetadata: indexState.namespaceMetadata,
             staticPolicy: normalizeStaticPolicy(indexState.staticPolicy),
           });
         }
@@ -2249,9 +2371,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const created: PendingNamespaceCommit = {
       scope,
       cancelFlush: null,
+      hasNamespaceMetadataUpdate: false,
       inFlightBarrierKeys: null,
       flushPromise: null,
       hasStaticPolicyUpdate: false,
+      namespaceMetadata: null,
       removes: new Set(),
       staticPolicy: null,
       touches: new Map(),
@@ -2475,6 +2599,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
                       scope: scopePlan.scope,
                     }),
               persistEntries: scopePlan.persistEntries ?? null,
+              persistNamespaceMetadata: scopePlan.persistNamespaceMetadata,
               persistStaticPolicy: scopePlan.persistStaticPolicy,
               scope: scopePlan.scope,
             },
@@ -2509,7 +2634,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     ];
     const persistPlans: Array<{
       entries: Map<string, InternalManagedMetadataRecord> | null;
-      staticPolicy: AsyncStorageNamespaceStaticPolicy | null | undefined;
+      persistNamespaceMetadata?: Record<string, unknown> | null;
+      persistStaticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
       scope: AsyncStorageNamespaceScope;
     }> = [];
     const invalidatedScopesByNamespaceId = new Map<
@@ -2607,7 +2733,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           if (scopePlan !== undefined && scopePlan.persistEntries !== null) {
             persistPlans.push({
               entries: scopePlan.persistEntries,
-              staticPolicy: scopePlan.persistStaticPolicy,
+              persistNamespaceMetadata: scopePlan.persistNamespaceMetadata,
+              persistStaticPolicy: scopePlan.persistStaticPolicy,
               scope: scopePlan.scope,
             });
           }
@@ -2637,7 +2764,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
       persistPlans.push({
         entries: scopePlan.persistEntries,
-        staticPolicy: scopePlan.persistStaticPolicy,
+        persistNamespaceMetadata: scopePlan.persistNamespaceMetadata,
+        persistStaticPolicy: scopePlan.persistStaticPolicy,
         scope: scopePlan.scope,
       });
     }
@@ -2666,20 +2794,28 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     const persistPromise = Promise.all(
-      persistPlans.map(async ({ entries, scope, staticPolicy }) => {
-        if (entries !== null) {
-          await this.#persistNamespaceIndexUsingDriver(driver, scope, {
-            entries,
-            staticPolicy:
-              staticPolicy !== undefined
-                ? staticPolicy
-                : await this.#readNamespaceIndexStaticPolicyUsingDriver(
-                    driver,
-                    scope,
-                  ),
-          });
-        }
-      }),
+      persistPlans.map(
+        async ({
+          entries,
+          persistNamespaceMetadata,
+          persistStaticPolicy,
+          scope,
+        }) => {
+          if (entries !== null) {
+            await this.#persistNamespaceIndexUsingDriver(driver, scope, {
+              entries,
+              namespaceMetadata: persistNamespaceMetadata,
+              staticPolicy:
+                persistStaticPolicy !== undefined
+                  ? persistStaticPolicy
+                  : await this.#readNamespaceIndexStaticPolicyUsingDriver(
+                      driver,
+                      scope,
+                    ),
+            });
+          }
+        },
+      ),
     );
 
     const [sessionDeleteResults] = await Promise.all([
@@ -2750,6 +2886,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
               scope: left.scope,
             }),
       persistEntries: mergedPersistEntries,
+      persistNamespaceMetadata:
+        right.persistNamespaceMetadata !== undefined
+          ? right.persistNamespaceMetadata
+          : left.persistNamespaceMetadata,
       persistStaticPolicy:
         right.persistStaticPolicy !== undefined
           ? right.persistStaticPolicy
@@ -2872,6 +3012,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
                 scope: args.scope,
               }),
         persistEntries: null,
+        persistNamespaceMetadata: null,
         persistStaticPolicy: null,
         scope: args.scope,
       };
@@ -2979,6 +3120,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
               scope: args.scope,
             }),
       persistEntries: indexChanged && nextEntries.size > 0 ? nextEntries : null,
+      persistNamespaceMetadata:
+        indexChanged && nextEntries.size > 0
+          ? indexState.namespaceMetadata
+          : undefined,
       persistStaticPolicy:
         indexChanged && nextEntries.size > 0
           ? nextPersistedStaticPolicy

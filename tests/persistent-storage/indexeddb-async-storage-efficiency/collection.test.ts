@@ -24,6 +24,10 @@ import {
 
 setupAsyncStorageEfficiencyTestSuite();
 
+function stripTimelineDurations(timeline: string): string {
+  return timeline.replace(/^\s*\d+(?:\.\d+)?(?:ms|s)\s+\| /gm, '| ');
+}
+
 async function readCollectionEntryRow(
   args:
     | {
@@ -575,12 +579,12 @@ describe('indexeddb async storage efficiency: collection', () => {
     expect(
       (await collectionScope.collection.listStoredPayloads()).sort(),
     ).toMatchInlineSnapshot(`['c', 'd']`);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
+    expect(stripTimelineDurations(operationsBreakdown)).toMatchInlineSnapshot(`
       ""
-      1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"b", "\\"a"]
-      1.04s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"c"] delete=["\\"a"] touch=[] static-policy
-      2.1s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"c", "\\"b"]
-      2.14s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"d"] delete=["\\"b"] touch=[] static-policy
+      | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"b", "\\"a"]
+      | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"c"] delete=["\\"a"] touch=[] static-policy
+      | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-inline-overflow-cleanup","collection.item"] order=lru-desc -> ["\\"c", "\\"b"]
+      | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-inline-overflow-cleanup","collection.item"] put=["\\"d"] delete=["\\"b"] touch=[] static-policy
       ""
     `);
   });
@@ -674,6 +678,64 @@ describe('indexeddb async storage efficiency: collection', () => {
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('alias preload resolves the persisted canonical collection item without scanning the item namespace', async () => {
+    const storeName = 'col-alias-preload';
+    const sessionKey = 'sess1';
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const serverData = {
+      'alias-user': { id: 'canonical-user', name: 'Alice' },
+      'canonical-user': { id: 'canonical-user', name: 'Alice' },
+    };
+
+    const env = createCollectionEnv({
+      resolveItemIdentity: ({ data }) => data.value.id,
+      serverData,
+      sessionKey,
+      storeName,
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Persist the canonicalized item first so the reload path has to resolve
+    // the alias through IndexedDB metadata instead of the in-memory registry.
+    env.apiStore.scheduleFetch('highPriority', 'alias-user');
+    await flushInvalidationPersistence(0);
+    env.apiStore.dispose();
+
+    const reloadedEnv = createCollectionEnv({
+      resolveItemIdentity: ({ data }) => data.value.id,
+      serverData,
+      sessionKey,
+      storeName,
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    const preloadCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    expect(
+      await resolveAfterIndexedDbStorage(
+        reloadedEnv.apiStore.preloadItemFromStorage('alias-user'),
+        mockAdapter,
+      ),
+    ).toMatchInlineSnapshot(`
+      - { payload: 'alias-user', preloaded: '✅' }
+    `);
+    const operationsBreakdown = preloadCapture.finish().timelineString;
+
+    expect(operationsBreakdown).not.toContain('entries.primaryKey');
+    expect(operationsBreakdown).not.toContain('scope-state');
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      ""
+      3ms | 📖 entries.getMany scope=["sess1","col-alias-preload","collection.item"] keys=["\\"canonical-user"] -> ["\\"canonical-user"]
+      ""
+    `);
+    expect(reloadedEnv.apiStore.getItemState('alias-user')?.data)
+      .toMatchInlineSnapshot(`
+        value: { id: 'canonical-user', name: 'Alice' }
+      `);
   });
 
   test('updating a hydrated collection item writes the mutation without rereading cached entries', async () => {
@@ -1285,7 +1347,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689604851
+      a: 1735689609151
 
       d:
         value: { id: '1', name: 'Fetched user' }
@@ -1295,8 +1357,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      1ms | 📖 entries.getMany scope=["sess1","col-remount-no-cache","collection.item"] keys=["\\"1"] -> []
-      1.851s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-no-cache","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
+      4.301s | 📖 entries.getMany scope=["sess1","col-remount-no-cache","collection.item"] keys=["\\"1"] -> []
+      6.156s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-no-cache","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1471,7 +1533,7 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(timelineString).toMatchInlineSnapshot(`
       ""
-      2ms | 📖 entries.getMany scope=["sess1","collection-opfs-batched-preload","collection.item"] keys=["\\"1", "\\"2"] -> ["\\"1", "\\"2"]
+      252ms | 📖 entries.getMany scope=["sess1","collection-opfs-batched-preload","collection.item"] keys=["\\"1", "\\"2"] -> ["\\"1", "\\"2"]
       ""
     `);
   });

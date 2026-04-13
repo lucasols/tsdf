@@ -1,5 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
+import { klona } from 'klona/json';
 import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
@@ -43,6 +44,7 @@ type IndexedDbManagedMetadataRecord = {
 type IndexedDbManagedIndexState = {
   entries: Map<string, IndexedDbManagedMetadataRecord> | null;
   exists: boolean;
+  namespaceMetadata: Record<string, unknown> | null;
   staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   valid: boolean;
 };
@@ -330,7 +332,7 @@ const INDEXED_DB_ENTRY_RECORD_KEYS = new Set([
   'v',
 ]);
 
-const INDEXED_DB_NAMESPACE_POLICY_RECORD_KEYS = new Set(['p', 's']);
+const INDEXED_DB_NAMESPACE_POLICY_RECORD_KEYS = new Set(['m', 'p', 's']);
 
 function toRecordValue(value: unknown): Record<string, unknown> {
   // WORKAROUND: IndexedDB returns untyped object payloads, and callers only use
@@ -347,6 +349,7 @@ function toEntryRecordValue(value: unknown): IndexedDbEntryRecord {
 type IndexedDbPersistedStaticPolicy = { k?: string[]; m?: number };
 
 type IndexedDbNamespacePolicyRecord = {
+  m?: Record<string, unknown>;
   p: IndexedDbPersistedStaticPolicy | null;
   s: string;
 };
@@ -463,8 +466,9 @@ function isValidNamespacePolicyRecord(record: unknown): boolean {
   }
 
   return (
-    recordValue.p === null ||
-    parseIndexedDbPersistedStaticPolicy(recordValue.p) !== undefined
+    (recordValue.m === undefined || isObject(recordValue.m)) &&
+    (recordValue.p === null ||
+      parseIndexedDbPersistedStaticPolicy(recordValue.p) !== undefined)
   );
 }
 
@@ -474,6 +478,13 @@ function getStaticPolicyFromScopeRecord(
   if (record === undefined) return null;
 
   return parseIndexedDbPersistedStaticPolicy(record.p) ?? null;
+}
+
+function getNamespaceMetadataFromScopeRecord(
+  record: IndexedDbNamespacePolicyRecord | undefined,
+): Record<string, unknown> | null {
+  if (record === undefined) return null;
+  return record.m ?? null;
 }
 
 function compactEntryValue(
@@ -622,6 +633,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     readProtectedStorageKeys: this.readProtectedStorageKeys.bind(this),
     readManagedEntries: this.readManagedEntries.bind(this),
     readNamespaceIndexState: this.readNamespaceIndexState.bind(this),
+    readNamespaceMetadata: this.readNamespaceMetadata.bind(this),
     syncSessionProtectedKeys: this.syncSessionProtectedKeys.bind(this),
   };
 
@@ -1064,11 +1076,13 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const rawScopeRecord = await openRequestAsPromise<unknown>(
       policyStore.get(createScopePolicyKey(scope)),
     );
-    const existingStaticPolicy = isValidNamespacePolicyRecord(rawScopeRecord)
-      ? getStaticPolicyFromScopeRecord(
-          toNamespacePolicyRecordValue(rawScopeRecord),
-        )
-      : null;
+    const existingScopeRecord = isValidNamespacePolicyRecord(rawScopeRecord)
+      ? toNamespacePolicyRecordValue(rawScopeRecord)
+      : undefined;
+    const existingNamespaceMetadata =
+      getNamespaceMetadataFromScopeRecord(existingScopeRecord);
+    const existingStaticPolicy =
+      getStaticPolicyFromScopeRecord(existingScopeRecord);
 
     await Promise.all(
       uniqueKeys.map(async (key) => {
@@ -1145,6 +1159,13 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       await openRequestAsPromise(
         policyStore.put(
           {
+            ...('namespaceMetadata' in args
+              ? args.namespaceMetadata !== null
+                ? { m: args.namespaceMetadata }
+                : {}
+              : existingNamespaceMetadata !== null
+                ? { m: existingNamespaceMetadata }
+                : {}),
             p: serializeIndexedDbPersistedStaticPolicy(
               normalizedStaticPolicy ?? existingStaticPolicy,
             ),
@@ -1218,6 +1239,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       const result = {
         entries: null,
         exists: entries.size > 0 || rawPolicy !== undefined,
+        namespaceMetadata: null,
         staticPolicy: null,
         valid: false,
       };
@@ -1236,6 +1258,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       const result = {
         entries: null,
         exists: true,
+        namespaceMetadata: null,
         staticPolicy: null,
         valid: false,
       };
@@ -1258,6 +1281,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       const result = {
         entries: null,
         exists,
+        namespaceMetadata: null,
         staticPolicy: null,
         valid: false,
       };
@@ -1275,6 +1299,11 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const result = {
       entries,
       exists: rawPolicy !== undefined,
+      namespaceMetadata: getNamespaceMetadataFromScopeRecord(
+        rawPolicy === undefined
+          ? undefined
+          : toNamespacePolicyRecordValue(rawPolicy),
+      ),
       staticPolicy: getStaticPolicyFromScopeRecord(
         rawPolicy === undefined
           ? undefined
@@ -1293,10 +1322,37 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     return result;
   }
 
+  async readNamespaceMetadata(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<Record<string, unknown> | null> {
+    const database = await this.#getDatabase();
+    const transaction = database.transaction(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+      'readonly',
+    );
+    const policyStore = transaction.objectStore(
+      INDEXED_DB_NAMESPACE_POLICY_STORE,
+    );
+    const rawPolicy = await openRequestAsPromise<unknown>(
+      policyStore.get(createScopePolicyKey(scope)),
+    );
+    await transactionDone(transaction);
+
+    if (rawPolicy === undefined || !isValidNamespacePolicyRecord(rawPolicy)) {
+      return null;
+    }
+
+    const metadata = getNamespaceMetadataFromScopeRecord(
+      toNamespacePolicyRecordValue(rawPolicy),
+    );
+    return metadata === null ? null : klona(metadata);
+  }
+
   async persistNamespaceIndexState(
     scope: AsyncStorageNamespaceScope,
     state: {
       entries: Map<string, IndexedDbManagedMetadataRecord>;
+      namespaceMetadata?: Record<string, unknown> | null;
       staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
     },
   ): Promise<void> {
@@ -1360,6 +1416,10 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     } else {
       policyStore.put(
         {
+          ...(state.namespaceMetadata !== undefined &&
+          state.namespaceMetadata !== null
+            ? { m: state.namespaceMetadata }
+            : {}),
           p: serializeIndexedDbPersistedStaticPolicy(state.staticPolicy),
           s: scope.sessionKey,
         } satisfies IndexedDbNamespacePolicyRecord,
@@ -1575,6 +1635,14 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const existingScopeRecord = await openRequestAsPromise<unknown>(
       policyStore.get(createScopePolicyKey(scope)),
     );
+    const normalizedExistingScopeRecord = isValidNamespacePolicyRecord(
+      existingScopeRecord,
+    )
+      ? toNamespacePolicyRecordValue(existingScopeRecord)
+      : undefined;
+    const existingNamespaceMetadata = getNamespaceMetadataFromScopeRecord(
+      normalizedExistingScopeRecord,
+    );
     const { extraMetadata, group, offlineProtected, payload } =
       splitCustomMetadata(args.customMetadata);
     const compactValue = compactEntryValue(scope, args.value);
@@ -1593,12 +1661,11 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     policyStore.put(
       {
+        ...(existingNamespaceMetadata !== null
+          ? { m: existingNamespaceMetadata }
+          : {}),
         p: serializeIndexedDbPersistedStaticPolicy(
-          getStaticPolicyFromScopeRecord(
-            isValidNamespacePolicyRecord(existingScopeRecord)
-              ? toNamespacePolicyRecordValue(existingScopeRecord)
-              : undefined,
-          ),
+          getStaticPolicyFromScopeRecord(normalizedExistingScopeRecord),
         ),
         s: scope.sessionKey,
       } satisfies IndexedDbNamespacePolicyRecord,
@@ -1611,6 +1678,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     value: unknown,
   ): {
     entries: Map<string, IndexedDbManagedMetadataRecord>;
+    namespaceMetadata: Record<string, unknown> | null;
     staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   } | null {
     if (!isObject(value)) return null;
@@ -1640,8 +1708,14 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
     const staticPolicy = parseIndexedDbPersistedStaticPolicy(recordValue.s);
     if (staticPolicy === undefined) return null;
+    if (recordValue.m !== undefined && !isObject(recordValue.m)) return null;
 
-    return { entries, staticPolicy };
+    return {
+      entries,
+      namespaceMetadata:
+        recordValue.m !== undefined ? toRecordValue(recordValue.m) : null,
+      staticPolicy,
+    };
   }
 
   async #getDatabase(): Promise<IDBDatabase> {

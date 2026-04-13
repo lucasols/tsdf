@@ -2,6 +2,7 @@ import {
   isWindowFocused,
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { notNullish } from '@ls-stack/utils/assertions';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
@@ -86,15 +87,23 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
+import {
+  createItemAliasRegistry,
+  normalizeResolvedItemIdentity,
+  type ResolveItemIdentity,
+} from '../utils/itemIdentity';
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
+  AbortedStoreError,
   DEFAULT_BATCH_KEY,
+  NotFoundStoreError,
   StoreFetchError,
+  TimeoutStoreError,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { createFetchApi } from './createFetchApi';
+import { createFetchApi, type FilterItemFn } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import { excludeLoadedFields } from './itemFieldUtils';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
@@ -209,6 +218,7 @@ type ListQuerySnapshotItemEntry<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
+  aliasPayloads?: ItemPayload[];
   itemKey: string;
   item: ItemState | null;
   itemQuery: TSDFItemQuery<ItemPayload> | null;
@@ -231,6 +241,7 @@ export type ListQueryBrowserTabsMessage<
   | (BrowserTabsMessageMeta & {
       kind: 'list-item-snapshot';
       itemKey: string;
+      aliasPayloads?: ItemPayload[];
       consistency: SnapshotConsistency;
       item: ItemState | null;
       itemQuery: TSDFItemQuery<ItemPayload> | null;
@@ -343,6 +354,8 @@ type ListQueryStoreOptionsBase<
   derivedQueries?: DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
+  /** Resolves the canonical payload for a fetched item after the response is known. */
+  resolveItemIdentity?: ResolveItemIdentity<ItemState, ItemPayload>;
   /** Opt-in persistent storage configuration. When provided, cached items and queries
    * are loaded from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store manager's `getSessionKey`, and the
@@ -444,6 +457,7 @@ export function createListQueryStore<
     derivedQueries,
     getQueryKey: customGetQueryKey,
     getItemKey: customGetItemKey,
+    resolveItemIdentity,
     partialResources,
     persistentStorage: persistentStorageConfig,
   } = storeOptions;
@@ -689,14 +703,34 @@ export function createListQueryStore<
       })
     : null;
 
+  function getRawItemKey(params: ItemPayload): string {
+    return getCompositeKey(
+      customGetItemKey ? customGetItemKey(params) : params,
+    );
+  }
+
+  const itemAliasRegistry = createItemAliasRegistry(getRawItemKey);
+
   // Persistent storage setup
   const persistence = resolvedPersistentStorageConfig
     ? setupListQueryPersistence(resolvedPersistentStorageConfig, {
-        getItemKey,
+        enableItemAliases: resolveItemIdentity !== undefined,
+        getItemAliasPayloads: (itemKey) =>
+          itemAliasRegistry.getAliasPayloads(itemKey),
+        getItemKey: getRawItemKey,
         getItemDerivedGroup: derivedQueries?.getItemGroup,
         getQueryKey,
       })
     : null;
+
+  function resolveKnownItemKey(itemKey: string): string {
+    const persistedItemKey = persistence?.resolveItemKey(itemKey) ?? itemKey;
+    return itemAliasRegistry.resolveItemKey(persistedItemKey);
+  }
+
+  function getLookupItemKey(params: ItemPayload): string {
+    return resolveKnownItemKey(getRawItemKey(params));
+  }
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
   // WORKAROUND: Session-only offline config omits operations, so list-query stores normalize that case to an empty registry before passing it through the generic offline controller surface.
   const resolvedOfflineOperations = __LEGIT_CAST__<
@@ -731,7 +765,7 @@ export function createListQueryStore<
 
         if (initialData) {
           for (const { payload, data } of initialData.items) {
-            const itemKey = getItemKey(payload);
+            const itemKey = getRawItemKey(payload);
 
             initialState.items[itemKey] = data;
             initialState.itemQueries[itemKey] = {
@@ -763,6 +797,312 @@ export function createListQueryStore<
     },
   });
 
+  function readResolvedItemState(
+    itemKey: string,
+  ):
+    | {
+        item: ItemState | null | undefined;
+        itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+        loadedFields: string[] | undefined;
+      }
+    | undefined {
+    const resolvedItemKey = resolveKnownItemKey(itemKey);
+    const hasItem = Object.hasOwn(store.state.items, resolvedItemKey);
+    const hasItemQuery = Object.hasOwn(
+      store.state.itemQueries,
+      resolvedItemKey,
+    );
+    const hasLoadedFields = Object.hasOwn(
+      store.state.itemLoadedFields,
+      resolvedItemKey,
+    );
+
+    if (hasItem || hasItemQuery || hasLoadedFields) {
+      return {
+        item: hasItem ? store.state.items[resolvedItemKey] : undefined,
+        itemQuery: hasItemQuery
+          ? store.state.itemQueries[resolvedItemKey]
+          : undefined,
+        loadedFields: hasLoadedFields
+          ? store.state.itemLoadedFields[resolvedItemKey]
+          : undefined,
+      };
+    }
+
+    const hydratedItem = persistence?.readHydratedItem(resolvedItemKey);
+    if (!hydratedItem) return undefined;
+
+    const storePersistence = persistence;
+    if (storePersistence && !storePersistence.hasAsyncPreload) {
+      void storePersistence.preloadItems([resolvedItemKey]);
+
+      const hasSyncedItem = Object.hasOwn(store.state.items, resolvedItemKey);
+      const hasSyncedItemQuery = Object.hasOwn(
+        store.state.itemQueries,
+        resolvedItemKey,
+      );
+      const hasSyncedLoadedFields = Object.hasOwn(
+        store.state.itemLoadedFields,
+        resolvedItemKey,
+      );
+
+      if (hasSyncedItem || hasSyncedItemQuery || hasSyncedLoadedFields) {
+        return {
+          item: hasSyncedItem ? store.state.items[resolvedItemKey] : undefined,
+          itemQuery: hasSyncedItemQuery
+            ? store.state.itemQueries[resolvedItemKey]
+            : undefined,
+          loadedFields: hasSyncedLoadedFields
+            ? store.state.itemLoadedFields[resolvedItemKey]
+            : undefined,
+        };
+      }
+    }
+
+    return {
+      item: hydratedItem.item,
+      itemQuery: hydratedItem.itemQuery,
+      loadedFields: hydratedItem.loadedFields,
+    };
+  }
+
+  function getResolvedItemPayload(itemPayload: ItemPayload): ItemPayload {
+    const rawItemKey = getRawItemKey(itemPayload);
+    const resolvedItemKey = resolveKnownItemKey(rawItemKey);
+
+    if (resolvedItemKey === rawItemKey) return itemPayload;
+
+    return (
+      readResolvedItemState(resolvedItemKey)?.itemQuery?.payload ?? itemPayload
+    );
+  }
+
+  function getKnownLocalItemSnapshotKeys(args: {
+    aliasPayloads?: readonly ItemPayload[];
+    itemKey: string;
+  }): string[] {
+    const candidateItemKeys = new Set<string>([args.itemKey]);
+
+    for (const aliasPayload of args.aliasPayloads ?? []) {
+      candidateItemKeys.add(getRawItemKey(aliasPayload));
+    }
+
+    return [...candidateItemKeys].filter((itemKey) => {
+      return (
+        Object.hasOwn(store.state.items, itemKey) ||
+        Object.hasOwn(store.state.itemQueries, itemKey) ||
+        Object.hasOwn(store.state.itemLoadedFields, itemKey)
+      );
+    });
+  }
+
+  function canonicalizeFetchedItems(args: {
+    itemKeys: string[];
+    requestedPayloadByItemKey?: Map<string, ItemPayload>;
+    requestedFieldsByItemKey?: Map<string, string[] | undefined>;
+    source: 'itemFetch' | 'listFetch';
+    startedAt: number;
+  }): {
+    affectedQueryKeys: string[];
+    canonicalItemKeys: string[];
+    removedAliasKeys: string[];
+  } {
+    const affectedQueryKeys = new Set<string>();
+    const canonicalItemKeys = new Set<string>();
+    const removedAliasKeys = new Set<string>();
+    const itemKeyRewriteMap = new Map<string, string>();
+    const itemKeyRewrites: { previousItemKey: string; nextItemKey: string }[] =
+      [];
+    const fetchResourcesToDelete: { itemKey: string; payload: ItemPayload }[] =
+      [];
+    const aliasUpdates: {
+      canonicalItemKey: string;
+      aliasPayloads: ItemPayload[];
+      canonicalPayload: ItemPayload;
+    }[] = [];
+
+    store.produceState(
+      (draft) => {
+        for (const itemKey of args.itemKeys) {
+          const item = draft.items[itemKey];
+          const itemQuery = draft.itemQueries[itemKey];
+          if (item == null || itemQuery == null) continue;
+
+          const requestedPayload =
+            args.requestedPayloadByItemKey?.get(itemKey) ?? itemQuery.payload;
+          const resolvedIdentity = normalizeResolvedItemIdentity({
+            data: item,
+            getItemKey: getRawItemKey,
+            payload: requestedPayload,
+            resolveItemIdentity,
+            source: args.source,
+          });
+          const canonicalItemKey = resolvedIdentity.canonicalItemKey;
+          const canonicalItem = draft.items[canonicalItemKey];
+          const canonicalItemQuery = draft.itemQueries[canonicalItemKey];
+          const aliasLoadedFields = draft.itemLoadedFields[itemKey] ?? [];
+          const canonicalLoadedFields =
+            draft.itemLoadedFields[canonicalItemKey] ?? [];
+          const mergedItem = partialResources
+            ? partialResources.mergeItems(canonicalItem ?? undefined, item)
+            : item;
+
+          draft.items[canonicalItemKey] = mergedItem;
+          draft.itemQueries[canonicalItemKey] = {
+            error: null,
+            status: 'success',
+            refetchOnMount: false,
+            wasLoaded: true,
+            payload: resolvedIdentity.canonicalPayload,
+          };
+
+          const nextInvalidationFields = Array.from(
+            new Set([
+              ...(draft.itemFieldInvalidationFields[canonicalItemKey] ?? []),
+              ...(itemKey === canonicalItemKey
+                ? []
+                : (draft.itemFieldInvalidationFields[itemKey] ?? [])),
+            ]),
+          ).sort();
+          if (nextInvalidationFields.length > 0) {
+            draft.itemFieldInvalidationFields[canonicalItemKey] =
+              nextInvalidationFields;
+          } else {
+            delete draft.itemFieldInvalidationFields[canonicalItemKey];
+          }
+
+          applyLoadedFieldsFromSnapshot(
+            draft,
+            canonicalItemKey,
+            Array.from(
+              new Set([
+                ...canonicalLoadedFields,
+                ...(itemKey === canonicalItemKey ? [] : aliasLoadedFields),
+              ]),
+            ).sort(),
+          );
+
+          canonicalItemKeys.add(canonicalItemKey);
+          aliasUpdates.push({
+            canonicalItemKey,
+            aliasPayloads: [
+              ...resolvedIdentity.aliasPayloads,
+              ...(canonicalItemQuery &&
+              getRawItemKey(canonicalItemQuery.payload) !== canonicalItemKey
+                ? [canonicalItemQuery.payload]
+                : []),
+            ],
+            canonicalPayload: resolvedIdentity.canonicalPayload,
+          });
+
+          if (itemKey === canonicalItemKey) continue;
+          delete draft.items[itemKey];
+          delete draft.itemQueries[itemKey];
+          delete draft.itemLoadedFields[itemKey];
+          delete draft.itemFieldInvalidationFields[itemKey];
+          removedAliasKeys.add(itemKey);
+          itemKeyRewriteMap.set(itemKey, canonicalItemKey);
+          itemKeyRewrites.push({
+            previousItemKey: itemKey,
+            nextItemKey: canonicalItemKey,
+          });
+          fetchResourcesToDelete.push({ itemKey, payload: requestedPayload });
+        }
+
+        rewriteQueryMemberships(draft, itemKeyRewriteMap, affectedQueryKeys);
+      },
+      { action: 'canonicalize-item-identity' },
+    );
+
+    for (const {
+      canonicalItemKey,
+      aliasPayloads,
+      canonicalPayload,
+    } of aliasUpdates) {
+      setCanonicalItemAliases(canonicalItemKey, aliasPayloads);
+      getOrCreateItemScheduler(
+        canonicalItemKey,
+        canonicalPayload,
+      ).setLastFetchStartTimeForRequest(canonicalItemKey, args.startedAt);
+    }
+    if (itemKeyRewrites.length > 0) {
+      rebindOfflineOverlays(itemKeyRewrites);
+    }
+    if (fetchResourcesToDelete.length > 0) {
+      deleteItemFetchResources(fetchResourcesToDelete);
+    }
+
+    return {
+      affectedQueryKeys: [...affectedQueryKeys],
+      canonicalItemKeys: [...canonicalItemKeys],
+      removedAliasKeys: [...removedAliasKeys],
+    };
+  }
+
+  function getItemState(
+    itemPayload: ItemPayload[] | FilterItemFn<ItemState, ItemPayload>,
+  ): { payload: ItemPayload; data: ItemState }[];
+  function getItemState(itemPayload: ItemPayload): ItemState | null | undefined;
+  function getItemState(
+    itemPayload:
+      | ItemPayload
+      | ItemPayload[]
+      | FilterItemFn<ItemState, ItemPayload>,
+  ):
+    | ItemState
+    | null
+    | undefined
+    | { payload: ItemPayload; data: ItemState }[] {
+    if (typeof itemPayload === 'function') {
+      const itemKeys = new Set(
+        [
+          ...Object.keys(store.state.itemQueries),
+          ...(persistence?.getHydratedItemKeys() ?? []),
+        ].map((itemKey) => resolveKnownItemKey(itemKey)),
+      );
+
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const itemState = readResolvedItemState(itemKey);
+        const item = itemState?.item;
+        const payload = itemState?.itemQuery?.payload;
+
+        if (item == null || payload === undefined) return false;
+
+        return itemPayload(payload, item) ? { payload, data: item } : false;
+      });
+    }
+
+    if (Array.isArray(itemPayload)) {
+      return filterAndMap(itemPayload, (payload) => {
+        const resolvedPayload = getResolvedItemPayload(payload);
+        const item = readResolvedItemState(getLookupItemKey(payload))?.item;
+        return item == null ? false : { payload: resolvedPayload, data: item };
+      });
+    }
+
+    const itemState = readResolvedItemState(getLookupItemKey(itemPayload));
+    if (itemState?.itemQuery === null) return null;
+    return itemState?.item;
+  }
+
+  function getQueriesRelatedToItem(
+    itemPayload: ItemPayload,
+  ): { query: TSFDListQuery<QueryPayload>; key: string }[] {
+    const itemKey = getLookupItemKey(itemPayload);
+
+    return getRawQueriesState((_queryPayload, query) => {
+      return query.items.includes(itemKey);
+    });
+  }
+
+  function getQueryState(params: QueryPayload) {
+    return getRawQueryState(params);
+  }
+
+  function getQueriesState(params: Parameters<typeof getRawQueriesState>[0]) {
+    return getRawQueriesState(params);
+  }
+
   function getQueryKey(params: QueryPayload): string {
     return getCompositeKey(
       customGetQueryKey ? customGetQueryKey(params) : params,
@@ -770,9 +1110,7 @@ export function createListQueryStore<
   }
 
   function getItemKey(params: ItemPayload): string {
-    return getCompositeKey(
-      customGetItemKey ? customGetItemKey(params) : params,
-    );
+    return getRawItemKey(params);
   }
 
   type ResolvedOfflineOperations = TOfflineOperations extends null
@@ -968,6 +1306,11 @@ export function createListQueryStore<
     query: TSFDListQuery<QueryPayload>,
   ): ListQuerySnapshotItemEntry<ItemState, ItemPayload>[] {
     return query.items.map((itemKey) => ({
+      ...(resolveKnownItemKey(itemKey) === itemKey &&
+      store.state.itemQueries[itemKey] !== null &&
+      store.state.itemQueries[itemKey] !== undefined
+        ? { aliasPayloads: itemAliasRegistry.getAliasPayloads(itemKey) }
+        : {}),
       itemKey,
       item: store.state.items[itemKey] ?? null,
       itemQuery: store.state.itemQueries[itemKey] ?? null,
@@ -1006,9 +1349,16 @@ export function createListQueryStore<
   ): void {
     if (remoteApplyDepth > 0) return;
 
+    const aliasPayloads =
+      resolveKnownItemKey(itemKey) === itemKey &&
+      store.state.itemQueries[itemKey] !== null &&
+      store.state.itemQueries[itemKey] !== undefined
+        ? itemAliasRegistry.getAliasPayloads(itemKey)
+        : [];
     const message = browserTabsSync?.publish({
       kind: 'list-item-snapshot',
       itemKey,
+      ...(aliasPayloads.length > 0 ? { aliasPayloads } : {}),
       consistency,
       item: store.state.items[itemKey] ?? null,
       itemQuery: store.state.itemQueries[itemKey] ?? null,
@@ -1081,7 +1431,9 @@ export function createListQueryStore<
 
     const itemKeys = payloads.map((itemPayload) => getItemKey(itemPayload));
     const results = await persistence.preloadItems(itemKeys);
-    const preloadedItemKeys = itemKeys.filter((_key, index) => results[index]);
+    const preloadedItemKeys = payloads.flatMap((itemPayload, index) =>
+      results[index] ? [getLookupItemKey(itemPayload)] : [],
+    );
     if (preloadedItemKeys.length > 0) {
       touchItems(preloadedItemKeys);
       if (shouldScheduleCacheLimitEnforcement()) {
@@ -1095,17 +1447,14 @@ export function createListQueryStore<
   }
 
   const {
-    getQueryState,
+    getQueryState: getRawQueryState,
     getQueriesKeyArray,
-    getQueriesState,
-    getQueriesRelatedToItem,
-    getItemsKeyArray,
-    getItemState,
-    scheduleListQueryFetch,
-    loadMore,
-    awaitListQueryFetch,
-    scheduleItemFetch,
-    awaitItemFetch,
+    getQueriesState: getRawQueriesState,
+    getQueriesRelatedToItem: getRawQueriesRelatedToItem,
+    getItemsKeyArray: getRawItemsKeyArray,
+    scheduleListQueryFetch: scheduleRawListQueryFetch,
+    loadMore: loadMoreRaw,
+    awaitListQueryFetch: awaitRawListQueryFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
     syncRemoteFetchStart,
@@ -1131,7 +1480,7 @@ export function createListQueryStore<
     defaultQuerySize,
     maxItemBatchSize,
     getQueryKey,
-    getItemKey,
+    getItemKey: getLookupItemKey,
     normalizeFieldsOption,
     syncHydrationEnabled: !!persistence && !persistence.hasAsyncPreload,
     preloadQueries: persistence
@@ -1173,15 +1522,94 @@ export function createListQueryStore<
       });
     },
     onQueryFetchSettled: ({ requests, results, startedAt, duration }) => {
+      const successfulQueryRequests = requests.filter(
+        ({ requestId }) => results.get(requestId) === true,
+      );
+      const successfulQueryKeys = successfulQueryRequests.map(
+        ({ requestId }) => requestId,
+      );
+
+      if (resolveItemIdentity === undefined) {
+        pruneItemInvalidationTracking();
+
+        if (successfulQueryKeys.length > 0) {
+          touchQueries(successfulQueryKeys);
+          touchItems(
+            Array.from(
+              new Set(
+                successfulQueryKeys.flatMap(
+                  (queryKey) => store.state.queries[queryKey]?.items ?? [],
+                ),
+              ),
+            ),
+          );
+          if (shouldScheduleCacheLimitEnforcement()) {
+            scheduleCacheLimitEnforcement();
+          }
+        }
+        const firstQueryKey = successfulQueryKeys[0];
+        if (firstQueryKey) {
+          browserTabsSync?.publish({
+            kind: 'fetch-success',
+            targetKey: getQueryTargetKey(firstQueryKey),
+            requestIds: successfulQueryKeys,
+            startedAt,
+            duration,
+          });
+
+          for (const queryKey of successfulQueryKeys) {
+            publishQuerySnapshot(queryKey, 'confirmed');
+          }
+        }
+        return;
+      }
+
+      const requestedFieldsByItemKey = new Map<string, string[] | undefined>();
+
+      for (const { payload, requestId } of successfulQueryRequests) {
+        for (const itemKey of store.state.queries[requestId]?.items ?? []) {
+          const previousFields = requestedFieldsByItemKey.get(itemKey);
+          if (previousFields === undefined || payload.fields === undefined) {
+            requestedFieldsByItemKey.set(itemKey, payload.fields);
+            continue;
+          }
+
+          requestedFieldsByItemKey.set(
+            itemKey,
+            Array.from(new Set([...previousFields, ...payload.fields])).sort(),
+          );
+        }
+      }
+
+      const canonicalization = canonicalizeFetchedItems({
+        itemKeys: Array.from(
+          new Set(
+            successfulQueryRequests.flatMap(
+              ({ requestId }) => store.state.queries[requestId]?.items ?? [],
+            ),
+          ),
+        ),
+        requestedFieldsByItemKey,
+        source: 'listFetch',
+        startedAt,
+      });
       pruneItemInvalidationTracking();
-      const successfulQueryKeys = requests
-        .filter(({ requestId }) => results.get(requestId) === true)
-        .map(({ requestId }) => requestId);
-      if (successfulQueryKeys.length > 0) {
-        touchQueries(successfulQueryKeys);
+
+      const touchedQueryKeys = Array.from(
+        new Set([
+          ...successfulQueryKeys,
+          ...canonicalization.affectedQueryKeys,
+        ]),
+      );
+      if (touchedQueryKeys.length > 0) {
+        touchQueries(touchedQueryKeys);
         touchItems(
-          successfulQueryKeys.flatMap(
-            (queryKey) => store.state.queries[queryKey]?.items ?? [],
+          Array.from(
+            new Set(
+              touchedQueryKeys.flatMap(
+                (queryKey) => store.state.queries[queryKey]?.items ?? [],
+              ),
+            ),
           ),
         );
         if (shouldScheduleCacheLimitEnforcement()) {
@@ -1199,46 +1627,138 @@ export function createListQueryStore<
           duration,
         });
 
-        for (const queryKey of successfulQueryKeys) {
+        for (const queryKey of touchedQueryKeys) {
           publishQuerySnapshot(queryKey, 'confirmed');
+        }
+        for (const itemKey of canonicalization.removedAliasKeys) {
+          publishItemSnapshot(itemKey, 'confirmed');
         }
       }
     },
     onItemFetchSettled: ({ requests, results, startedAt, duration }) => {
+      const successfulRequests = requests.filter(
+        ({ requestId }) => results.get(requestId) === true,
+      );
+
+      if (resolveItemIdentity === undefined) {
+        const successfulItemKeys = successfulRequests.map(
+          ({ requestId }) => requestId,
+        );
+        const affectedQueryKeys = Array.from(
+          new Set(
+            successfulRequests.flatMap(({ payload }) =>
+              getRawQueriesRelatedToItem(payload.payload).map(({ key }) => key),
+            ),
+          ),
+        );
+        pruneItemInvalidationTracking();
+
+        if (successfulItemKeys.length > 0) {
+          touchItems(successfulItemKeys);
+          touchQueries(affectedQueryKeys);
+          if (shouldScheduleCacheLimitEnforcement()) {
+            scheduleCacheLimitEnforcement();
+          }
+        }
+        const firstSuccessfulItem = successfulRequests[0];
+        if (firstSuccessfulItem) {
+          const payload = requests[0]?.payload.payload;
+          const batchKey = payload ? getItemBatchKey(payload) : false;
+          const targetKey =
+            batchKey === false
+              ? getItemTargetKey(firstSuccessfulItem.requestId)
+              : getItemBatchTargetKey(batchKey);
+
+          browserTabsSync?.publish({
+            kind: 'fetch-success',
+            targetKey,
+            requestIds: successfulItemKeys,
+            startedAt,
+            duration,
+          });
+
+          for (const itemKey of successfulItemKeys) {
+            publishItemSnapshot(itemKey, 'confirmed');
+          }
+        }
+        return;
+      }
+
+      const requestedPayloadByItemKey = new Map(
+        successfulRequests.map((request) => [
+          request.requestId,
+          request.payload.payload,
+        ]),
+      );
+      const requestedFieldsByItemKey = new Map(
+        successfulRequests.map((request) => [
+          request.requestId,
+          request.payload.fields,
+        ]),
+      );
+      const canonicalization = canonicalizeFetchedItems({
+        itemKeys: successfulRequests.map((request) => request.requestId),
+        requestedPayloadByItemKey,
+        requestedFieldsByItemKey,
+        source: 'itemFetch',
+        startedAt,
+      });
       pruneItemInvalidationTracking();
-      const successfulItems = requests
-        .filter(({ requestId }) => results.get(requestId) === true)
-        .map((request) => ({ itemKey: request.requestId }));
-      if (successfulItems.length > 0) {
-        touchItems(successfulItems.map(({ itemKey }) => itemKey));
+
+      if (canonicalization.canonicalItemKeys.length > 0) {
+        touchItems(canonicalization.canonicalItemKeys);
+        touchQueries(canonicalization.affectedQueryKeys);
         if (shouldScheduleCacheLimitEnforcement()) {
           scheduleCacheLimitEnforcement();
         }
       }
-      const firstSuccessfulItem = successfulItems[0];
+      const firstSuccessfulItem = successfulRequests[0];
 
       if (firstSuccessfulItem) {
         const payload = requests[0]?.payload.payload;
         const batchKey = payload ? getItemBatchKey(payload) : false;
         const targetKey =
           batchKey === false
-            ? getItemTargetKey(firstSuccessfulItem.itemKey)
+            ? getItemTargetKey(firstSuccessfulItem.requestId)
             : getItemBatchTargetKey(batchKey);
 
         browserTabsSync?.publish({
           kind: 'fetch-success',
           targetKey,
-          requestIds: successfulItems.map(({ itemKey }) => itemKey),
+          requestIds: successfulRequests.map(({ requestId }) => requestId),
           startedAt,
           duration,
         });
 
-        for (const { itemKey } of successfulItems) {
+        for (const itemKey of canonicalization.canonicalItemKeys) {
+          publishItemSnapshot(itemKey, 'confirmed');
+        }
+        for (const queryKey of canonicalization.affectedQueryKeys) {
+          publishQuerySnapshot(queryKey, 'confirmed');
+        }
+        for (const itemKey of canonicalization.removedAliasKeys) {
           publishItemSnapshot(itemKey, 'confirmed');
         }
       }
     },
   });
+
+  function getMutationItemEntries(
+    itemPayload:
+      | ItemPayload
+      | ItemPayload[]
+      | FilterItemFn<ItemState, ItemPayload>,
+  ): { itemKey: string; payload: ItemPayload }[] {
+    if (typeof itemPayload === 'function') {
+      return getRawItemsKeyArray(itemPayload);
+    }
+
+    const payloads = Array.isArray(itemPayload) ? itemPayload : [itemPayload];
+    return payloads.map((payload) => ({
+      itemKey: getLookupItemKey(payload),
+      payload,
+    }));
+  }
 
   const {
     storeEvents,
@@ -1246,9 +1766,9 @@ export function createListQueryStore<
     itemInvalidationWasTriggered,
     itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
-    invalidateQueryAndItems,
-    invalidateItem,
-    startItemMutation,
+    invalidateQueryAndItems: invalidateQueryAndItemsBase,
+    invalidateItem: invalidateItemBase,
+    startItemMutation: startItemMutationBase,
     updateItemState: updateItemStateBase,
     addItemToState: addItemToStateBase,
     deleteItemState: deleteItemStateBase,
@@ -1268,10 +1788,10 @@ export function createListQueryStore<
     onInvalidateItem,
     onMutationError,
     errorNormalizer,
-    getItemKey,
+    getItemKey: getRawItemKey,
     getQueriesKeyArray,
     getQueriesRelatedToItem,
-    getItemsKeyArray,
+    getItemsKeyArray: getMutationItemEntries,
     getOrCreateItemScheduler,
     getOrCreateQueryScheduler,
     deleteItemFetchResources,
@@ -1291,6 +1811,148 @@ export function createListQueryStore<
         ? testOptions.onOfflineTimelineEvent
         : undefined,
   });
+
+  const scheduleListQueryFetch = scheduleRawListQueryFetch;
+  const loadMore = loadMoreRaw;
+  const awaitListQueryFetch = awaitRawListQueryFetch;
+
+  function invalidateQueryAndItems(
+    args: Parameters<typeof invalidateQueryAndItemsBase>[0],
+  ): void {
+    invalidateQueryAndItemsBase(args);
+  }
+
+  function invalidateItem(
+    itemPayload: Parameters<typeof invalidateItemBase>[0],
+    priority?: Parameters<typeof invalidateItemBase>[1],
+  ): void {
+    invalidateItemBase(itemPayload, priority);
+  }
+
+  function startItemMutation(
+    itemPayload: Parameters<typeof startItemMutationBase>[0],
+  ): ReturnType<typeof startItemMutationBase> {
+    return startItemMutationBase(itemPayload);
+  }
+
+  function scheduleItemFetch(
+    fetchType: FetchType,
+    itemPayload: ItemPayload,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
+  ): ScheduleFetchResults;
+  function scheduleItemFetch(
+    fetchType: FetchType,
+    itemPayload: ItemPayload[],
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
+  ): ScheduleFetchResults[];
+  function scheduleItemFetch(
+    fetchType: FetchType,
+    itemPayload: ItemPayload | ItemPayload[],
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
+  ): ScheduleFetchResults | ScheduleFetchResults[] {
+    if (!fetchItemFn) {
+      throw new Error('No fetchItemFn was provided');
+    }
+
+    const fields = normalizeFieldsOption(options?.fields);
+    const payloads = Array.isArray(itemPayload) ? itemPayload : [itemPayload];
+    const results = payloads.map((payload) => {
+      const requestItemKey = getItemKey(payload);
+      const lookupItemKey = resolveKnownItemKey(requestItemKey);
+      return getOrCreateItemScheduler(lookupItemKey, payload).scheduleFetch(
+        requestItemKey,
+        fetchType,
+        { payload, fields },
+        options,
+      );
+    });
+
+    if (Array.isArray(itemPayload)) return results;
+
+    const firstResult = results[0];
+    if (!firstResult) {
+      throw new Error('Unexpected empty results array');
+    }
+    return firstResult;
+  }
+
+  async function awaitItemFetch(
+    itemPayload: ItemPayload,
+    options: { timeoutMs?: number; fields?: FieldsInput } = {},
+  ): Promise<
+    { data: null; error: StoreFetchError } | { data: ItemState; error: null }
+  > {
+    if (!fetchItemFn) {
+      throw new Error('No fetchItemFn was provided');
+    }
+
+    const requestItemKey = getItemKey(itemPayload);
+    const lookupItemKey = resolveKnownItemKey(requestItemKey);
+    const fields = normalizeFieldsOption(options.fields);
+
+    if (
+      persistence?.hasAsyncPreload &&
+      readResolvedItemState(lookupItemKey) === undefined
+    ) {
+      await persistence.preloadItems([requestItemKey]);
+    }
+
+    const result = await getOrCreateItemScheduler(
+      lookupItemKey,
+      itemPayload,
+    ).awaitFetch(
+      requestItemKey,
+      { payload: itemPayload, fields },
+      { timeoutMs: options.timeoutMs },
+    );
+
+    if (result === 'timeout') {
+      return { data: null, error: new TimeoutStoreError() };
+    }
+
+    if (result === true) {
+      return { data: null, error: new AbortedStoreError() };
+    }
+
+    let itemState = readResolvedItemState(requestItemKey);
+
+    if (itemState?.itemQuery?.error?.id === 'offline') {
+      const hydratedItem = persistence?.readHydratedItem(requestItemKey);
+
+      if (hydratedItem) {
+        const resolvedItemKey = resolveKnownItemKey(requestItemKey);
+        itemState = {
+          item: hydratedItem.item,
+          itemQuery: hydratedItem.itemQuery,
+          loadedFields: hydratedItem.loadedFields,
+        };
+        store.produceState(
+          (draft) => {
+            draft.items[resolvedItemKey] = hydratedItem.item;
+            draft.itemQueries[resolvedItemKey] = hydratedItem.itemQuery;
+            draft.itemLoadedFields[resolvedItemKey] = hydratedItem.loadedFields;
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      }
+    }
+
+    const item = itemState?.item;
+    const itemQuery = itemState?.itemQuery;
+
+    if (itemQuery?.error) {
+      return {
+        data: null,
+        error: new StoreFetchError(itemQuery.error, 'fetch'),
+      };
+    }
+
+    if (!itemQuery || !item) {
+      return { data: null, error: new NotFoundStoreError() };
+    }
+
+    return { data: item, error: null };
+  }
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
     offlineController = createOfflineStoreController<ResolvedOfflineOperations>(
@@ -1319,7 +1981,7 @@ export function createListQueryStore<
               if (normalizedRef !== null) return normalizedRef;
 
               return {
-                entityKey: getItemKey(
+                entityKey: getLookupItemKey(
                   // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
                   __LEGIT_CAST__<ItemPayload, unknown>(ref),
                 ),
@@ -1361,7 +2023,7 @@ export function createListQueryStore<
             const tempPayload =
               // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
               __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
-            const tempItemKey = getItemKey(tempPayload);
+            const tempItemKey = getLookupItemKey(tempPayload);
             const currentItem = getItemState(tempPayload);
             const finalData =
               reconciliation.finalData !== undefined
@@ -1375,7 +2037,7 @@ export function createListQueryStore<
               __LEGIT_CAST__<ItemPayload, ValidPayload>(
                 reconciliation.finalPayload,
               );
-            const finalItemKey = getItemKey(finalPayload);
+            const finalItemKey = getLookupItemKey(finalPayload);
             const queryMemberships = Object.entries(store.state.queries)
               .map(([queryKey, query]) => ({
                 queryKey,
@@ -1514,6 +2176,13 @@ export function createListQueryStore<
     itemPendingInvalidationFields.delete(itemKey);
     itemInvalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
+    if (
+      resolveKnownItemKey(itemKey) === itemKey &&
+      store.state.items[itemKey] === undefined &&
+      store.state.itemQueries[itemKey] === undefined
+    ) {
+      itemAliasRegistry.clearCanonicalAliases(itemKey);
+    }
   }
 
   function cleanupQueryStateMetadata(queryKey: string): void {
@@ -1583,6 +2252,70 @@ export function createListQueryStore<
     });
   }
 
+  function getCanonicalAliasPayloads(
+    canonicalItemKey: string,
+    extraAliasPayloads: readonly ItemPayload[] = [],
+  ): ItemPayload[] {
+    const aliasPayloadsByKey = new Map<string, ItemPayload>();
+
+    for (const aliasPayload of [
+      ...itemAliasRegistry.getAliasPayloads(canonicalItemKey),
+      ...extraAliasPayloads,
+    ]) {
+      const aliasItemKey = getRawItemKey(aliasPayload);
+      if (aliasItemKey === canonicalItemKey) continue;
+      if (!aliasPayloadsByKey.has(aliasItemKey)) {
+        aliasPayloadsByKey.set(aliasItemKey, aliasPayload);
+      }
+    }
+
+    return [...aliasPayloadsByKey.values()];
+  }
+
+  function setCanonicalItemAliases(
+    canonicalItemKey: string,
+    aliasPayloads: readonly ItemPayload[],
+  ): ItemPayload[] {
+    const nextAliasPayloads = getCanonicalAliasPayloads(
+      canonicalItemKey,
+      aliasPayloads,
+    );
+    itemAliasRegistry.setCanonicalAliases(canonicalItemKey, nextAliasPayloads);
+    return nextAliasPayloads;
+  }
+
+  function rewriteQueryMemberships(
+    draft: State,
+    itemKeyRewrites: ReadonlyMap<string, string>,
+    affectedQueryKeys: Set<string>,
+  ): void {
+    if (itemKeyRewrites.size === 0) return;
+
+    for (const [queryKey, query] of Object.entries(draft.queries)) {
+      let didChange = false;
+      const dedupedItems: string[] = [];
+      const seenItemKeys = new Set<string>();
+
+      for (const itemKey of query.items) {
+        const rewrittenItemKey = itemKeyRewrites.get(itemKey) ?? itemKey;
+        if (rewrittenItemKey !== itemKey) {
+          didChange = true;
+        }
+        if (seenItemKeys.has(rewrittenItemKey)) {
+          didChange = true;
+          continue;
+        }
+        seenItemKeys.add(rewrittenItemKey);
+        dedupedItems.push(rewrittenItemKey);
+      }
+
+      if (!didChange) continue;
+
+      query.items = dedupedItems;
+      affectedQueryKeys.add(queryKey);
+    }
+  }
+
   function isQueryProtectedFromEviction(
     queryKey: string,
     query: TSFDListQuery<QueryPayload>,
@@ -1635,6 +2368,12 @@ export function createListQueryStore<
       { kind: 'list-item-snapshot' }
     >,
   ): void {
+    if (message.item !== null && message.itemQuery !== null) {
+      setCanonicalItemAliases(message.itemKey, message.aliasPayloads ?? []);
+    } else if (resolveKnownItemKey(message.itemKey) === message.itemKey) {
+      itemAliasRegistry.clearCanonicalAliases(message.itemKey);
+    }
+
     const payloadToCleanup = store.state.itemQueries[message.itemKey]?.payload;
 
     runWithoutBroadcast(() => {
@@ -1699,6 +2438,11 @@ export function createListQueryStore<
       { kind: 'list-query-snapshot' }
     >,
   ): void {
+    for (const item of message.items) {
+      if (item.itemQuery === null) continue;
+      setCanonicalItemAliases(item.itemKey, item.aliasPayloads ?? []);
+    }
+
     runWithoutBroadcast(() => {
       store.produceState(
         (draft) => {
@@ -1762,16 +2506,21 @@ export function createListQueryStore<
     >,
   ): boolean {
     for (const item of message.items) {
-      const localItemQuery = store.state.itemQueries[item.itemKey];
-      if (!localItemQuery) continue;
+      for (const localItemKey of getKnownLocalItemSnapshotKeys({
+        itemKey: item.itemKey,
+        aliasPayloads: item.aliasPayloads,
+      })) {
+        const localItemQuery = store.state.itemQueries[localItemKey];
+        if (!localItemQuery) continue;
 
-      if (
-        getOrCreateItemScheduler(
-          item.itemKey,
-          localItemQuery.payload,
-        ).isMutationInProgress(item.itemKey)
-      ) {
-        return true;
+        if (
+          getOrCreateItemScheduler(
+            localItemKey,
+            localItemQuery.payload,
+          ).isMutationInProgress(localItemKey)
+        ) {
+          return true;
+        }
       }
     }
 
@@ -1815,22 +2564,30 @@ export function createListQueryStore<
         return;
       }
 
-      const localItemQuery = store.state.itemQueries[message.itemKey];
-      if (localItemQuery === undefined) {
+      const localItemKeys = getKnownLocalItemSnapshotKeys({
+        itemKey: message.itemKey,
+        aliasPayloads: message.aliasPayloads,
+      });
+      if (localItemKeys.length === 0) {
         lastItemSyncVersions.set(message.itemKey, candidateVersion);
         return;
       }
 
-      if (
-        message.consistency === 'confirmed' &&
-        localItemQuery !== null &&
-        getOrCreateItemScheduler(
-          message.itemKey,
-          localItemQuery.payload,
-        ).isMutationInProgress(message.itemKey)
-      ) {
-        lastItemSyncVersions.set(message.itemKey, candidateVersion);
-        return;
+      if (message.consistency === 'confirmed') {
+        const hasMutatingLocalItem = localItemKeys.some((localItemKey) => {
+          const localItemQuery = store.state.itemQueries[localItemKey];
+          if (!localItemQuery) return false;
+
+          return getOrCreateItemScheduler(
+            localItemKey,
+            localItemQuery.payload,
+          ).isMutationInProgress(localItemKey);
+        });
+
+        if (hasMutatingLocalItem) {
+          lastItemSyncVersions.set(message.itemKey, candidateVersion);
+          return;
+        }
       }
 
       if (import.meta.env.TEST) {
@@ -2054,14 +2811,14 @@ export function createListQueryStore<
       options,
       store,
       events,
-      getItemKey,
+      getLookupItemKey,
       registerActiveStandaloneItems,
       touchItems,
       scheduleAutomaticItemFetch,
       persistence
         ? (payloads) =>
             persistence.maybeHydrateItems(
-              payloads.map((payload) => getItemKey(payload)),
+              payloads.map((payload) => getLookupItemKey(payload)),
             )
         : undefined,
       !!persistence && !persistence.hasAsyncPreload,
@@ -2255,6 +3012,7 @@ export function createListQueryStore<
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
     lastItemSyncVersions.clear();
+    itemAliasRegistry.clearAll();
     clearOfflineOverlays();
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();
@@ -2293,6 +3051,7 @@ export function createListQueryStore<
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
     lastItemSyncVersions.clear();
+    itemAliasRegistry.clearAll();
     clearOfflineOverlays();
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();
@@ -2405,11 +3164,12 @@ export function createListQueryStore<
     itemPayload: ItemPayload,
     options?: { fields?: FieldsInput },
   ): ScheduleFetchResults {
-    const itemKey = getItemKey(itemPayload);
-    const scheduler = getOrCreateItemScheduler(itemKey, itemPayload);
+    const requestItemKey = getItemKey(itemPayload);
+    const lookupItemKey = resolveKnownItemKey(requestItemKey);
+    const scheduler = getOrCreateItemScheduler(lookupItemKey, itemPayload);
     const fields = normalizeFieldsOption(options?.fields);
 
-    return scheduler.scheduleFetch(itemKey, fetchType, {
+    return scheduler.scheduleFetch(requestItemKey, fetchType, {
       payload: itemPayload,
       fields,
     });
@@ -2452,7 +3212,7 @@ export function createListQueryStore<
     produceNewData: Parameters<typeof updateItemStateBase>[1],
     options?: Parameters<typeof updateItemStateBase>[2],
   ): ReturnType<typeof updateItemStateBase> {
-    const itemEntries = getItemsKeyArray(itemIds);
+    const itemEntries = getMutationItemEntries(itemIds);
     const wasUpdated = updateItemStateBase(itemIds, produceNewData, options);
 
     if (!wasUpdated) return wasUpdated;
@@ -2467,16 +3227,16 @@ export function createListQueryStore<
     data: Parameters<typeof addItemToStateBase>[1],
     options?: Parameters<typeof addItemToStateBase>[2],
   ): void {
-    addItemToStateBase(itemPayload, data, options);
+    addItemToStateBase(getResolvedItemPayload(itemPayload), data, options);
     touchUpdatedItemEntries([
-      { itemKey: getItemKey(itemPayload), payload: itemPayload },
+      { itemKey: getLookupItemKey(itemPayload), payload: itemPayload },
     ]);
   }
 
   function deleteItemState(
     itemId: Parameters<typeof deleteItemStateBase>[0],
   ): void {
-    const itemEntries = getItemsKeyArray(itemId);
+    const itemEntries = getMutationItemEntries(itemId);
     const relatedQueryKeys = getRelatedQueryKeysForItemEntries(itemEntries);
 
     deleteItemStateBase(itemId);
@@ -2486,6 +3246,10 @@ export function createListQueryStore<
     }
     touchQueries(relatedQueryKeys);
   }
+
+  const performMutation: typeof performMutationBase = (payload, args) => {
+    return performMutationBase(payload, args);
+  };
 
   let isDisposed = false;
   const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
@@ -2575,7 +3339,7 @@ export function createListQueryStore<
     updateItemState,
     addItemToState,
     deleteItemState,
-    performMutation: performMutationBase,
+    performMutation,
     useMultipleListQueries,
     useListQuery,
     useMultipleItems,

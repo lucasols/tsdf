@@ -90,6 +90,7 @@ export type AsyncStorageNamespaceCommitArgs<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
 > = {
+  namespaceMetadata?: Record<string, unknown> | null;
   upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
   removes?: string[];
   staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
@@ -171,6 +172,7 @@ export type AsyncStorageNamespaceHandle<
     filter: { equals: unknown; key: string };
     order?: AsyncStorageMetadataOrder;
   }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
+  readNamespaceMetadata(): Promise<Record<string, unknown> | null>;
   clear(): Promise<void>;
 };
 
@@ -520,6 +522,8 @@ export type PersistedCollectionItemData<State> = {
   data: State;
   /** Payload stored alongside the item for validation and retrieval. */
   payload: unknown;
+  /** Optional payload aliases that should resolve to the same canonical item. */
+  aliasPayloads?: unknown[];
 };
 
 /** Shape of a single persisted list item entry. */
@@ -528,6 +532,8 @@ export type PersistedListQueryItemData<State> = {
   data: State;
   /** Payload stored to validate and rehydrate item queries. */
   payload: unknown;
+  /** Optional payload aliases that should resolve to the same canonical item. */
+  aliasPayloads?: unknown[];
   /** Optional list of selected fields that were loaded from the query result. */
   loadedFields?: string[];
 };

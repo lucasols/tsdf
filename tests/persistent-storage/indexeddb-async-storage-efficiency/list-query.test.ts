@@ -45,6 +45,31 @@ function stripTimelineDurations(timeline: string): string {
   return timeline.replace(/^\s*\d+(?:\.\d+)?(?:ms|s)\s+\| /gm, '| ');
 }
 
+function stripNamespaceAccessTimes(
+  snapshot: {
+    entries: Record<string, Record<string, unknown>>;
+    staticPolicy?: Record<string, unknown>;
+  } | null,
+): {
+  entries: Record<string, Record<string, unknown>>;
+  staticPolicy?: Record<string, unknown>;
+} | null {
+  if (snapshot === null) return null;
+
+  return {
+    ...snapshot,
+    entries: Object.fromEntries(
+      Object.entries(snapshot.entries).map(([entryKey, metadata]) => [
+        entryKey,
+        {
+          ...metadata,
+          ...(!Object.hasOwn(metadata, 'a') ? {} : { a: '<timestamp>' }),
+        },
+      ]),
+    ),
+  };
+}
+
 async function readListQueryItemNamespaceSnapshot(args: {
   mockAdapter: ReturnType<typeof createIndexedDbPersistentStorageTestStore>;
   sessionKey: string;
@@ -1169,21 +1194,23 @@ describe('indexeddb async storage efficiency: list-query', () => {
       (await listQueryScope.listQuery.listStoredItemKeys()).sort(),
     ).toMatchInlineSnapshot(`['"users||2']`);
     expect(
-      await readListQueryQueryNamespaceSnapshot({
-        mockAdapter,
-        sessionKey,
-        storeName,
-      }),
+      stripNamespaceAccessTimes(
+        await readListQueryQueryNamespaceSnapshot({
+          mockAdapter,
+          sessionKey,
+          storeName,
+        }),
+      ),
     ).toMatchInlineSnapshot(`
       entries:
         {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}:
-          a: 1735689602048
+          a: '<timestamp>'
           p:
             filters:
               - { field: 'name', op: 'eq', value: 'Alice' }
             tableId: 'users'
         {tableId:"users"}:
-          a: 1735689602048
+          a: '<timestamp>'
           p: { tableId: 'users' }
     `);
     expect(
@@ -1471,6 +1498,65 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(
       `"empty"`,
     );
+  });
+
+  test('alias preload resolves the persisted canonical list item without scanning the item namespace', async () => {
+    const storeName = 'lq-alias-preload';
+    const sessionKey = 'sess1';
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const serverData = {
+      users: [{ email: 'alice@canonical.test', id: 1, name: 'Alice' }],
+    };
+
+    const env = createListQueryEnv({
+      resolveItemIdentity: ({ data }) =>
+        typeof data.email === 'string' ? data.email : '',
+      serverData,
+      sessionKey,
+      storeName,
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Persist the canonicalized standalone item first so the reload path has
+    // to resolve the alias from IndexedDB instead of reusing live memory.
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 1));
+    await flushInvalidationPersistence(0);
+    env.apiStore.dispose();
+
+    const reloadedEnv = createListQueryEnv({
+      resolveItemIdentity: ({ data }) =>
+        typeof data.email === 'string' ? data.email : '',
+      serverData,
+      sessionKey,
+      storeName,
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    const preloadCapture =
+      startIndexedDbPersistentStorageOperationCapture(mockAdapter);
+    expect(
+      await resolveAfterIndexedDbStorage(
+        reloadedEnv.apiStore.preloadItemFromStorage(rawItemPayload('users', 1)),
+        mockAdapter,
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||1', preloaded: '✅' }`);
+    const operationsBreakdown = preloadCapture.finish().timelineString;
+
+    expect(operationsBreakdown).not.toContain('entries.primaryKey');
+    expect(operationsBreakdown).not.toContain('scope-state');
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      ""
+      3ms | 📖 entries.getMany scope=["sess1","lq-alias-preload","listQuery.item"] keys=["\\"alice@canonical.test"] -> ["\\"alice@canonical.test"]
+      ""
+    `);
+    expect(reloadedEnv.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        email: 'alice@canonical.test'
+        id: 1
+        name: 'Alice'
+      `);
   });
 
   test('useListQuery invalidation snapshots the full query persistence timeline through the refetch save', async () => {
@@ -1967,7 +2053,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
     // skipped touch explicit.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      1ms | 📖 entries.getMany scope=["sess1","lq-item-remount-flow","listQuery.item"] keys=["\\"users||1"] -> ["\\"users||1"]
+      251ms | 📖 entries.getMany scope=["sess1","lq-item-remount-flow","listQuery.item"] keys=["\\"users||1"] -> ["\\"users||1"]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -2014,7 +2100,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
       `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
-      2ms | 📖 entries.getMany scope=["sess1","lq-multi-item-remount-flow","listQuery.item"] keys=["\\"users||1", "\\"users||2"] -> ["\\"users||1", "\\"users||2"]
+      252ms | 📖 entries.getMany scope=["sess1","lq-multi-item-remount-flow","listQuery.item"] keys=["\\"users||1", "\\"users||2"] -> ["\\"users||1", "\\"users||2"]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

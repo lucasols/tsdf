@@ -250,9 +250,15 @@ function refreshLocalStorageTimestampUnlocked(
   }
 }
 
-type LocalStorageValueCodec<T> = {
+type LocalStorageValueCodec<
+  T,
+  TMetadata extends Record<string, unknown> | undefined = undefined,
+> = {
   serialize(data: T): CompactLocalStorageEntryValue;
-  deserialize(data: CompactLocalStorageEntryValue): T | null;
+  deserialize(
+    data: CompactLocalStorageEntryValue,
+    metadata?: TMetadata,
+  ): T | null;
 };
 
 const defaultLocalStorageValueCodec: LocalStorageValueCodec<unknown> = {
@@ -556,6 +562,7 @@ export type PersistentStorageNamespaceCommitArgs<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
+  namespaceMetadata?: Record<string, unknown> | null;
   removes?: string[];
   staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   touches?: Array<{ key: string; lastAccessAt?: number }>;
@@ -592,6 +599,7 @@ export type PersistentStorageNamespaceHandle<
     key: string;
     order?: AsyncStorageMetadataOrder;
   }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]>;
+  readNamespaceMetadata(): Promise<Record<string, unknown> | null>;
   clear(): Promise<void>;
   dispose(): void;
 };
@@ -676,6 +684,7 @@ export function createPersistentStorageNamespaceHandle<
         if (!namespace) return;
 
         await namespace.commit({
+          namespaceMetadata: args.namespaceMetadata,
           removes: args.removes,
           staticPolicy: args.staticPolicy,
           touches: args.touches,
@@ -752,6 +761,25 @@ export function createPersistentStorageNamespaceHandle<
       });
     } catch (error) {
       onPersistentStorageError?.(error);
+    }
+  }
+
+  async function readNamespaceMetadata(): Promise<Record<
+    string,
+    unknown
+  > | null> {
+    try {
+      if (asyncAdapter !== null) {
+        const namespace = getAsyncNamespace();
+        if (!namespace) return null;
+
+        return namespace.readNamespaceMetadata();
+      }
+
+      return null;
+    } catch (error) {
+      onPersistentStorageError?.(error);
+      return null;
     }
   }
 
@@ -1097,18 +1125,22 @@ export function createPersistentStorageNamespaceHandle<
     listKeys,
     listMetadata,
     listMetadataByFilter,
+    readNamespaceMetadata,
     clear,
     dispose,
   };
 }
 
-export function readStorageEntryFromLocalStorageSync<T = unknown>(
+export function readStorageEntryFromLocalStorageSync<
+  T = unknown,
+  TMetadata extends Record<string, unknown> | undefined = undefined,
+>(
   key: string,
   version: number | undefined,
   options: LocalStorageMetadataOptions & { allowExpiredRead?: boolean },
   // WORKAROUND: The default local-storage codec is generic over unknown and simply forwards JSON-compatible values, so callers rebind it to their T when no custom codec is supplied.
-  valueCodec: LocalStorageValueCodec<T> = __LEGIT_CAST__<
-    LocalStorageValueCodec<T>,
+  valueCodec: LocalStorageValueCodec<T, TMetadata> = __LEGIT_CAST__<
+    LocalStorageValueCodec<T, TMetadata>,
     LocalStorageValueCodec<unknown>
   >(defaultLocalStorageValueCodec),
 ): StorageCacheEntry<T> | null {
@@ -1145,7 +1177,12 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
     return removeAndReturnNull();
   }
 
-  const decoded = valueCodec.deserialize(entry.value);
+  // WORKAROUND: local-storage manifest metadata is untyped at this boundary,
+  // but each codec supplies the concrete metadata shape it expects.
+  const decoded = valueCodec.deserialize(
+    entry.value,
+    __LEGIT_CAST__<TMetadata | undefined, unknown>(metadata.meta),
+  );
   if (decoded === null) return removeAndReturnNull();
 
   return {

@@ -65,6 +65,11 @@ export type {
   ValidPayload,
   ValidStoreState,
 } from './utils/storeShared';
+export type {
+  ResolveItemIdentity,
+  ResolveItemIdentityArgs,
+  ResolvedItemIdentity,
+} from './utils/itemIdentity';
 
 // Mutation types
 export type {
