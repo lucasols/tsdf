@@ -1430,9 +1430,6 @@ export function createDocumentStore<
     get invalidationWasTriggered() {
       return invalidationWasTriggered;
     },
-    set invalidationWasTriggered(value: boolean) {
-      invalidationWasTriggered = value;
-    },
     scheduleFetch,
     awaitFetch,
     preloadPersistentStorage,

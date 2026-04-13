@@ -148,6 +148,29 @@ test('resetAll resets every registered store except ignored ids', async () => {
   `);
 });
 
+test('store with persistentStorage.offline throws when storeManager has no offlineSession', () => {
+  // Manager is intentionally missing the offlineSession option, so any store
+  // that opts into offline persistence must fail fast with a clear message.
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'manager-session',
+    errorNormalizer: normalizeError,
+  });
+
+  expect(() => {
+    createDocumentStoreTestEnv(1, {
+      id: 'offline-doc-without-session',
+      storeManager,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {},
+      },
+    });
+  }).toThrow(
+    '[tsdf] Store "offline-doc-without-session" has persistentStorage.offline configured but storeManager was created without offlineSession',
+  );
+});
+
 test('inline offline session config inherits session scoping from the store manager', () => {
   const storeManager = createStoreManager({
     getSessionKey: () => 'manager-session',

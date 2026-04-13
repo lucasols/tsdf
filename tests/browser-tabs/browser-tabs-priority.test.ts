@@ -92,3 +92,31 @@ test('browser tabs priority keeps the first background tab behind a focused sibl
 
   priority.close();
 });
+
+test('browser tabs priority republishes local status on each heartbeat until close', () => {
+  // An explicit heartbeatMs is required to enable the heartbeat interval in
+  // tests — the default otherwise suppresses it via import.meta.env.TEST.
+  const published: number[] = [];
+  const priority = createBrowserTabsPriority({
+    transportEnabled: true,
+    getIsEnabled: () => true,
+    tabId: 'local-tab',
+    getWindowIsFocused: () => true,
+    publishStatus() {
+      published.push(Date.now());
+    },
+    timings: { heartbeatMs: 1_000 },
+  });
+
+  // Initial publish happens synchronously during construction.
+  expect(published).toMatchInlineSnapshot(`[0]`);
+
+  // Advancing past the heartbeat interval should trigger a republish each tick.
+  vi.advanceTimersByTime(2_500);
+  expect(published).toMatchInlineSnapshot(`[0, 1000, 2000]`);
+
+  // close() must stop the interval so no further ticks fire.
+  priority.close();
+  vi.advanceTimersByTime(5_000);
+  expect(published).toMatchInlineSnapshot(`[0, 1000, 2000]`);
+});
