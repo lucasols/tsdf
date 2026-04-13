@@ -118,6 +118,7 @@ store.useDocument({ disabled: true });
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'`
 - `error` - The `StoreError` if the fetch failed, otherwise `null`
 - `isLoading` - Shorthand for `status === 'loading'`
+- `pendingSync` - `true` while local offline changes for this document still need to sync to the server
 
 ## useItem
 
@@ -163,6 +164,7 @@ selection or fast keyboard navigation.
 
 - `loadFromStateOnly` - Don't fetch; return a cache-miss error (`{ code: 460, id: 'cache-miss' }`) if the item isn't already in the store
 - `fields` - When [Partial Resources](./partial-resources.md) is enabled, specifies which fields to fetch
+- `showPartialAsRefetching` - When requesting new fields on an item that already has some cached fields, keep the cached data visible and expose the pending fields via `loadingFields` instead of returning `null` / `loading`
 
 ### Return value
 
@@ -172,6 +174,8 @@ selection or fast keyboard navigation.
 - `isLoading` - Shorthand for `status === 'loading'`
 - `payload` - The resolved payload
 - `itemStateKey` - The internal key for this item
+- `loadingFields` - (List Query Store, partial resources) Requested fields that are still pending while cached data remains visible
+- `pendingSync` - `true` while local offline changes for this item still need to sync to the server
 - `queryMetadata` - Optional metadata passed via `useMultipleItems`
 
 The `'deleted'` status is returned when the item's state is explicitly set to `null` (via `deleteItemState`).
@@ -226,10 +230,16 @@ const result = store.useListQuery(
 This is useful for search forms and filter panels where the query payload
 changes on every keystroke.
 
+### Partial-resources options
+
+- `fields` - When [Partial Resources](./partial-resources.md) is enabled, specifies which fields to fetch
+- `showPartialAsRefetching` - When requesting new fields on a query whose items already have some cached fields, keep the cached items visible and expose the pending fields via `loadingFields` instead of returning `loading`
+
 ### Return value
 
 - `items` - Array of items (or selected items)
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'` | `'loadingMore'`
+- `fields` - The resolved partial-resource fields for this query (when partial resources is enabled this is required, otherwise `FieldsInput | undefined`)
 - `loadingFields` - Requested partial-resource fields still pending while cached data remains visible
 - `hasMore` - Whether more items are available for pagination
 - `isDerived` - Whether the result is currently coming from `derivedQueries` instead of an exact cached/fetched query
@@ -238,6 +248,8 @@ changes on every keystroke.
 - `error` - The `StoreError` if the fetch failed
 - `payload` - The resolved payload
 - `queryKey` - The internal key for this query
+- `pendingSync` - `true` while local offline changes for this query still need to sync to the server
+- `queryMetadata` - Optional metadata passed via `useMultipleListQueries`
 
 Notes:
 
