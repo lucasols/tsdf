@@ -16,9 +16,9 @@ import {
   captureHookRemount,
   createDocumentEnv,
   flushInvalidationPersistence,
-  markEntryOfflineProtected,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
+  syncEntriesOfflineProtectedFromSiblingTab,
 } from './shared';
 
 setupAsyncStorageEfficiencyTestSuite();
@@ -147,11 +147,9 @@ describe('async storage efficiency: document', () => {
       7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data) | 0.09 kb
            ·
-      50ms | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
-           |    └ (namespace index) | 0.07 kb
-      55ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
+      52ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.07 kb -> 0.07 kb
-      57ms | end
+      54ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -270,7 +268,7 @@ describe('async storage efficiency: document', () => {
     await resolveAfterAllTimers(preloadPromise);
 
     // Simulate another tab marking the document as offline-protected before the touch runs.
-    markEntryOfflineProtected(mockAdapter, storageKey);
+    await syncEntriesOfflineProtectedFromSiblingTab(sessionKey, [storageKey]);
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       e:
         - { a: 1735664400000, o: '✅', z: 65 }
@@ -291,18 +289,16 @@ describe('async storage efficiency: document', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      40ms   | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
+      28ms   | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb
-      45ms   | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
+      33ms   | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb -> 0.09 kb
              ·
-      1.04s  | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
-             |    └ (namespace index) | 0.09 kb
-      1.045s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
+      1.03s  | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
              |    └ (entry data) | 0.09 kb -> 0.09 kb ⚠️ UNCHANGED
-      1.049s | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
+      1.034s | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb -> 0.09 kb
-      1.051s | end
+      1.036s | end
       "
     `);
   });
@@ -346,13 +342,11 @@ describe('async storage efficiency: document', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📖 #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
-             |    └ (namespace index) | 0.07 kb
-      1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
+      1.042s | ✍️ #1 tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (entry data) | 0.09 kb -> 0.09 kb
-      1.049s | ✍️ #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
+      1.046s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb -> 0.07 kb
-      1.051s | end
+      1.048s | end
       "
     `);
   });
@@ -398,11 +392,9 @@ describe('async storage efficiency: document', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.85s  | 📖 #1 tsdf/sess1/doc-invalidation-flow/d._i.r.json
-             |    └ (namespace index) | 0.07 kb
-      1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
+      1.852s | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (entry data) | 0.09 kb -> 0.09 kb
-      1.857s | end
+      1.854s | end
       "
     `);
   });
@@ -468,13 +460,11 @@ describe('async storage efficiency: document', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.85s  | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
-             |    └ (namespace index) | 0.07 kb
-      1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
+      1.852s | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (entry data) | 0.09 kb -> 0.09 kb
-      1.859s | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
+      1.856s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
              |    └ (namespace index) | 0.07 kb -> 0.07 kb
-      1.861s | end
+      1.858s | end
       "
     `);
   });
@@ -503,7 +493,7 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
 
     // Simulate another tab marking this document as offline-protected.
-    markEntryOfflineProtected(mockAdapter, storageKey);
+    await syncEntriesOfflineProtectedFromSiblingTab(sessionKey, [storageKey]);
 
     // A normal invalidation save should keep the externally-added offline marker.
     act(() => {

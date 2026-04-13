@@ -12,7 +12,11 @@ import {
   vi,
 } from 'vitest';
 import { clearSessionStorage } from '../../src/main';
-import { createAsyncStorageAdapter } from '../../src/persistentStorage/asyncStorageAdapter';
+import {
+  ASYNC_STORAGE_COMMIT_DEBOUNCE_MS,
+  createAsyncStorageAdapter,
+  serializeProtectedRef,
+} from '../../src/persistentStorage/asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getPayloadRecordKey,
@@ -21,6 +25,7 @@ import { resetManagedLocalStorageState } from '../../src/persistentStorage/local
 import type {
   AsyncStorageDiscoveredScope,
   AsyncStorageDriver,
+  AsyncStorageNamespaceCommitArgs,
   AsyncStorageNamespaceScope,
   PersistentStorageSchema,
 } from '../../src/persistentStorage/types';
@@ -222,6 +227,111 @@ function installMockBroadcastChannel() {
     vi.unstubAllGlobals();
     vi.stubGlobal('BroadcastChannel', OriginalBroadcastChannel);
   };
+}
+
+function installMockNavigatorLocks() {
+  const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis.navigator,
+    'locks',
+  );
+  const tailsByName = new Map<string, Promise<void>>();
+
+  const locks = {
+    async request<T>(
+      name: string,
+      optionsOrCallback: LockOptions | LockGrantedCallback<T>,
+      maybeCallback?: LockGrantedCallback<T>,
+    ): Promise<Awaited<T>> {
+      const callback =
+        typeof optionsOrCallback === 'function'
+          ? optionsOrCallback
+          : maybeCallback;
+      if (callback === undefined) {
+        throw new Error('Expected a lock callback.');
+      }
+
+      const previousTail = tailsByName.get(name) ?? Promise.resolve();
+      let releaseCurrentTail!: () => void;
+      const currentTail = new Promise<void>((resolve) => {
+        releaseCurrentTail = resolve;
+      });
+      const nextTail = previousTail.then(() => currentTail);
+      tailsByName.set(name, nextTail);
+
+      await previousTail;
+
+      try {
+        return await callback(null);
+      } finally {
+        releaseCurrentTail();
+        if (tailsByName.get(name) === nextTail) {
+          tailsByName.delete(name);
+        }
+      }
+    },
+  };
+
+  Object.defineProperty(globalThis.navigator, 'locks', {
+    value: __LEGIT_CAST__<LockManager, unknown>(locks),
+    writable: true,
+    configurable: true,
+  });
+
+  return () => {
+    if (originalLocksDescriptor) {
+      Object.defineProperty(
+        globalThis.navigator,
+        'locks',
+        originalLocksDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(globalThis.navigator, 'locks');
+    }
+  };
+}
+
+function createManagedLockTestDriver(options: { delayMs?: number } = {}) {
+  const baseDriver = createInMemoryAsyncStorageDriver();
+  const operations: string[] = [];
+  const delayMs = options.delayMs ?? 25;
+  const driver: AsyncStorageDriver & { operations: string[] } = __LEGIT_CAST__<
+    AsyncStorageDriver & { operations: string[] },
+    unknown
+  >({
+    ...baseDriver,
+    __tsdfManagedStorage: {
+      applyManagedCommit: async (
+        scope: AsyncStorageNamespaceScope,
+        args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+      ) => {
+        operations.push(
+          `commit:start:${scope.sessionKey}:${[
+            ...(args.upserts ?? []).map((upsert) => upsert.key),
+            ...(args.removes ?? []).map((key) => `-${key}`),
+          ].join(',')}`,
+        );
+        await new Promise((resolve) => {
+          setTimeout(resolve, delayMs);
+        });
+        operations.push(
+          `commit:end:${scope.sessionKey}:${[
+            ...(args.upserts ?? []).map((upsert) => upsert.key),
+            ...(args.removes ?? []).map((key) => `-${key}`),
+          ].join(',')}`,
+        );
+      },
+      syncSessionProtectedKeys: async (sessionKey: string) => {
+        operations.push(`protect:start:${sessionKey}`);
+        await new Promise((resolve) => {
+          setTimeout(resolve, delayMs);
+        });
+        operations.push(`protect:end:${sessionKey}`);
+      },
+    },
+    operations,
+  });
+
+  return driver;
 }
 
 function createDocumentEnv(options: {
@@ -872,6 +982,145 @@ describe('persistent storage integration', () => {
 
       value: { value: 'first' }
     `);
+  });
+
+  test('same-session sibling adapters serialize managed commits through the shared writer lock', async () => {
+    const restoreNavigatorLocks = installMockNavigatorLocks();
+    const driver = createManagedLockTestDriver();
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-session-writer-lock',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+
+    try {
+      const adapterA = createAsyncStorageAdapter(driver);
+      const adapterB = createAsyncStorageAdapter(driver);
+      const namespaceA = adapterA.openNamespace<{ value: string }>(scope);
+      const namespaceB = adapterB.openNamespace<{ value: string }>(scope);
+
+      const firstCommit = namespaceA.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      const secondCommit = namespaceB.commit({
+        upserts: [{ key: 'b', value: { value: 'second' }, version: 1 }],
+      });
+
+      await flushAllTimers();
+      await Promise.all([firstCommit, secondCommit]);
+
+      expect(driver.operations).toMatchInlineSnapshot(`
+        - 'commit:start:sess1:a'
+        - 'commit:end:sess1:a'
+        - 'commit:start:sess1:b'
+        - 'commit:end:sess1:b'
+      `);
+    } finally {
+      restoreNavigatorLocks();
+    }
+  });
+
+  test('same-session writer locks also serialize protected-key sync with sibling commits', async () => {
+    const restoreNavigatorLocks = installMockNavigatorLocks();
+    const driver = createManagedLockTestDriver({ delayMs: 50 });
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-session-protection-lock',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+
+    try {
+      const adapterA = createAsyncStorageAdapter(driver);
+      const adapterB = createAsyncStorageAdapter(driver);
+      const namespace = adapterA.openNamespace<{ value: string }>(scope);
+
+      const commitPromise = namespace.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await advanceTime(ASYNC_STORAGE_COMMIT_DEBOUNCE_MS);
+
+      const syncPromise = adapterB.syncSessionProtectedKeys(
+        'sess1',
+        [serializeProtectedRef({ ...scope, key: 'a' })],
+        [],
+      );
+
+      await flushAllTimers();
+      await Promise.all([commitPromise, syncPromise]);
+
+      expect(driver.operations).toMatchInlineSnapshot(`
+        - 'commit:start:sess1:a'
+        - 'commit:end:sess1:a'
+        - 'protect:start:sess1'
+        - 'protect:end:sess1'
+      `);
+    } finally {
+      restoreNavigatorLocks();
+    }
+  });
+
+  test('async writer locks fall back to unlocked coordination with a single warning', async () => {
+    const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis.navigator,
+      'locks',
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const driver = createInMemoryAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'async-without-locks',
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<{ value: string }>(scope);
+
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      value: null,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      const firstCommit = namespace.commit({
+        upserts: [{ key: 'a', value: { value: 'first' }, version: 1 }],
+      });
+      await advanceTime(ASYNC_STORAGE_COMMIT_DEBOUNCE_MS);
+      await firstCommit;
+
+      const secondCommit = namespace.commit({
+        upserts: [{ key: 'b', value: { value: 'second' }, version: 1 }],
+      });
+      await advanceTime(ASYNC_STORAGE_COMMIT_DEBOUNCE_MS);
+      await secondCommit;
+
+      expect(await namespace.get('a')).toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'a'
+          lastAccessAt: 1735689600040
+          payloadRef: '__tsdf_payload__:a'
+          sizeBytes: 36
+          version: 1
+          writtenAt: 1735689600040
+
+        value: { value: 'first' }
+      `);
+      expect(warnSpy.mock.calls).toMatchInlineSnapshot(`
+        - - '[TSDF] navigator.locks is unavailable; async persistentStorage is using unlocked writer coordination.'
+      `);
+    } finally {
+      warnSpy.mockRestore();
+
+      if (originalLocksDescriptor) {
+        Object.defineProperty(
+          globalThis.navigator,
+          'locks',
+          originalLocksDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(globalThis.navigator, 'locks');
+      }
+    }
   });
 
   test('document persistence still hydrates and refetches when navigator.locks is unavailable', async () => {

@@ -4,12 +4,16 @@ import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
-import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
+import {
+  createAsyncStorageAdapter,
+  serializeProtectedRef,
+} from '../../../src/persistentStorage/asyncStorageAdapter';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
+import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
@@ -24,7 +28,11 @@ import {
 } from '../../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 import * as byteBudgetTestUtils from '../persistentStorageByteBudgetTestUtils';
@@ -239,30 +247,20 @@ export function createListQueryEnv(options: {
   });
 }
 
-export function updateEntryCustomMetadata(
-  mockAdapter: MockOpfsAdapter,
-  key: string,
-  update: (current: Record<string, unknown>) => Record<string, unknown>,
-): void {
-  const currentMetadata = mockAdapter.readMetadata(key);
-  if (currentMetadata === null) {
-    throw new Error(`Expected metadata for ${key}.`);
-  }
-
-  mockAdapter.setMetadata(key, {
-    ...currentMetadata,
-    customMetadata: update(currentMetadata.customMetadata),
-  });
-}
-
-export function markEntryOfflineProtected(
-  mockAdapter: MockOpfsAdapter,
-  key: string,
-): void {
-  updateEntryCustomMetadata(mockAdapter, key, (current) => ({
-    ...current,
-    o: true,
-  }));
+export async function syncEntriesOfflineProtectedFromSiblingTab(
+  sessionKey: string,
+  keys: string[],
+): Promise<void> {
+  const siblingAdapter = createAsyncStorageAdapter(
+    new OpfsAsyncStorageDriver(),
+  );
+  await resolveAfterAllTimers(
+    siblingAdapter.syncSessionProtectedKeys(
+      sessionKey,
+      keys.map((key) => serializeProtectedStorageKey(key)),
+      [],
+    ),
+  );
 }
 
 export function setProtectedKeysSnapshot(
