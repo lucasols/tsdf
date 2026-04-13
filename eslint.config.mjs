@@ -12,6 +12,7 @@ export default lsStackEslintCfg({
         'react-hooks/rules-of-hooks': 'error',
         'react-hooks/exhaustive-deps': 'warn',
         '@typescript-eslint/no-deprecated': 'error',
+        '@typescript-eslint/only-throw-error': 'error',
         '@ls-stack/prefer-named-functions': 0,
         'no-restricted-imports': [
           'error',
