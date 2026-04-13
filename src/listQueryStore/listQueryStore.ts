@@ -25,6 +25,7 @@ import type {
 } from '../internal/testTimelineTypes';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import type { OfflineMutationResult } from '../persistentStorage/offline/mutationRuntime';
+import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/offlineResolution.typeGuards';
 import {
   captureOfflineOverlayEntries,
   rebindOfflineOverlayEntries,
@@ -41,7 +42,6 @@ import {
   type OfflineStoreController,
 } from '../persistentStorage/offline/storeController';
 import {
-  isOfflineResolutionRecordForStore,
   offlineItemEntityRefSchema,
   OfflineResolutionConflictParseError,
   type GlobalOfflineEntity,

@@ -32,6 +32,7 @@ import {
   type OfflineAwareMutationController,
   type OfflineMutationResult,
 } from '../persistentStorage/offline/mutationRuntime';
+import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/offlineResolution.typeGuards';
 import {
   captureOfflineOverlayEntries,
   rebindOfflineOverlayEntries,
@@ -46,7 +47,6 @@ import {
   offlineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import {
-  isOfflineResolutionRecordForStore,
   offlineItemEntityRefSchema,
   OfflineResolutionConflictParseError,
   type AnyOfflineOperationDefinition,

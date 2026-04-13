@@ -1695,16 +1695,6 @@ export type OfflineResolutionRecordForStore<
   [K in TName]: OfflineResolutionRecordForOperation<TOperations, K>;
 }[TName];
 
-/** @internal */
-export function isOfflineResolutionRecordForStore<
-  TOperations extends Record<string, unknown>,
->(
-  resolution: OfflineResolutionRecord,
-  operations: TOperations,
-): resolution is OfflineResolutionRecordForStore<TOperations> {
-  return resolution.operation in operations;
-}
-
 function formatSchemaValidationError(error: SchemaValidationError): string {
   if (error.length === 0) return 'invalid-conflict-payload';
   if (typeof error[0] === 'string') {
