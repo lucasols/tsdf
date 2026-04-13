@@ -50,7 +50,7 @@ import {
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
-  offlineSessionUnavailableError,
+  OfflineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
 import {
   OfflineResolutionConflictParseError,
@@ -1175,7 +1175,10 @@ export function createDocumentStore<
   > {
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(
-        toStoreMutationError(offlineSessionUnavailableError, errorNormalizer),
+        toStoreMutationError(
+          new OfflineSessionUnavailableError(),
+          errorNormalizer,
+        ),
       );
     }
 

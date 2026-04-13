@@ -10,7 +10,7 @@ import {
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
-import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
+import { OfflineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import type { OfflineMutationInput } from '../persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
@@ -1047,7 +1047,10 @@ export function createMutationApi<
 
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(
-        toStoreMutationError(offlineSessionUnavailableError, errorNormalizer),
+        toStoreMutationError(
+          new OfflineSessionUnavailableError(),
+          errorNormalizer,
+        ),
       );
     }
 

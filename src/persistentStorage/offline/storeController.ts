@@ -364,13 +364,15 @@ function getQueueOrder(entry: {
     : entry.createdAt;
 }
 
-export const offlineSessionUnavailableError: Error & {
-  code: number;
-  id: 'offline-session-unavailable';
-} = Object.assign(new Error('Offline session unavailable'), {
-  code: 460,
-  id: 'offline-session-unavailable' as const,
-});
+export class OfflineSessionUnavailableError extends Error {
+  readonly code = 460;
+  readonly id = 'offline-session-unavailable' as const;
+
+  constructor() {
+    super('Offline session unavailable');
+    this.name = 'OfflineSessionUnavailableError';
+  }
+}
 
 function normalizeEntityRefs(entityRefs: OfflineEntityRef[]): string {
   return JSON.stringify(
@@ -605,7 +607,7 @@ export function createOfflineStoreController<
   ): Promise<void> {
     const current = ensureActiveSession();
     if (!current || current.sessionKey !== currentSessionKey) {
-      throw offlineSessionUnavailableError;
+      throw new OfflineSessionUnavailableError();
     }
 
     const status = current.session.getStatus();
@@ -2876,7 +2878,7 @@ export function createOfflineStoreController<
   ): Promise<void> {
     const current = ensureActiveSession();
     if (!current || current.sessionKey !== preparedMutation.currentSessionKey) {
-      throw offlineSessionUnavailableError;
+      throw new OfflineSessionUnavailableError();
     }
 
     const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
@@ -3286,7 +3288,7 @@ export function createOfflineStoreController<
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) {
-      throw offlineSessionUnavailableError;
+      throw new OfflineSessionUnavailableError();
     }
 
     await queuePreparedMutations(
@@ -3307,7 +3309,7 @@ export function createOfflineStoreController<
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) {
-      throw offlineSessionUnavailableError;
+      throw new OfflineSessionUnavailableError();
     }
 
     const prepared = prepareMutationWithSession(current, {
@@ -3328,7 +3330,7 @@ export function createOfflineStoreController<
           !preparedCurrent ||
           preparedCurrent.sessionKey !== prepared.currentSessionKey
         ) {
-          throw offlineSessionUnavailableError;
+          throw new OfflineSessionUnavailableError();
         }
 
         await preparedCurrent.session.refreshNetworkState();

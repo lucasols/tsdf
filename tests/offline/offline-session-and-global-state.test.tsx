@@ -656,7 +656,7 @@ test('offline mutations fail fast when no session key is available', async () =>
         cause:
           Error#:
             message: 'Offline session unavailable'
-            name: 'Error'
+            name: 'OfflineSessionUnavailableError'
             code: 460
             id: 'offline-session-unavailable'
     `,

@@ -44,7 +44,7 @@ import {
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
-  offlineSessionUnavailableError,
+  OfflineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import {
   offlineItemEntityRefSchema,
@@ -2055,7 +2055,10 @@ export function createCollectionStore<
 
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(
-        toStoreMutationError(offlineSessionUnavailableError, errorNormalizer),
+        toStoreMutationError(
+          new OfflineSessionUnavailableError(),
+          errorNormalizer,
+        ),
       );
     }
 
