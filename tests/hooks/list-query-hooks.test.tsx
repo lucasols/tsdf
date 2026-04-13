@@ -176,6 +176,59 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     expect(fetchCount()).toBe(1);
   });
 
+  test('query invalidation keeps the mounted hook loadSize instead of falling back to defaultQuerySize', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      defaultQuerySize: 4,
+    });
+    const listQueryStore = env.apiStore;
+
+    renderHook(() => {
+      listQueryStore.useListQuery(getFetchQueryForTable('products'), {
+        loadSize: 2,
+        returnRefetchingStatus: true,
+        itemSelector(data) {
+          return data.name;
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The initial mount should respect the hook's explicit load size.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 2, offset: 0 }
+          returned_items: 2
+      `);
+
+    env.serverTable.updateItem('products||1', { name: 'Updated Product 1' });
+
+    // Invalidating the mounted query should preserve the same list size.
+    listQueryStore.invalidateQueryAndItems({
+      itemPayload: false,
+      queryPayload: getFetchQueryForTable('products'),
+    });
+
+    await flushAllTimers();
+
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 2, offset: 0 }
+          returned_items: 2
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 2, offset: 0 }
+          returned_items: 2
+      `);
+  });
+
   test('do not fetch more than expected with multiple components connected to the same items', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;

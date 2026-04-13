@@ -985,6 +985,7 @@ export function useMultipleListQueries<
       key,
       payload,
       fields,
+      loadSize,
       isOffScreen,
       disableRefetches,
     } of fetchQueriesWithId) {
@@ -1008,7 +1009,7 @@ export function useMultipleListQueries<
           query.refetchOnMount = false;
         });
 
-        scheduleAutomaticListQueryFetch(event.priority, payload, undefined, {
+        scheduleAutomaticListQueryFetch(event.priority, payload, loadSize, {
           fields,
         });
         queryInvalidationWasTriggered.add(key);
