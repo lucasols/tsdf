@@ -278,7 +278,7 @@ export async function getIndexedDbStructureSnapshot(
   };
 }
 
-export type IndexedDbRowReference = { key: unknown; storeName: string };
+type IndexedDbRowReference = { key: unknown; storeName: string };
 
 export async function getParsedIndexedDbRecordData<T = unknown>(
   mockAdapterOrReference:
@@ -446,23 +446,7 @@ export async function getIndexedDbPayloadSnapshot<T = unknown>(
   return __LEGIT_CAST__<T | null, unknown>(row?.d ?? null);
 }
 
-export async function getIndexedDbStoredValueSnapshot<T = unknown>(
-  mockAdapter: IndexedDbPersistentStorageTestStore,
-  storageKey: string,
-): Promise<T | null> {
-  const raw = await mockAdapter.getRaw(storageKey);
-  if (raw === null) return null;
-
-  const parsed = safeJsonParse(raw);
-  const record = getObjectRecord(parsed);
-  if (record === null || !('data' in record)) {
-    return __LEGIT_CAST__<T, unknown>(parsed);
-  }
-
-  return __LEGIT_CAST__<T, unknown>(record.data);
-}
-
-export type IndexedDbPersistentStorageOperationCaptureResult = {
+type IndexedDbPersistentStorageOperationCaptureResult = {
   operations: string[];
   timelineString: string;
 };

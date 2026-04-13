@@ -30,8 +30,7 @@ import type {
   AsyncStorageNamespaceStaticPolicy,
 } from './types';
 
-export const DEFAULT_INDEXED_DB_NAME =
-  'tsdf-persistent-storage-compact-alpha-reset';
+const DEFAULT_INDEXED_DB_NAME = 'tsdf-persistent-storage-compact-alpha-reset';
 const INDEXED_DB_VERSION = 1;
 const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
@@ -638,7 +637,7 @@ async function setMaintenanceState(
   await transactionDone(transaction);
 }
 
-export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
+class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   readonly __tsdfManagedStorage = {
     applyManagedCommit: this.applyManagedCommit.bind(this),
     clearManagedNamespace: this.clearManagedNamespace.bind(this),

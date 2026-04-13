@@ -18,13 +18,13 @@ type PresenceState = {
   lastPresenceAt: number;
 };
 
-export type BrowserTabsRemoteLeaseState = {
+type BrowserTabsRemoteLeaseState = {
   ownerTabId: string;
   startedAt: number;
   expiresAt: number;
 };
 
-export type BrowserTabsPriorityOptions = {
+type BrowserTabsPriorityOptions = {
   transportEnabled: boolean;
   getIsEnabled: () => boolean;
   tabId: string;

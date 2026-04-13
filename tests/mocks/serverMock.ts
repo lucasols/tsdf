@@ -6,7 +6,7 @@ import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
-export const DEFAULT_RTU_DELAY_MS = 50;
+const DEFAULT_RTU_DELAY_MS = 50;
 
 export type FetchErrorConfig = {
   message: string;
@@ -17,7 +17,7 @@ export type FetchErrorConfig = {
 
 const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
 
-export type FetchHistoryEntry<Data> = {
+type FetchHistoryEntry<Data> = {
   id: string;
   startTime: number;
   endTime: number;
@@ -27,7 +27,7 @@ export type FetchHistoryEntry<Data> = {
   error?: Error;
 };
 
-export type AddActionFn = (
+type AddActionFn = (
   action: string,
   options?: { id?: string | number; actionValue?: unknown },
 ) => void;

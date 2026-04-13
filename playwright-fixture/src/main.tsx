@@ -1,3 +1,6 @@
+import { useCallback, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   clearSessionStorage,
   createCollectionStore,
@@ -7,10 +10,7 @@ import {
   localPersistentStorage,
   opfsPersistentStorage,
   type StoreError,
-} from '@src/main';
-import { useCallback, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+} from '../../src/main';
 
 type ListQueryPayload = { tableId: 'users' };
 

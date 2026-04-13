@@ -237,7 +237,7 @@ function formatRelativeTime(
   return formatTimeMs(ms);
 }
 
-export type PersistentStorageOperation =
+type PersistentStorageOperation =
   | {
       time: number;
       type: 'getItem';
@@ -540,7 +540,7 @@ function formatWrappedOperationMainLine(
     : `${icon} #${id} ${value}`;
 }
 
-export type PersistentStorageOperationCapture = {
+type PersistentStorageOperationCapture = {
   finish: () => {
     timelineString: string;
     operations: readonly PersistentStorageOperation[];
@@ -1411,7 +1411,7 @@ function formatOpfsOperationLabel(
   }
 }
 
-export type OpfsPersistentStorageOperationCaptureResult = {
+type OpfsPersistentStorageOperationCaptureResult = {
   operations: string[];
   timelineString: string;
 };

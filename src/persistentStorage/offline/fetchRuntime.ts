@@ -27,7 +27,7 @@ export type OfflineAwareFetchController = {
   ) => Promise<void>;
 };
 
-export type OfflineAwareFetchResult<T> =
+type OfflineAwareFetchResult<T> =
   | { ok: true; data: T }
   | { ok: false; offline: true }
   | { ok: false; offline: false; error: unknown };

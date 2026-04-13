@@ -76,11 +76,11 @@ export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
 });
 
-export const wrappedCollectionItemSchema = rc_object({
+const wrappedCollectionItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
 });
 
-export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
+const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
     id: rc_number,
     name: rc_string,
@@ -89,7 +89,7 @@ export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   }),
 );
 
-export const listQueryParamsSchema = rc_object({ tableId: rc_string });
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
 
 export function setupAsyncStorageEfficiencyTestSuite(): void {
   beforeAll(() => {
@@ -119,9 +119,7 @@ export async function waitForScheduledCleanup(delayMs = 3000): Promise<void> {
   await flushAllTimers();
 }
 
-export type MockOpfsAdapter = ReturnType<
-  typeof createOpfsPersistentStorageTestStore
->;
+type MockOpfsAdapter = ReturnType<typeof createOpfsPersistentStorageTestStore>;
 
 export async function settleStartupBackgroundScan(
   mockAdapter: MockOpfsAdapter,
@@ -164,7 +162,7 @@ export async function captureHookRemount<Result>(args: {
   return { secondHook, firstMountOperations, remountOperations };
 }
 
-export type DocumentState = { name: string; value: number };
+type DocumentState = { name: string; value: number };
 
 export function createDocumentEnv(options: {
   serverData?: DocumentState;
@@ -186,7 +184,7 @@ export function createDocumentEnv(options: {
   );
 }
 
-export type CollectionItemState = { id: string; name: string };
+type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
   maxBytes?: number;

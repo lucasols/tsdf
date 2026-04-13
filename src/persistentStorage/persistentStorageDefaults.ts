@@ -1,6 +1,6 @@
 import type { AsyncStorageNamespaceKind, StorageAdapter } from './types';
 
-export const defaultMaxBytes = {
+const defaultMaxBytes = {
   localSync: {
     collection: 64 * 1024,
     listItem: 64 * 1024,
@@ -9,7 +9,7 @@ export const defaultMaxBytes = {
   async: { collection: 128 * 1024, listItem: 128 * 1024, listQuery: 64 * 1024 },
 } as const;
 
-export type DefaultMaxBytesProfile = keyof typeof defaultMaxBytes;
+type DefaultMaxBytesProfile = keyof typeof defaultMaxBytes;
 
 function getDefaultMaxBytesProfile(
   adapter: StorageAdapter | DefaultMaxBytesProfile,
@@ -19,9 +19,9 @@ function getDefaultMaxBytesProfile(
     : 'async';
 }
 
-export type DefaultMaxBytesKind = keyof (typeof defaultMaxBytes)['localSync'];
+type DefaultMaxBytesKind = keyof (typeof defaultMaxBytes)['localSync'];
 
-export function getDefaultMaxBytesKindForScope(
+function getDefaultMaxBytesKindForScope(
   scopeKind: Extract<
     AsyncStorageNamespaceKind,
     'collection.item' | 'listQuery.item' | 'listQuery.query'
@@ -37,7 +37,7 @@ export function getDefaultMaxBytesKindForScope(
   }
 }
 
-export function getDefaultMaxBytesForAdapter(args: {
+function getDefaultMaxBytesForAdapter(args: {
   adapter: StorageAdapter | DefaultMaxBytesProfile;
   kind: DefaultMaxBytesKind;
 }): number {

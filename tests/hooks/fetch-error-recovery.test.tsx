@@ -59,9 +59,9 @@ describe('fetch error recovery', () => {
 
     expect({ error: env.store.state.error, status: env.store.state.status })
       .toMatchInlineSnapshot(`
-      error: { code: 500, id: 'fetch-error', message: 'Fetch error' }
-      status: 'error'
-    `);
+        error: { code: 500, id: 'fetch-error', message: 'Fetch error' }
+        status: 'error'
+      `);
 
     // Force a fresh fetch after the visible error state; recovery should go
     // through loading and settle on the server data again.
@@ -127,11 +127,11 @@ describe('fetch error recovery', () => {
 
     expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
       .toMatchInlineSnapshot(`
-      - _type: 'item'
-        payload: { itemId: '1' }
-      - _type: 'item'
-        payload: { itemId: '1' }
-    `);
+        - _type: 'item'
+          payload: { itemId: '1' }
+        - _type: 'item'
+          payload: { itemId: '1' }
+      `);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item-data | item-status |

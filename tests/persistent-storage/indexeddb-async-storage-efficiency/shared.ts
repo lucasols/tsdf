@@ -72,11 +72,11 @@ export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
 });
 
-export const wrappedCollectionItemSchema = rc_object({
+const wrappedCollectionItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
 });
 
-export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
+const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
     age: rc_number.optional(),
     email: rc_string.optional(),
@@ -85,7 +85,7 @@ export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   }),
 );
 
-export const listQueryParamsSchema = rc_object({ tableId: rc_string });
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 const INDEXED_DB_REAL_TASK_SETTLE_PASSES = 3;
 const pendingTestEnvDisposers: Array<() => void> = [];
@@ -100,7 +100,7 @@ async function flushIndexedDbTimers(): Promise<void> {
   await flushAllTimers();
 }
 
-export type MockIndexedDbAdapter = ReturnType<
+type MockIndexedDbAdapter = ReturnType<
   typeof createIndexedDbPersistentStorageTestStore
 >;
 
@@ -149,7 +149,7 @@ async function waitForCapturedOperationsToSettle(
   }
 }
 
-export function setupIndexedDbAsyncStorageEfficiencyTestSuite(): void {
+function setupIndexedDbAsyncStorageEfficiencyTestSuite(): void {
   beforeAll(() => {
     vi.useFakeTimers();
   });
@@ -187,10 +187,6 @@ export function setupIndexedDbAsyncStorageEfficiencyTestSuite(): void {
 
 export const setupAsyncStorageEfficiencyTestSuite =
   setupIndexedDbAsyncStorageEfficiencyTestSuite;
-
-export function createMockIndexedDbAdapter() {
-  return createIndexedDbPersistentStorageTestStore();
-}
 
 export async function waitForScheduledCleanup(delayMs = 3000): Promise<void> {
   await advanceTime(delayMs);
@@ -365,7 +361,7 @@ export async function waitForIndexedDbCondition(
   throw new Error('IndexedDB state did not settle to the expected condition.');
 }
 
-export type DocumentState = { name: string; value: number };
+type DocumentState = { name: string; value: number };
 
 export function createDocumentEnv(options: {
   serverData?: DocumentState;
@@ -390,7 +386,7 @@ export function createDocumentEnv(options: {
   return env;
 }
 
-export type CollectionItemState = { id: string; name: string };
+type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
   maxBytes?: number;
@@ -460,33 +456,6 @@ export function createListQueryEnv(options: {
   });
   pendingTestEnvDisposers.push(() => env.apiStore.dispose());
   return env;
-}
-
-export async function updateEntryCustomMetadata(
-  mockAdapter: MockIndexedDbAdapter,
-  key: string,
-  update: (current: Record<string, unknown>) => Record<string, unknown>,
-): Promise<void> {
-  const currentMetadata = await mockAdapter.readMetadata(key);
-  if (currentMetadata === null) {
-    throw new Error(`Expected metadata for ${key}.`);
-  }
-
-  mockAdapter.setMetadata(key, {
-    ...currentMetadata,
-    customMetadata: update(currentMetadata.customMetadata),
-  });
-  await mockAdapter.flushPendingWrites();
-}
-
-export async function markEntryOfflineProtected(
-  mockAdapter: MockIndexedDbAdapter,
-  key: string,
-): Promise<void> {
-  await updateEntryCustomMetadata(mockAdapter, key, (current) => ({
-    ...current,
-    o: true,
-  }));
 }
 
 export function setProtectedKeysSnapshot(

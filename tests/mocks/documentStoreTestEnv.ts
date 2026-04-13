@@ -66,7 +66,7 @@ type TestDocumentPersistentStorageConfig<
   TOfflineOperations
 >;
 
-export type DocumentStoreTestEnvOptions<
+type DocumentStoreTestEnvOptions<
   D,
   TOfflineOperations extends TestDocumentOfflineOperationsConfig<D> = null,
   StorageState = unknown,

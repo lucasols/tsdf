@@ -40,7 +40,7 @@ import {
   type TSFDListQueryState,
 } from './types';
 
-export type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
+type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
   mutationStart: { mutationId: number; items: ItemPayload[] };
   /** Emitted when a mutation completes or fails */
@@ -58,7 +58,7 @@ type InvalidateItemEvent = {
 
 type SchedulerWithMutation = { startMutation: (key: string) => () => boolean };
 
-export type CreateMutationApiOptions<
+type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,

@@ -1160,7 +1160,7 @@ export type OpfsPersistentStorageTestStore = ReturnType<
   typeof createOpfsPersistentStorageTestStore
 >;
 
-export type OpfsPersistentStorageTestStoreScope = {
+type OpfsPersistentStorageTestStoreScope = {
   document: {
     namespace: AsyncStorageNamespaceScope;
     storageKey: () => string;

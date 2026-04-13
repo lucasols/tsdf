@@ -136,7 +136,7 @@ export type PersistentTestStoreScope = {
   };
 };
 
-export type PersistentTestStore = {
+type PersistentTestStore = {
   storage: PersistentTestStoreStorage;
   scope: (storeName: string, sessionKey: string) => PersistentTestStoreScope;
 };
@@ -624,40 +624,5 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
       return parseGlobalMaintenanceRaw(localStorage.getItem('tsdf._m.g'));
     },
     storageKind: 'localStorage',
-  });
-}
-
-export function createInMemoryPersistentTestStore(
-  storageMap = new Map<string, string>(),
-): PersistentTestStore {
-  return createPersistentTestStore({
-    writeRaw(key: string, raw: string) {
-      storageMap.set(key, raw);
-    },
-    writeValue<T>(key: string, value: T) {
-      storageMap.set(key, JSON.stringify(value));
-    },
-    readEntry<T>(key: string): T | null {
-      const raw = storageMap.get(key);
-      if (raw === undefined) return null;
-
-      return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
-    },
-    remove(key: string) {
-      storageMap.delete(key);
-    },
-    listKeys(prefix: string): string[] {
-      return [...storageMap.keys()].filter((key) => key.startsWith(prefix));
-    },
-    has(key: string) {
-      return storageMap.has(key);
-    },
-    getRaw(key: string) {
-      return storageMap.get(key) ?? null;
-    },
-    getGlobalMaintenanceRaw() {
-      return parseGlobalMaintenanceRaw(storageMap.get('tsdf._m.g') ?? null);
-    },
-    storageKind: 'memory',
   });
 }

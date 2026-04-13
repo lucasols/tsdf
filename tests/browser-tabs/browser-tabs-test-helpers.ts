@@ -38,9 +38,7 @@ function createFocusFlag(initialValue: boolean) {
   };
 }
 
-export type FocusFlag = ReturnType<typeof createFocusFlag>;
-
-export type FocusControllerBinding = {
+type FocusControllerBinding = {
   getWindowIsFocused: () => boolean;
   /** Per-tab focus subscription. Calls the handler when this tab receives focus. */
   onWindowFocus: (handler: () => void) => () => void;
@@ -48,7 +46,7 @@ export type FocusControllerBinding = {
   onWindowBlur: (handler: () => void) => () => void;
 };
 
-export interface FocusChangeCoordinator<T extends string> {
+interface FocusChangeCoordinator<T extends string> {
   /** Returns a `getWindowIsFocused` getter for the given tab, for use in store env creation. */
   getWindowIsFocused(tab: T): () => boolean;
   /** Returns a binding for use as `bindFocusController` in test env options. Provides per-tab `getWindowIsFocused`, `onWindowFocus`, and `onWindowBlur`. */

@@ -101,7 +101,7 @@ export function convertStoreDataForPersistence<TFinal, TStorage = unknown>(
   }
 }
 
-export type ParsedPersistedDocumentData<TData = unknown> = { data: TData };
+type ParsedPersistedDocumentData<TData = unknown> = { data: TData };
 
 export function parsePersistedDocumentData(
   value: unknown,

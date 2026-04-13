@@ -6,8 +6,8 @@ import type { StoreError } from '../../src/utils/storeShared';
 import { FetchError, formatTimeMs, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
-export const DEFAULT_MUTATION_DURATION_MS = 1200;
-export const DEFAULT_RTU_DELAY_MS = 50;
+const DEFAULT_MUTATION_DURATION_MS = 1200;
+const DEFAULT_RTU_DELAY_MS = 50;
 
 export type FilterOperator =
   | { op: 'eq'; field: string; value: unknown }
@@ -20,7 +20,7 @@ export type FilterOperator =
   | { op: 'in'; field: string; values: unknown[] }
   | { op: 'startsWith'; field: string; value: string };
 
-export type ListQueryOptions = {
+type ListQueryOptions = {
   offset?: number;
   limit?: number;
   itemIds?: string[];
@@ -80,12 +80,12 @@ function selectFields<T extends Record<string, unknown>>(
   return __LEGIT_CAST__<T, Record<string, unknown>>(result);
 }
 
-export type ListQueryResult<ItemData> = {
+type ListQueryResult<ItemData> = {
   items: Array<{ itemId: string; data: ItemData }>;
   hasMore: boolean;
 };
 
-export type MutationOptions = {
+type MutationOptions = {
   duration?: number;
   setDataAt?: number;
   triggerRTUEvent?: boolean;
@@ -93,7 +93,7 @@ export type MutationOptions = {
   mutationId?: string | number;
 };
 
-export type FetchErrorConfig = {
+type FetchErrorConfig = {
   message: string;
   path?: string;
   method?: StoreError['method'];
@@ -102,7 +102,7 @@ export type FetchErrorConfig = {
 
 const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
 
-export type AddActionFn = (
+type AddActionFn = (
   action: string,
   options?: { id?: string | number; actionValue?: unknown; itemId?: string },
 ) => void;
@@ -115,7 +115,7 @@ function getTableId(itemId: string): string | null {
   return tableId;
 }
 
-export type ServerTableEvents<ItemData> = {
+type ServerTableEvents<ItemData> = {
   data_changed: { itemId: string; data: ItemData };
   item_deleted: { itemId: string };
   item_added: { itemId: string; data: ItemData };

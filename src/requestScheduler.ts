@@ -41,7 +41,7 @@ export type FetchType =
   | 'realtimeUpdate';
 
 /** Per-request pending state for batch coalescing */
-export type PendingRequest<T> = {
+type PendingRequest<T> = {
   payload: T;
   priority: FetchType;
   addedAt: number;
@@ -115,7 +115,7 @@ type SchedulerState<T> = {
   lastAbortedRequests: Set<string>;
 };
 
-export type RequestSchedulerOptions<T> = {
+type RequestSchedulerOptions<T> = {
   /** Fetch function receives array of requests (even for single request) */
   fetchFn: (
     requests: BatchRequest<T>[],

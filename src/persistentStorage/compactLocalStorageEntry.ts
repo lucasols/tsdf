@@ -18,7 +18,7 @@ export function createCompactLocalStorageEntry(
   return { ...value, v: version };
 }
 
-export type ParsedCompactLocalStorageEntry = {
+type ParsedCompactLocalStorageEntry = {
   value: CompactLocalStorageEntryValue;
   version?: number;
 };

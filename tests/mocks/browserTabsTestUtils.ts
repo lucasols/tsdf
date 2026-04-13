@@ -32,7 +32,7 @@ export function registerMockStoreInstance(args: {
   };
 }
 
-export function resetMockStoreInstanceRegistry(): void {
+function resetMockStoreInstanceRegistry(): void {
   activeStoreKeys.clear();
 }
 

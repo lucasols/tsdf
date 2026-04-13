@@ -111,7 +111,7 @@ function toCollectionItemState<
   };
 }
 
-export type CollectionPersistenceSetup<
+type CollectionPersistenceSetup<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {

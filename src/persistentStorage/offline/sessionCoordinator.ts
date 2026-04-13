@@ -563,7 +563,7 @@ function dedupeById<T extends { id: string }>(values: readonly T[]): T[] {
  * Instances are shared per session key and reused through `getOrCreateSessionOfflineCoordinator`.
  * @internal
  */
-export class SessionOfflineCoordinator {
+class SessionOfflineCoordinator {
   readonly sessionKey: string;
   readonly store: Store<SessionStoreState>;
 

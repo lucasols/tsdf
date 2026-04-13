@@ -47,8 +47,8 @@ import { parseAsyncStorageNamespaceKind } from './types';
 
 export const ASYNC_STORAGE_COMMIT_DEBOUNCE_MS = 40;
 export const ASYNC_STORAGE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-export const ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-export const ASYNC_STORAGE_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
+const ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const ASYNC_STORAGE_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
 export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g';
 const ASYNC_STORAGE_WRITER_LOCK_NAME_PREFIX = 'tsdf-async-write:';
 const ASYNC_STORAGE_WRITER_LOCK_WARNING =
@@ -71,7 +71,7 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   return value;
 }
 
-export function isOfflineProtectedMetadata(
+function isOfflineProtectedMetadata(
   customMetadata: Record<string, unknown> | undefined,
 ): boolean {
   return customMetadata?.o === true;
@@ -414,7 +414,7 @@ function getEffectiveStaticPolicyForScope(
   });
 }
 
-export async function driverGetManyFrom(
+async function driverGetManyFrom(
   driver: AsyncStorageDriver,
   scope: AsyncStorageNamespaceScope,
   keys: string[],
@@ -977,7 +977,7 @@ export type AsyncStartupCleanupScopePlan = {
   scope: AsyncStorageNamespaceScope;
 };
 
-export type AsyncStartupStoreCleanupCallback = (args: {
+type AsyncStartupStoreCleanupCallback = (args: {
   discoveredScopes: AsyncStorageDiscoveredScope[];
   driver: AsyncStorageDriver;
   now: number;

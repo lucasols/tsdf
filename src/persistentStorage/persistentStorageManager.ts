@@ -543,7 +543,7 @@ export function createPersistentStorageHandle<T>(
   return { load, scheduleSave, saveNow, clear, dispose };
 }
 
-export type PersistentStorageNamespaceMetadata<
+type PersistentStorageNamespaceMetadata<
   TMetadata extends Record<string, unknown>,
 > = {
   customMetadata: TMetadata;
@@ -554,7 +554,7 @@ export type PersistentStorageNamespaceMetadata<
   version: number;
 };
 
-export type PersistentStorageNamespaceCommitArgs<
+type PersistentStorageNamespaceCommitArgs<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
@@ -564,7 +564,7 @@ export type PersistentStorageNamespaceCommitArgs<
   upserts?: Array<{ data: T; key: string; metadata?: TMetadata }>;
 };
 
-export type PersistentStorageNamespaceHandle<
+type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {

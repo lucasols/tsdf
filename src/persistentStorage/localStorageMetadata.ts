@@ -25,8 +25,8 @@ const MANIFEST_KEY_SUFFIX = '.m';
 const SINGLE_MANIFEST_KEY_PREFIX = `${MANIFEST_KEY_PREFIX}s:`;
 const NAMESPACE_MANIFEST_KEY_PREFIX = `${MANIFEST_KEY_PREFIX}n:`;
 
-export const DEFAULT_LOCAL_STORAGE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-export const DEFAULT_LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_LOCAL_STORAGE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const maintenanceCallbacks = new Map<string, () => Promise<void>>();
 
@@ -448,7 +448,7 @@ function getPayloadKeyForManifestEntry(
     : `${manifestLocation.storagePrefix}${entryKey}`;
 }
 
-export type ManagedLocalStorageManifestEntry<TMeta = unknown> = {
+type ManagedLocalStorageManifestEntry<TMeta = unknown> = {
   entryKey: string | undefined;
   payloadKey: string;
   lastAccessAt: number;
@@ -530,7 +530,7 @@ export function listManagedLocalStorageKeysSync(
   );
 }
 
-export type ManagedLocalStorageNamespaceManifestEntry<TMeta = unknown> =
+type ManagedLocalStorageNamespaceManifestEntry<TMeta = unknown> =
   ManagedLocalStorageManifestEntry<TMeta> & { entryKey: string };
 
 export function readManagedLocalStorageManifestEntriesByPrefix(

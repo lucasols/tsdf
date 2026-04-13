@@ -957,7 +957,7 @@ export async function flushMockBrowserOpfsLatenciesForTests(): Promise<void> {
   await currentEnvironment?.flushLatencies();
 }
 
-export function installMockBrowserOpfsForTests(): void {
+function installMockBrowserOpfsForTests(): void {
   Object.defineProperty(globalThis.navigator, 'storage', {
     value: {
       getDirectory: async () =>

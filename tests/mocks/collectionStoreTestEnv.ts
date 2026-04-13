@@ -42,7 +42,7 @@ import {
   TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
-export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
+type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** App just opened, no data fetched yet. */
   | 'idle'
   /**
@@ -81,7 +81,7 @@ type TestCollectionPersistentStorageConfig<
   TOfflineOperations
 >;
 
-export type CollectionStoreTestEnvOptions<
+type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,
   TOfflineOperations extends TestCollectionOfflineOperationsConfig<D> = null,
   StorageState = unknown,

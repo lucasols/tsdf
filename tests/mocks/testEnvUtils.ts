@@ -64,32 +64,12 @@ export function normalizeError(exception: Error): StoreError {
 }
 
 // Emojis for visual identification in timelines
-export const fetchEmojis = [
-  '🔴',
-  '🟠',
-  '🟡',
-  '🟢',
-  '🔵',
-  '🟣',
-  '🟤',
-  '⚫',
-  '⚪',
-];
-export const mutationEmojis = [
-  '⬜',
-  '⬛',
-  '🟫',
-  '🟪',
-  '🟦',
-  '🟩',
-  '🟨',
-  '🟧',
-  '🟥',
-];
+const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
+const mutationEmojis = ['⬜', '⬛', '🟫', '🟪', '🟦', '🟩', '🟨', '🟧', '🟥'];
 
-export type CommentInput = string | { comment: string; deltaMs?: number };
+type CommentInput = string | { comment: string; deltaMs?: number };
 
-export type Action = {
+type Action = {
   action: string;
   time: number;
   uiValue: unknown;
@@ -100,7 +80,7 @@ export type Action = {
   itemUiValues?: Record<string, unknown>;
 };
 
-export type ActionReference = Pick<Action, 'id' | 'action'>;
+type ActionReference = Pick<Action, 'id' | 'action'>;
 
 function formatTimelineSessionKey(value: string | false): string {
   return value === false ? 'false' : value;
@@ -509,25 +489,6 @@ export function createEmojiCyclers() {
 }
 
 /**
- * Creates a fetch counter
- */
-export function createFetchCounter() {
-  let numOfFetches = 0;
-  let numOfStartedFetches = 0;
-
-  return {
-    get numOfFinishedFetches() {
-      return numOfFetches;
-    },
-    get numOfStartedFetches() {
-      return numOfStartedFetches;
-    },
-    incrementStarted: () => numOfStartedFetches++,
-    incrementFinished: () => numOfFetches++,
-  };
-}
-
-/**
  * Logs schedule fetch result as an action
  */
 export function logScheduleFetchResult(
@@ -613,7 +574,7 @@ function formatId(id: string | number | undefined): string {
   return `${id} `;
 }
 
-export function formatTimelineString(actionsHistory: Action[]): string {
+function formatTimelineString(actionsHistory: Action[]): string {
   if (actionsHistory.length === 0) return '\n\n';
 
   // Sort actions by time, preserving insertion order for same-time events

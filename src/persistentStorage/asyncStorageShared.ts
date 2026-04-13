@@ -15,7 +15,7 @@ export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
   return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
 }
 
-export type PersistedAsyncNamespaceKindAlias =
+type PersistedAsyncNamespaceKindAlias =
   | 'd'
   | 'ci'
   | 'li'

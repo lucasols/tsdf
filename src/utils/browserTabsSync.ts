@@ -11,7 +11,7 @@ export type BrowserTabsStoreType =
   | 'collection'
   | 'listQuery'
   | 'offline';
-export type BrowserTabsSessionKey = string | false;
+type BrowserTabsSessionKey = string | false;
 
 export type BrowserTabsTransport = {
   postMessage: (message: unknown) => void;
@@ -23,7 +23,7 @@ export type BrowserTabsTransportFactory = (options: {
   onMessage: (message: unknown) => void;
 }) => BrowserTabsTransport | null;
 
-export type BrowserTabsCoordinatorOptions<Message extends { kind: string }> = {
+type BrowserTabsCoordinatorOptions<Message extends { kind: string }> = {
   storeType: BrowserTabsStoreType;
   storeKey: string;
   getSessionKey: () => BrowserTabsSessionKey;
@@ -48,7 +48,7 @@ export type BrowserTabsMessageMeta = {
 type MessageWithoutMeta<Message extends { kind: string }> =
   Message extends unknown ? Omit<Message, keyof BrowserTabsMessageMeta> : never;
 
-export type BrowserTabsCoordinator<Message extends { kind: string }> = {
+type BrowserTabsCoordinator<Message extends { kind: string }> = {
   enabled: boolean;
   tabId: string;
   isSessionActive: () => boolean;
@@ -189,7 +189,7 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>({
   };
 }
 
-export type BrowserTabsCoordinatorWithPriorityOptions<
+type BrowserTabsCoordinatorWithPriorityOptions<
   Message extends { kind: string },
 > = BrowserTabsCoordinatorOptions<Message> & {
   getWindowIsFocused: () => boolean;

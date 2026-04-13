@@ -11,7 +11,7 @@ import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import type { AsyncStorageNamespaceScope } from './types';
 
 export const OPFS_ROOT_DIR = 'tsdf';
-export const JSON_FILE_EXTENSION = '.json';
+const JSON_FILE_EXTENSION = '.json';
 
 const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
 const HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX = 'h~';
@@ -37,7 +37,7 @@ export function decodePathSegment(value: string): string {
   return decodeURIComponent(value);
 }
 
-export function encodeFileNameSegment(value: string): string {
+function encodeFileNameSegment(value: string): string {
   return encodePathSegment(value).replaceAll('.', '%2E');
 }
 
@@ -45,9 +45,9 @@ export function joinPath(...segments: string[]): string {
   return segments.filter((segment) => segment.length > 0).join('/');
 }
 
-export type OpfsRecordKind = 'payload' | 'raw';
+type OpfsRecordKind = 'payload' | 'raw';
 
-export function getRecordKindAlias(kind: OpfsRecordKind): string {
+function getRecordKindAlias(kind: OpfsRecordKind): string {
   switch (kind) {
     case 'payload':
       return 'p';
@@ -67,7 +67,7 @@ export function parseRecordKindAlias(value: string): OpfsRecordKind | null {
   }
 }
 
-export function getEntryToken(
+function getEntryToken(
   scope: AsyncStorageNamespaceScope,
   userKey: string,
 ): string {
@@ -78,7 +78,7 @@ export function getEntryToken(
   return encodeFileNameSegment(userKey);
 }
 
-export function parseEntryToken(
+function parseEntryToken(
   scopeKind: AsyncStorageNamespaceScope['kind'],
   token: string,
 ): string {
@@ -97,10 +97,7 @@ export function parseRecordKey(
   return parseAsyncStorageRecordKey(key);
 }
 
-export function toRecordKey(
-  recordKind: OpfsRecordKind,
-  userKey: string,
-): string {
+function toRecordKey(recordKind: OpfsRecordKind, userKey: string): string {
   switch (recordKind) {
     case 'payload':
       return getPayloadRecordKey(userKey);
@@ -157,7 +154,7 @@ export function resolveHashedPayloadRecordKeyFromValue(
   }
 }
 
-export type ParsedOpfsFileName = {
+type ParsedOpfsFileName = {
   isHashedPayload: boolean;
   key: string | null;
   kind: AsyncStorageNamespaceScope['kind'];

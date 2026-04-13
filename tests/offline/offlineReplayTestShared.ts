@@ -94,7 +94,7 @@ export function getOfflineQueueEntries(
     });
 }
 
-export function getSessionOfflineQueueEntries(
+function getSessionOfflineQueueEntries(
   sessionKey: string,
 ): Array<Record<string, unknown>> {
   const sessionPrefix = `tsdf.${sessionKey}.`;

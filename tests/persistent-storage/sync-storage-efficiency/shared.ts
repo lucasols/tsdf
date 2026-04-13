@@ -72,11 +72,11 @@ export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
 });
 
-export const wrappedCollectionItemSchema = rc_object({
+const wrappedCollectionItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
 });
 
-export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
+const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
     id: rc_number,
     name: rc_string,
@@ -85,7 +85,7 @@ export const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   }),
 );
 
-export const listQueryParamsSchema = rc_object({ tableId: rc_string });
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
 
 export const persistentStore = createLocalStoragePersistentTestStore();
 
@@ -153,7 +153,7 @@ export async function captureHookRemount<Result>(render: () => Result) {
   return { secondHook, firstMountOperations, remountOperations };
 }
 
-export type DocumentState = { name: string; value: number };
+type DocumentState = { name: string; value: number };
 
 export function setCachedDocumentData(
   storeName: string,
@@ -183,7 +183,7 @@ export function createDocumentEnv(options: {
   );
 }
 
-export type CollectionItemState = { id: string; name: string };
+type CollectionItemState = { id: string; name: string };
 
 type PersistedCollectionItemState = { value: CollectionItemState };
 

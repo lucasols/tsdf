@@ -54,7 +54,7 @@ function readDocumentFromLocalStorageSync(
   return { persisted: entry.data, foundEntry: true };
 }
 
-export type DocumentPersistenceSetup<State extends ValidStoreState> = {
+type DocumentPersistenceSetup<State extends ValidStoreState> = {
   createInitialState(
     baseState: DocumentStoreState<State>,
   ): DocumentStoreState<State>;

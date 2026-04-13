@@ -63,7 +63,7 @@ export type NormalizedFetchListFn<
   hasMore: boolean;
 }>;
 
-export type CreateFetchApiOptions<
+type CreateFetchApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,

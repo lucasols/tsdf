@@ -79,16 +79,6 @@ export const offlineResolutionRecordSchema = rc_discriminated_union('kind', {
   },
 });
 
-/** Error shape emitted when runtime is operating in offline mode. */
-export type OfflineConnectivityError = {
-  /** Numeric error code used by offline failure handlers. */
-  code: 0;
-  /** Stable machine-readable offline error identifier. */
-  id: 'offline';
-  /** Default offline error message. */
-  message: 'Offline';
-};
-
 /** Connectivity cause currently governing offline mutation queueing. */
 export type OfflineMutationQueueingCause = 'network' | 'outage';
 
@@ -1236,18 +1226,6 @@ export type AnyOfflineOperationDefinition<
     ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
   ) => string[];
 };
-
-export type OfflineOperationsUploadRef<TOperations> =
-  TOperations extends Record<
-    string,
-    AnyOfflineOperationDefinition<__LEGIT_ANY__>
-  >
-    ? TOperations[keyof TOperations] extends AnyOfflineOperationDefinition<
-        infer TUploadRef
-      >
-      ? TUploadRef
-      : ValidPayload
-    : ValidPayload;
 
 /**
  * Compact type-spec helper for a single offline operation.

@@ -131,7 +131,7 @@ type FakeIndexedDbFactory = IDBFactory & {
   _databases?: Map<string, FakeIndexedDbRawDatabase>;
 };
 
-export type IndexedDbPersistentStorageTestStoreScope = {
+type IndexedDbPersistentStorageTestStoreScope = {
   document: {
     namespace: AsyncStorageNamespaceScope;
     storageKey: () => string;
@@ -750,11 +750,91 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
-let currentIndexedDbPersistentStorageTestStore: ReturnType<
-  typeof createIndexedDbPersistentStorageTestStore
-> | null = null;
+export type IndexedDbPersistentStorageTestStore = {
+  adapter: ReturnType<
+    typeof createIndexedDbPersistentStorageForTests
+  >['adapter'];
+  clearReadRequests: () => void;
+  clearInstrumentation: () => void;
+  databaseName: string;
+  flushIndexedDbCommits: () => Promise<void>;
+  flushPendingWrites: () => Promise<void>;
+  flushWrites: () => Promise<void>;
+  scopeReadRequests: (args?: {
+    storeName: string;
+    sessionKey: string;
+  }) => string[];
+  getRaw: (key: string) => Promise<string | null>;
+  has: (key: string) => Promise<boolean>;
+  listKeysRequests: AsyncStorageNamespaceScope[];
+  operations: IndexedDbPersistentStorageOperation[];
+  payloadGetManyRequests: string[][];
+  payloadGetRequests: string[];
+  storage: {
+    getRaw: (key: string) => Promise<string | null>;
+    has: (key: string) => Promise<boolean>;
+    writeRaw: (key: string, raw: string) => void;
+    writeValue: <T>(key: string, value: T) => void;
+    writePayload: (key: string, value: unknown) => void;
+    writeMetadata: (key: string, value: unknown) => void;
+    removePayload: (key: string) => void;
+    removeMetadata: (key: string) => void;
+  };
+  indexedDb: {
+    getRow: (storeName: string, key: unknown) => Promise<unknown>;
+    listRows: (
+      storeName: string,
+    ) => Promise<Array<{ key: unknown; value: unknown }>>;
+    putRow: (storeName: string, value: unknown) => Promise<unknown>;
+    updateRow: (
+      storeName: string,
+      key: unknown,
+      update: (current: unknown) => unknown,
+    ) => Promise<unknown>;
+    deleteRow: (storeName: string, key: unknown) => Promise<unknown>;
+    inspectStructure: () => Promise<IndexedDbStructureInspection>;
+    mutateRawRow: (
+      storeName: string,
+      key: unknown,
+      update: (current: unknown) => unknown,
+    ) => Promise<void>;
+    queueMutateRawRow: (
+      storeName: string,
+      key: unknown,
+      update: (current: unknown) => unknown,
+    ) => void;
+    failCleanupRemoveKnownRecords: (
+      scope: AsyncStorageNamespaceScope,
+      times?: number,
+    ) => void;
+  };
+  rawNamespace: {
+    get: (scope: AsyncStorageNamespaceScope, key: string) => Promise<unknown>;
+    listKeys: (scope: AsyncStorageNamespaceScope) => Promise<string[]>;
+    remove: (scope: AsyncStorageNamespaceScope, key: string) => void;
+    set: (
+      scope: AsyncStorageNamespaceScope,
+      key: string,
+      value: unknown,
+    ) => void;
+  };
+  readMetadata: (key: string) => Promise<ManagedMetadataRecord | null>;
+  removeMetadata: (key: string) => void;
+  removePayload: (key: string) => void;
+  scope: (
+    storeName: string,
+    sessionKey: string,
+  ) => IndexedDbPersistentStorageTestStoreScope;
+  setMetadata: (key: string, value: unknown) => void;
+  setPayload: (key: string, value: unknown) => void;
+  setRaw: (key: string, raw: string) => void;
+  setValue: <T>(key: string, value: T) => void;
+};
 
-export function getCurrentIndexedDbPersistentStorageTestStore() {
+let currentIndexedDbPersistentStorageTestStore: IndexedDbPersistentStorageTestStore | null =
+  null;
+
+export function getCurrentIndexedDbPersistentStorageTestStore(): IndexedDbPersistentStorageTestStore {
   if (currentIndexedDbPersistentStorageTestStore === null) {
     throw new Error(
       'Expected an active IndexedDB persistent storage test store.',
@@ -764,10 +844,6 @@ export function getCurrentIndexedDbPersistentStorageTestStore() {
   return currentIndexedDbPersistentStorageTestStore;
 }
 
-export function clearCurrentIndexedDbPersistentStorageTestStore(): void {
-  currentIndexedDbPersistentStorageTestStore = null;
-}
-
 export function resetCurrentIndexedDbPersistentStorageTestStore(): Promise<void> {
   const currentStore = currentIndexedDbPersistentStorageTestStore;
   currentIndexedDbPersistentStorageTestStore = null;
@@ -775,7 +851,7 @@ export function resetCurrentIndexedDbPersistentStorageTestStore(): Promise<void>
   return Promise.resolve();
 }
 
-export function createIndexedDbPersistentStorageTestStore(
+function createIndexedDbPersistentStorageTestStoreInternal(
   options: IndexedDbPersistentStorageTestStoreOptions = {},
 ) {
   const instrumentationOperations: IndexedDbPersistentStorageOperation[] = [];
@@ -2000,6 +2076,8 @@ export function createIndexedDbPersistentStorageTestStore(
   return store;
 }
 
-export type IndexedDbPersistentStorageTestStore = ReturnType<
-  typeof createIndexedDbPersistentStorageTestStore
->;
+export function createIndexedDbPersistentStorageTestStore(
+  options: IndexedDbPersistentStorageTestStoreOptions = {},
+): IndexedDbPersistentStorageTestStore {
+  return createIndexedDbPersistentStorageTestStoreInternal(options);
+}

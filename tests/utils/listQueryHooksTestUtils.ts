@@ -4,9 +4,7 @@ export function shouldNotSkip(scheduleResult: string) {
   }
 }
 
-export type ListQueryTestEnv = {
-  serverTable: { numOfFinishedFetches: number };
-};
+type ListQueryTestEnv = { serverTable: { numOfFinishedFetches: number } };
 
 export function getFetchCountFromHere(env: ListQueryTestEnv) {
   const startCount = env.serverTable.numOfFinishedFetches;

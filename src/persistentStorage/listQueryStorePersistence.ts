@@ -180,7 +180,7 @@ function readManifestGroupMeta(meta: unknown): string | undefined {
   return typeof meta.g === 'string' ? meta.g : undefined;
 }
 
-export type ListQueryPersistenceSetup<
+type ListQueryPersistenceSetup<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
