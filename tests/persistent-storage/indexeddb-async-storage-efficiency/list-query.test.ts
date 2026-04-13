@@ -407,12 +407,12 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(
       (await listQueryScope.listQuery.listStoredQueryKeys()).sort(),
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
+    expect(stripTimelineDurations(operationsBreakdown)).toMatchInlineSnapshot(`
       ""
-      1.811s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-metadata","listQuery.item"] order=lru-desc -> []
-      1.815s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-metadata","listQuery.query"] order=lru-desc -> ["{tableId:\\"second\\"}", "{tableId:\\"first\\"}"]
-      1.863s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-metadata","listQuery.query"] put=["{tableId:\\"third\\"}"] delete=["{tableId:\\"first\\"}"] touch=[] static-policy
-      1.909s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-metadata","listQuery.item"] put=["\\"third||1"] delete=[] touch=[] static-policy
+      | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-metadata","listQuery.item"] order=lru-desc -> []
+      | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-metadata","listQuery.query"] order=lru-desc -> ["{tableId:\\"second\\"}", "{tableId:\\"first\\"}"]
+      | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-metadata","listQuery.query"] put=["{tableId:\\"third\\"}"] delete=["{tableId:\\"first\\"}"] touch=[] static-policy
+      | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-metadata","listQuery.item"] put=["\\"third||1"] delete=[] touch=[] static-policy
       ""
     `);
     expect(
@@ -1173,22 +1173,31 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(
       (await listQueryScope.listQuery.listStoredItemKeys()).sort(),
     ).toMatchInlineSnapshot(`['"users||2']`);
+    const queryNamespaceSnapshot = await readListQueryQueryNamespaceSnapshot({
+      mockAdapter,
+      sessionKey,
+      storeName,
+    });
     expect(
-      await readListQueryQueryNamespaceSnapshot({
-        mockAdapter,
-        sessionKey,
-        storeName,
-      }),
+      queryNamespaceSnapshot && {
+        ...queryNamespaceSnapshot,
+        entries: Object.fromEntries(
+          Object.entries(queryNamespaceSnapshot.entries).map(([key, entry]) => [
+            key,
+            { ...entry, a: '<timestamp>' },
+          ]),
+        ),
+      },
     ).toMatchInlineSnapshot(`
       entries:
         {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}:
-          a: 1735689602052
+          a: '<timestamp>'
           p:
             filters:
               - { field: 'name', op: 'eq', value: 'Alice' }
             tableId: 'users'
         {tableId:"users"}:
-          a: 1735689602052
+          a: '<timestamp>'
           p: { tableId: 'users' }
     `);
     expect(

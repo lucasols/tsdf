@@ -726,12 +726,22 @@ export function syncManagedLocalStorageSessionProtection(
 
 function upsertManifestEntry(
   manifestKey: string,
-  entry: StoredManagedLocalStorageManifestEntry,
+  entry: StoredManagedLocalStorageManifestEntry & {
+    mergeMeta?: (
+      currentMeta: StoredManagedLocalStorageManifestEntry['meta'],
+    ) => unknown;
+  },
   io: ManagedLocalStorageIo,
 ): void {
   const manifest = readManifest(manifestKey, io);
+  const currentEntry = manifest.entries.get(entry.entryKey);
   const nextEntries = new Map(manifest.entries);
-  nextEntries.set(entry.entryKey, entry);
+  nextEntries.set(entry.entryKey, {
+    entryKey: entry.entryKey,
+    lastAccessAt: entry.lastAccessAt,
+    sizeBytes: entry.sizeBytes ?? currentEntry?.sizeBytes,
+    meta: entry.mergeMeta ? entry.mergeMeta(currentEntry?.meta) : entry.meta,
+  });
   writeManifest(manifestKey, { entries: nextEntries }, io);
 }
 
@@ -752,6 +762,9 @@ type UpsertSingleEntryParams = {
   storageKey: string;
   lastAccessAt?: number;
   sizeBytes?: number;
+  mergeMeta?: (
+    currentMeta: StoredManagedLocalStorageManifestEntry['meta'],
+  ) => unknown;
   meta?: unknown;
 };
 
@@ -769,6 +782,7 @@ export function upsertManagedLocalStorageSingleEntry(
       entryKey: undefined,
       lastAccessAt: params.lastAccessAt ?? Date.now(),
       sizeBytes: params.sizeBytes,
+      mergeMeta: params.mergeMeta,
       meta: params.meta,
     },
     io,
@@ -782,6 +796,9 @@ type UpsertNamespaceEntryParams = {
   entryKey: string;
   lastAccessAt?: number;
   sizeBytes?: number;
+  mergeMeta?: (
+    currentMeta: StoredManagedLocalStorageManifestEntry['meta'],
+  ) => unknown;
   meta?: unknown;
 };
 
@@ -799,6 +816,7 @@ export function upsertManagedLocalStorageNamespaceEntry(
       entryKey: params.entryKey,
       lastAccessAt: params.lastAccessAt ?? Date.now(),
       sizeBytes: params.sizeBytes,
+      mergeMeta: params.mergeMeta,
       meta: params.meta,
     },
     io,

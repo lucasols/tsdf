@@ -446,6 +446,33 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
+  test('a missing collection item becomes visible again before the next task', async () => {
+    const storeName = 'col-microtask-miss-cache';
+    const sessionKey = 'sess1';
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the test only exercises the direct read path.
+    await settleStartupBackgroundScan();
+
+    // The first miss should only dedupe repeated sync reads within this turn.
+    expect(env.apiStore.getItemState('1')).toBeUndefined();
+
+    // Another tab can persist the item before the browser reaches the next task.
+    await Promise.resolve();
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Fresh user' },
+    });
+
+    // The next read should immediately see the new persisted payload.
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
+      `value: { id: '1', name: 'Fresh user' }`,
+    );
+    expect(env.store.state[getCompositeKey('1')]?.data).toMatchInlineSnapshot(
+      `value: { id: '1', name: 'Fresh user' }`,
+    );
+  });
+
   test('direct getItemState touch preserves an offline marker added by another tab before the batched manifest update', async () => {
     const storeName = 'col-direct-touch-offline-marker';
     const sessionKey = 'sess1';
@@ -877,10 +904,6 @@ describe('sync storage efficiency: collection', () => {
       "
       time  |
       0     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
-            |    └ (namespace index)
-      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
-            |    └ (namespace index)
-      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index)
             ·
       1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
