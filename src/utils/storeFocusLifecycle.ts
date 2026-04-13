@@ -1,5 +1,12 @@
 type TimeoutId = ReturnType<typeof setTimeout>;
 
+type StoreFocusLifecycle = {
+  onTransportReconnect: () => void;
+  reset: () => void;
+  dispose: () => void;
+};
+
+/** @internal */
 export function createStoreFocusLifecycle({
   revalidateOnWindowFocus,
   usesRealTimeUpdates,
@@ -16,7 +23,7 @@ export function createStoreFocusLifecycle({
   onWindowFocus: (handler: () => void) => () => void;
   onWindowFocusRevalidate: () => void;
   onTransportReconnectRevalidate: () => void;
-}) {
+}): StoreFocusLifecycle {
   let cleanupFocusListener: (() => void) | null = null;
   let cleanupReconnectFocusListener: (() => void) | null = null;
   let reconnectCooldownTimeoutId: TimeoutId | null = null;

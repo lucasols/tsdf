@@ -5,7 +5,7 @@ import {
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { evtmitter } from 'evtmitter';
+import { evtmitter, type Emitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { useCallback } from 'react';
 import { Result, type Result as ResultType } from 't-result';
@@ -28,9 +28,9 @@ import type {
 } from '../internal/testTimelineTypes';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import {
+  runHybridOfflineMutation,
   type OfflineAwareMutationController,
   type OfflineMutationResult,
-  runHybridOfflineMutation,
 } from '../persistentStorage/offline/mutationRuntime';
 import {
   captureOfflineOverlayEntries,
@@ -46,14 +46,16 @@ import {
   offlineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import {
+  isOfflineResolutionRecordForStore,
   offlineItemEntityRefSchema,
   OfflineResolutionConflictParseError,
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
+  type GlobalOfflineEntity,
   type OfflineMutationInput,
-  type ParsedOfflineResolutionConflictResultForOperation,
-  type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
+  type OfflineResolutionRecord,
+  type ParsedOfflineResolutionConflictResultForStore,
 } from '../persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
@@ -76,8 +78,8 @@ import {
 import {
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
-  type StoreManager,
   validateStoreManagerSessionConsistency,
+  type StoreManager,
 } from '../storeManager';
 import {
   type BrowserTabsPriorityTimings,
@@ -101,15 +103,15 @@ import {
   AbortedStoreError,
   DEFAULT_BATCH_KEY,
   fetchTypePriority,
-  type MutationSkipped,
   NotFoundStoreError,
   StoreFetchError,
   StoreMutationError,
-  toStoreMutationError,
   TimeoutStoreError,
+  toStoreMutationError,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
+  type MutationSkipped,
   type StoreError,
 } from '../utils/storeShared';
 import { createCollectionCacheLimits } from './collectionCacheLimits';
@@ -336,6 +338,111 @@ export type CollectionStoreOptions<
   };
 };
 
+export type CollectionStoreEvents = {
+  invalidateData: { priority: FetchType; itemKey: string };
+};
+
+type CollectionFilterItemsFn<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (params: ItemPayload, data: ItemState | null) => boolean;
+
+type ResolvedCollectionOfflineOperations<TOfflineOperations> =
+  TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
+
+type CollectionMutationPayload<ItemPayload extends ValidPayload> =
+  | ItemPayload
+  | ItemPayload[]
+  | false
+  | undefined
+  | null;
+
+type CollectionMutationPayloadToUse<ItemPayload extends ValidPayload> =
+  | ItemPayload
+  | ItemPayload[];
+
+type CollectionMutationArgsBase<T, ItemPayload extends ValidPayload> = {
+  optimisticUpdate?: (
+    payload: CollectionMutationPayloadToUse<ItemPayload>,
+  ) => void | boolean;
+  mutation: (
+    payload: CollectionMutationPayloadToUse<ItemPayload>,
+  ) => Promise<T>;
+  onSuccess?: (
+    response: Awaited<T>,
+    payload: CollectionMutationPayloadToUse<ItemPayload>,
+  ) => void;
+  revalidateOnSuccess?: boolean;
+  silentErrors?: boolean;
+  debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+};
+
+type CollectionOnlineMutationArgs<
+  T,
+  ItemPayload extends ValidPayload,
+> = CollectionMutationArgsBase<T, ItemPayload> & {
+  offline?: undefined;
+  upload?: undefined;
+};
+
+type CollectionOfflineMutationArgs<
+  T,
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  >,
+> = CollectionMutationArgsBase<T, ItemPayload> & {
+  offline: TOfflineOperations extends null
+    ? never
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  upload?: OfflineMutationUploadsInput;
+};
+
+type CollectionPerformMutation<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
+    ItemState,
+    ItemPayload
+  >,
+> = {
+  <T>(
+    payload: CollectionMutationPayload<ItemPayload>,
+    args: CollectionOnlineMutationArgs<T, ItemPayload>,
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  <T>(
+    payload: CollectionMutationPayload<ItemPayload>,
+    args: CollectionOfflineMutationArgs<
+      T,
+      ItemState,
+      ItemPayload,
+      TOfflineOperations
+    >,
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
+  <T>(
+    payload: CollectionMutationPayload<ItemPayload>,
+    args:
+      | CollectionOnlineMutationArgs<T, ItemPayload>
+      | CollectionOfflineMutationArgs<
+          T,
+          ItemState,
+          ItemPayload,
+          TOfflineOperations
+        >,
+  ): Promise<
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
+};
+
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -343,12 +450,143 @@ export type CollectionStore<
     ItemState,
     ItemPayload
   > = null,
-> = ReturnType<
-  typeof createCollectionStore<ItemState, ItemPayload, TOfflineOperations>
->;
-
-export type CollectionStoreEvents = {
-  invalidateData: { priority: FetchType; itemKey: string };
+> = {
+  store: Store<TSFDCollectionState<ItemState, ItemPayload>>;
+  events: Emitter<CollectionStoreEvents>;
+  storeEvents: Emitter<CollectionStoreStoreEvents<ItemPayload>>;
+  readonly invalidationWasTriggered: Set<string>;
+  scheduleFetch: {
+    (
+      fetchType: FetchType,
+      payload: ItemPayload,
+      options?: ScheduleFetchOptions,
+    ): ScheduleFetchResults;
+    (
+      fetchType: FetchType,
+      payload: ItemPayload[],
+      options?: ScheduleFetchOptions,
+    ): ScheduleFetchResults[];
+  };
+  awaitFetch: (
+    params: ItemPayload,
+    options?: { timeoutMs?: number },
+  ) => Promise<
+    { data: ItemState; error: null } | { data: null; error: StoreFetchError }
+  >;
+  useMultipleItems: <
+    Selected = ItemState | null,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
+    options?: UseMultipleItemsOptions<ItemState, Selected>,
+  ) => readonly TSFDUseCollectionItemReturn<
+    Selected,
+    ItemPayload,
+    QueryMetadata
+  >[];
+  useItem: <Selected = ItemState | null>(
+    payload: ItemPayload | undefined | false | null,
+    options?: UseItemOptions<ItemState, Selected>,
+  ) => TSFDUseCollectionItemReturn<Selected, ItemPayload>;
+  useListItemIsLoading: (
+    payload: ItemPayload,
+    args: {
+      itemId: string;
+      selector: (data: ItemState | null) => unknown;
+      loadItemFallback?: () => void;
+      ensureIsLoaded?: boolean;
+    },
+  ) => boolean;
+  useListItemIsDeleted: (
+    payload: ItemPayload,
+    args: {
+      itemId: string;
+      selector: (data: ItemState | null) => unknown;
+      onDelete?: () => void;
+      ensureIsLoaded?: boolean;
+    },
+  ) => boolean;
+  useListItem: <Selected>(
+    payload: ItemPayload,
+    args: {
+      itemId: string;
+      selector: (data: ItemState | null) => Selected;
+      loadItemFallback?: () => void;
+      onDelete?: () => void;
+      ensureIsLoaded?: boolean;
+    },
+  ) => { isLoading: boolean; isDeleted: boolean; data: Selected };
+  reset: () => void;
+  dispose: () => void;
+  preloadItemFromStorage: (
+    params: ItemPayload | ItemPayload[],
+  ) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>;
+  getItemKey: (params: ItemPayload) => string;
+  getItemState: {
+    (
+      params: ItemPayload,
+    ): TSFDCollectionItem<ItemState, ItemPayload> | undefined | null;
+    (
+      params: ItemPayload[] | CollectionFilterItemsFn<ItemState, ItemPayload>,
+    ): TSFDCollectionItem<ItemState, ItemPayload>[];
+  };
+  getOfflineEntities: () => GlobalOfflineEntity[];
+  useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  getOfflineResolutions: () => OfflineResolutionRecord[];
+  parseOfflineResolutionConflict: (
+    resolution: OfflineResolutionRecord,
+  ) => ParsedOfflineResolutionConflictResultForStore<
+    ResolvedCollectionOfflineOperations<TOfflineOperations>
+  >;
+  resolveOfflineResolution: <
+    TName extends
+      keyof ResolvedCollectionOfflineOperations<TOfflineOperations> & string,
+  >(
+    resolutionId: string,
+    operationName: TName,
+    resolution: OfflineResolutionActionForOperation<
+      ResolvedCollectionOfflineOperations<TOfflineOperations>,
+      TName
+    >,
+  ) => Promise<void> | void;
+  startMutation: (
+    fetchParams:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+  ) => () => void;
+  invalidateItem: (
+    itemPayload:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+    priority?: FetchType,
+  ) => void;
+  updateItemState: (
+    fetchParams:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+    produceNewData: (
+      draftData: ItemState,
+      collectionItem: TSFDCollectionItem<ItemState, ItemPayload>,
+    ) => void | ItemState,
+    options?: { ifNothingWasUpdated?: () => void },
+  ) => boolean;
+  addItemToState: (fetchParams: ItemPayload, data: ItemState) => void;
+  deleteItemState: (
+    fetchParams:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+  ) => void;
+  performMutation: CollectionPerformMutation<
+    ItemState,
+    ItemPayload,
+    TOfflineOperations
+  >;
+  onTransportReconnect: () => void;
 };
 
 export function createCollectionStore<
@@ -388,7 +626,7 @@ export function createCollectionStore<
   ItemPayload,
   TOfflineOperations,
   StorageState
->) {
+>): CollectionStore<ItemState, ItemPayload, TOfflineOperations> {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
   type CollectionOfflineOverlay = {
@@ -1255,8 +1493,6 @@ export function createCollectionStore<
     return scheduler.isMutationInProgress(itemKey);
   }
 
-  type FilterItemsFn = (params: ItemPayload, data: ItemState | null) => boolean;
-
   function scheduleFetch(
     fetchType: FetchType,
     payload: ItemPayload,
@@ -1357,7 +1593,7 @@ export function createCollectionStore<
   function getItemFromStateOrPersistence(
     itemKey: string,
     options: { materializeSyncState?: boolean } = {},
-  ): CollectionItem | null | undefined {
+  ): TSFDCollectionItem<ItemState, ItemPayload> | null | undefined {
     const item = store.state[itemKey];
     if (Object.hasOwn(store.state, itemKey)) return item;
     const hydratedItem = persistence?.readHydratedItem(itemKey);
@@ -1379,7 +1615,10 @@ export function createCollectionStore<
   }
 
   function getItemsKeyArray(
-    params: ItemPayload[] | FilterItemsFn | ItemPayload,
+    params:
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>
+      | ItemPayload,
   ): { itemKey: string; payload: ItemPayload }[] {
     if (Array.isArray(params)) {
       return params.map((p) => ({ itemKey: getItemKey(p), payload: p }));
@@ -1405,9 +1644,12 @@ export function createCollectionStore<
   const invalidationWasTriggered = new Set<string>();
 
   function invalidateItem(
-    itemPayload: ItemPayload | ItemPayload[] | FilterItemsFn,
+    itemPayload:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
     priority: FetchType = 'highPriority',
-  ) {
+  ): void {
     const itemsKey = getItemsKeyArray(itemPayload);
 
     for (const { itemKey } of itemsKey) {
@@ -1447,13 +1689,22 @@ export function createCollectionStore<
 
   function getItemState(
     fetchParam: ItemPayload,
-  ): CollectionItem | undefined | null;
+  ): TSFDCollectionItem<ItemState, ItemPayload> | undefined | null;
   function getItemState(
-    fetchParams: ItemPayload[] | FilterItemsFn,
-  ): CollectionItem[];
+    fetchParams:
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+  ): TSFDCollectionItem<ItemState, ItemPayload>[];
   function getItemState(
-    params: ItemPayload | ItemPayload[] | FilterItemsFn,
-  ): CollectionItem | CollectionItem[] | undefined | null {
+    params:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+  ):
+    | TSFDCollectionItem<ItemState, ItemPayload>
+    | TSFDCollectionItem<ItemState, ItemPayload>[]
+    | undefined
+    | null {
     if (typeof params === 'function') {
       const itemsId = getItemsKeyArray(params);
 
@@ -1576,11 +1827,12 @@ export function createCollectionStore<
     );
   }
 
-  type EndMutation = () => void;
-
   function startMutation(
-    fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
-  ): EndMutation {
+    fetchParams:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+  ): () => void {
     const itemKeys = getItemsKeyArray(fetchParams);
 
     const endMutations: (() => boolean)[] = [];
@@ -1623,8 +1875,11 @@ export function createCollectionStore<
   }
 
   function deleteItemState(
-    fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
-  ) {
+    fetchParams:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
+  ): void {
     const itemKeys = getItemsKeyArray(fetchParams);
 
     store.produceState(
@@ -1643,10 +1898,13 @@ export function createCollectionStore<
   }
 
   function updateItemState(
-    fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
+    fetchParams:
+      | ItemPayload
+      | ItemPayload[]
+      | CollectionFilterItemsFn<ItemState, ItemPayload>,
     produceNewData: (
       draftData: ItemState,
-      collectionItem: CollectionItem,
+      collectionItem: TSFDCollectionItem<ItemState, ItemPayload>,
     ) => void | ItemState,
     { ifNothingWasUpdated }: { ifNothingWasUpdated?: () => void } = {},
   ): boolean {
@@ -1701,49 +1959,10 @@ export function createCollectionStore<
     return someItemWasUpdated;
   }
 
-  type CollectionMutationPayload =
-    | ItemPayload
-    | ItemPayload[]
-    | false
-    | undefined
-    | null;
-  type CollectionMutationPayloadToUse = ItemPayload | ItemPayload[];
   type CollectionMutationRollbackSnapshot = {
     itemKey: string;
     payload: ItemPayload;
     item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
-  };
-
-  type CollectionMutationArgs<T> = {
-    optimisticUpdate?: (
-      payload: CollectionMutationPayloadToUse,
-    ) => void | boolean;
-    mutation: (payload: CollectionMutationPayloadToUse) => Promise<T>;
-    onSuccess?: (
-      response: Awaited<T>,
-      payload: CollectionMutationPayloadToUse,
-    ) => void;
-    revalidateOnSuccess?: boolean;
-    silentErrors?: boolean;
-    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-  };
-
-  type CollectionOnlineMutationArgs<T> = CollectionMutationArgs<T> & {
-    offline?: undefined;
-    upload?: undefined;
-  };
-
-  type CollectionOfflineMutationArgs<T> = CollectionMutationArgs<T> & {
-    /**
-     * When provided, the mutation tries the direct request while the session is
-     * online, but degrades into durable offline queueing when the session is
-     * already offline or the failure is classified as offline/outage. Callers
-     * must not assume a successful result always includes the server payload.
-     */
-    offline: TOfflineOperations extends null
-      ? never
-      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
-    upload?: OfflineMutationUploadsInput;
   };
 
   /**
@@ -1755,8 +1974,8 @@ export function createCollectionStore<
    * configured for this call.
    */
   async function performMutation<T>(
-    payload: CollectionMutationPayload,
-    args: CollectionOnlineMutationArgs<T>,
+    payload: CollectionMutationPayload<ItemPayload>,
+    args: CollectionOnlineMutationArgs<T, ItemPayload>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
   /**
    * Runs a collection mutation that may fall back to durable offline queueing.
@@ -1766,14 +1985,26 @@ export function createCollectionStore<
    * instead of the server payload.
    */
   async function performMutation<T>(
-    payload: CollectionMutationPayload,
-    args: CollectionOfflineMutationArgs<T>,
+    payload: CollectionMutationPayload<ItemPayload>,
+    args: CollectionOfflineMutationArgs<
+      T,
+      ItemState,
+      ItemPayload,
+      TOfflineOperations
+    >,
   ): Promise<
     ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
   >;
   async function performMutation<T>(
-    payload: CollectionMutationPayload,
-    args: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
+    payload: CollectionMutationPayload<ItemPayload>,
+    args:
+      | CollectionOnlineMutationArgs<T, ItemPayload>
+      | CollectionOfflineMutationArgs<
+          T,
+          ItemState,
+          ItemPayload,
+          TOfflineOperations
+        >,
   ): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
@@ -1781,7 +2012,7 @@ export function createCollectionStore<
     >
   >;
   async function performMutation<T>(
-    payload: CollectionMutationPayload,
+    payload: CollectionMutationPayload<ItemPayload>,
     {
       optimisticUpdate,
       mutation,
@@ -1791,14 +2022,21 @@ export function createCollectionStore<
       debounce: _debounce,
       offline,
       upload,
-    }: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
+    }:
+      | CollectionOnlineMutationArgs<T, ItemPayload>
+      | CollectionOfflineMutationArgs<
+          T,
+          ItemState,
+          ItemPayload,
+          TOfflineOperations
+        >,
   ): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
       StoreMutationError | MutationSkipped
     >
   > {
-    const payloadToUse: CollectionMutationPayloadToUse =
+    const payloadToUse: CollectionMutationPayloadToUse<ItemPayload> =
       payload === false || payload == null ? [] : payload;
     const affectedItems = Array.isArray(payloadToUse)
       ? payloadToUse
@@ -2202,40 +2440,46 @@ export function createCollectionStore<
     getItemKey,
     getItemState,
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
-    useOfflineEntities: () => {
-      return useOfflineStoreEntities({
+    useOfflineEntities: () =>
+      useOfflineStoreEntities({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-    },
-    useOfflineResolutions: () => {
-      return useOfflineStoreResolutions({
+      }),
+    useOfflineResolutions: () =>
+      useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-    },
+      }),
     getOfflineResolutions: () =>
       offlineController?.getOfflineResolutions() ?? [],
-    parseOfflineResolutionConflict: <
-      TName extends keyof ResolvedOfflineOperations & string,
-    >(
-      resolution: OfflineResolutionRecordForOperation<
-        ResolvedOfflineOperations,
-        TName
-      >,
-    ): ParsedOfflineResolutionConflictResultForOperation<
-      ResolvedOfflineOperations,
-      TName
-    > =>
-      offlineController?.parseOfflineResolutionConflict(resolution) ??
-      Result.err(
-        new OfflineResolutionConflictParseError({
-          code: 'offline-not-configured',
-          operation: resolution.operation,
-        }),
-      ),
+    parseOfflineResolutionConflict: (resolution) => {
+      if (!offlineController) {
+        return Result.err(
+          new OfflineResolutionConflictParseError({
+            code: 'offline-not-configured',
+            operation: resolution.operation,
+          }),
+        );
+      }
+
+      if (
+        !isOfflineResolutionRecordForStore(
+          resolution,
+          resolvedOfflineOperations,
+        )
+      ) {
+        return Result.err(
+          new OfflineResolutionConflictParseError({
+            code: 'operation-not-found',
+            operation: resolution.operation,
+          }),
+        );
+      }
+
+      return offlineController.parseOfflineResolutionConflict(resolution);
+    },
     resolveOfflineResolution: <
       TName extends keyof ResolvedOfflineOperations & string,
     >(

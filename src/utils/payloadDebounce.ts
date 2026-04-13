@@ -3,7 +3,7 @@ import type { PayloadDebounce } from './storeShared';
 
 export function shouldDebouncePayload(
   debouncePayload: PayloadDebounce | undefined,
-) {
+): boolean {
   return !!debouncePayload && debouncePayload.ms > 0;
 }
 
@@ -24,7 +24,7 @@ export function assertNoEnsureIsLoadedWithDebouncePayload(
   hookName: string,
   ensureIsLoaded: boolean | undefined,
   debouncePayload: PayloadDebounce | undefined,
-) {
+): void {
   if (
     !import.meta.env.PROD &&
     ensureIsLoaded &&

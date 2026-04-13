@@ -1,6 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
+  type AsyncStorageManagedDriverCapabilities,
   createAsyncStorageAdapter,
   estimateManagedAsyncStorageEntrySizeBytes,
 } from './asyncStorageAdapter';
@@ -638,7 +639,20 @@ async function setMaintenanceState(
 }
 
 class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
-  readonly __tsdfManagedStorage = {
+  readonly __tsdfManagedStorage: Required<
+    Pick<
+      AsyncStorageManagedDriverCapabilities,
+      | 'applyManagedCommit'
+      | 'clearManagedNamespace'
+      | 'listManagedKeys'
+      | 'listManagedMetadata'
+      | 'persistNamespaceIndexState'
+      | 'readProtectedStorageKeys'
+      | 'readManagedEntries'
+      | 'readNamespaceIndexState'
+      | 'syncSessionProtectedKeys'
+    >
+  > = {
     applyManagedCommit: this.applyManagedCommit.bind(this),
     clearManagedNamespace: this.clearManagedNamespace.bind(this),
     listManagedKeys: this.listManagedKeys.bind(this),
@@ -654,7 +668,9 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   constructor(
     readonly databaseName: string = DEFAULT_INDEXED_DB_NAME,
-    private readonly instrumentation?: IndexedDbDriverInstrumentation,
+    private readonly instrumentation:
+      | IndexedDbDriverInstrumentation
+      | undefined = undefined,
   ) {}
 
   async get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown> {

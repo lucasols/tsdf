@@ -18,12 +18,6 @@ type PresenceState = {
   lastPresenceAt: number;
 };
 
-type BrowserTabsRemoteLeaseState = {
-  ownerTabId: string;
-  startedAt: number;
-  expiresAt: number;
-};
-
 type BrowserTabsPriorityOptions = {
   transportEnabled: boolean;
   getIsEnabled: () => boolean;
@@ -35,11 +29,47 @@ type BrowserTabsPriorityOptions = {
   timings?: BrowserTabsPriorityTimings;
 };
 
+type BrowserTabsRemoteLeaseState = {
+  ownerTabId: string;
+  startedAt: number;
+  expiresAt: number;
+};
+
+type BrowserTabsPriority = {
+  publishLocalStatus: () => void;
+  noteLocalFocusState: () => void;
+  getPriorityRank: () => number;
+  getCoalescingWindowMs: (baseCoalescingWindowMs: number) => number;
+  onTabStatusMessage: (
+    remoteTabId: string,
+    message: BrowserTabsTabStatusMessage,
+  ) => void;
+  noteRemoteFetchStart: (
+    targetKey: string,
+    remoteTabId: string,
+    startedAt: number,
+    lastFetchDuration: number,
+  ) => BrowserTabsRemoteLeaseState;
+  noteRemoteFetchSuccess: (
+    targetKey: string,
+    remoteTabId: string,
+    startedAt: number,
+    duration: number,
+  ) => void;
+  getRemoteLeaseState: (
+    targetKey: string,
+  ) => BrowserTabsRemoteLeaseState | null;
+  clearRemoteLease: (targetKey: string) => void;
+  reset: () => void;
+  close: () => void;
+};
+
 const DEFAULT_HEARTBEAT_MS = 5_000;
 const DEFAULT_PRESENCE_TTL_MS = 15_000;
 const DEFAULT_FETCH_LEASE_MS = 10_000;
 const COALESCING_WINDOW_STEP_MS = 1_000;
 
+/** @internal */
 export function createBrowserTabsPriority({
   transportEnabled,
   getIsEnabled,
@@ -48,7 +78,7 @@ export function createBrowserTabsPriority({
   onWindowFocusChange,
   publishStatus,
   timings,
-}: BrowserTabsPriorityOptions) {
+}: BrowserTabsPriorityOptions): BrowserTabsPriority {
   const knownTabs = new Map<string, PresenceState>();
   const remoteFetchLeases = new Map<string, BrowserTabsRemoteLeaseState>();
 
@@ -313,7 +343,7 @@ export function createBrowserTabsPriority({
     getRemoteLeaseState,
     clearRemoteLease,
     reset,
-    close() {
+    close(): void {
       cleanupFocusListeners?.();
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);

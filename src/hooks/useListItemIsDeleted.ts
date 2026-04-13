@@ -18,7 +18,7 @@ export function useListItemIsDeleted({
   listIsLoading: boolean;
   /** Called once when the deletion is detected */
   onDelete?: () => void;
-}) {
+}): boolean {
   const [isDeleted, setIsDeleted] = useState<string | undefined>();
 
   useOnChange({ itemExists, itemId }, ({ current, prev }) => {

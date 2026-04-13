@@ -364,10 +364,13 @@ function getQueueOrder(entry: {
     : entry.createdAt;
 }
 
-export const offlineSessionUnavailableError = Object.assign(
-  new Error('Offline session unavailable'),
-  { code: 460, id: 'offline-session-unavailable' as const },
-);
+export const offlineSessionUnavailableError: Error & {
+  code: number;
+  id: 'offline-session-unavailable';
+} = Object.assign(new Error('Offline session unavailable'), {
+  code: 460,
+  id: 'offline-session-unavailable' as const,
+});
 
 function normalizeEntityRefs(entityRefs: OfflineEntityRef[]): string {
   return JSON.stringify(

@@ -58,6 +58,11 @@ type BrowserTabsCoordinator<Message extends { kind: string }> = {
   close: () => void;
 };
 
+type BrowserTabsCoordinatorWithPriority<Message extends { kind: string }> = {
+  coordinator: BrowserTabsCoordinator<Message>;
+  priority: ReturnType<typeof createBrowserTabsPriority>;
+};
+
 const PROTOCOL_VERSION = 1 as const;
 const CHANNEL_PREFIX = 'tsdf-browser-tabs-v1';
 
@@ -100,6 +105,7 @@ function getDefaultTransportFactory(): BrowserTabsTransportFactory {
   };
 }
 
+/** @internal */
 export function createBrowserTabsCoordinator<Message extends { kind: string }>({
   storeType,
   storeKey,
@@ -197,6 +203,7 @@ type BrowserTabsCoordinatorWithPriorityOptions<
   priorityTimings?: BrowserTabsPriorityTimings;
 };
 
+/** @internal */
 export function createBrowserTabsCoordinatorWithPriority<
   Message extends { kind: string },
 >({
@@ -209,7 +216,7 @@ export function createBrowserTabsCoordinatorWithPriority<
   getWindowIsFocused,
   onWindowFocusChange,
   priorityTimings,
-}: BrowserTabsCoordinatorWithPriorityOptions<Message>) {
+}: BrowserTabsCoordinatorWithPriorityOptions<Message>): BrowserTabsCoordinatorWithPriority<Message> {
   const priorityRef: {
     current: ReturnType<typeof createBrowserTabsPriority> | null;
   } = { current: null };

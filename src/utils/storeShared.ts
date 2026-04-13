@@ -31,11 +31,19 @@ export type PayloadDebounce = {
 
 export const DEFAULT_BATCH_KEY = '__default__';
 
-export const invalidPayloadError = {
+export type StoreError = {
+  code: number;
+  id: string;
+  message: string;
+  path?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+};
+
+export const invalidPayloadError: StoreError = {
   code: 461,
   id: 'invalid-payload',
   message: 'Invalid payload',
-} as const;
+};
 
 export const fetchTypePriority: Record<FetchType, number> = {
   lowPriority: 0,
@@ -46,17 +54,7 @@ export const fetchTypePriority: Record<FetchType, number> = {
 
 export type MutationSkipped = { kind: 'skipped' };
 
-export const mutationSkipped = {
-  kind: 'skipped',
-} as const satisfies MutationSkipped;
-
-export type StoreError = {
-  code: number;
-  id: string;
-  message: string;
-  path?: string;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-};
+export const mutationSkipped: MutationSkipped = { kind: 'skipped' };
 
 function getStoreErrorLike(value: unknown): StoreError | null {
   if (

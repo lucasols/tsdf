@@ -128,6 +128,7 @@ type CreateMutationApiOptions<
   onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
 };
 
+/** @internal */
 export function createMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,

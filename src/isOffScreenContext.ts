@@ -1,4 +1,4 @@
-import { createContext } from 'react';
+import { createContext, type Context } from 'react';
 
 /**
  * Context to set `isOffScreen` for all TSDF hooks within a subtree.
@@ -14,4 +14,5 @@ import { createContext } from 'react';
  * </IsOffScreenContext.Provider>
  * ```
  */
-export const IsOffScreenContext = createContext<boolean>(false);
+export const IsOffScreenContext: Context<boolean> =
+  createContext<boolean>(false);

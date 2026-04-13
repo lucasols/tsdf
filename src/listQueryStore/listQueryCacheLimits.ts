@@ -9,6 +9,7 @@ type LiveItemEntry<ItemPayload extends ValidPayload> = {
   itemQuery: TSDFItemQuery<ItemPayload>;
 };
 
+/** @internal */
 export function createListQueryCacheLimits<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,

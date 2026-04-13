@@ -1,9 +1,11 @@
 import { scheduleIdleCleanup } from '../persistentStorage/scheduleIdleCleanup';
 
-export const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
+/** @internal */
+export const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS: number = 60 * 60 * 1000;
 
 type IdleThrottledScheduler = { schedule(): void; cancel(): void };
 
+/** @internal */
 export function createIdleThrottledScheduler({
   throttleMs,
   run,

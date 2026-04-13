@@ -8,7 +8,7 @@ import {
   __LEGIT_CAST__,
   type __LEGIT_ANY__,
 } from '@ls-stack/utils/saferTyping';
-import { evtmitter } from 'evtmitter';
+import { evtmitter, type Emitter } from 'evtmitter';
 import { produce } from 'immer';
 import { klona } from 'klona/json';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
@@ -52,12 +52,14 @@ import {
   offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
 import {
+  isOfflineResolutionRecordForStore,
   OfflineResolutionConflictParseError,
   type AnyOfflineOperationDefinition,
+  type GlobalOfflineEntity,
   type OfflineMutationInput,
   type OfflineResolutionActionForOperation,
-  type OfflineResolutionRecordForOperation,
-  type ParsedOfflineResolutionConflictResultForOperation,
+  type OfflineResolutionRecord,
+  type ParsedOfflineResolutionConflictResultForStore,
 } from './persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from './persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
@@ -79,8 +81,8 @@ import {
 import {
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
-  type StoreManager,
   validateStoreManagerSessionConsistency,
+  type StoreManager,
 } from './storeManager';
 import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import {
@@ -105,14 +107,14 @@ import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
   AbortedStoreError,
   fetchTypePriority,
-  type MutationSkipped,
   NotFoundStoreError,
   StoreFetchError,
   StoreMutationError,
-  toStoreMutationError,
   TimeoutStoreError,
+  toStoreMutationError,
   TSDFStatus,
   ValidStoreState,
+  type MutationSkipped,
   type StoreError,
 } from './utils/storeShared';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
@@ -265,10 +267,146 @@ export type DocumentStoreOptions<
   };
 };
 
+type ResolvedDocumentOfflineOperations<TOfflineOperations> =
+  TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
+
+type DocumentUpdateState<State extends ValidStoreState> = (
+  produceNewData: (draftData: State) => State | void | undefined,
+) => boolean;
+
+type DocumentMutationContext<State extends ValidStoreState> = {
+  updateState: DocumentUpdateState<State>;
+  currentState: State | null;
+};
+
+type DocumentMutationArgsBase<State extends ValidStoreState, T> = {
+  optimisticUpdate?: (currentState: State | null) => void | boolean;
+  mutation: (ctx: DocumentMutationContext<State>) => Promise<T>;
+  debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+  dontShowErrorToast?: boolean;
+  revalidateOnSuccess?: boolean;
+};
+
+type DocumentOnlineMutationArgs<
+  State extends ValidStoreState,
+  T,
+> = DocumentMutationArgsBase<State, T> & {
+  offline?: undefined;
+  upload?: undefined;
+};
+
+type DocumentOfflineMutationArgs<
+  State extends ValidStoreState,
+  T,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
+> = DocumentMutationArgsBase<State, T> & {
+  offline: TOfflineOperations extends null
+    ? never
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  upload?: OfflineMutationUploadsInput;
+};
+
+type DocumentPerformMutation<
+  State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
+> = {
+  <T>(
+    args: DocumentOnlineMutationArgs<State, T>,
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  <T>(
+    args: DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
+  <T>(
+    args:
+      | DocumentOnlineMutationArgs<State, T>
+      | DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
+  ): Promise<
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
+};
+
 export type DocumentStore<
   State extends ValidStoreState,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
-> = ReturnType<typeof createDocumentStore<State, TOfflineOperations>>;
+> = {
+  store: Store<DocumentStoreState<State>>;
+  events: Emitter<DocumentStoreEvents>;
+  storeEvents: Emitter<DocumentStoreStoreEvents>;
+  readonly invalidationWasTriggered: boolean;
+  scheduleFetch: (
+    fetchType: FetchType,
+    options?: ScheduleFetchOptions,
+  ) => ScheduleFetchResults;
+  awaitFetch: (options?: {
+    timeoutMs?: number;
+  }) => Promise<
+    { data: State; error: null } | { data: null; error: StoreFetchError }
+  >;
+  preloadPersistentStorage: () => Promise<void>;
+  invalidateData: (priority?: FetchType) => void;
+  updateState: DocumentUpdateState<State>;
+  reset: () => void;
+  dispose: () => void;
+  startMutation: () => () => boolean;
+  getOfflineEntities: () => GlobalOfflineEntity[];
+  useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  getOfflineResolutions: () => OfflineResolutionRecord[];
+  parseOfflineResolutionConflict: (
+    resolution: OfflineResolutionRecord,
+  ) => ParsedOfflineResolutionConflictResultForStore<
+    ResolvedDocumentOfflineOperations<TOfflineOperations>
+  >;
+  resolveOfflineResolution: <
+    TName extends keyof ResolvedDocumentOfflineOperations<TOfflineOperations> &
+      string,
+  >(
+    resolutionId: string,
+    operationName: TName,
+    resolution: OfflineResolutionActionForOperation<
+      ResolvedDocumentOfflineOperations<TOfflineOperations>,
+      TName
+    >,
+  ) => Promise<void> | void;
+  useDocument: <Selected = State | null>(args?: {
+    selector?: (data: State | null) => Selected;
+    disabled?: boolean;
+    isOffScreen?: boolean;
+    disableRefetches?: boolean;
+    disableRefetchOnMount?: boolean;
+    returnIdleStatus?: boolean;
+    ensureIsLoaded?: boolean;
+    returnRefetchingStatus?: boolean;
+  }) => TSDFUseDocumentReturn<Selected>;
+  useListItemIsLoading: (args: {
+    itemId: string;
+    selector: (data: State | null) => unknown;
+    loadItemFallback?: () => void;
+    ensureIsLoaded?: boolean;
+  }) => boolean;
+  useListItemIsDeleted: (args: {
+    itemId: string;
+    selector: (data: State | null) => unknown;
+    onDelete?: () => void;
+    ensureIsLoaded?: boolean;
+  }) => boolean;
+  useListItem: <Selected>(args: {
+    itemId: string;
+    selector: (data: State | null) => Selected;
+    loadItemFallback?: () => void;
+    onDelete?: () => void;
+    ensureIsLoaded?: boolean;
+  }) => { isLoading: boolean; isDeleted: boolean; data: Selected };
+  performMutation: DocumentPerformMutation<State, TOfflineOperations>;
+  onTransportReconnect: () => void;
+};
 
 // Constant requestId for document store (single-item mode)
 const DOC_REQUEST_ID = '_doc';
@@ -295,7 +433,11 @@ export function createDocumentStore<
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: DocumentStoreOptions<State, TOfflineOperations, StorageState>) {
+}: DocumentStoreOptions<
+  State,
+  TOfflineOperations,
+  StorageState
+>): DocumentStore<State, TOfflineOperations> {
   let invalidationWasTriggered = false;
   type ResolvedOfflineOperations = TOfflineOperations extends null
     ? Record<never, never>
@@ -984,35 +1126,6 @@ export function createDocumentStore<
     return scheduler.startMutation(DOC_REQUEST_ID);
   }
 
-  type DocumentMutationArgs<T> = {
-    optimisticUpdate?: (currentState: State | null) => void | boolean;
-    mutation: (ctx: {
-      updateState: typeof updateState;
-      currentState: State | null;
-    }) => Promise<T>;
-    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-    dontShowErrorToast?: boolean;
-    revalidateOnSuccess?: boolean;
-  };
-
-  type DocumentOnlineMutationArgs<T> = DocumentMutationArgs<T> & {
-    offline?: undefined;
-    upload?: undefined;
-  };
-
-  type DocumentOfflineMutationArgs<T> = DocumentMutationArgs<T> & {
-    /**
-     * When provided, the mutation tries the direct request while the session is
-     * online, but degrades into durable offline queueing when the session is
-     * already offline or the failure is classified as offline/outage. Callers
-     * must not assume a successful result always includes the server payload.
-     */
-    offline: TOfflineOperations extends null
-      ? never
-      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
-    upload?: OfflineMutationUploadsInput;
-  };
-
   /**
    * Runs a document mutation with optional optimistic updates and revalidation.
    *
@@ -1020,7 +1133,7 @@ export function createDocumentStore<
    * this call.
    */
   async function performMutation<T>(
-    args: DocumentOnlineMutationArgs<T>,
+    args: DocumentOnlineMutationArgs<State, T>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
   /**
    * Runs a document mutation that may fall back to durable offline queueing.
@@ -1030,12 +1143,14 @@ export function createDocumentStore<
    * working while offline or during classified outages.
    */
   async function performMutation<T>(
-    args: DocumentOfflineMutationArgs<T>,
+    args: DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
     ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
   >;
   async function performMutation<T>(
-    args: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>,
+    args:
+      | DocumentOnlineMutationArgs<State, T>
+      | DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
@@ -1050,7 +1165,9 @@ export function createDocumentStore<
     revalidateOnSuccess,
     offline,
     upload,
-  }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
+  }:
+    | DocumentOnlineMutationArgs<State, T>
+    | DocumentOfflineMutationArgs<State, T, TOfflineOperations>): Promise<
     ResultType<
       Awaited<T> | OfflineMutationResult<T>,
       StoreMutationError | MutationSkipped
@@ -1439,40 +1556,46 @@ export function createDocumentStore<
     dispose,
     startMutation,
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
-    useOfflineEntities: () => {
-      return useOfflineStoreEntities({
+    useOfflineEntities: () =>
+      useOfflineStoreEntities({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-    },
-    useOfflineResolutions: () => {
-      return useOfflineStoreResolutions({
+      }),
+    useOfflineResolutions: () =>
+      useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-    },
+      }),
     getOfflineResolutions: () =>
       offlineController?.getOfflineResolutions() ?? [],
-    parseOfflineResolutionConflict: <
-      TName extends keyof ResolvedOfflineOperations & string,
-    >(
-      resolution: OfflineResolutionRecordForOperation<
-        ResolvedOfflineOperations,
-        TName
-      >,
-    ): ParsedOfflineResolutionConflictResultForOperation<
-      ResolvedOfflineOperations,
-      TName
-    > =>
-      offlineController?.parseOfflineResolutionConflict(resolution) ??
-      Result.err(
-        new OfflineResolutionConflictParseError({
-          code: 'offline-not-configured',
-          operation: resolution.operation,
-        }),
-      ),
+    parseOfflineResolutionConflict: (resolution) => {
+      if (!offlineController) {
+        return Result.err(
+          new OfflineResolutionConflictParseError({
+            code: 'offline-not-configured',
+            operation: resolution.operation,
+          }),
+        );
+      }
+
+      if (
+        !isOfflineResolutionRecordForStore(
+          resolution,
+          resolvedOfflineOperations,
+        )
+      ) {
+        return Result.err(
+          new OfflineResolutionConflictParseError({
+            code: 'operation-not-found',
+            operation: resolution.operation,
+          }),
+        );
+      }
+
+      return offlineController.parseOfflineResolutionConflict(resolution);
+    },
     resolveOfflineResolution: <
       TName extends keyof ResolvedOfflineOperations & string,
     >(

@@ -45,11 +45,11 @@ import type {
 } from './types';
 import { parseAsyncStorageNamespaceKind } from './types';
 
-export const ASYNC_STORAGE_COMMIT_DEBOUNCE_MS = 40;
-export const ASYNC_STORAGE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+export const ASYNC_STORAGE_COMMIT_DEBOUNCE_MS: number = 40;
+export const ASYNC_STORAGE_MAX_AGE_MS: number = 14 * 24 * 60 * 60 * 1000;
 const ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const ASYNC_STORAGE_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
-export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g';
+export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g' as const;
 const ASYNC_STORAGE_WRITER_LOCK_NAME_PREFIX = 'tsdf-async-write:';
 const ASYNC_STORAGE_WRITER_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; async persistentStorage is using unlocked writer coordination.';
@@ -433,7 +433,8 @@ type AsyncStorageManagedMetadataListArgs = {
   order?: AsyncStorageMetadataOrder;
 };
 
-type AsyncStorageManagedDriverCapabilities = {
+/** @internal */
+export type AsyncStorageManagedDriverCapabilities = {
   applyManagedCommit?: (
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,

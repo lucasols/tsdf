@@ -7,6 +7,7 @@ import type {
   TSFDCollectionState,
 } from './collectionStore';
 
+/** @internal */
 export function createCollectionCacheLimits<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,

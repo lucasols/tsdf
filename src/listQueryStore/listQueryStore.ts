@@ -5,10 +5,10 @@ import {
 import { notNullish } from '@ls-stack/utils/assertions';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { evtmitter } from 'evtmitter';
+import { evtmitter, type Emitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { useCallback } from 'react';
-import { Result } from 't-result';
+import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
 import {
@@ -24,15 +24,16 @@ import type {
   TestSessionKeyChangedEvent,
 } from '../internal/testTimelineTypes';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
+import type { OfflineMutationResult } from '../persistentStorage/offline/mutationRuntime';
 import {
   captureOfflineOverlayEntries,
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
-  useOfflineStoreStatus,
   useOfflineStoreEntities,
   useOfflineStoreEntitiesWithPayload,
   useOfflineStoreResolutions,
+  useOfflineStoreStatus,
 } from '../persistentStorage/offline/sessionCoordinator';
 import {
   createOfflineStoreController,
@@ -40,12 +41,14 @@ import {
   type OfflineStoreController,
 } from '../persistentStorage/offline/storeController';
 import {
+  isOfflineResolutionRecordForStore,
   offlineItemEntityRefSchema,
   OfflineResolutionConflictParseError,
+  type GlobalOfflineEntity,
   type OfflineMutationInput,
-  type ParsedOfflineResolutionConflictResultForOperation,
-  type OfflineResolutionRecordForOperation,
   type OfflineResolutionActionForOperation,
+  type OfflineResolutionRecord,
+  type ParsedOfflineResolutionConflictResultForStore,
 } from '../persistentStorage/offline/types';
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import {
@@ -68,8 +71,8 @@ import {
 import {
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
-  type StoreManager,
   validateStoreManagerSessionConsistency,
+  type StoreManager,
 } from '../storeManager';
 import {
   createBrowserTabsPriority,
@@ -91,8 +94,10 @@ import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
   StoreFetchError,
+  StoreMutationError,
   ValidPayload,
   ValidStoreState,
+  type MutationSkipped,
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
@@ -147,27 +152,558 @@ export type ListQueryStoreEvents = {
   };
 };
 
+type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
+  mutationStart: { mutationId: number; items: ItemPayload[] };
+  mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
+  tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
+};
+
+type ResolvedListQueryOfflineOperations<TOfflineOperations> =
+  TOfflineOperations extends null
+    ? Record<never, never>
+    : Exclude<TOfflineOperations, null>;
+
+type ListQueryHasPartialResources<TPartialResources extends boolean> = [
+  TPartialResources,
+] extends [true]
+  ? true
+  : false;
+
+type ListQueryFetchFieldsOption<TPartialResources extends boolean> =
+  ListQueryHasPartialResources<TPartialResources> extends true
+    ? { fields: FieldsInput }
+    : { fields?: FieldsInput };
+
+type ListQueryScheduleFetchWithFieldsOption<TPartialResources extends boolean> =
+  ScheduleFetchOptions & ListQueryFetchFieldsOption<TPartialResources>;
+
+type ListQueryScheduleListQueryFetchApi<
+  QueryPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = {
+  (
+    fetchType: FetchType,
+    payload: QueryPayload,
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [
+          size: number | undefined,
+          options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
+      : [
+          size?: number,
+          options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
+  ): ScheduleFetchResults;
+  (
+    fetchType: FetchType,
+    payload: QueryPayload[],
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [
+          size: number | undefined,
+          options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
+      : [
+          size?: number,
+          options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
+  ): ScheduleFetchResults[];
+};
+
+type ListQueryScheduleItemFetchApi<
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = {
+  (
+    fetchType: FetchType,
+    itemPayload: ItemPayload,
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
+      : [options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
+  ): ScheduleFetchResults;
+  (
+    fetchType: FetchType,
+    itemPayload: ItemPayload[],
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
+      : [options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
+  ): ScheduleFetchResults[];
+};
+
+type ListQueryLoadMoreWithFieldsOptions<TPartialResources extends boolean> = {
+  size?: number;
+} & ListQueryFetchFieldsOption<TPartialResources>;
+
+type ListQueryLoadMoreApi<
+  QueryPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = (
+  params: QueryPayload,
+  ...args: ListQueryHasPartialResources<TPartialResources> extends true
+    ?
+        | [size: number, options: ListQueryFetchFieldsOption<TPartialResources>]
+        | [options: ListQueryLoadMoreWithFieldsOptions<TPartialResources>]
+    :
+        | [
+            size?: number,
+            options?: ListQueryFetchFieldsOption<TPartialResources>,
+          ]
+        | [options?: ListQueryLoadMoreWithFieldsOptions<TPartialResources>]
+) => ScheduleFetchResults;
+
+type ListQueryAwaitListQueryFetchOptions<TPartialResources extends boolean> = {
+  size?: number;
+  timeoutMs?: number;
+} & ListQueryFetchFieldsOption<TPartialResources>;
+
+type ListQueryAwaitListQueryFetchApi<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = (
+  params: QueryPayload,
+  ...args: ListQueryHasPartialResources<TPartialResources> extends true
+    ? [options: ListQueryAwaitListQueryFetchOptions<TPartialResources>]
+    : [options?: ListQueryAwaitListQueryFetchOptions<TPartialResources>]
+) => Promise<
+  | { items: []; error: StoreFetchError; hasMore: boolean }
+  | {
+      items: { data: ItemState; itemPayload: ItemPayload }[];
+      error: null;
+      hasMore: boolean;
+    }
+>;
+
+type ListQueryAwaitItemFetchOptions<TPartialResources extends boolean> = {
+  timeoutMs?: number;
+} & ListQueryFetchFieldsOption<TPartialResources>;
+
+type ListQueryAwaitItemFetchApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = (
+  itemPayload: ItemPayload,
+  ...args: ListQueryHasPartialResources<TPartialResources> extends true
+    ? [options: ListQueryAwaitItemFetchOptions<TPartialResources>]
+    : [options?: ListQueryAwaitItemFetchOptions<TPartialResources>]
+) => Promise<
+  { data: null; error: StoreFetchError } | { data: ItemState; error: null }
+>;
+
+type ListQueryUseMultipleListQueriesApi<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = {
+  <
+    SelectedItem = ItemState,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    queries: (ListQueryUseMultipleListQueriesQuery<
+      QueryPayload,
+      QueryMetadata
+    > &
+      FieldsOption<ListQueryHasPartialResources<TPartialResources>>)[],
+    options?: UseMultipleListQueriesOptions<
+      ItemState,
+      ItemPayload,
+      SelectedItem
+    >,
+  ): readonly TSFDUseListQueryReturn<
+    SelectedItem,
+    QueryPayload,
+    QueryMetadata
+  >[];
+  <S = ItemState>(
+    queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
+    options: UseMultipleListQueriesOptions<ItemState, ItemPayload, S>,
+  ): readonly TSFDUseListQueryReturn<S, QueryPayload, undefined>[];
+};
+
+type ListQueryUseListQueryApi<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = {
+  <SelectedItem = ItemState>(
+    payload: QueryPayload | false | null | undefined,
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [
+          options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> & {
+            fields: FieldsInput;
+          },
+        ]
+      : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
+  ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
+};
+
+type ListQueryUseMultipleItemsApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = {
+  <
+    Selected = ItemState | null,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
+      FieldsOption<ListQueryHasPartialResources<TPartialResources>>)[],
+    options?: UseMultipleItemsOptions<ItemState, Selected>,
+  ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[];
+  <S = ItemState | null>(
+    items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
+    options: UseMultipleItemsOptions<ItemState, S>,
+  ): readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[];
+};
+
+type ListQueryUseItemApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = {
+  <Selected = ItemState | null>(
+    itemPayload: ItemPayload | false | null | undefined,
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [options: UseItemOptions<ItemState, Selected> & { fields: FieldsInput }]
+      : [options?: UseItemOptions<ItemState, Selected>]
+  ): TSFDUseListItemReturn<Selected, ItemPayload>;
+};
+
+type ListQueryUsePendingOfflineItemsApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = {
+  <SelectedItem = ItemState>(
+    options?: UsePendingOfflineItemsOptions<
+      ItemState,
+      ItemPayload,
+      SelectedItem
+    >,
+  ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload>;
+};
+
+type ListQueryFilterQuery<QueryPayload extends ValidPayload> = (
+  params: QueryPayload,
+  data: TSFDListQuery<QueryPayload>,
+  queryKey: string,
+) => boolean;
+
+type ListQueryRevalidateOnSuccessOption<QueryPayload extends ValidPayload> =
+  | boolean
+  | 'queries'
+  | ListQueryFilterQuery<QueryPayload>
+  | { queries: ListQueryFilterQuery<QueryPayload>; items?: boolean };
+
+type ListQueryFilterItem<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (itemPayload: ItemPayload, itemState: ItemState) => boolean;
+
+type ListQueryMutationPayload<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> =
+  | ItemPayload
+  | ItemPayload[]
+  | ListQueryFilterItem<ItemState, ItemPayload>
+  | false
+  | undefined
+  | null;
+
+type ListQueryMutationPayloadToUse<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = ItemPayload | ItemPayload[] | ListQueryFilterItem<ItemState, ItemPayload>;
+
+type ListQueryMutationArgsBase<
+  T,
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = {
+  optimisticUpdate?: (
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
+  ) => void | boolean;
+  mutation: (
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
+  ) => Promise<T>;
+  revalidateOnSuccess?: ListQueryRevalidateOnSuccessOption<QueryPayload>;
+  onSuccess?: (
+    response: Awaited<T>,
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
+  ) => void;
+  onError?: (error: StoreMutationError | MutationSkipped) => void;
+  silentErrors?: boolean;
+  debounce?: { context: string; payload: unknown; ms: number };
+};
+
+type ListQueryOnlineMutationArgs<
+  T,
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+  offline?: undefined;
+  upload?: undefined;
+};
+
+type ListQueryOfflineMutationArgs<
+  T,
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
+> = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+  offline: TOfflineOperations extends null
+    ? never
+    : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  upload?: OfflineMutationUploadsInput;
+};
+
+type ListQueryPerformMutationApi<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
+> = {
+  <T>(
+    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    args: ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  <T>(
+    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    args: ListQueryOfflineMutationArgs<
+      T,
+      ItemState,
+      QueryPayload,
+      ItemPayload,
+      TOfflineOperations
+    >,
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
+  <T>(
+    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    args:
+      | ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>
+      | ListQueryOfflineMutationArgs<
+          T,
+          ItemState,
+          QueryPayload,
+          ItemPayload,
+          TOfflineOperations
+        >,
+  ): Promise<
+    ResultType<
+      Awaited<T> | OfflineMutationResult<T>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
+};
+
+type ListQueryUpdateItemStateApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (
+  itemIds:
+    | ItemPayload
+    | ItemPayload[]
+    | ListQueryFilterItem<ItemState, ItemPayload>,
+  produceNewData: (
+    draftData: ItemState,
+    itemPayload: ItemPayload,
+  ) => void | ItemState,
+  options?: { ifNothingWasUpdated?: () => void },
+) => boolean;
+
+type ListQueryAddItemToStateApi<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = (
+  itemPayload: ItemPayload,
+  data: ItemState,
+  options?: {
+    addItemToQueries?: {
+      queries:
+        | QueryPayload[]
+        | ListQueryFilterQuery<QueryPayload>
+        | QueryPayload;
+      appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
+    };
+  },
+) => void;
+
+type ListQueryDeleteItemStateApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (
+  itemId:
+    | ItemPayload
+    | ItemPayload[]
+    | ListQueryFilterItem<ItemState, ItemPayload>,
+) => void;
+
 export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
-  TOffsetPagination extends boolean = false,
   TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
   > = null,
-> = ReturnType<
-  typeof createListQueryStore<
+> = {
+  store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
+  events: Emitter<ListQueryStoreEvents>;
+  storeEvents: Emitter<ListQueryStoreStoreEvents<ItemPayload>>;
+  readonly queryInvalidationWasTriggered: Set<string>;
+  readonly itemInvalidationWasTriggered: Set<string>;
+  reset: () => void;
+  dispose: () => void;
+  scheduleListQueryFetch: ListQueryScheduleListQueryFetchApi<
+    QueryPayload,
+    TPartialResources
+  >;
+  getQueryState: (
+    params: QueryPayload,
+  ) => TSFDListQuery<QueryPayload> | undefined;
+  getQueryKey: (params: QueryPayload) => string;
+  getQueriesState: (
+    params: QueryPayload[] | ListQueryFilterQuery<QueryPayload>,
+  ) => { query: TSFDListQuery<QueryPayload>; key: string }[];
+  getQueriesRelatedToItem: (
+    itemPayload: ItemPayload,
+  ) => { query: TSFDListQuery<QueryPayload>; key: string }[];
+  awaitListQueryFetch: ListQueryAwaitListQueryFetchApi<
     ItemState,
     QueryPayload,
     ItemPayload,
-    TPartialResources,
-    TOffsetPagination,
+    TPartialResources
+  >;
+  preloadQueryFromStorage: (
+    params: QueryPayload | QueryPayload[],
+  ) => Promise<PersistentStoragePreloadResult<QueryPayload>[]>;
+  loadMore: ListQueryLoadMoreApi<QueryPayload, TPartialResources>;
+  getItemKey: (params: ItemPayload) => string;
+  getItemState: {
+    (itemPayload: ItemPayload): ItemState | null | undefined;
+    (
+      itemPayload: ItemPayload[] | ListQueryFilterItem<ItemState, ItemPayload>,
+    ): { payload: ItemPayload; data: ItemState }[];
+  };
+  usePendingOfflineItems: ListQueryUsePendingOfflineItemsApi<
+    ItemState,
+    ItemPayload
+  >;
+  getOfflineEntities: () => GlobalOfflineEntity[];
+  useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  getOfflineResolutions: () => OfflineResolutionRecord[];
+  parseOfflineResolutionConflict: (
+    resolution: OfflineResolutionRecord,
+  ) => ParsedOfflineResolutionConflictResultForStore<
+    ResolvedListQueryOfflineOperations<TOfflineOperations>
+  >;
+  resolveOfflineResolution: <
+    TName extends keyof ResolvedListQueryOfflineOperations<TOfflineOperations> &
+      string,
+  >(
+    resolutionId: string,
+    operationName: TName,
+    resolution: OfflineResolutionActionForOperation<
+      ResolvedListQueryOfflineOperations<TOfflineOperations>,
+      TName
+    >,
+  ) => Promise<void> | void;
+  preloadItemFromStorage: (
+    params: ItemPayload | ItemPayload[],
+  ) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>;
+  scheduleItemFetch: ListQueryScheduleItemFetchApi<
+    ItemPayload,
+    TPartialResources
+  >;
+  awaitItemFetch: ListQueryAwaitItemFetchApi<
+    ItemState,
+    ItemPayload,
+    TPartialResources
+  >;
+  invalidateQueryAndItems: (args: {
+    itemPayload:
+      | ItemPayload
+      | ItemPayload[]
+      | ListQueryFilterItem<ItemState, ItemPayload>
+      | false;
+    queryPayload:
+      | QueryPayload
+      | QueryPayload[]
+      | ListQueryFilterQuery<QueryPayload>
+      | false;
+    type?: FetchType;
+    fields?: string[];
+  }) => void;
+  invalidateItem: (
+    itemId:
+      | ItemPayload
+      | ItemPayload[]
+      | ListQueryFilterItem<ItemState, ItemPayload>,
+    priority?: FetchType,
+  ) => void;
+  startItemMutation: (
+    itemId:
+      | ItemPayload
+      | ItemPayload[]
+      | ListQueryFilterItem<ItemState, ItemPayload>,
+  ) => () => void;
+  updateItemState: ListQueryUpdateItemStateApi<ItemState, ItemPayload>;
+  addItemToState: ListQueryAddItemToStateApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >;
+  deleteItemState: ListQueryDeleteItemStateApi<ItemState, ItemPayload>;
+  performMutation: ListQueryPerformMutationApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
     TOfflineOperations
-  >
->;
+  >;
+  useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  >;
+  useListQuery: ListQueryUseListQueryApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  >;
+  useMultipleItems: ListQueryUseMultipleItemsApi<
+    ItemState,
+    ItemPayload,
+    TPartialResources
+  >;
+  useItem: ListQueryUseItemApi<ItemState, ItemPayload, TPartialResources>;
+  useFindItem: <SelectedItem = ItemState | null>(
+    findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
+    options?: { selector?: (data: ItemState, id: ItemPayload) => SelectedItem },
+  ) => SelectedItem | null;
+  onTransportReconnect: () => void;
+};
 
 export type ListQueryStateCleanup<
   QueryPayload extends ValidPayload,
@@ -414,7 +950,13 @@ export function createListQueryStore<
     TOfflineOperations,
     StorageState
   >,
-) {
+): ListQueryStore<
+  ItemState,
+  QueryPayload,
+  ItemPayload,
+  TPartialResources,
+  TOfflineOperations
+> {
   const {
     debugName,
     id,
@@ -460,7 +1002,6 @@ export function createListQueryStore<
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
 
-  type HasPR = [TPartialResources] extends [true] ? true : false;
   const offsetPagination: OffsetPaginationConfig | undefined =
     storeOptions.offsetPagination;
 
@@ -478,16 +1019,6 @@ export function createListQueryStore<
         fetchOptions: { signal: AbortSignal; fields?: string[] },
       ) => storeOptions.fetchListFn(payload, limit, fetchOptions);
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
-  type FetchFieldsOption = HasPR extends true
-    ? { fields: FieldsInput }
-    : { fields?: FieldsInput };
-  type ScheduleFetchWithFieldsOption = ScheduleFetchOptions & FetchFieldsOption;
-  type AwaitListQueryFetchOptions = {
-    size?: number;
-    timeoutMs?: number;
-  } & FetchFieldsOption;
-  type AwaitItemFetchOptions = { timeoutMs?: number } & FetchFieldsOption;
-  type LoadMoreWithFieldsOptions = { size?: number } & FetchFieldsOption;
 
   function normalizeFieldsOption(
     fields: FieldsInput | undefined,
@@ -500,125 +1031,6 @@ export function createListQueryStore<
 
     return fields;
   }
-
-  type ScheduleListQueryFetchApi = {
-    (
-      fetchType: FetchType,
-      payload: QueryPayload,
-      ...args: HasPR extends true
-        ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
-        : [size?: number, options?: ScheduleFetchWithFieldsOption]
-    ): ScheduleFetchResults;
-    (
-      fetchType: FetchType,
-      payload: QueryPayload[],
-      ...args: HasPR extends true
-        ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
-        : [size?: number, options?: ScheduleFetchWithFieldsOption]
-    ): ScheduleFetchResults[];
-  };
-
-  type ScheduleItemFetchApi = {
-    (
-      fetchType: FetchType,
-      itemPayload: ItemPayload,
-      ...args: HasPR extends true
-        ? [options: ScheduleFetchWithFieldsOption]
-        : [options?: ScheduleFetchWithFieldsOption]
-    ): ScheduleFetchResults;
-    (
-      fetchType: FetchType,
-      itemPayload: ItemPayload[],
-      ...args: HasPR extends true
-        ? [options: ScheduleFetchWithFieldsOption]
-        : [options?: ScheduleFetchWithFieldsOption]
-    ): ScheduleFetchResults[];
-  };
-
-  type LoadMoreApi = (
-    params: QueryPayload,
-    ...args: HasPR extends true
-      ?
-          | [size: number, options: FetchFieldsOption]
-          | [options: LoadMoreWithFieldsOptions]
-      :
-          | [size?: number, options?: FetchFieldsOption]
-          | [options?: LoadMoreWithFieldsOptions]
-  ) => ScheduleFetchResults;
-
-  type AwaitListQueryFetchApi = (
-    params: QueryPayload,
-    ...args: HasPR extends true
-      ? [options: AwaitListQueryFetchOptions]
-      : [options?: AwaitListQueryFetchOptions]
-  ) => Promise<
-    | { items: []; error: StoreFetchError; hasMore: boolean }
-    | {
-        items: { data: ItemState; itemPayload: ItemPayload }[];
-        error: null;
-        hasMore: boolean;
-      }
-  >;
-
-  type AwaitItemFetchApi = (
-    itemPayload: ItemPayload,
-    ...args: HasPR extends true
-      ? [options: AwaitItemFetchOptions]
-      : [options?: AwaitItemFetchOptions]
-  ) => Promise<
-    { data: null; error: StoreFetchError } | { data: ItemState; error: null }
-  >;
-
-  type UseMultipleListQueriesApi = {
-    <
-      SelectedItem = ItemState,
-      QueryMetadata extends undefined | Record<string, unknown> = undefined,
-    >(
-      queries: (ListQueryUseMultipleListQueriesQuery<
-        QueryPayload,
-        QueryMetadata
-      > &
-        FieldsOption<HasPR>)[],
-      options?: UseMultipleListQueriesOptions<
-        ItemState,
-        ItemPayload,
-        SelectedItem
-      >,
-    ): readonly TSFDUseListQueryReturn<
-      SelectedItem,
-      QueryPayload,
-      QueryMetadata
-    >[];
-    <S = ItemState>(
-      queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
-      options: UseMultipleListQueriesOptions<ItemState, ItemPayload, S>,
-    ): readonly TSFDUseListQueryReturn<S, QueryPayload, undefined>[];
-  };
-
-  type UseMultipleItemsApi = {
-    <
-      Selected = ItemState | null,
-      QueryMetadata extends undefined | Record<string, unknown> = undefined,
-    >(
-      items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
-        FieldsOption<HasPR>)[],
-      options?: UseMultipleItemsOptions<ItemState, Selected>,
-    ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[];
-    <S = ItemState | null>(
-      items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
-      options: UseMultipleItemsOptions<ItemState, S>,
-    ): readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[];
-  };
-
-  type UsePendingOfflineItemsApi = {
-    <SelectedItem = ItemState>(
-      options?: UsePendingOfflineItemsOptions<
-        ItemState,
-        ItemPayload,
-        SelectedItem
-      >,
-    ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload>;
-  };
 
   const resolvedOfflineSession = resolveStoreManagerOfflineSession({
     storeManager,
@@ -1899,103 +2311,102 @@ export function createListQueryStore<
         testOptions?.browserTabsLeadershipTimings,
     }));
 
-  const useMultipleListQueries: UseMultipleListQueriesApi =
-    function useMultipleListQueries<
-      SelectedItem = ItemState,
-      QueryMetadata extends undefined | Record<string, unknown> = undefined,
-    >(
-      queries: ListQueryUseMultipleListQueriesQuery<
-        QueryPayload,
-        QueryMetadata
-      >[],
-      options: UseMultipleListQueriesOptions<
-        ItemState,
-        ItemPayload,
-        SelectedItem
-      > = {},
-    ): readonly TSFDUseListQueryReturn<
-      SelectedItem,
+  const useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  > = function useMultipleListQueries<
+    SelectedItem = ItemState,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    queries: ListQueryUseMultipleListQueriesQuery<
       QueryPayload,
       QueryMetadata
-    >[] {
-      const offlineEntities = useOfflineStoreEntities({
-        sessionKey: getSessionKeyForRuntime(),
-        inactiveScope: id,
-        storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-      const offlineStatus = useOfflineStoreStatus({
-        sessionKey: getSessionKeyForRuntime(),
-        inactiveScope: id,
-      });
-      const isStoreOfflineMode =
-        offlineStatus.isOfflineMode ||
-        isOfflineNetworkModeActiveSync(
-          resolvedOfflineConfig?.session.getConfig().network,
-        );
-      const offlineOverlaysSelector = useCallback(
-        (
-          state: Record<
-            string,
-            ListQueryOfflineOverlay<ItemState, ItemPayload>
-          >,
-        ) => {
-          return state;
-        },
-        [],
+    >[],
+    options: UseMultipleListQueriesOptions<
+      ItemState,
+      ItemPayload,
+      SelectedItem
+    > = {},
+  ): readonly TSFDUseListQueryReturn<
+    SelectedItem,
+    QueryPayload,
+    QueryMetadata
+  >[] {
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKeyForRuntime(),
+      inactiveScope: id,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
+    });
+    const offlineStatus = useOfflineStoreStatus({
+      sessionKey: getSessionKeyForRuntime(),
+      inactiveScope: id,
+    });
+    const isStoreOfflineMode =
+      offlineStatus.isOfflineMode ||
+      isOfflineNetworkModeActiveSync(
+        resolvedOfflineConfig?.session.getConfig().network,
       );
-      const offlineOverlays = offlineOverlayStore.useSelectorRC(
-        offlineOverlaysSelector,
-      );
+    const offlineOverlaysSelector = useCallback(
+      (
+        state: Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>,
+      ) => {
+        return state;
+      },
+      [],
+    );
+    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+      offlineOverlaysSelector,
+    );
 
-      return useMultipleListQueriesHook<
-        ItemState,
-        QueryPayload,
-        ItemPayload,
-        SelectedItem,
-        QueryMetadata
-      >(
-        queries,
-        options,
-        store,
-        events,
-        getQueryKey,
-        registerActiveQueryRefs,
-        touchQueries,
-        getQueryState,
-        persistence?.readHydratedQuery,
-        persistence
-          ? (payloads) =>
-              persistence.maybeHydrateQueries(
-                payloads.map((payload) => getQueryKey(payload)),
-              )
-          : undefined,
-        !!persistence && !persistence.hasAsyncPreload,
-        persistence && derivedQueries
-          ? (payloads) =>
-              persistence.preloadItemsByDerivedQueryGroup(
-                payloads.map((payload) =>
-                  derivedQueries.getQueryGroup(payload),
-                ),
-              )
-          : undefined,
-        persistence?.readHydratedItem,
-        scheduleAutomaticListQueryFetch,
-        queryInvalidationWasTriggered,
-        itemFieldInvalidationPriorities,
-        itemPendingInvalidationFields,
-        globalDisableRefetchOnMount,
-        partialResources,
-        derivedQueries,
-        isStoreOfflineMode,
-        offlineEntities,
-        offlineOverlays,
-      );
-    };
+    return useMultipleListQueriesHook<
+      ItemState,
+      QueryPayload,
+      ItemPayload,
+      SelectedItem,
+      QueryMetadata
+    >(
+      queries,
+      options,
+      store,
+      events,
+      getQueryKey,
+      registerActiveQueryRefs,
+      touchQueries,
+      getQueryState,
+      persistence?.readHydratedQuery,
+      persistence
+        ? (payloads) =>
+            persistence.maybeHydrateQueries(
+              payloads.map((payload) => getQueryKey(payload)),
+            )
+        : undefined,
+      !!persistence && !persistence.hasAsyncPreload,
+      persistence && derivedQueries
+        ? (payloads) =>
+            persistence.preloadItemsByDerivedQueryGroup(
+              payloads.map((payload) => derivedQueries.getQueryGroup(payload)),
+            )
+        : undefined,
+      persistence?.readHydratedItem,
+      scheduleAutomaticListQueryFetch,
+      queryInvalidationWasTriggered,
+      itemFieldInvalidationPriorities,
+      itemPendingInvalidationFields,
+      globalDisableRefetchOnMount,
+      partialResources,
+      derivedQueries,
+      isStoreOfflineMode,
+      offlineEntities,
+      offlineOverlays,
+    );
+  };
 
   const useListQuery: {
     <SelectedItem = ItemState>(
       payload: QueryPayload | false | null | undefined,
-      ...args: HasPR extends true
+      ...args: ListQueryHasPartialResources<TPartialResources> extends true
         ? [
             options: UseListQueryOptions<
               ItemState,
@@ -2019,7 +2430,11 @@ export function createListQueryStore<
     );
   };
 
-  const useMultipleItems: UseMultipleItemsApi = function useMultipleItems<
+  const useMultipleItems: ListQueryUseMultipleItemsApi<
+    ItemState,
+    ItemPayload,
+    TPartialResources
+  > = function useMultipleItems<
     Selected = ItemState | null,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
   >(
@@ -2080,7 +2495,7 @@ export function createListQueryStore<
   const useItem: {
     <Selected = ItemState | null>(
       itemPayload: ItemPayload | false | null | undefined,
-      ...args: HasPR extends true
+      ...args: ListQueryHasPartialResources<TPartialResources> extends true
         ? [
             options: UseItemOptions<ItemState, Selected> & {
               fields: FieldsInput;
@@ -2107,53 +2522,52 @@ export function createListQueryStore<
    * `items`, while pending deletes are exposed separately through
    * `deletedItems`.
    */
-  const usePendingOfflineItems: UsePendingOfflineItemsApi =
-    function usePendingOfflineItems<SelectedItem = ItemState>(
-      options: UsePendingOfflineItemsOptions<
-        ItemState,
-        ItemPayload,
-        SelectedItem
-      > = {},
-    ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload> {
-      const offlineEntities = useOfflineStoreEntitiesWithPayload({
-        sessionKey: getSessionKeyForRuntime(),
-        inactiveScope: id,
-        storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-      const offlineOverlaysSelector = useCallback(
-        (
-          state: Record<
-            string,
-            ListQueryOfflineOverlay<ItemState, ItemPayload>
-          >,
-        ) => {
-          return state;
-        },
-        [],
-      );
-      const offlineOverlays = offlineOverlayStore.useSelectorRC(
-        offlineOverlaysSelector,
-      );
+  const usePendingOfflineItems: ListQueryUsePendingOfflineItemsApi<
+    ItemState,
+    ItemPayload
+  > = function usePendingOfflineItems<SelectedItem = ItemState>(
+    options: UsePendingOfflineItemsOptions<
+      ItemState,
+      ItemPayload,
+      SelectedItem
+    > = {},
+  ): TSFDUsePendingOfflineItemsReturn<SelectedItem, ItemPayload> {
+    const offlineEntities = useOfflineStoreEntitiesWithPayload({
+      sessionKey: getSessionKeyForRuntime(),
+      inactiveScope: id,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
+    });
+    const offlineOverlaysSelector = useCallback(
+      (
+        state: Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>,
+      ) => {
+        return state;
+      },
+      [],
+    );
+    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+      offlineOverlaysSelector,
+    );
 
-      return usePendingOfflineItemsHook<
-        ItemState,
-        QueryPayload,
-        ItemPayload,
-        SelectedItem
-      >(
-        options,
-        store,
-        registerActiveStandaloneItems,
-        touchItems,
-        persistence?.preloadItems
-          ? (itemKeys) => persistence.preloadItems(itemKeys)
-          : undefined,
-        !!persistence && !persistence.hasAsyncPreload,
-        persistence?.readHydratedItem,
-        offlineEntities,
-        offlineOverlays,
-      );
-    };
+    return usePendingOfflineItemsHook<
+      ItemState,
+      QueryPayload,
+      ItemPayload,
+      SelectedItem
+    >(
+      options,
+      store,
+      registerActiveStandaloneItems,
+      touchItems,
+      persistence?.preloadItems
+        ? (itemKeys) => persistence.preloadItems(itemKeys)
+        : undefined,
+      !!persistence && !persistence.hasAsyncPreload,
+      persistence?.readHydratedItem,
+      offlineEntities,
+      offlineOverlays,
+    );
+  };
 
   function useFindItem<SelectedItem = ItemState | null>(
     findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
@@ -2307,21 +2721,36 @@ export function createListQueryStore<
   function scheduleListQueryFetchApiImpl(
     fetchType: FetchType,
     payload: QueryPayload,
-    ...args: HasPR extends true
-      ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
-      : [size?: number, options?: ScheduleFetchWithFieldsOption]
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [
+          size: number | undefined,
+          options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
+      : [
+          size?: number,
+          options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
   ): ScheduleFetchResults;
   function scheduleListQueryFetchApiImpl(
     fetchType: FetchType,
     payload: QueryPayload[],
-    ...args: HasPR extends true
-      ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
-      : [size?: number, options?: ScheduleFetchWithFieldsOption]
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [
+          size: number | undefined,
+          options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
+      : [
+          size?: number,
+          options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+        ]
   ): ScheduleFetchResults[];
   function scheduleListQueryFetchApiImpl(
     fetchType: FetchType,
     payload: QueryPayload | QueryPayload[],
-    ...args: [size?: number, options?: ScheduleFetchWithFieldsOption]
+    ...args: [
+      size?: number,
+      options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+    ]
   ): ScheduleFetchResults | ScheduleFetchResults[] {
     const [size, options] = args;
     if (Array.isArray(payload)) {
@@ -2330,8 +2759,10 @@ export function createListQueryStore<
     return scheduleListQueryFetch(fetchType, payload, size, options);
   }
 
-  const scheduleListQueryFetchApi: ScheduleListQueryFetchApi =
-    scheduleListQueryFetchApiImpl;
+  const scheduleListQueryFetchApi: ListQueryScheduleListQueryFetchApi<
+    QueryPayload,
+    TPartialResources
+  > = scheduleListQueryFetchApiImpl;
 
   function scheduleAutomaticListQueryFetch(
     fetchType: FetchType,
@@ -2356,13 +2787,19 @@ export function createListQueryStore<
 
   function loadMoreApiImpl(
     params: QueryPayload,
-    ...args: HasPR extends true
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
       ?
-          | [size: number, options: FetchFieldsOption]
-          | [options: LoadMoreWithFieldsOptions]
+          | [
+              size: number,
+              options: ListQueryFetchFieldsOption<TPartialResources>,
+            ]
+          | [options: ListQueryLoadMoreWithFieldsOptions<TPartialResources>]
       :
-          | [size?: number, options?: FetchFieldsOption]
-          | [options?: LoadMoreWithFieldsOptions]
+          | [
+              size?: number,
+              options?: ListQueryFetchFieldsOption<TPartialResources>,
+            ]
+          | [options?: ListQueryLoadMoreWithFieldsOptions<TPartialResources>]
   ): ScheduleFetchResults {
     if (typeof args[0] === 'number') {
       return loadMore(params, args[0], args[1]);
@@ -2370,26 +2807,29 @@ export function createListQueryStore<
     return loadMore(params, args[0]);
   }
 
-  const loadMoreApi: LoadMoreApi = loadMoreApiImpl;
+  const loadMoreApi: ListQueryLoadMoreApi<QueryPayload, TPartialResources> =
+    loadMoreApiImpl;
 
   function scheduleItemFetchApiImpl(
     fetchType: FetchType,
     itemPayload: ItemPayload,
-    ...args: HasPR extends true
-      ? [options: ScheduleFetchWithFieldsOption]
-      : [options?: ScheduleFetchWithFieldsOption]
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
+      : [options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
   ): ScheduleFetchResults;
   function scheduleItemFetchApiImpl(
     fetchType: FetchType,
     itemPayload: ItemPayload[],
-    ...args: HasPR extends true
-      ? [options: ScheduleFetchWithFieldsOption]
-      : [options?: ScheduleFetchWithFieldsOption]
+    ...args: ListQueryHasPartialResources<TPartialResources> extends true
+      ? [options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
+      : [options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>]
   ): ScheduleFetchResults[];
   function scheduleItemFetchApiImpl(
     fetchType: FetchType,
     itemPayload: ItemPayload | ItemPayload[],
-    ...args: [options?: ScheduleFetchWithFieldsOption]
+    ...args: [
+      options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
+    ]
   ): ScheduleFetchResults | ScheduleFetchResults[] {
     const [options] = args;
     if (Array.isArray(itemPayload)) {
@@ -2398,7 +2838,10 @@ export function createListQueryStore<
     return scheduleItemFetch(fetchType, itemPayload, options);
   }
 
-  const scheduleItemFetchApi: ScheduleItemFetchApi = scheduleItemFetchApiImpl;
+  const scheduleItemFetchApi: ListQueryScheduleItemFetchApi<
+    ItemPayload,
+    TPartialResources
+  > = scheduleItemFetchApiImpl;
 
   function scheduleAutomaticItemFetch(
     fetchType: FetchType,
@@ -2415,12 +2858,21 @@ export function createListQueryStore<
     });
   }
 
-  const awaitListQueryFetchApi: AwaitListQueryFetchApi = (params, ...args) => {
+  const awaitListQueryFetchApi: ListQueryAwaitListQueryFetchApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  > = (params, ...args) => {
     const [options] = args;
     return awaitListQueryFetch(params, options);
   };
 
-  const awaitItemFetchApi: AwaitItemFetchApi = (itemPayload, ...args) => {
+  const awaitItemFetchApi: ListQueryAwaitItemFetchApi<
+    ItemState,
+    ItemPayload,
+    TPartialResources
+  > = (itemPayload, ...args) => {
     const [options] = args;
     return awaitItemFetch(itemPayload, options);
   };
@@ -2517,40 +2969,46 @@ export function createListQueryStore<
     getItemState,
     usePendingOfflineItems,
     getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
-    useOfflineEntities: () => {
-      return useOfflineStoreEntities({
+    useOfflineEntities: () =>
+      useOfflineStoreEntities({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-    },
-    useOfflineResolutions: () => {
-      return useOfflineStoreResolutions({
+      }),
+    useOfflineResolutions: () =>
+      useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
-      });
-    },
+      }),
     getOfflineResolutions: () =>
       offlineController?.getOfflineResolutions() ?? [],
-    parseOfflineResolutionConflict: <
-      TName extends keyof ResolvedOfflineOperations & string,
-    >(
-      resolution: OfflineResolutionRecordForOperation<
-        ResolvedOfflineOperations,
-        TName
-      >,
-    ): ParsedOfflineResolutionConflictResultForOperation<
-      ResolvedOfflineOperations,
-      TName
-    > =>
-      offlineController?.parseOfflineResolutionConflict(resolution) ??
-      Result.err(
-        new OfflineResolutionConflictParseError({
-          code: 'offline-not-configured',
-          operation: resolution.operation,
-        }),
-      ),
+    parseOfflineResolutionConflict: (resolution) => {
+      if (!offlineController) {
+        return Result.err(
+          new OfflineResolutionConflictParseError({
+            code: 'offline-not-configured',
+            operation: resolution.operation,
+          }),
+        );
+      }
+
+      if (
+        !isOfflineResolutionRecordForStore(
+          resolution,
+          resolvedOfflineOperations,
+        )
+      ) {
+        return Result.err(
+          new OfflineResolutionConflictParseError({
+            code: 'operation-not-found',
+            operation: resolution.operation,
+          }),
+        );
+      }
+
+      return offlineController.parseOfflineResolutionConflict(resolution);
+    },
     resolveOfflineResolution: <
       TName extends keyof ResolvedOfflineOperations & string,
     >(

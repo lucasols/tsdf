@@ -39,6 +39,7 @@ export type OfflineEntityMutationKind =
   | 'delete';
 
 /** Runtime schema for validating serialized offline item entity references. */
+/** @internal */
 export const offlineItemEntityRefSchema = rc_object({
   entityKey: rc_string,
   entityKind: rc_literals('item'),
@@ -66,6 +67,7 @@ const offlineResolutionBaseFields = {
 };
 
 /** Runtime schema for validating persisted offline resolution records on hydration. */
+/** @internal */
 export const offlineResolutionRecordSchema = rc_discriminated_union('kind', {
   conflict: {
     ...offlineResolutionBaseFields,
@@ -530,6 +532,7 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
 };
 
+/** @internal */
 export const COMPACT_OFFLINE_STATUS_FLAG = 1 as const;
 const compactOfflineStatusModeStateSchema = rc_object({
   e: rc_literals(COMPACT_OFFLINE_STATUS_FLAG).optionalKey(),
@@ -537,6 +540,7 @@ const compactOfflineStatusModeStateSchema = rc_object({
 });
 
 /** Runtime schema for compact persisted offline status snapshots. */
+/** @internal */
 export const compactOfflineStatusSnapshotSchema = rc_object({
   n: compactOfflineStatusModeStateSchema.optionalKey(),
   o: compactOfflineStatusModeStateSchema.optionalKey(),
@@ -548,14 +552,14 @@ export const compactOfflineStatusSnapshotSchema = rc_object({
 export function isModeEffectivelyActive(mode: {
   enabled: boolean;
   active: boolean;
-}) {
+}): boolean {
   return mode.enabled && mode.active;
 }
 
 export function getIsOfflineModeFromStatus(status: {
   network: { enabled: boolean; active: boolean };
   outage: { enabled: boolean; active: boolean };
-}) {
+}): boolean {
   return status.network.active || status.outage.active;
 }
 
@@ -1641,6 +1645,26 @@ export type OperationConflict<
   : never;
 
 /**
+ * Result returned when decoding a stored offline conflict payload.
+ *
+ * `ok: true` contains the typed conflict payload. `ok: false` contains a
+ * machine-readable parse error describing why decoding was not possible.
+ */
+export type ParsedOfflineResolutionConflictResultForOperation<
+  TOperations,
+  TName extends keyof TOperations & string,
+> = ResultType<
+  OperationConflict<TOperations, TName>,
+  OfflineResolutionConflictParseError
+>;
+
+export type ParsedOfflineResolutionConflictResultForStore<TOperations> =
+  ParsedOfflineResolutionConflictResultForOperation<
+    TOperations,
+    keyof TOperations & string
+  >;
+
+/**
  * Operation-aware offline resolution record for a specific registered operation.
  *
  * @typeParam TOperations - Operation registry to inspect.
@@ -1670,6 +1694,16 @@ export type OfflineResolutionRecordForStore<
 > = {
   [K in TName]: OfflineResolutionRecordForOperation<TOperations, K>;
 }[TName];
+
+/** @internal */
+export function isOfflineResolutionRecordForStore<
+  TOperations extends Record<string, unknown>,
+>(
+  resolution: OfflineResolutionRecord,
+  operations: TOperations,
+): resolution is OfflineResolutionRecordForStore<TOperations> {
+  return resolution.operation in operations;
+}
 
 function formatSchemaValidationError(error: SchemaValidationError): string {
   if (error.length === 0) return 'invalid-conflict-payload';
@@ -1727,20 +1761,6 @@ export class OfflineResolutionConflictParseError extends Error {
     this.validationError = args.validationError;
   }
 }
-
-/**
- * Result returned when decoding a stored offline conflict payload.
- *
- * `ok: true` contains the typed conflict payload. `ok: false` contains a
- * machine-readable parse error describing why decoding was not possible.
- */
-export type ParsedOfflineResolutionConflictResultForOperation<
-  TOperations,
-  TName extends keyof TOperations & string,
-> = ResultType<
-  OperationConflict<TOperations, TName>,
-  OfflineResolutionConflictParseError
->;
 
 /**
  * Base shape for each offline operation entry in `persistentStorage.offline.operations`.

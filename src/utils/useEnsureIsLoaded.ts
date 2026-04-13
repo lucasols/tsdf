@@ -4,11 +4,17 @@ import { useOnChange } from '@ls-stack/react-utils/useOnChange';
 import { evtmitter } from 'evtmitter';
 import { useMemo, useState } from 'react';
 
+type EnsureIsLoadedResultModifier = <
+  T extends { isLoading: boolean; status: string },
+>(
+  result: T,
+) => T;
+
 export function useEnsureIsLoaded(
   ensureIsLoaded: boolean | undefined,
   enabled: boolean,
   forceFetch: () => void,
-) {
+): readonly [EnsureIsLoadedResultModifier, () => void] {
   const isLoadedEvtEmitter = useConst(() => evtmitter<{ isLoaded: boolean }>());
 
   const [isForceLoading, setIsForceLoading] = useState(true);
@@ -35,7 +41,7 @@ export function useEnsureIsLoaded(
 
   function useModifyResult<T extends { isLoading: boolean; status: string }>(
     result: T,
-  ) {
+  ): T {
     return useGetModifyResult<T>(
       result,
       ensureIsLoaded,

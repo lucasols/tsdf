@@ -33,12 +33,14 @@ import {
   type TSFDListQueryState,
 } from './types';
 
+/** @internal */
 export type FilterQueryFn<QueryPayload extends ValidPayload> = (
   params: QueryPayload,
   data: TSFDListQuery<QueryPayload>,
   queryKey: string,
 ) => boolean;
 
+/** @internal */
 export type FilterItemFn<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -49,6 +51,7 @@ type ItemFetchData<ItemPayload extends ValidPayload> = {
   fields?: string[];
 };
 
+/** @internal */
 export type NormalizedFetchListFn<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -147,6 +150,7 @@ type CreateFetchApiOptions<
   offlineController?: OfflineAwareFetchController | null;
 };
 
+/** @internal */
 export function createFetchApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
