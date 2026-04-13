@@ -1,5 +1,6 @@
 const config = {
   entry: ['playwright-fixture/src/main.tsx'],
+  ignoreDependencies: ['@vitest/coverage-v8'],
   project: [
     'src/**/*.{ts,tsx}',
     'tests/**/*.{ts,tsx}',
