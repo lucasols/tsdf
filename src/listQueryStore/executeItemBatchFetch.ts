@@ -1,0 +1,336 @@
+import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { klona } from 'klona/json';
+import { unknownToError } from 't-result';
+import { Store } from 't-state';
+import {
+  normalizeFetchResultError,
+  runOfflineAwareFetch,
+  type OfflineAwareFetchController,
+} from '../persistentStorage/offline/fetchRuntime';
+import { BatchRequest, FetchContext } from '../requestScheduler';
+import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
+import {
+  DEFAULT_BATCH_KEY,
+  StoreError,
+  ValidPayload,
+  ValidStoreState,
+} from '../utils/storeShared';
+import { applyPartialItemMerge } from './itemFieldUtils';
+import { type PartialResourcesConfig, type TSFDListQueryState } from './types';
+
+type ItemFetchData<ItemPayload extends ValidPayload> = {
+  payload: ItemPayload;
+  fields?: string[];
+};
+
+export async function executeItemBatchFetch<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+>(
+  requests: BatchRequest<ItemFetchData<ItemPayload>>[],
+  fetchCtx: FetchContext,
+  store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
+  itemKeyToPayload: Map<string, ItemPayload>,
+  fetchItemFn: (
+    params: ItemPayload,
+    options: { signal: AbortSignal; fields?: string[] },
+  ) => Promise<ItemState>,
+  batchFetchItemFn:
+    | ((
+        requests: { payload: ItemPayload; fields?: string[] }[],
+        options: { signal: AbortSignal; batchKey: string },
+      ) => Promise<Map<ItemPayload, ItemState | Error>>)
+    | undefined,
+  errorNormalizer: (exception: Error) => StoreError,
+  partialResources?: PartialResourcesConfig<ItemState>,
+  batchKey?: string,
+  offlineController?: OfflineAwareFetchController | null,
+): Promise<Map<string, boolean>> {
+  const results = new Map<string, boolean>();
+  type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
+
+  function applyItemResult(
+    draft: State,
+    itemKey: string,
+    data: ItemState,
+    fields?: string[],
+  ) {
+    if (partialResources) {
+      applyPartialItemMerge(draft, itemKey, data, fields, partialResources);
+    } else {
+      draft.items[itemKey] = reusePrevIfEqual({
+        current: data,
+        prev: draft.items[itemKey] ?? undefined,
+      });
+    }
+  }
+
+  function clearSatisfiedItemInvalidationFields(
+    draft: State,
+    itemKey: string,
+    requestFields: string[] | undefined,
+  ): void {
+    const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
+    if (!invalidationFields) return;
+
+    if (!requestFields || requestFields.length === 0) {
+      delete draft.itemFieldInvalidationFields[itemKey];
+      return;
+    }
+
+    const remainingFields = invalidationFields.filter(
+      (field) => !requestFields.includes(field),
+    );
+
+    if (remainingFields.length > 0) {
+      draft.itemFieldInvalidationFields[itemKey] = remainingFields;
+    } else {
+      delete draft.itemFieldInvalidationFields[itemKey];
+    }
+  }
+
+  for (const { requestId, payload: data } of requests) {
+    itemKeyToPayload.set(requestId, data.payload);
+  }
+
+  store.produceState(
+    (draft) => {
+      for (const { requestId: itemKey, payload: data } of requests) {
+        const itemQuery = draft.itemQueries[itemKey];
+        if (!itemQuery) {
+          draft.itemQueries[itemKey] = {
+            status: 'loading',
+            error: null,
+            wasLoaded: false,
+            refetchOnMount: false,
+            payload: klona(data.payload),
+          };
+        } else {
+          itemQuery.status = itemQuery.wasLoaded ? 'refetching' : 'loading';
+          itemQuery.error = null;
+          itemQuery.refetchOnMount = false;
+        }
+      }
+    },
+    { equalityCheck: deepEqual, action: 'item-batch-fetch-start' },
+  );
+
+  if (fetchCtx.shouldAbort()) {
+    for (const { requestId } of requests) {
+      results.set(requestId, false);
+    }
+    return results;
+  }
+
+  if (batchFetchItemFn && requests.length > 1) {
+    try {
+      const batchRequests = requests.map((r) => ({
+        payload: r.payload.payload,
+        fields: r.payload.fields,
+      }));
+      const fetchResult = await runOfflineAwareFetch({
+        controller: offlineController,
+        fetcher: () =>
+          batchFetchItemFn(batchRequests, {
+            signal: fetchCtx.signal,
+            batchKey: batchKey ?? DEFAULT_BATCH_KEY,
+          }),
+      });
+      if (!fetchResult.ok) {
+        const error = normalizeFetchResultError(fetchResult, errorNormalizer);
+
+        store.produceState(
+          (draft) => {
+            for (const { requestId: itemKey } of requests) {
+              const itemQuery = draft.itemQueries[itemKey];
+              if (!itemQuery) continue;
+
+              if (fetchResult.offline && itemQuery.wasLoaded) {
+                itemQuery.error = null;
+                itemQuery.status = 'success';
+              } else {
+                itemQuery.error = error;
+                itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
+              }
+              results.set(itemKey, false);
+            }
+          },
+          {
+            action: fetchResult.offline
+              ? 'item-batch-fetch-offline'
+              : 'item-batch-fetch-error',
+          },
+        );
+
+        return results;
+      }
+      const batchResults = fetchResult.data;
+
+      if (fetchCtx.shouldAbort()) {
+        for (const { requestId } of requests) {
+          results.set(requestId, false);
+        }
+        return results;
+      }
+
+      store.produceState(
+        (draft) => {
+          for (const { requestId: itemKey, payload: data } of requests) {
+            const itemQuery = draft.itemQueries[itemKey];
+            if (!itemQuery) continue;
+
+            const result = batchResults.get(data.payload);
+
+            if (result instanceof Error) {
+              itemQuery.error = errorNormalizer(result);
+              itemQuery.status = 'error';
+              delete draft.itemFieldInvalidationFields[itemKey];
+              results.set(itemKey, false);
+            } else if (result !== undefined) {
+              applyItemResult(draft, itemKey, result, data.fields);
+              itemQuery.status = 'success';
+              itemQuery.wasLoaded = true;
+              clearSatisfiedItemInvalidationFields(draft, itemKey, data.fields);
+              results.set(itemKey, true);
+            } else {
+              itemQuery.error = errorNormalizer(
+                new Error(`No result for item ${itemKey}`),
+              );
+              itemQuery.status = 'error';
+              delete draft.itemFieldInvalidationFields[itemKey];
+              results.set(itemKey, false);
+            }
+          }
+        },
+        { action: 'item-batch-fetch-complete' },
+      );
+
+      return results;
+    } catch (exception) {
+      if (fetchCtx.shouldAbort()) {
+        for (const { requestId } of requests) {
+          results.set(requestId, false);
+        }
+        return results;
+      }
+
+      const error = errorNormalizer(unknownToError(exception));
+
+      store.produceState(
+        (draft) => {
+          for (const { requestId: itemKey } of requests) {
+            const itemQuery = draft.itemQueries[itemKey];
+            if (!itemQuery) continue;
+
+            itemQuery.error = error;
+            itemQuery.status = 'error';
+            delete draft.itemFieldInvalidationFields[itemKey];
+            results.set(itemKey, false);
+          }
+        },
+        { action: 'item-batch-fetch-error' },
+      );
+
+      return results;
+    }
+  }
+
+  const fetchPromises = requests.map(
+    async ({ requestId: itemKey, payload: requestData }) => {
+      try {
+        const fetchResult = await runOfflineAwareFetch({
+          controller: offlineController,
+          fetcher: () =>
+            fetchItemFn(klona(requestData.payload), {
+              signal: fetchCtx.signal,
+              fields: requestData.fields,
+            }),
+        });
+        if (!fetchResult.ok) {
+          if (fetchCtx.shouldAbort()) {
+            results.set(itemKey, false);
+            return;
+          }
+
+          const error = normalizeFetchResultError(fetchResult, errorNormalizer);
+
+          store.produceState(
+            (draft) => {
+              const itemQuery = draft.itemQueries[itemKey];
+              if (!itemQuery) return;
+
+              if (fetchResult.offline && itemQuery.wasLoaded) {
+                itemQuery.error = null;
+                itemQuery.status = 'success';
+              } else {
+                itemQuery.error = error;
+                itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
+              }
+            },
+            {
+              action: fetchResult.offline
+                ? 'item-fetch-error-offline'
+                : 'item-fetch-error',
+            },
+          );
+
+          results.set(itemKey, false);
+          return;
+        }
+        const data = fetchResult.data;
+
+        if (fetchCtx.shouldAbort()) {
+          results.set(itemKey, false);
+          return;
+        }
+
+        store.produceState(
+          (draft) => {
+            const itemQuery = draft.itemQueries[itemKey];
+            if (!itemQuery) return;
+
+            applyItemResult(draft, itemKey, data, requestData.fields);
+            itemQuery.status = 'success';
+            itemQuery.wasLoaded = true;
+            clearSatisfiedItemInvalidationFields(
+              draft,
+              itemKey,
+              requestData.fields,
+            );
+          },
+          { action: 'item-fetch-success' },
+        );
+
+        results.set(itemKey, true);
+      } catch (exception) {
+        if (fetchCtx.shouldAbort()) {
+          results.set(itemKey, false);
+          return;
+        }
+
+        const error = errorNormalizer(unknownToError(exception));
+
+        store.produceState(
+          (draft) => {
+            const itemQuery = draft.itemQueries[itemKey];
+            if (!itemQuery) return;
+
+            itemQuery.error = error;
+            itemQuery.status = 'error';
+            delete draft.itemFieldInvalidationFields[itemKey];
+          },
+          { action: 'item-fetch-error' },
+        );
+
+        results.set(itemKey, false);
+      }
+    },
+  );
+
+  await Promise.all(fetchPromises);
+
+  return results;
+}

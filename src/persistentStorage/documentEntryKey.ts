@@ -1,0 +1,1 @@
+export const DOCUMENT_PERSISTED_ENTRY_KEY = 'd';

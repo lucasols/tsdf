@@ -1,0 +1,214 @@
+---
+name: improve-tests
+description: Improve tests feature coverage, readability, determinism, and failure signals in Vitest/TypeScript suites
+---
+
+# Improve Tests
+
+Default mode is to improve tests, not just critique them. Read the relevant tests, identify the highest-value changes, implement them, and verify the result. Only stay in review mode when the user explicitly asks to review, audit, or evaluate tests without changing them.
+
+## Modes
+
+- `Improve` (default): make concrete test changes. Add or rewrite tests, improve structure/readability, replace weak assertions, reduce flakiness, and run the relevant test commands.
+- `Review` (only when explicitly requested): inspect tests and report prioritized findings without changing files unless the user then asks for fixes.
+
+## Core Standard
+
+- Prefer tests that reproduce real library usage flows through the highest practical public surface.
+- Prefer existing higher-level suites over adding new low-level or synthetic “contract” tests when they protect the same behavior with better realism.
+- Do not build fake or simplified versions of real library behavior inside tests unless the true system boundary requires a mock.
+- When fake timers are used, keep timings realistic. Prefer shared defaults and production-like durations over tiny toy numbers chosen only to make snapshots shorter.
+- Treat unrealistic timing, impossible state combinations, and elaborate synthetic scaffolding as defects in the test shape, not acceptable shortcuts.
+- Be willing to delete or replace tests that are rare, low-risk, redundant, or too synthetic to provide meaningful confidence.
+
+## Improve Workflow
+
+1. Define scope and intent.
+2. Identify the most valuable test improvements.
+3. Implement the test changes.
+4. Validate realism, abstraction level, and test value.
+5. Validate readability, assertion quality, and determinism.
+6. Validate comments, annotations, and comment placement.
+7. Run relevant tests and lint/type-check when appropriate.
+8. Summarize what changed, what improved, and any remaining gaps.
+
+## 1) Define Scope And Intent
+
+- Identify the behavior each test file is supposed to protect.
+- Map core production paths to explicit tests.
+- Identify the highest realistic public surface that can express the behavior.
+- Check whether an existing higher-level suite already covers the behavior better than the current test location or abstraction level.
+- Distinguish whether the user wants:
+  - better tests by default, or
+  - a review-only pass with findings and no edits.
+- When the request is ambiguous, default to improving the tests.
+
+## 2) Identify The Most Valuable Improvements
+
+- Prioritize changes that improve regression protection, readability, and trustworthiness.
+- Focus first on:
+  - missing realistic scenarios,
+  - unrealistic or synthetic scenarios that should be rewritten or removed,
+  - tests that give false confidence,
+  - flaky/nondeterministic behavior,
+  - assertions that are too weak or too low-level,
+  - tests whose story is hard to follow,
+  - rare low-risk edge cases that cost more to maintain than the confidence they add.
+- Prefer a small number of high-signal improvements over many low-value edits.
+- Prefer deleting low-value or misleading tests over preserving them out of caution.
+
+## 3) Implement The Test Changes
+
+- Add or rewrite tests to cover realistic production behavior.
+- Prefer feature-level or user-visible flows through the normal test envs and public hooks/APIs.
+- Prefer the project's shared test environments and utilities instead of hand-rolled setup.
+- Reuse the library’s real implementation plus boundary mocks instead of inventing fake mini-implementations inside the test.
+- When timing matters, use realistic durations from shared defaults/constants/helpers unless the exact timing value is itself the behavior under test.
+- Strengthen assertions so failures explain the regression clearly.
+- Prefer readable snapshots, timelines, and helpers over dense low-level expectations.
+- Do not introduce setup helpers, factories, or builder wrappers that hide scenario-defining config from the test body.
+- Keep relevant config inline when it explains the behavior under test. If reuse is still worthwhile, limit helpers to small local utility functions that are used inside the inline config instead of replacing the config object itself.
+- If a helper must stay extracted, its name must be fully self-explanatory from the call site. If that is not realistically possible, add detailed JSDoc that explains what the helper does, why it exists, what assumptions it bakes in, and which parts of the test scenario it is meant to keep readable.
+- Improve naming, comments, and structure so the scenario is obvious at a glance.
+- Prefer the most local explanatory comment possible. When confusion comes from a specific callback body, invalid fixture entry, timer advance, mock branch, or config line, put the explanation there instead of only at the test level.
+- Delete or consolidate tests that are redundant, low-signal, or only test speculative low-risk edges through synthetic setup.
+
+## 4) Validate Realism, Abstraction Level, And Test Value
+
+- Ask first: does this test reproduce a real library usage flow, or is it simulating an artificial situation that exists only in the test?
+- Prefer the highest practical public surface. If a bug can be expressed through normal envs, hooks, store APIs, or feature-level flows, do not drop to lower-level scheduler/internal contract scaffolding.
+- Flag tests that create fake, naive, or simplified versions of behavior that the library already implements for real.
+- Flag tests that use unrealistic fake-timer values purely for convenience, especially when shared defaults or production-like timings are available.
+- When fake timers are used, prefer values that preserve the real relative timing story of the feature. Tiny durations are acceptable only when the exact numbers are irrelevant and realism is not lost; if you keep them, justify that choice in the test.
+- Flag rare, low-risk edge-case tests that add substantial scaffolding, brittleness, or maintenance cost without materially improving regression protection.
+- In improve mode, remove or replace tests that are low-value, unrealistic, or better covered by a more realistic suite.
+- If a behavior cannot be reproduced in a realistic way and the test would only assert a synthetic scenario, skip or delete the test instead of adding speculative coverage.
+
+## 5) Validate Readability And Reviewability
+
+- Treat readability as one of the top priorities in the review. If a test is difficult for a human to scan and understand quickly, that is a real defect in the test suite.
+- Ask: can a reviewer understand the scenario, the actions, and the expected outcome at a glance without reverse-engineering the implementation?
+- Comments are a first-class readability concern — see the dedicated "Validate Comments And Annotations" section for the full rules.
+- Flag tests whose narrative is buried across long setup blocks, scattered assertions, raw store poking, or transport/`fetchHistory` details when a clearer structure, timeline snapshot, or `getRequestHistory(...)` assertion would make the behavior obvious.
+- Flag complex tests that do not present the scenario as a clear arrange/act/assert flow.
+- Prefer tests that communicate the regression they guard against immediately through naming, comments, helpers, and snapshots.
+- Flag helpers that hide the meaningful parts of test setup, especially config objects, callback behavior, mock branches, or initial state choices that a reviewer needs to see inline to understand the scenario.
+- Flag extracted helpers whose names are vague, partial, or only understandable after reading their implementation. If a helper remains extracted, either rename it so the call site tells the story on its own or add detailed JSDoc that makes the helper understandable without jumping around the file.
+- Do not treat readability issues as optional cleanup. In improve mode, fix them. In review mode, report them.
+
+## 6) Validate Behavioral Coverage
+
+- Check happy path, edge cases, error paths, and state transitions.
+- Check that contract changes would fail tests in useful ways.
+- Flag missing cases where production code can regress silently.
+- Verify that test scenarios reflect realistic production usage — tests should simulate how the code is actually used in practice, not manufacture impossible or contrived sequences just to satisfy assertions.
+- Flag tests that force artificial conditions (impossible state combinations, unrealistic timing, states that cannot occur in real usage) to make assertions pass. These create false confidence and may mask real bugs.
+- Do not treat every theoretical edge case as worth covering. Prefer omitting or deleting rare low-risk cases when they do not reflect meaningful user risk.
+- Verify that test setup matches the scenario being tested. Initial state must reflect the real-world context of the behavior under test (for example, a test for "refetch on mount" should start with an already-loaded store, not an idle one — testing refetch from idle is a different scenario). Mismatched initial state makes the test verify the wrong behavior.
+
+## 7) Validate Mock Fidelity And Test Setup
+
+- Flag mocks that deviate from real behavior in ways that affect test validity (for example, a mock that resolves instantly when the real API is paginated, or a mock that never returns errors when the test is about error handling).
+- Verify mocks preserve the behavioral contract of what they replace — response shape, timing characteristics, failure modes.
+- Prefer production-like default timings from shared mocks/helpers over custom tiny durations chosen just to shorten the test, unless the shorter duration is itself important to the scenario.
+- Flag test setup that initializes state inconsistent with the scenario being tested. The initial conditions must be the ones that would naturally lead to the behavior under test in production.
+- Use the project's shared test utilities (`createLoggerStore`, `flushAllTimers`, `advanceTime`, `range`, `pick`, test environment helpers from `tests/mocks/`) instead of rolling custom setup. Inconsistent setup across tests makes it harder to spot when initial conditions are wrong.
+- Treat raw `fetchHistory` assertions as a default review finding when `serverTable.getRequestHistory('item' | 'list' | 'all')` can express the same behavior. Prefer `getRequestHistory(...)` because it snapshots the request contract instead of low-level transport internals; fall back to raw `fetchHistory` only when the higher-level helper cannot express the assertion.
+
+## 8) Validate Assertion Quality And Failure Signals
+
+- Prefer assertions on user-visible or API-visible outcomes.
+- Flag weak assertions (for example, only checking call count without verifying effect).
+- Check negative assertions and error assertions for precision.
+- Ensure snapshots are readable and scoped to meaningful behavior.
+- **Flag tests with sequential actions over time that don't include `timelineString` snapshots.** Whenever a test performs a sequence of actions over time (fetches, refetches, invalidations, syncs), `timelineString` snapshots should be the primary assertion — they make the full sequence of events and their timing visible at a glance, replacing scattered point assertions.
+- **Flag `timelineString` tests that are missing `addTimelineComments` where they would add clarity** — see "Validate Comments And Annotations" section for full annotation rules.
+- When a test involves multiple environments/tabs/stores, **all** timelines must be included so the reader can compare them side by side and trace connected actions across environments.
+- Prefer using the existing tracking helpers (`trackUIChanges`, `trackItemUI`, logger/test env helpers) so timeline snapshots show the state transitions a reader actually cares about.
+- When `createLoggerStore` snapshots include arrays that matter to the behavior under test (for example item names, ids, or ordered query membership), prefer `createLoggerStore({ arrays: 'all' })` so the snapshot shows the full array instead of a shortened summary.
+- **Flag `createLoggerStore` timelines with multiple phases that don't use `.addMark('label')`** — see "Validate Comments And Annotations" section.
+- Flag tests that use dense object assertions or raw `fetchHistory` assertions where a focused `timelineString`, `.changesSnapshot`, or `serverTable.getRequestHistory(...)` assertion would communicate the behavior more clearly.
+- Flag tests that inspect `fetchHistory` directly when `getRequestHistory(...)` would cover the scenario. Ask for the assertion to be replaced with `serverTable.getRequestHistory('item' | 'list' | 'all')` unless the test genuinely needs transport-only details that the shared helper does not expose.
+- Flag tests that force the reader to reconstruct the scenario from many low-level assertions instead of showing the important behavior in one readable artifact.
+- Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
+
+## 9) Check Determinism And Flakiness
+
+- Flag reliance on real time, random values, network race timing, or global mutable state.
+- Ensure async behavior is awaited and timers are controlled.
+- If fake timers are used, verify the chosen durations preserve realism and do not distort the behavior being protected.
+- Flag tests that depend on execution order or leaked state between tests.
+
+## 10) Validate Comments And Annotations
+
+Comments are not optional polish — they are a core readability requirement. A test without comments forces the reader to reverse-engineer the scenario from raw code, which makes it impossible to tell whether the test is correct or what regression it guards against. Treat missing or low-quality comments as a defect on par with weak assertions or unrealistic setup.
+
+### Code comments
+
+- **Every non-trivial test must include comments.** The default expectation is that each important setup step, action, and assertion has a short comment explaining its purpose — especially in time-based, persistence, hydration, retry, sync, cross-tab, or otherwise stateful scenarios.
+- **Comment setup, not just behavior.** If the setup itself carries meaning — for example why the env starts in `loaded`, why a mock is configured a certain way, why offline mode is enabled, or why a fixture shape is chosen — add a short comment before that setup so the reader understands how the scenario is being constructed.
+- **Keep meaningful config visible.** If a config object or callback body carries the test’s story, keep it inline so the reader can understand the scenario without jumping to a helper. Extract only tiny utility logic that supports the inline config.
+- **Helpers need strong names or strong docs.** When a helper is still worth extracting, prefer a name that is fully self-explanatory at the call site. If the behavior, assumptions, or scenario role are still not obvious from the name alone, add detailed JSDoc explaining all three.
+- **Comments must explain _why_, not just label _what_.** A comment like `// refetch` adds nothing — the code already says that. A comment like `// refetch while previous request is still in-flight — should deduplicate` explains the scenario and the expected behavior in one line.
+- **Use comments to separate phases.** Label the setup, action, and assertion phases so a reader can scan the test structure without parsing every line. This is especially important in longer tests with multiple sequential steps.
+- **Place comments where the confusion is.** If the hard part is a specific line inside setup — for example an intentionally invalid `buildPendingEntities`, a suspicious `classifyFailure`, a weird timer duration, or a one-off mock branch — put the explanation directly on that line or callback, not only above the test action.
+- **Comment intentionally invalid or surprising fixture code locally.** Any setup that is deliberately malformed, incomplete, asymmetric, or otherwise “wrong on purpose” must be annotated at the exact line that makes it wrong. Do not make the reader infer the bad setup from later assertions.
+- **Do a local-comment pass before finishing.** After adding scenario-level comments, scan again for any callback, object entry, or helper call that would still be confusing if read in isolation. Add a short why-comment there.
+- **Flag tests where the reader must cross-reference production code to understand what is being tested.** If the test comment says `// trigger the edge case` without explaining which edge case or why it matters, the comment is not doing its job.
+- **Every user interaction point must have a comment.** Any line that simulates a user or system action — fetches, mutations, navigation, reconnection, tab switches, timer advances, invalidations — must be preceded by a comment explaining what is happening and why. These are the critical moments that drive the test scenario; without comments, the reader must decode function calls to reconstruct the story.
+- **Don't add noise comments.** Comments that restate the code (`// create the store` above `createStore()`) or that describe obvious operations add clutter. Every comment should earn its place by explaining something the code alone does not make clear.
+
+### Comment placement checklist
+
+Before considering a test readable, verify all four layers:
+
+1. **Scenario comment**: does the test explain the overall behavior being protected?
+2. **Setup comments**: does the setup explain how the scenario is constructed and why those fixtures/config values were chosen?
+3. **Action comments**: does every meaningful user/system action explain why it happens?
+4. **Assertion comments**: do the main assertions explain what regression they catch?
+5. **Local weirdness comments**: does every intentionally confusing or invalid setup line explain itself exactly where it appears?
+
+### Timeline and snapshot annotations
+
+- **`addTimelineComments`**: when a test uses `timelineString` and the timeline has moments that are hard to understand without cross-referencing the test code — e.g., a new action starting during an in-flight fetch, a cancellation triggered by an external event, or a state transition whose cause isn't obvious from the timeline alone — use `env.addTimelineComments(reference, comments)` to annotate those points. The `reference` parameter controls placement: `'beforeNextAction'` inserts the comment before the next recorded action, `'afterLastAction'` inserts it after the most recent action. Do not add annotations that merely restate what the timeline already shows (e.g., annotating a fetch-started line with "fetch starts") — only annotate when the comment explains something the reader cannot infer from the timeline output itself.
+- **`addMark('label')`**: when a `createLoggerStore` timeline has multiple logical phases, use `.addMark('label')` to visually separate them. Without markers, the reader must infer where each phase starts and ends.
+- **Flag timeline tests missing annotations where they would add clarity.** If a timeline snapshot requires mental reconstruction to understand, that is a comment defect.
+
+## 11) Readability Standards
+
+- Prefer focused tests with clear setup and intent.
+- Default stance: unreadable tests are review findings, not polish opportunities.
+- A strong test should let a human reviewer answer three questions in seconds: what is the setup, what changed, and what should happen next.
+- **Flag test names that use technical/implementation language instead of describing behavior.** Test names should read like a user-facing requirement, not an implementation note. Prefer `"queued mutations are sent after reconnecting"` over `"calls flushQueue when isOnline transitions to true"`. Prefer `"global offline hooks can mount before any store is created"` over `"useGlobalOfflineStatus works without localStorage-backed store"`. The name should describe _what happens from the user's perspective and what outcome to expect_, not which internal function is called or which state flag changes.
+- Flag test names that are wrong, vague, or misleading relative to the actual assertions.
+- **Flag top-level `describe` blocks that merely repeat the file name.** A file-level `describe` wrapper that adds no information beyond what the file name already communicates is pure noise — remove it and let the inner `describe`/`test` blocks stand on their own. If the top-level `describe` label carries meaning that the file name does not, rename the file to be self-explanatory instead of keeping the redundant wrapper.
+- Flag brittle fixtures, duplicated setup, and opaque data builders.
+- Prefer human-readable snapshots over dense object comparisons.
+- When a timeline snapshot can express the behavior clearly, prefer it as the primary readable artifact and keep additional assertions limited to key invariants or end-state checks.
+- Flag logger snapshots that hide relevant array contents behind abbreviated formatting when `createLoggerStore({ arrays: 'all' })` would make the protected behavior obvious at a glance.
+- For cross-tab, cross-store, or time-based tests, missing or incomplete timelines are usually a significant readability defect, not a minor nit.
+- Flag redundant tests — tests that assert the same behavior already covered by another test without adding meaningful coverage. Multiple tests should exist only when they exercise genuinely different paths, states, or edge cases. Copy-pasted tests with trivial variations, or tests that are strict subsets of a more comprehensive test, add maintenance cost without catching additional regressions.
+- **Flag tests that lack comments** — see "Validate Comments And Annotations" section for the full rules on when and how to comment.
+- Flag generic names for test scenarios, fixtures, and variables (`scenarioA`, `scenarioB`, `store1`, `store2`). Names should describe what makes each case distinct (e.g., `storeWithExpiredCache`, `fetchThatFailsOnce`) so a reader can understand the test without tracing through the setup.
+- Prefer inline snapshots for object/array assertions instead of chaining multiple `expect(obj.a.b).toBe(...)` calls — a single snapshot communicates the full expected shape at a glance.
+- Flag tests where related assertions are scattered across many individual `expect` calls when they could be grouped into one snapshot.
+- Flag tests that mix transport assertions, `fetchHistory` checks, and raw state checks without a clear primary assertion showing the user-visible story. In most cases the `fetchHistory` part should be replaced with `serverTable.getRequestHistory(...)`.
+- Flag redundant or noise assertions that don't add confidence — re-checking already-asserted state, asserting obvious intermediate values, or verifying test setup rather than behavior. Every assertion should justify its existence by catching a distinct regression.
+- Flag tests whose complexity exists mainly to cover a marginal edge with little real user risk. If the scenario is not carrying its weight, simplify or remove it.
+
+## 12) Deliver The Result
+
+- In `Improve` mode:
+  - summarize the test changes you made,
+  - mention any tests you deleted or intentionally declined to add because they were unrealistic or low-value,
+  - report which commands you ran,
+  - call out any remaining gaps or risks.
+- In `Review` mode:
+  - report findings first, ordered by severity,
+  - include file and line references,
+  - explain risk, expected impact, and the minimum fix,
+  - explicitly state when no findings were identified and list remaining testing gaps.
+
+## Reference
+
+- Use `references/test-review-checklist.md` as a compact checklist during review-only requests.

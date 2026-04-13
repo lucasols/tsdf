@@ -1,0 +1,915 @@
+import { renderHook } from '@testing-library/react';
+import { act } from 'react';
+import { rc_number, rc_object, rc_string } from 'runcheck';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { z } from 'zod';
+import {
+  createDocumentStore,
+  createStoreManager,
+  type DefineDocumentOfflineOperations,
+  type DefineOfflineOperation,
+  getGlobalOfflineEntities,
+  getGlobalOfflineStatus,
+} from '../../src/main';
+import { createServerMock } from '../mocks/serverMock';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
+
+const docSchema = rc_object({ value: rc_number, label: rc_string });
+const docConflictSchema = rc_object({ reason: rc_string });
+const setValueInputSchema = rc_object({ value: rc_number });
+const conflictResolutionSchema = z.object({ value: z.number() });
+const patchDocAccumulationZodSchema = z
+  .object({ value: z.number().optional(), label: z.string().optional() })
+  .superRefine((input, ctx) => {
+    if (input.value === 4 && input.label === 'invalid') {
+      ctx.addIssue({ code: 'custom', message: 'Invalid accumulated input' });
+    }
+  })
+  .transform((value) => ({ value: value.value, label: value.label }));
+type PatchDocInput = { value: number | undefined; label: string | undefined };
+const patchDocAccumulationSchema = patchDocAccumulationZodSchema;
+const FETCH_DELAY_MS = 30;
+
+type ConflictData = { reason: string };
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+  localStorage.clear();
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
+  localStorage.clear();
+});
+
+const invalidDocumentTempEntityOperation: DirectDocumentOfflineOperations['setValue'] =
+  {
+    inputSchema: setValueInputSchema,
+    kind: 'update',
+    execute: ({ input }) => input,
+    // @ts-expect-error - document offline operations do not support tempEntity
+    tempEntity: {
+      buildPendingEntity: () => ({ value: 1, label: 'pending' }),
+      reconcileServerEntity: () => ({
+        finalPayload: 'document',
+        finalData: { value: 1, label: 'done' },
+      }),
+    },
+  };
+
+void invalidDocumentTempEntityOperation;
+
+type DocState = { value: number; label: string };
+
+type UploadedDocumentRef = { assetId: string };
+
+const uploadAwareDocumentOperation: UploadAwareDocumentOfflineOperations['updateWithUpload'] =
+  {
+    inputSchema: rc_object({ attachmentId: rc_string }),
+    kind: 'update',
+    dependsOnUploads: ({ input }) => [input.attachmentId],
+    execute: ({ input, uploads }) => {
+      const resolvedRef = uploads.resolvedRefsById[input.attachmentId];
+      if (!resolvedRef) {
+        throw new Error('Missing upload ref');
+      }
+      const assetId: string = resolvedRef.assetId;
+      void assetId;
+      // @ts-expect-error - upload refs keep the configured object shape
+      const invalidString: string = resolvedRef;
+      void invalidString;
+    },
+    onSuccessExecute: () => {},
+  };
+
+void uploadAwareDocumentOperation;
+
+type UploadAwareDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  { updateWithUpload: DefineOfflineOperation<{ attachmentId: string }> },
+  UploadedDocumentRef
+>;
+
+function assertTypedUploadRefsInPublicApi() {
+  const typedStoreManager = createStoreManager<UploadedDocumentRef>({
+    getSessionKey: () => 'typed-upload-refs',
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      uploads: {
+        adapter: {
+          save: () => Promise.resolve(),
+          load: () => Promise.resolve(null),
+          list: () => Promise.resolve([]),
+          remove: () => Promise.resolve(),
+          clearSession: () => Promise.resolve(),
+        },
+        upload: () => Promise.resolve({ assetId: 'server-asset' }),
+      },
+    },
+  });
+
+  const typedUploads = typedStoreManager.getOfflineUploads();
+  const managerResolvedRef = typedUploads[0]?.resolvedRef;
+  if (managerResolvedRef) {
+    const managerAssetId: string = managerResolvedRef.assetId;
+    void managerAssetId;
+    // @ts-expect-error - store manager upload refs keep the configured object shape
+    const invalidManagerString: string = managerResolvedRef;
+    void invalidManagerString;
+  }
+
+  void typedStoreManager.resolveOfflineUpload('asset').then((result) => {
+    if (!result.ok) return;
+    const resolvedUploadRef = result.value;
+    const resolvedAssetId: string = resolvedUploadRef.assetId;
+    void resolvedAssetId;
+    // @ts-expect-error - resolved upload refs keep the configured object shape
+    const invalidResolvedString: string = resolvedUploadRef;
+    void invalidResolvedString;
+  });
+
+  const typedDocumentStore = createDocumentStore<
+    DocState,
+    UploadAwareDocumentOfflineOperations
+  >({
+    id: 'typed-upload-refs',
+    storeManager: typedStoreManager,
+    fetchFn: () => Promise.resolve({ value: 1, label: 'server' }),
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: { updateWithUpload: uploadAwareDocumentOperation },
+      },
+    },
+  });
+
+  void typedDocumentStore.performMutation({
+    mutation: () => Promise.resolve(undefined),
+    offline: {
+      operation: 'updateWithUpload',
+      input: { attachmentId: 'asset' },
+    },
+  });
+}
+
+void assertTypedUploadRefsInPublicApi;
+
+type RuntimeOnlyDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  Record<never, never>
+>;
+
+test('direct document store runtime offline controls public api', async () => {
+  const network = createOfflineNetworkMock(false);
+  const sessionKey = 'direct-document-runtime-controls';
+  network.install();
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: { network: network.config },
+  });
+  const offlineSession = storeManager;
+
+  const documentStore_ = createDocumentStore<
+    DocState,
+    RuntimeOnlyDocumentOfflineOperations
+  >({
+    id: 'direct-document-runtime-controls',
+    storeManager,
+    fetchFn: () => Promise.resolve({ value: 1, label: 'server' }),
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+
+  await flushAllTimers();
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '✅' }
+    outage: { enabled: '❌' }
+  `);
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-runtime-controls'
+    updatedAt: 1735689602000
+  `);
+
+  offlineSession
+    .setOfflineRuntimeConfig({
+      network: { enabled: false },
+      mutationQueueing: { network: 'disallow' },
+    })
+    .unwrap();
+  await Promise.resolve();
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'disallow', outage: 'allow' }
+    network: { enabled: '❌' }
+    outage: { enabled: '❌' }
+  `);
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-runtime-controls'
+    updatedAt: 1735689602000
+  `);
+
+  const unavailableOutageResult = offlineSession.setOfflineRuntimeConfig({
+    outage: { enabled: true },
+  });
+  expect(unavailableOutageResult.ok).toBe(false);
+  if (!unavailableOutageResult.ok) {
+    expect(unavailableOutageResult.error).toMatchInlineSnapshot(
+      `
+        Error#:
+          message: 'Offline runtime control "outage.enabled" is unavailable for session "direct-document-runtime-controls" because offlineSession.outage was not configured'
+          name: 'Error'
+      `,
+    );
+  }
+
+  offlineSession.resetOfflineRuntimeConfig();
+  await Promise.resolve();
+
+  expect(offlineSession.getOfflineRuntimeConfig()).toMatchInlineSnapshot(`
+    mutationQueueing: { network: 'allow', outage: 'allow' }
+    network: { enabled: '✅' }
+    outage: { enabled: '❌' }
+  `);
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-runtime-controls'
+    updatedAt: 1735689602000
+  `);
+});
+
+type ValueInput = { value: number };
+
+type LifecycleDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  {
+    createDoc: DefineOfflineOperation<ValueInput>;
+    updateDoc: DefineOfflineOperation<ValueInput>;
+    deleteDoc: DefineOfflineOperation<ValueInput>;
+  }
+>;
+
+function createLifecycleDocumentStore(sessionKey: string) {
+  const network = createOfflineNetworkMock(false);
+  network.install();
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      mutationQueueing: { network: 'allow', outage: 'allow' },
+    },
+  });
+  const serverMock = createServerMock<DocState>({ value: 1, label: 'server' });
+
+  const documentStore = createDocumentStore<
+    DocState,
+    LifecycleDocumentOfflineOperations
+  >({
+    id: `direct-document-lifecycle-${sessionKey}`,
+    storeManager,
+    fetchFn: () => Promise.resolve({ ...serverMock.current }),
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          createDoc: {
+            inputSchema: setValueInputSchema,
+            kind: 'create',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `created:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `created:${input.value}`;
+              });
+            },
+          },
+          updateDoc: {
+            inputSchema: setValueInputSchema,
+            kind: 'update',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `updated:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `updated:${input.value}`;
+              });
+            },
+          },
+          deleteDoc: {
+            inputSchema: setValueInputSchema,
+            kind: 'delete',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `deleted:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `deleted:${input.value}`;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return { documentStore };
+}
+
+test('offline entity kind reduces queued lifecycle operations once per document', async () => {
+  const scenarios = [
+    {
+      name: 'create only',
+      expectedKind: 'create',
+      steps: [{ operation: 'createDoc', value: 2 }],
+    },
+    {
+      name: 'update only',
+      expectedKind: 'update',
+      steps: [{ operation: 'updateDoc', value: 3 }],
+    },
+    {
+      name: 'create then update',
+      expectedKind: 'createAndUpdate',
+      steps: [
+        { operation: 'createDoc', value: 4 },
+        { operation: 'updateDoc', value: 5 },
+      ],
+    },
+    {
+      name: 'update then delete',
+      expectedKind: 'delete',
+      steps: [
+        { operation: 'updateDoc', value: 6 },
+        { operation: 'deleteDoc', value: 7 },
+      ],
+    },
+    {
+      name: 'delete then create',
+      expectedKind: 'create',
+      steps: [
+        { operation: 'deleteDoc', value: 8 },
+        { operation: 'createDoc', value: 9 },
+      ],
+    },
+  ] as const;
+
+  const lifecycleKinds: Record<string, string | undefined> = {};
+
+  for (const [index, scenario] of scenarios.entries()) {
+    const { documentStore } = createLifecycleDocumentStore(
+      `direct-document-lifecycle-${index}`,
+    );
+
+    await flushAllTimers();
+
+    // Queue the scenario's offline operations while the session stays offline.
+    for (const step of scenario.steps) {
+      await act(async () => {
+        await documentStore.performMutation({
+          optimisticUpdate: () => {
+            documentStore.updateState((draft) => {
+              draft.value = step.value;
+              draft.label = `${step.operation}:${step.value}`;
+            });
+          },
+          mutation: () => Promise.resolve({ value: step.value }),
+          offline: { operation: step.operation, input: { value: step.value } },
+        });
+      });
+    }
+    await Promise.resolve();
+
+    lifecycleKinds[scenario.name] =
+      documentStore.getOfflineEntities()[0]?.kind ?? undefined;
+  }
+
+  expect(lifecycleKinds).toMatchInlineSnapshot(`
+    create only: 'create'
+    create then update: 'createAndUpdate'
+    delete then create: 'create'
+    update only: 'update'
+    update then delete: 'delete'
+  `);
+});
+
+type DirectDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  {
+    setValue: DefineOfflineOperation<ValueInput>;
+    patchDoc: DefineOfflineOperation<PatchDocInput>;
+    skipSyncValue: DefineOfflineOperation<
+      ValueInput,
+      unknown,
+      unknown,
+      DocState
+    >;
+    conflictValue: DefineOfflineOperation<
+      ValueInput,
+      ConflictData,
+      unknown,
+      DocState
+    >;
+  }
+>;
+
+// tests using the document store directly without test envs to verify the public API usage
+test('direct document store offline public api', async () => {
+  const network = createOfflineNetworkMock();
+  const sessionKey = 'direct-document-offline-session';
+  network.install();
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      mutationQueueing: { network: 'allow', outage: 'allow' },
+    },
+  });
+
+  const serverMock = createServerMock<DocState>({ value: 1, label: 'server' });
+  const skipSyncReplayOrder: string[] = [];
+  const conflictReplayOrder: string[] = [];
+
+  const documentStore = createDocumentStore<
+    DocState,
+    DirectDocumentOfflineOperations
+  >({
+    id: 'direct-document-offline',
+    storeManager,
+    fetchFn: async () => {
+      await delay(FETCH_DELAY_MS);
+      return { ...serverMock.current };
+    },
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          setValue: {
+            inputSchema: setValueInputSchema,
+            kind: 'update',
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `doc:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `doc:${input.value}`;
+              });
+            },
+          },
+          patchDoc: {
+            inputSchema: patchDocAccumulationSchema,
+            kind: 'update',
+            accumulation: {
+              mergeInput: ({ existingInput, incomingInput }) => ({
+                value: incomingInput.value ?? existingInput.value,
+                label: incomingInput.label ?? existingInput.label,
+              }),
+            },
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value ?? serverMock.current.value,
+                label: input.label ?? serverMock.current.label,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value ?? draft.value;
+                draft.label = input.label ?? draft.label;
+              });
+            },
+          },
+          skipSyncValue: {
+            inputSchema: setValueInputSchema,
+            kind: 'update',
+            getServerSnapshot: () => {
+              skipSyncReplayOrder.push('getServerSnapshot');
+              return { ...serverMock.current };
+            },
+            execute: ({ input }) => {
+              throw new Error(`dispatch failed after send ${input.value}`);
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+            shouldSkipSync: ({
+              input,
+              enqueuedAt,
+              updatedAt,
+              serverSnapshot,
+            }) => {
+              skipSyncReplayOrder.push('shouldSkipSync');
+              expect(input.value).toBe(5);
+              expect(typeof input.value).toBe('number');
+              expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+              expect(serverSnapshot).toEqual(serverMock.current);
+              return true;
+            },
+          },
+          conflictValue: {
+            inputSchema: setValueInputSchema,
+            kind: 'update',
+            getServerSnapshot: () => {
+              conflictReplayOrder.push('getServerSnapshot');
+              return { ...serverMock.current };
+            },
+            conflictHandling: {
+              schema: docConflictSchema,
+              detectConflict: ({
+                input,
+                enqueuedAt,
+                updatedAt,
+                serverSnapshot,
+              }) => {
+                conflictReplayOrder.push('detectConflict');
+                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+                expect(serverSnapshot).toEqual(serverMock.current);
+                if (input.value !== 6) return false;
+
+                return { reason: 'stale-server-value' };
+              },
+            },
+            execute: ({ input }) => {
+              serverMock.setData({
+                value: input.value,
+                label: `resolved:${input.value}`,
+              });
+            },
+            onSuccessExecute: ({ input }) => {
+              documentStore.updateState((draft) => {
+                draft.value = input.value;
+                draft.label = `resolved:${input.value}`;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const documentHook = renderHook(() => documentStore.useDocument());
+  await flushAllTimers();
+
+  expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
+      data: { label: 'server', value: 1 }
+      pendingSync: '❌'
+      status: 'success'
+    `);
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '❌'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-offline-session'
+    updatedAt: 1735689600010
+  `);
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  const setValueResult = await act(async () => {
+    return documentStore.performMutation({
+      optimisticUpdate: () => {
+        documentStore.updateState((draft) => {
+          draft.value = 2;
+          draft.label = 'doc:2';
+        });
+      },
+      mutation: () => Promise.resolve({ value: 2 }),
+      offline: { operation: 'setValue', input: { value: 2 } },
+    });
+  });
+
+  assert(setValueResult.ok);
+  expect(setValueResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
+
+  const patchDocResult = await act(async () => {
+    return documentStore.performMutation({
+      optimisticUpdate: () => {
+        documentStore.updateState((draft) => {
+          draft.value = 3;
+          draft.label = 'offline label';
+        });
+      },
+      mutation: () => Promise.resolve({ value: 3, label: 'offline label' }),
+      offline: {
+        operation: 'patchDoc',
+        input: { value: 3, label: 'offline label' },
+      },
+    });
+  });
+
+  assert(patchDocResult.ok);
+  expect(patchDocResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
+
+  const invalidAccumulationResult = await act(async () => {
+    return documentStore.performMutation({
+      mutation: () => Promise.resolve({ value: 4, label: 'invalid' }),
+      offline: { operation: 'patchDoc', input: { value: 4, label: 'invalid' } },
+    });
+  });
+
+  assert(!invalidAccumulationResult.ok);
+  expect(invalidAccumulationResult.error).toMatchInlineSnapshot(`
+    Error#:
+      message: 'Invalid offline operation input for "patchDoc"'
+      name: 'StoreMutationError'
+      kind: 'error'
+      code: 500
+      id: 'fetch-error'
+      cause:
+        Error#:
+          message: 'Invalid offline operation input for "patchDoc"'
+          name: 'Error'
+  `);
+
+  await act(async () => {
+    await documentStore.performMutation({
+      optimisticUpdate: () => {
+        documentStore.updateState((draft) => {
+          draft.value = 4;
+        });
+      },
+      mutation: () => Promise.resolve({ value: 4 }),
+      offline: { operation: 'patchDoc', input: { value: 4, label: undefined } },
+    });
+  });
+
+  await act(async () => {
+    await documentStore.performMutation({
+      optimisticUpdate: () => {
+        documentStore.updateState((draft) => {
+          draft.value = 5;
+          draft.label = 'confirm:5';
+        });
+      },
+      mutation: () => Promise.resolve({ value: 5 }),
+      offline: { operation: 'skipSyncValue', input: { value: 5 } },
+    });
+  });
+
+  await act(async () => {
+    await documentStore.performMutation({
+      optimisticUpdate: () => {
+        documentStore.updateState((draft) => {
+          draft.value = 6;
+          draft.label = 'conflict:6';
+        });
+      },
+      mutation: () => Promise.resolve({ value: 6 }),
+      offline: { operation: 'conflictValue', input: { value: 6 } },
+    });
+  });
+  await Promise.resolve();
+
+  expect(documentStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  await documentStore.resolveOfflineResolution('missing', 'conflictValue', {
+    action: 'discard',
+  });
+  expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
+      data: { label: 'conflict:6', value: 6 }
+      pendingSync: '✅'
+      status: 'success'
+    `);
+
+  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689601040
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'direct-document-offline-session:direct-document-offline:document'
+      kind: 'update'
+      pendingMutations: 4
+      requiresResolution: '❌'
+      sessionKey: 'direct-document-offline-session'
+      storeName: 'direct-document-offline'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689601040
+  `);
+
+  expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689601040
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'direct-document-offline-session:direct-document-offline:document'
+      kind: 'update'
+      pendingMutations: 4
+      requiresResolution: '❌'
+      sessionKey: 'direct-document-offline-session'
+      storeName: 'direct-document-offline'
+      storeType: 'document'
+      syncState: 'pending'
+      updatedAt: 1735689601040
+  `);
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '✅'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-offline-session'
+    updatedAt: 1735689601040
+  `);
+
+  await act(async () => {
+    network.goOnline();
+    await advanceTime(250);
+    await flushAllTimers();
+  });
+
+  expect(documentHook.result.current.status).toBe('success');
+  expect(documentHook.result.current.pendingSync).toBe(false);
+
+  const [conflict] = documentStore.getOfflineResolutions();
+  if (
+    !conflict ||
+    conflict.kind !== 'conflict' ||
+    conflict.operation !== 'conflictValue'
+  ) {
+    throw new Error('Expected a conflict resolution');
+  }
+
+  expect({
+    ...pick(conflict, [
+      'blockedByResolutionIds',
+      'blockedResolutionCount',
+      'childResolutionCount',
+      'childResolutionIds',
+      'createdAt',
+      'enqueuedAt',
+      'entityRefs',
+      'input',
+      'kind',
+      'operation',
+      'sessionKey',
+      'storeName',
+      'storeType',
+      'updatedAt',
+    ]),
+    conflict: conflict.conflict,
+  }).toMatchInlineSnapshot(`
+    blockedByResolutionIds: []
+    blockedResolutionCount: 0
+    childResolutionCount: 0
+    childResolutionIds: []
+    conflict: { reason: 'stale-server-value' }
+    createdAt: 1735689606040
+    enqueuedAt: 1735689601040
+    entityRefs:
+      - { entityKey: 'document', entityKind: 'document' }
+    input: { value: 6 }
+    kind: 'conflict'
+    operation: 'conflictValue'
+    sessionKey: 'direct-document-offline-session'
+    storeName: 'direct-document-offline'
+    storeType: 'document'
+    updatedAt: 1735689606040
+  `);
+  const parsedConflict = documentStore.parseOfflineResolutionConflict(conflict);
+  expect({
+    ok: parsedConflict.ok,
+    value: parsedConflict.ok ? parsedConflict.value : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { reason: 'stale-server-value' }
+  `);
+
+  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689606040
+      entityKey: 'document'
+      entityKind: 'document'
+      id: 'direct-document-offline-session:direct-document-offline:document'
+      kind: 'update'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      sessionKey: 'direct-document-offline-session'
+      storeName: 'direct-document-offline'
+      storeType: 'document'
+      syncState: 'resolution-required'
+      updatedAt: 1735689606040
+  `);
+  expect(skipSyncReplayOrder).toMatchInlineSnapshot(
+    `['getServerSnapshot', 'shouldSkipSync']`,
+  );
+  expect(conflictReplayOrder).toMatchInlineSnapshot(
+    `['getServerSnapshot', 'detectConflict']`,
+  );
+
+  await act(async () => {
+    await documentStore.resolveOfflineResolution(conflict.id, 'conflictValue', {
+      action: 'requeue',
+      input: conflictResolutionSchema.parse({ value: 7 }),
+    });
+    await flushAllTimers();
+  });
+
+  expect(documentStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
+  expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
+      data: { label: 'resolved:7', value: 7 }
+      pendingSync: '❌'
+      status: 'success'
+    `);
+
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '❌'
+    lastFailureAt: null
+    lastRecoveryCheckAt: null
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'direct-document-offline-session'
+    updatedAt: 1735689601040
+  `);
+
+  documentHook.unmount();
+});

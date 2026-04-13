@@ -3,11 +3,14 @@ import { defineConfig } from 'vitest/config';
 const isDev = process.env.NODE_ENV === 'test';
 
 export default defineConfig({
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
-    include: ['test/*.test.{ts,tsx}'],
-    testTimeout: 5_000,
-    setupFiles: 'test/setup/setup.ts',
+    include: ['src/*.test.{ts,tsx}', 'tests/**/*.test.{ts,tsx}'],
+    testTimeout: 2_000,
     environment: 'happy-dom',
+    execArgv: ['--no-experimental-webstorage'],
     allowOnly: isDev,
+    globals: true,
+    setupFiles: ['./vitest.setup.ts'],
   },
 });

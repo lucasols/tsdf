@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "trailingComma": "all",
+  "singleAttributePerLine": true,
+  "printWidth": 80,
+  "experimentalSortImports": { "newlinesBetween": false },
+  "experimentalSortPackageJson": false,
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    "build",
+    "*.lock",
+    ".git",
+    "pnpm-lock.yaml"
+  ],
+  "objectWrap": "collapse"
+}

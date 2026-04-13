@@ -3,7 +3,8 @@
   "compilerOptions": {
     "outDir": "./dist",
     "noEmit": false,
+    "emitDeclarationOnly": true,
     "declaration": true
   },
-  "include": ["src/**/*", "test/**/*", "types/**/*"],
+  "include": ["src/**/*", "tests/**/*", "types/**/*"]
 }

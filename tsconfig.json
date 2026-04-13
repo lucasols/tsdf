@@ -1,12 +1,11 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
-    "target": "ESNext",
-    "moduleResolution": "node",
-    "module": "CommonJS",
-    "jsx": "react-jsx",
+    "target": "es2024",
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "jsx": "preserve",
     "skipLibCheck": true,
-    "types": ["node"],
     "noEmit": true,
     "esModuleInterop": true,
     "strictNullChecks": true,
@@ -14,9 +13,13 @@
     "noImplicitAny": true,
     "alwaysStrict": true,
     "strict": true,
+    "strictPropertyInitialization": true,
     "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true,
-    "strictPropertyInitialization": true
+    "stripInternal": true,
+    "allowImportingTsExtensions": true,
+    "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src/**/*", "test/**/*", "types/**/*"]
+  "include": ["src/**/*", "tests/**/*", "types/**/*"],
+  "exclude": ["src-old/**/*", "test-old/**/*"]
 }

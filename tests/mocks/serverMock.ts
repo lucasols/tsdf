@@ -1,0 +1,252 @@
+import { notNullish } from '@ls-stack/utils/assertions';
+import { sleep } from '@ls-stack/utils/sleep';
+import { evtmitter } from 'evtmitter';
+import type { StoreError } from '../../src/utils/storeShared';
+import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
+
+export const DEFAULT_FETCH_DURATION_MS = 800;
+export const DEFAULT_MUTATION_DURATION_MS = 1200;
+const DEFAULT_RTU_DELAY_MS = 50;
+
+export type FetchErrorConfig = {
+  message: string;
+  path?: string;
+  method?: StoreError['method'];
+  code?: number;
+};
+
+const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
+
+type FetchHistoryEntry<Data> = {
+  id: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  result: 'success' | 'error' | 'aborted';
+  data?: Data;
+  error?: Error;
+};
+
+type AddActionFn = (
+  action: string,
+  options?: { id?: string | number; actionValue?: unknown },
+) => void;
+
+type ServerMockEvents = { data_changed: undefined };
+
+export type SharedServerMockState<Data> = {
+  serverDataHistory: Data[];
+  wsEvents: ReturnType<typeof evtmitter<ServerMockEvents>>;
+};
+
+export function createSharedServerMockState<Data>(
+  initialData: Data,
+): SharedServerMockState<Data> {
+  return {
+    serverDataHistory: [initialData],
+    wsEvents: evtmitter<ServerMockEvents>(),
+  };
+}
+
+export function createServerMock<Data>(
+  initialData: Data,
+  addAction?: AddActionFn,
+  sharedState: SharedServerMockState<Data> = createSharedServerMockState(
+    initialData,
+  ),
+) {
+  const { serverDataHistory, wsEvents } = sharedState;
+  const customFetchDurations: number[] = [];
+  let nextFetchError: FetchErrorConfig | null = null;
+
+  // Fetch tracking state
+  let numOfStartedFetches = 0;
+  let numOfFinishedFetches = 0;
+  let fetchIdCounter = 0;
+  const fetchHistory: FetchHistoryEntry<Data>[] = [];
+
+  function getFetchId() {
+    return notNullish(fetchEmojis[fetchIdCounter++ % fetchEmojis.length]);
+  }
+
+  /** default duration: 1200ms */
+  async function mutateData(
+    newData: Data,
+    {
+      duration = DEFAULT_MUTATION_DURATION_MS,
+      setDataAt = duration * 0.7,
+      triggerRTUEvent,
+      addServerDataChangeAction,
+      mutationId,
+      addMutationResolvedAction,
+    }: {
+      duration?: number;
+      setDataAt?: number;
+      triggerRTUEvent?: boolean;
+      addServerDataChangeAction?: boolean;
+      addMutationResolvedAction?: boolean;
+      mutationId?: string | number;
+    } = {},
+  ) {
+    addAction?.('>mutation-started', { actionValue: newData, id: mutationId });
+
+    await sleep(setDataAt);
+
+    serverDataHistory.push(newData);
+
+    if (addServerDataChangeAction) {
+      addAction?.('server-data-changed', { actionValue: newData });
+    }
+
+    if (triggerRTUEvent) {
+      void sleep(DEFAULT_RTU_DELAY_MS).then(() => {
+        wsEvents.emit('data_changed', undefined);
+      });
+    }
+
+    // "mutation-finished" marks when server data is applied (setDataAt), not promise resolution.
+    addAction?.('<mutation-data-persisted', {
+      actionValue: newData,
+      id: mutationId,
+    });
+
+    await sleep(duration - setDataAt);
+
+    if (addMutationResolvedAction) {
+      addAction?.('<mutation-resolved', {
+        actionValue: newData,
+        id: mutationId,
+      });
+    }
+  }
+
+  return {
+    mutateData,
+    wsEvents,
+    async delayedSetData(
+      value: Data,
+      options: { durationMs?: number } = {},
+    ): Promise<void> {
+      await sleep(options.durationMs ?? DEFAULT_MUTATION_DURATION_MS);
+      this.setData(value);
+    },
+    setData(value: Data) {
+      addAction?.('server-data-changed', { actionValue: value });
+      serverDataHistory.push(value);
+    },
+    get current(): Data {
+      const last = serverDataHistory.at(-1);
+      if (last === undefined) {
+        throw new Error('Server data history is empty');
+      }
+      return last;
+    },
+    history: serverDataHistory,
+    fetch: async (
+      signal?: AbortSignal,
+      duration = DEFAULT_FETCH_DURATION_MS,
+    ): Promise<Data> => {
+      const fetchId = getFetchId();
+      const startTime = Date.now() - TEST_INITIAL_TIME;
+
+      if (addAction) {
+        addAction('>fetch-started', { id: fetchId });
+        numOfStartedFetches++;
+      }
+
+      let abortLogged = false;
+      function onAbort() {
+        if (!addAction || abortLogged) return;
+        abortLogged = true;
+        addAction('<fetch-aborted 🚫', { id: fetchId });
+      }
+      signal?.addEventListener('abort', onAbort);
+
+      // Check for scheduled error first (simulates immediate request failure)
+      if (nextFetchError) {
+        signal?.removeEventListener('abort', onAbort);
+        const endTime = Date.now() - TEST_INITIAL_TIME;
+        const error = nextFetchError.path
+          ? new FetchError(nextFetchError.message, {
+              path: nextFetchError.path,
+              method: nextFetchError.method,
+              code: nextFetchError.code,
+            })
+          : new Error(nextFetchError.message);
+
+        fetchHistory.push({
+          id: fetchId,
+          startTime,
+          endTime,
+          duration: endTime - startTime,
+          result: 'error',
+          error,
+        });
+
+        if (addAction) {
+          numOfFinishedFetches++;
+          addAction('<fetch-error', { actionValue: 'error', id: fetchId });
+        }
+
+        nextFetchError = null;
+        throw error;
+      }
+
+      const actualDuration = customFetchDurations.shift() ?? duration;
+      await sleep(actualDuration);
+
+      signal?.removeEventListener('abort', onAbort);
+
+      // Check for abort after network delay
+      if (signal?.aborted) {
+        onAbort();
+        const endTime = Date.now() - TEST_INITIAL_TIME;
+        fetchHistory.push({
+          id: fetchId,
+          startTime,
+          endTime,
+          duration: endTime - startTime,
+          result: 'aborted',
+        });
+        // Note: Don't increment numOfFinishedFetches for aborted fetches
+        // to match test expectations (only successful fetches count)
+        throw new Error('Aborted');
+      }
+
+      const last = serverDataHistory.at(-1);
+      if (last === undefined) {
+        throw new Error('Server data history is empty');
+      }
+
+      const endTime = Date.now() - TEST_INITIAL_TIME;
+      fetchHistory.push({
+        id: fetchId,
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        result: 'success',
+        data: last,
+      });
+
+      if (addAction) {
+        numOfFinishedFetches++;
+        addAction('<fetch-finished', { actionValue: last, id: fetchId });
+      }
+
+      return last;
+    },
+    setFetchDurations(...durations: number[]) {
+      customFetchDurations.push(...durations);
+    },
+    setNextFetchError(error: FetchErrorConfig | string) {
+      nextFetchError = typeof error === 'string' ? { message: error } : error;
+    },
+    get numOfStartedFetches() {
+      return numOfStartedFetches;
+    },
+    get numOfFinishedFetches() {
+      return numOfFinishedFetches;
+    },
+    fetchHistory,
+  };
+}
