@@ -1,6 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
-import { createAsyncStorageAdapter } from './asyncStorageAdapter';
+import {
+  createAsyncStorageAdapter,
+  estimateManagedAsyncStorageEntrySizeBytes,
+} from './asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   compareMetadata,
@@ -13,6 +16,7 @@ import {
   parseAsyncStorageRecordKey,
   serializeProtectedRef,
 } from './asyncStorageShared';
+import { serializeJsonForStorage } from './persistenceUtils';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,
@@ -488,6 +492,22 @@ function compactEntryValue(
 ): Pick<IndexedDbEntryRecord, 'd' | 'f' | 'h'> {
   void scope;
   return { d: value };
+}
+
+function estimateIndexedDbManagedEntrySizeBytes(args: {
+  customMetadata?: Record<string, unknown>;
+  lastAccessAt: number;
+  serializedValue?: string;
+  value: unknown;
+  version: number;
+}): number {
+  return estimateManagedAsyncStorageEntrySizeBytes({
+    customMetadata: args.customMetadata,
+    lastAccessAt: args.lastAccessAt,
+    serializedValue:
+      args.serializedValue ?? serializeJsonForStorage(args.value).rawValue,
+    version: args.version,
+  });
 }
 
 function expandEntryValue(
@@ -1108,6 +1128,13 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         splitCustomMetadata(customMetadata);
       const nextLastAccessAt =
         touchTimestamps.get(upsert.key) ?? existing?.a ?? now;
+      const sizeBytes = estimateIndexedDbManagedEntrySizeBytes({
+        customMetadata,
+        lastAccessAt: nextLastAccessAt,
+        serializedValue: upsert.serializedValue,
+        value: upsert.value,
+        version: upsert.version,
+      });
       const compactValue = compactEntryValue(scope, upsert.value);
       await openRequestAsPromise(
         entryStore.put(
@@ -1120,9 +1147,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
             ...(offlineProtected === true ? { o: 1 as const } : {}),
             ...(payload !== undefined ? { p: payload } : {}),
             ...(upsert.version !== 1 ? { v: upsert.version } : {}),
-            ...(typeof upsert.sizeBytes === 'number'
-              ? { z: upsert.sizeBytes }
-              : {}),
+            z: sizeBytes,
           } satisfies IndexedDbEntryRecord,
           createEntryPrimaryKey(scope, upsert.key),
         ),
@@ -1593,6 +1618,12 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     const { extraMetadata, group, offlineProtected, payload } =
       splitCustomMetadata(args.customMetadata);
+    const sizeBytes = estimateIndexedDbManagedEntrySizeBytes({
+      customMetadata: args.customMetadata,
+      lastAccessAt: args.lastAccessAt,
+      value: args.value,
+      version: args.version,
+    });
     const compactValue = compactEntryValue(scope, args.value);
     entryStore.put(
       {
@@ -1604,6 +1635,7 @@ export class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         ...(offlineProtected === true ? { o: 1 as const } : {}),
         ...(payload !== undefined ? { p: payload } : {}),
         ...(args.version !== 1 ? { v: args.version } : {}),
+        z: sizeBytes,
       } satisfies IndexedDbEntryRecord,
       createEntryPrimaryKey(scope, args.key),
     );

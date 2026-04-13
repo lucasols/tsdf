@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import { estimateManagedAsyncStorageEntrySizeBytes } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { advanceTime } from '../../utils/genericTestUtils';
 import {
@@ -540,6 +541,72 @@ describe('indexeddb async storage efficiency: collection', () => {
       `);
   });
 
+  test('real indexeddb commits store metadata-inclusive sizeBytes', async () => {
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'collection-real-z-bytes',
+      kind: 'collection.item',
+    } as const;
+    const namespace = mockAdapter.adapter.openNamespace<
+      { value: string },
+      { p?: string; tag?: string }
+    >(scope);
+    const firstValue = { value: 'first' };
+    const secondValue = { value: 'second' };
+
+    // Cover both production call shapes: payload-only size from the higher
+    // namespace helper, and a direct commit with no caller-provided size.
+    await resolveAfterIndexedDbStorage(
+      namespace.commit({
+        upserts: [
+          {
+            key: 'a',
+            metadata: { p: 'a' },
+            sizeBytes: JSON.stringify(firstValue).length,
+            value: firstValue,
+            version: 1,
+          },
+          {
+            key: 'b',
+            metadata: { tag: 'second' },
+            value: secondValue,
+            version: 1,
+          },
+        ],
+      }),
+      mockAdapter,
+    );
+
+    const metadataEntries = await resolveAfterIndexedDbStorage(
+      namespace.listMetadata({ order: 'key' }),
+      mockAdapter,
+    );
+    expect(metadataEntries).toHaveLength(2);
+
+    const [firstEntry, secondEntry] = metadataEntries;
+    if (firstEntry === undefined || secondEntry === undefined) {
+      throw new Error('Expected IndexedDB metadata entries to be available.');
+    }
+
+    expect(firstEntry.sizeBytes).toBe(
+      estimateManagedAsyncStorageEntrySizeBytes({
+        customMetadata: { p: 'a' },
+        lastAccessAt: firstEntry.lastAccessAt,
+        serializedValue: JSON.stringify(firstValue),
+        version: 1,
+      }),
+    );
+    expect(secondEntry.sizeBytes).toBe(
+      estimateManagedAsyncStorageEntrySizeBytes({
+        customMetadata: { tag: 'second' },
+        lastAccessAt: secondEntry.lastAccessAt,
+        serializedValue: JSON.stringify(secondValue),
+        version: 1,
+      }),
+    );
+  });
+
   test('repeated overflowing collection updates evict inline without scheduling background maintenance', async () => {
     const storeName = 'col-inline-overflow-cleanup';
     const sessionKey = 'sess1';
@@ -746,7 +813,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-mutation-flow","ci"]'
       p: '1'
-      z: 41
+      z: 68
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
@@ -815,7 +882,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-mutation-retry-after-delete","ci"]'
       p: '1'
-      z: 49
+      z: 76
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
@@ -898,7 +965,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-mutation-retry-during-write","ci"]'
       p: '1'
-      z: 49
+      z: 76
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
@@ -1004,7 +1071,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess-invalidation-flow","col-invalidation-flow","ci"]'
       p: '1'
-      z: 40
+      z: 67
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -1073,7 +1140,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       i: '["sess1","col-offline-marker-flow","ci"]'
       o: 1
       p: '1'
-      z: 40
+      z: 76
     `);
   });
 
@@ -1155,7 +1222,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-coalesced-invalidations","ci"]'
       p: '1'
-      z: 42
+      z: 69
     `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -1326,7 +1393,7 @@ describe('indexeddb async storage efficiency: collection', () => {
 
       i: '["sess1","col-remount-no-cache","ci"]'
       p: '1'
-      z: 42
+      z: 69
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""

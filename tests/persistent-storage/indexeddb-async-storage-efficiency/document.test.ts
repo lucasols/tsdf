@@ -136,6 +136,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Cached document', value: 7 }
 
         i: '["sess1","doc-remount-flow","d"]'
+        z: 65
       `);
   });
 
@@ -297,6 +298,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Cached document', value: 8 }
 
         i: '["sess1","doc-startup-touch-offline-marker","d"]'
+        z: 65
       `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
@@ -343,6 +345,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Edited document', value: 99 }
 
         i: '["sess1","doc-mutation-flow","d"]'
+        z: 66
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       ""
@@ -394,6 +397,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Fresh document', value: 42 }
 
         i: '["sess1","doc-invalidation-flow","d"]'
+        z: 65
       `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -463,6 +467,7 @@ describe('indexeddb async storage efficiency: document', () => {
           value: { name: 'Fresh document 2', value: 42 }
 
         i: '["sess1","doc-coalesced-invalidations","d"]'
+        z: 67
       `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       ""
@@ -516,6 +521,7 @@ describe('indexeddb async storage efficiency: document', () => {
 
         i: '["sess1","doc-offline-marker-flow","d"]'
         o: 1
+        z: 74
       `);
   });
 });
