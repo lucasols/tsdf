@@ -2,6 +2,7 @@ import {
   afterEach,
   assert,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   test,
@@ -14,9 +15,30 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, pick } from '../utils/genericTestUtils';
 
+// mutationIds (and fetchIds) come from a module-level counter in
+// requestScheduler. Reset the counter between tests so snapshots with
+// absolute ids don't shift when tests are added or reordered.
+const counterState = vi.hoisted(() => ({ value: 0 }));
+
+vi.mock('../../src/requestScheduler', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/requestScheduler')>();
+  return {
+    ...actual,
+    getAutoIncrementId: () => {
+      counterState.value += 1;
+      return counterState.value;
+    },
+  };
+});
+
 beforeAll(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
+beforeEach(() => {
+  counterState.value = 0;
 });
 
 afterEach(() => {
@@ -76,9 +98,9 @@ describe('documentStore storeEvents', () => {
           Error#: { message: 'fail', name: 'Error' }
     `);
     expect(events).toMatchInlineSnapshot(`
-      - payload: { mutationId: 2 }
+      - payload: { mutationId: 1 }
         type: 'mutationStart'
-      - payload: { mutationId: 2, status: 'error' }
+      - payload: { mutationId: 1, status: 'error' }
         type: 'mutationEnd'
     `);
   });
@@ -100,13 +122,13 @@ describe('documentStore storeEvents', () => {
     });
 
     expect(events).toMatchInlineSnapshot(`
-      - payload: { mutationId: 3 }
+      - payload: { mutationId: 1 }
         type: 'mutationStart'
-      - payload: { mutationId: 3, status: 'success' }
+      - payload: { mutationId: 1, status: 'success' }
         type: 'mutationEnd'
-      - payload: { mutationId: 4 }
+      - payload: { mutationId: 2 }
         type: 'mutationStart'
-      - payload: { mutationId: 4, status: 'success' }
+      - payload: { mutationId: 2, status: 'success' }
         type: 'mutationEnd'
     `);
   });
@@ -137,9 +159,9 @@ describe('documentStore storeEvents', () => {
     expect(result.error).toMatchInlineSnapshot(`kind: 'skipped'`);
     // mutationStart fires before the skip, mutationEnd fires after with success: false
     expect(events).toMatchInlineSnapshot(`
-      - payload: { mutationId: 5 }
+      - payload: { mutationId: 1 }
         type: 'mutationStart'
-      - payload: { mutationId: 5, status: 'skipped' }
+      - payload: { mutationId: 1, status: 'skipped' }
         type: 'mutationEnd'
     `);
   });
@@ -180,13 +202,13 @@ describe('documentStore storeEvents', () => {
     // both mutationStart events fire, then a mutationEnd for the skipped first
     // (success: false) and a mutationEnd for the second (success: true)
     expect(events).toMatchInlineSnapshot(`
-      - payload: { mutationId: 6 }
+      - payload: { mutationId: 1 }
         type: 'mutationStart'
-      - payload: { mutationId: 7 }
+      - payload: { mutationId: 2 }
         type: 'mutationStart'
-      - payload: { mutationId: 6, status: 'skipped' }
+      - payload: { mutationId: 1, status: 'skipped' }
         type: 'mutationEnd'
-      - payload: { mutationId: 7, status: 'success' }
+      - payload: { mutationId: 2, status: 'success' }
         type: 'mutationEnd'
     `);
   });
@@ -209,11 +231,11 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1']
-          mutationId: 8
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['item-1']
-          mutationId: 8
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -238,11 +260,11 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1', 'item-2']
-          mutationId: 9
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['item-1', 'item-2']
-          mutationId: 9
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -277,11 +299,11 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1']
-          mutationId: 10
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['item-1']
-          mutationId: 10
+          mutationId: 1
           status: 'error'
         type: 'mutationEnd'
     `);
@@ -309,20 +331,20 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1']
-          mutationId: 11
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['item-1']
-          mutationId: 11
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
       - payload:
           items: ['item-2']
-          mutationId: 12
+          mutationId: 2
         type: 'mutationStart'
       - payload:
           items: ['item-2']
-          mutationId: 12
+          mutationId: 2
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -355,29 +377,29 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: []
-          mutationId: 13
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 13
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
       - payload:
           items: []
-          mutationId: 14
+          mutationId: 2
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 14
+          mutationId: 2
           status: 'success'
         type: 'mutationEnd'
       - payload:
           items: []
-          mutationId: 15
+          mutationId: 3
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 15
+          mutationId: 3
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -477,11 +499,11 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1']
-          mutationId: 18
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['item-1']
-          mutationId: 18
+          mutationId: 1
           status: 'skipped'
         type: 'mutationEnd'
     `);
@@ -519,20 +541,20 @@ describe('collectionStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['item-1']
-          mutationId: 19
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['item-1']
-          mutationId: 20
+          mutationId: 2
         type: 'mutationStart'
       - payload:
           items: ['item-1']
-          mutationId: 19
+          mutationId: 1
           status: 'skipped'
         type: 'mutationEnd'
       - payload:
           items: ['item-1']
-          mutationId: 20
+          mutationId: 2
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -558,11 +580,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 21
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 21
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -590,11 +612,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1', 'users||2']
-          mutationId: 22
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['users||1', 'users||2']
-          mutationId: 22
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -631,11 +653,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 23
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 23
+          mutationId: 1
           status: 'error'
         type: 'mutationEnd'
     `);
@@ -665,20 +687,20 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 24
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 24
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
       - payload:
           items: ['users||2']
-          mutationId: 25
+          mutationId: 2
         type: 'mutationStart'
       - payload:
           items: ['users||2']
-          mutationId: 25
+          mutationId: 2
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -702,11 +724,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: []
-          mutationId: 26
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 26
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -734,20 +756,20 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: []
-          mutationId: 27
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 27
+          mutationId: 1
           status: 'success'
         type: 'mutationEnd'
       - payload:
           items: []
-          mutationId: 28
+          mutationId: 2
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 28
+          mutationId: 2
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -820,11 +842,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 30
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 30
+          mutationId: 1
           status: 'skipped'
         type: 'mutationEnd'
     `);
@@ -864,20 +886,20 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 31
+          mutationId: 1
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 32
+          mutationId: 2
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 31
+          mutationId: 1
           status: 'skipped'
         type: 'mutationEnd'
       - payload:
           items: ['users||1']
-          mutationId: 32
+          mutationId: 2
           status: 'success'
         type: 'mutationEnd'
     `);
