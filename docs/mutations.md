@@ -244,9 +244,11 @@ store.storeEvents.on('mutationStart', ({ mutationId }) => {
   console.log('Mutation started:', mutationId);
 });
 
-store.storeEvents.on('mutationEnd', ({ mutationId, success }) => {
-  console.log('Mutation ended:', mutationId, success ? 'OK' : 'FAILED');
+store.storeEvents.on('mutationEnd', ({ mutationId, status }) => {
+  console.log('Mutation ended:', mutationId, status);
 });
 ```
+
+`status` is `'success' | 'error' | 'skipped'`. A mutation is `'skipped'` when its `optimisticUpdate` callback returns `false` or when a debounced mutation is superseded by a newer one with the same debounce key — these are not failures and should usually not trigger error handling.
 
 Collection and List Query stores also include the affected `payload`/`items` in the event.

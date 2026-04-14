@@ -154,7 +154,11 @@ export type ListQueryStoreEvents = {
 
 type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationStart: { mutationId: number; items: ItemPayload[] };
-  mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
+  mutationEnd: {
+    mutationId: number;
+    items: ItemPayload[];
+    status: 'success' | 'error' | 'skipped';
+  };
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 

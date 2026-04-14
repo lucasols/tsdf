@@ -114,6 +114,7 @@ import {
   toStoreMutationError,
   TSDFStatus,
   ValidStoreState,
+  mutationSkipped,
   type MutationSkipped,
   type StoreError,
 } from './utils/storeShared';
@@ -148,8 +149,8 @@ export type OnDocumentInvalidate = (priority: FetchType) => void;
 export type DocumentStoreStoreEvents = {
   /** Emitted when a mutation begins executing */
   mutationStart: { mutationId: number };
-  /** Emitted when a mutation completes or fails */
-  mutationEnd: { mutationId: number; success: boolean };
+  /** Emitted when a mutation completes, fails, or is skipped */
+  mutationEnd: { mutationId: number; status: 'success' | 'error' | 'skipped' };
 };
 
 export type DocumentBrowserTabsMessage<State extends ValidStoreState> =
@@ -1242,7 +1243,14 @@ export function createDocumentStore<
       },
     });
 
-    storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
+    storeEvents.emit('mutationEnd', {
+      mutationId,
+      status: result.ok
+        ? 'success'
+        : result.error === mutationSkipped
+          ? 'skipped'
+          : 'error',
+    });
 
     if (
       import.meta.env.TEST &&

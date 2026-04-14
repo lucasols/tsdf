@@ -111,6 +111,7 @@ import {
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
+  mutationSkipped,
   type MutationSkipped,
   type StoreError,
 } from '../utils/storeShared';
@@ -189,8 +190,12 @@ export type CollectionInitialStateItem<
 export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
   mutationStart: { mutationId: number; items: ItemPayload[] };
-  /** Emitted when a mutation completes or fails */
-  mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
+  /** Emitted when a mutation completes, fails, or is skipped */
+  mutationEnd: {
+    mutationId: number;
+    items: ItemPayload[];
+    status: 'success' | 'error' | 'skipped';
+  };
   /** Emitted when an offline temp item is reconciled to its final payload. */
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
@@ -2160,7 +2165,11 @@ export function createCollectionStore<
     storeEvents.emit('mutationEnd', {
       mutationId,
       items: affectedItems,
-      success: result.ok,
+      status: result.ok
+        ? 'success'
+        : result.error === mutationSkipped
+          ? 'skipped'
+          : 'error',
     });
 
     if (
