@@ -350,7 +350,7 @@ describe('collectionStore storeEvents', () => {
     `);
   });
 
-  test('emits events with no affected items for undefined, null, and false', async () => {
+  test('emits events with no affected items when payload is null', async () => {
     const env = createCollectionStoreTestEnv({
       'item-1': { name: 'Item 1' },
       'item-2': { name: 'Item 2' },
@@ -361,19 +361,11 @@ describe('collectionStore storeEvents', () => {
       events.push(event);
     });
 
-    const undefinedResult = await env.apiStore.performMutation(undefined, {
-      mutation: () => Promise.resolve('undefined'),
-    });
-    const nullResult = await env.apiStore.performMutation(null, {
+    const result = await env.apiStore.performMutation(null, {
       mutation: () => Promise.resolve('null'),
     });
-    const falseResult = await env.apiStore.performMutation(false, {
-      mutation: () => Promise.resolve('false'),
-    });
 
-    assert(undefinedResult.ok);
-    assert(nullResult.ok);
-    assert(falseResult.ok);
+    assert(result.ok);
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: []
@@ -382,24 +374,6 @@ describe('collectionStore storeEvents', () => {
       - payload:
           items: []
           mutationId: 1
-          status: 'success'
-        type: 'mutationEnd'
-      - payload:
-          items: []
-          mutationId: 2
-        type: 'mutationStart'
-      - payload:
-          items: []
-          mutationId: 2
-          status: 'success'
-        type: 'mutationEnd'
-      - payload:
-          items: []
-          mutationId: 3
-        type: 'mutationStart'
-      - payload:
-          items: []
-          mutationId: 3
           status: 'success'
         type: 'mutationEnd'
     `);
@@ -455,7 +429,7 @@ describe('collectionStore storeEvents', () => {
 
     let mutationPayload: string | string[] | undefined;
 
-    const result = await env.apiStore.performMutation(undefined, {
+    const result = await env.apiStore.performMutation(null, {
       mutation: (payload) => {
         mutationPayload = payload;
         return Promise.resolve('ok');
@@ -706,7 +680,7 @@ describe('listQueryStore storeEvents', () => {
     `);
   });
 
-  test('emits events even when no items are affected', async () => {
+  test('emits events when payload is null (no affected items)', async () => {
     const env = createListQueryStoreTestEnv({
       users: [{ id: 1, name: 'User 1' }],
     });
@@ -716,7 +690,7 @@ describe('listQueryStore storeEvents', () => {
       events.push(event);
     });
 
-    const result = await env.apiStore.performMutation(undefined, {
+    const result = await env.apiStore.performMutation(null, {
       mutation: () => Promise.resolve('ok'),
     });
 
@@ -734,48 +708,7 @@ describe('listQueryStore storeEvents', () => {
     `);
   });
 
-  test('treats null and false as no-target mutations too', async () => {
-    const env = createListQueryStoreTestEnv({
-      users: [{ id: 1, name: 'User 1' }],
-    });
-    const events: unknown[] = [];
-
-    env.apiStore.storeEvents.on('*', (event) => {
-      events.push(event);
-    });
-
-    const nullResult = await env.apiStore.performMutation(null, {
-      mutation: () => Promise.resolve('null'),
-    });
-    const falseResult = await env.apiStore.performMutation(false, {
-      mutation: () => Promise.resolve('false'),
-    });
-
-    assert(nullResult.ok);
-    assert(falseResult.ok);
-    expect(events).toMatchInlineSnapshot(`
-      - payload:
-          items: []
-          mutationId: 1
-        type: 'mutationStart'
-      - payload:
-          items: []
-          mutationId: 1
-          status: 'success'
-        type: 'mutationEnd'
-      - payload:
-          items: []
-          mutationId: 2
-        type: 'mutationStart'
-      - payload:
-          items: []
-          mutationId: 2
-          status: 'success'
-        type: 'mutationEnd'
-    `);
-  });
-
-  test('nullish no-target mutations no longer expand to loaded items', async () => {
+  test('null no-target mutations no longer expand to loaded items', async () => {
     const env = createListQueryStoreTestEnv(
       {
         users: [
@@ -788,7 +721,7 @@ describe('listQueryStore storeEvents', () => {
 
     let mutationPayload: unknown;
 
-    const result = await env.apiStore.performMutation(undefined, {
+    const result = await env.apiStore.performMutation(null, {
       mutation: (payload) => {
         mutationPayload = payload;
         return Promise.resolve('ok');

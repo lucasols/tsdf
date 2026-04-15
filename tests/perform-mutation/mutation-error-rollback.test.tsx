@@ -233,39 +233,6 @@ test('collection optimistic delete failures restore the deleted item', async () 
     `);
 });
 
-test('collection optimistic mutations require a concrete payload in non-production builds', async () => {
-  const env = createCollectionStoreTestEnv(
-    { 'item-1': { name: 'Item 1' } },
-    { testScenario: 'loaded' },
-  );
-
-  // No-target optimistic mutations would otherwise have nothing to roll back.
-  await expect(
-    env.apiStore.performMutation(undefined, {
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve('ok'),
-    }),
-  ).rejects.toThrow(
-    'Optimistic collection mutations require a concrete item payload.',
-  );
-  await expect(
-    env.apiStore.performMutation(null, {
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve('ok'),
-    }),
-  ).rejects.toThrow(
-    'Optimistic collection mutations require a concrete item payload.',
-  );
-  await expect(
-    env.apiStore.performMutation(false, {
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve('ok'),
-    }),
-  ).rejects.toThrow(
-    'Optimistic collection mutations require a concrete item payload.',
-  );
-});
-
 type ListQueryUser = { id: number; name: string; type: 'admin' | 'user' };
 
 test('list-query optimistic failures restore item data and query membership', async () => {
@@ -500,34 +467,4 @@ test('list-query optimistic delete failures restore item state and query members
     items: ['"users||1', '"users||2']
     refetchOnMount: '❌'
   `);
-});
-
-test('list-query optimistic mutations require a concrete payload in non-production builds', async () => {
-  const env = createListQueryStoreTestEnv({ users: [{ id: 1, name: 'Ada' }] });
-
-  // Reject the unsupported no-target optimistic cases up front.
-  await expect(
-    env.apiStore.performMutation(undefined, {
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve('ok'),
-    }),
-  ).rejects.toThrow(
-    'Optimistic list-query mutations require a concrete item payload.',
-  );
-  await expect(
-    env.apiStore.performMutation(null, {
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve('ok'),
-    }),
-  ).rejects.toThrow(
-    'Optimistic list-query mutations require a concrete item payload.',
-  );
-  await expect(
-    env.apiStore.performMutation(false, {
-      optimisticUpdate: () => {},
-      mutation: () => Promise.resolve('ok'),
-    }),
-  ).rejects.toThrow(
-    'Optimistic list-query mutations require a concrete item payload.',
-  );
 });

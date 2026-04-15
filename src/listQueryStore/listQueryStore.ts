@@ -413,8 +413,6 @@ type ListQueryMutationPayload<
   | ItemPayload
   | ItemPayload[]
   | ListQueryFilterItem<ItemState, ItemPayload>
-  | false
-  | undefined
   | null;
 
 type ListQueryMutationPayloadToUse<
@@ -482,17 +480,39 @@ type ListQueryPerformMutationApi<
   >,
 > = {
   <T>(
-    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
   <T>(
-    payload: ListQueryMutationPayload<ItemState, ItemPayload>,
+    payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOfflineMutationArgs<
       T,
       ItemState,
       QueryPayload,
       ItemPayload,
       TOfflineOperations
+    >,
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
+  <T>(
+    payload: null,
+    args: Omit<
+      ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
+      'optimisticUpdate'
+    >,
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  <T>(
+    payload: null,
+    args: Omit<
+      ListQueryOfflineMutationArgs<
+        T,
+        ItemState,
+        QueryPayload,
+        ItemPayload,
+        TOfflineOperations
+      >,
+      'optimisticUpdate'
     >,
   ): Promise<
     ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>

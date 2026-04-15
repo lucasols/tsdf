@@ -360,13 +360,14 @@ type ResolvedCollectionOfflineOperations<TOfflineOperations> =
 type CollectionMutationPayload<ItemPayload extends ValidPayload> =
   | ItemPayload
   | ItemPayload[]
-  | false
-  | undefined
   | null;
 
-type CollectionMutationPayloadToUse<ItemPayload extends ValidPayload> =
+type CollectionMutationTarget<ItemPayload extends ValidPayload> =
   | ItemPayload
   | ItemPayload[];
+
+type CollectionMutationPayloadToUse<ItemPayload extends ValidPayload> =
+  CollectionMutationTarget<ItemPayload>;
 
 type CollectionMutationArgsBase<T, ItemPayload extends ValidPayload> = {
   optimisticUpdate?: (
@@ -416,16 +417,37 @@ type CollectionPerformMutation<
   >,
 > = {
   <T>(
-    payload: CollectionMutationPayload<ItemPayload>,
+    payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOnlineMutationArgs<T, ItemPayload>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
   <T>(
-    payload: CollectionMutationPayload<ItemPayload>,
+    payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOfflineMutationArgs<
       T,
       ItemState,
       ItemPayload,
       TOfflineOperations
+    >,
+  ): Promise<
+    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+  >;
+  <T>(
+    payload: null,
+    args: Omit<
+      CollectionOnlineMutationArgs<T, ItemPayload>,
+      'optimisticUpdate'
+    >,
+  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  <T>(
+    payload: null,
+    args: Omit<
+      CollectionOfflineMutationArgs<
+        T,
+        ItemState,
+        ItemPayload,
+        TOfflineOperations
+      >,
+      'optimisticUpdate'
     >,
   ): Promise<
     ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
@@ -2042,21 +2064,11 @@ export function createCollectionStore<
     >
   > {
     const payloadToUse: CollectionMutationPayloadToUse<ItemPayload> =
-      payload === false || payload == null ? [] : payload;
+      payload === null ? [] : payload;
     const affectedItems = Array.isArray(payloadToUse)
       ? payloadToUse
       : [payloadToUse];
     const affectedItemEntries = getItemsKeyArray(payloadToUse);
-
-    if (
-      !import.meta.env.PROD &&
-      optimisticUpdate &&
-      (payload === false || payload == null)
-    ) {
-      throw new Error(
-        'Optimistic collection mutations require a concrete item payload.',
-      );
-    }
 
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(

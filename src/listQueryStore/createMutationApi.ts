@@ -175,13 +175,7 @@ export function createMutationApi<
 >) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
-  type MutationPayload =
-    | ItemPayload
-    | ItemPayload[]
-    | FilterItem
-    | false
-    | undefined
-    | null;
+  type MutationPayload = ItemPayload | ItemPayload[] | FilterItem | null;
   type MutationPayloadToUse = ItemPayload | ItemPayload[] | FilterItem;
   type MutationItemRollbackSnapshot = {
     itemKey: string;
@@ -1037,18 +1031,7 @@ export function createMutationApi<
       StoreMutationError | MutationSkipped
     >
   > {
-    const payloadToUse: MutationPayloadToUse =
-      payload === false || payload == null ? [] : payload;
-
-    if (
-      !import.meta.env.PROD &&
-      optimisticUpdate &&
-      (payload === false || payload == null)
-    ) {
-      throw new Error(
-        'Optimistic list-query mutations require a concrete item payload.',
-      );
-    }
+    const payloadToUse: MutationPayloadToUse = payload === null ? [] : payload;
 
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(
