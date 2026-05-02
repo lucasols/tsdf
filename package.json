@@ -13,6 +13,21 @@
       "types": "./dist/main.d.ts",
       "import": "./dist/main.js",
       "default": "./dist/main.js"
+    },
+    "./async-storage": {
+      "types": "./dist/async-storage.d.ts",
+      "import": "./dist/async-storage.js",
+      "default": "./dist/async-storage.js"
+    },
+    "./indexed-db-storage": {
+      "types": "./dist/indexed-db-storage.d.ts",
+      "import": "./dist/indexed-db-storage.js",
+      "default": "./dist/indexed-db-storage.js"
+    },
+    "./opfs-storage": {
+      "types": "./dist/opfs-storage.d.ts",
+      "import": "./dist/opfs-storage.js",
+      "default": "./dist/opfs-storage.js"
     }
   },
   "files": [

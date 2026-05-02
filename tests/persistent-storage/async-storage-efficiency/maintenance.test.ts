@@ -828,6 +828,8 @@ describe('async storage efficiency: maintenance', () => {
 
     // Re-arm the one-off startup cleanup so this same test can trigger a fresh scan after protection is registered.
     resetExpirationScanTracking();
+    // The OPFS adapter owns its own per-adapter startup scan guard, separate from the global maintenance scheduler.
+    opfsPersistentStorage.resetForTests?.();
 
     // A fresh entry in another session triggers the scheduled global cleanup pass.
     const triggerDoc = mockAdapter.scope('trigger-doc', 'sess-trigger');

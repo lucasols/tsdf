@@ -22,9 +22,7 @@ import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
 import { serializeJsonForStorage } from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
-  indexedDbPersistentStorage,
   localPersistentStorage,
-  opfsPersistentStorage,
   type LocalStorageMetadataOptions,
 } from './storageAdapter';
 import type {
@@ -1253,6 +1251,10 @@ export async function clearSessionStorage(
 export async function clearAllSessionStorage(
   sessionKey: string,
 ): Promise<void> {
+  const { indexedDbPersistentStorage, opfsPersistentStorage } = await import(
+    './asyncStorageAdapters'
+  );
+
   await Promise.all([
     clearSessionStorage(sessionKey, 'local-sync'),
     clearSessionStorage(sessionKey, opfsPersistentStorage),
@@ -1293,8 +1295,6 @@ export function resetExpirationScanTracking(): void {
   scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
   localStorageTouchTimestamps = new Map<string, number>();
   resetManagedLocalStorageState();
-  opfsPersistentStorage.resetForTests?.();
-  indexedDbPersistentStorage.resetForTests?.();
 }
 
 export async function readProtectedStorageKeys(

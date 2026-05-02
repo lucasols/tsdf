@@ -1,8 +1,4 @@
-import { createAsyncStorageAdapter } from './asyncStorageAdapter';
-import {
-  createIndexedDbPersistentStorage as createIndexedDbPersistentStorageInternal,
-  type IndexedDbPersistentStorageOptions as IndexedDbPersistentStorageOptionsInternal,
-} from './indexedDbAsyncStorageAdapter';
+/* eslint-disable @ls-stack/no-reexport -- keeps async adapters tree-shakable from the local-sync adapter module */
 import {
   clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
@@ -30,10 +26,8 @@ import {
   getNavigatorLockManager,
   warnIfNavigatorLockUnavailable,
 } from './navigatorLocks';
-import { OpfsAsyncStorageDriver } from './opfsAsyncStorageAdapter';
 import { serializeJsonForStorage } from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import type { AsyncStorageAdapter } from './types';
 
 const MANAGED_LOCAL_STORAGE_LOCK_NAME = 'tsdf-local-storage-metadata';
 const MANAGED_LOCAL_STORAGE_LOCK_WARNING =
@@ -416,17 +410,9 @@ export const localPersistentStorage: LocalPersistentStorage = {
   },
 };
 
-export const opfsPersistentStorage: AsyncStorageAdapter =
-  createAsyncStorageAdapter(new OpfsAsyncStorageDriver());
-
-export const indexedDbPersistentStorage: AsyncStorageAdapter =
-  createIndexedDbPersistentStorageInternal();
-
-export type IndexedDbPersistentStorageOptions =
-  IndexedDbPersistentStorageOptionsInternal;
-
-export function createIndexedDbPersistentStorage(
-  options: IndexedDbPersistentStorageOptions = {},
-): AsyncStorageAdapter {
-  return createIndexedDbPersistentStorageInternal(options);
-}
+export {
+  createIndexedDbPersistentStorage,
+  indexedDbPersistentStorage,
+  opfsPersistentStorage,
+  type IndexedDbPersistentStorageOptions,
+} from './asyncStorageAdapters';

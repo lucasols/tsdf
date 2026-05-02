@@ -23,12 +23,18 @@ Exported from `tsdf`:
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                             |
 | `createStoreManager(options)`                                                                                | Creates the shared store manager used by all stores              |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                                 |
+| `localPersistentStorage`                                                                                     | Built-in localStorage helper used by the `'local-sync'` adapter  |
 | `clearSessionStorage(sessionKey, adapter)`                                                                   | Clears all TSDF entries for one session/adapter                  |
 | `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across built-in adapters |
-| `localPersistentStorage`                                                                                     | Built-in localStorage helper used by the `'local-sync'` adapter  |
-| `opfsPersistentStorage` / `indexedDbPersistentStorage`                                                       | Built-in async storage adapters                                  |
-| `createIndexedDbPersistentStorage(options?)`                                                                 | Creates an IndexedDB adapter, optionally with a database name    |
-| `createAsyncStorageAdapter(driver)`                                                                          | Wraps a custom async storage driver                              |
+
+Exported from async-storage subpaths:
+
+| Export                                       | Import From               | Description                                                   |
+| -------------------------------------------- | ------------------------- | ------------------------------------------------------------- |
+| `opfsPersistentStorage`                      | `tsdf/opfs-storage`       | Built-in OPFS async storage adapter                           |
+| `indexedDbPersistentStorage`                 | `tsdf/indexed-db-storage` | Built-in IndexedDB async storage adapter                      |
+| `createIndexedDbPersistentStorage(options?)` | `tsdf/indexed-db-storage` | Creates an IndexedDB adapter, optionally with a database name |
+| `createAsyncStorageAdapter(driver)`          | `tsdf/async-storage`      | Wraps a custom async storage driver                           |
 
 ## Configuration
 
@@ -150,7 +156,7 @@ persistentStorage: {
 - Stores one logical row per entry and uses native indexes for recency ordering, group lookups, and protected-key scans.
 - Hydration is asynchronous, and can be triggered explicitly with preload APIs.
 
-Use `createIndexedDbPersistentStorage({ databaseName })` when an app needs an isolated IndexedDB database.
+Use `createIndexedDbPersistentStorage({ databaseName })` from `tsdf/indexed-db-storage` when an app needs an isolated IndexedDB database.
 
 ### Custom async adapters
 
@@ -159,7 +165,7 @@ Use `createAsyncStorageAdapter(driver)` only when the built-in OPFS and IndexedD
 A driver is responsible for storing raw records by logical namespace:
 
 ```ts
-import { createAsyncStorageAdapter } from 'tsdf';
+import { createAsyncStorageAdapter } from 'tsdf/async-storage';
 import type { AsyncStorageDriver } from 'tsdf';
 
 const driver: AsyncStorageDriver = {

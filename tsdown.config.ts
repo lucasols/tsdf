@@ -2,7 +2,12 @@ import { defineConfig } from 'tsdown';
 
 export default defineConfig({
   deps: { neverBundle: ['runcheck'] },
-  entry: ['src/main.ts'],
+  entry: {
+    main: 'src/main.ts',
+    'async-storage': 'src/async-storage.ts',
+    'indexed-db-storage': 'src/indexed-db-storage.ts',
+    'opfs-storage': 'src/opfs-storage.ts',
+  },
   clean: true,
   env: { TEST: false },
   minify: true,
