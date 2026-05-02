@@ -742,6 +742,9 @@ export function createCollectionStore<
         unknown
       >({
         ...persistentStorageConfig,
+        onPersistentStorageError:
+          persistentStorageConfig.onPersistentStorageError ??
+          storeManager.onPersistentStorageError,
         offline: persistentStorageConfig.offline
           ? {
               ...persistentStorageConfig.offline,
@@ -1773,9 +1776,10 @@ export function createCollectionStore<
     const payloads = Array.isArray(params) ? params : [params];
 
     if (!persistence) {
-      persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Persistent storage preload is not available'),
-      );
+      (
+        resolvedPersistentStorageConfig?.onPersistentStorageError ??
+        storeManager.onPersistentStorageError
+      )?.(new Error('Persistent storage preload is not available'));
       return payloads.map((payload) => ({ payload, preloaded: false }));
     }
 

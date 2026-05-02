@@ -35,9 +35,6 @@ const storeManager = createStoreManager({
     id: 'fetch-error',
     message: err.message,
   }),
-  lowPriorityThrottleMs: 5, // optional; defaults to 5
-  baseCoalescingWindowMs: 10, // optional; defaults to 10
-  blockWindowClose: null, // optional manager-wide mutation close blocker
   offlineSession: undefined, // optional; required for offline queueing
 });
 
@@ -45,8 +42,9 @@ const userStore = createDocumentStore<User>({
   id: 'document-user', // stable id; also used for browser tab sync
   storeManager,
   fetchFn: (signal) => api.getUser(signal),
-  lowPriorityThrottleMs: 2000, // optional store override
-  baseCoalescingWindowMs: 100, // optional store override
+  lowPriorityThrottleMs: 2000,
+  baseCoalescingWindowMs: 100,
+  blockWindowClose: null,
 });
 ```
 
@@ -144,7 +142,7 @@ Per-store `persistentStorage`:
 ```ts
 persistentStorage: {
   adapter: 'local-sync',     // or localPersistentStorage / opfsPersistentStorage / indexedDbPersistentStorage / createAsyncStorageAdapter(driver)
-  schema: stateSchema,        // PersistentStorageSchema — validates restored data
+  schema: stateSchema,        // PersistentStorageSchema or ConvertedPersistentStorageDataSchema
   version: 1,                 // bump to invalidate older entries
   // Collection / ListQuery: payloadSchema, itemPayloadSchema, queryPayloadSchema, maxBytes/maxItemBytes/maxQueryBytes, maxQuerySize, pinnedItems, pinnedQueries, ignoreItems
   // optional: offline: { operations: { ... } }
@@ -153,6 +151,19 @@ persistentStorage: {
 ```
 
 The store reuses its `id` as the storage namespace and the manager's `getSessionKey` for session scoping. Async adapters (OPFS, IndexedDB, custom) require calling `preloadPersistentStorage()` / `preloadItemFromStorage(...)` / `preloadQueryFromStorage(...)` before reading.
+
+Use `ConvertedPersistentStorageDataSchema<TStore, TStorage>` when the in-memory store shape should differ from the persisted cache shape:
+
+```ts
+const schema: ConvertedPersistentStorageDataSchema<User, StoredUser> = {
+  storeSchema: userSchema,
+  storageSchema: storedUserSchema,
+  convertToStorage: (user) => ({ n: user.name, s: user.score }),
+  convertFromStorage: (stored) => ({ name: stored.n, score: stored.s }),
+};
+```
+
+Loaded data must pass `storageSchema`, then `convertFromStorage(...)`, then `storeSchema`; fetched data runs through `convertToStorage(...)` before saving.
 
 Utilities: `clearSessionStorage(sessionKey, adapter)`, `clearAllSessionStorage(sessionKey)`.
 
@@ -180,7 +191,7 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 
-Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). The shipped `opfsOfflineUploadAdapter` is one supported backend.
+Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
 Docs: `docs/offline.md`.
 
@@ -230,7 +241,7 @@ Exported from `tsdf` (see `docs/shared-types.md`):
 - `IsOffScreenContext` — React context that propagates `isOffScreen` to nested hooks.
 - `PayloadDebounce` — option type for hook `debouncePayload`.
 
-Persistent storage / offline types are re-exported (e.g. `PersistentStorageSchema`, `StorageAdapter`, `DocumentPersistentStorageConfig`, `CollectionPersistentStorageConfig`, `ListQueryPersistentStorageConfig`, `DefineDocumentOfflineOperations`, `DefineCollectionOfflineOperations`, `DefineListQueryOfflineOperations`, `OfflineMutationResult`, `OfflineRuntimeConfig`, etc.) — read `node_modules/tsdf/dist/main.d.ts` for the authoritative list.
+Persistent storage / offline types are re-exported (e.g. `PersistentStorageSchema`, `PersistentStorageDataSchema`, `ConvertedPersistentStorageDataSchema`, `StorageAdapter`, `DocumentPersistentStorageConfig`, `CollectionPersistentStorageConfig`, `ListQueryPersistentStorageConfig`, `DefineDocumentOfflineOperations`, `DefineCollectionOfflineOperations`, `DefineListQueryOfflineOperations`, `OfflineMutationResult`, `OfflineRuntimeConfig`, etc.) — read `node_modules/tsdf/dist/main.d.ts` for the authoritative list.
 
 ## Conventions when writing code with TSDF
 

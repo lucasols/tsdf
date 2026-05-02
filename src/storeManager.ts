@@ -20,6 +20,7 @@ import type {
 } from './persistentStorage/offline/types';
 import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 import type { OfflineUpload } from './persistentStorage/offlineUploadTypes';
+import type { PersistentStorageErrorHandler } from './persistentStorage/types';
 import type { BlockWindowCloseHandler } from './utils/performMutation';
 import type { StoreError, ValidPayload } from './utils/storeShared';
 
@@ -89,6 +90,8 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   getSessionKey: () => string | false;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
+  /** Global fallback for persistent storage failures in attached stores. */
+  onPersistentStorageError: PersistentStorageErrorHandler | undefined;
   /** Shared defaults used by attached stores unless a store-level override exists. */
   storeDefaults: StoreManagerStoreDefaults;
   /** Returns the unique ids of all currently registered store instances. */
@@ -201,6 +204,8 @@ export type CreateStoreManagerOptions<
   baseCoalescingWindowMs?: number;
   /** Shared window-close blocker used by mutations in attached stores. Pass `null` to disable. */
   blockWindowClose?: BlockWindowCloseHandler | null;
+  /** Global fallback for persistent storage failures when a store does not provide its own handler. */
+  onPersistentStorageError?: PersistentStorageErrorHandler;
   /** Optional shared offline session config for every attached store. */
   offlineSession?: OfflineSessionConfig<TUploadRef>;
 };
@@ -277,6 +282,7 @@ export function createStoreManager<
   const storeManager: StoreManager<TUploadRef> = {
     getSessionKey: options.getSessionKey,
     errorNormalizer: options.errorNormalizer,
+    onPersistentStorageError: options.onPersistentStorageError,
     storeDefaults: Object.freeze({
       lowPriorityThrottleMs:
         options.lowPriorityThrottleMs ?? DEFAULT_LOW_PRIORITY_THROTTLE_MS,

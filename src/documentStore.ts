@@ -521,6 +521,9 @@ export function createDocumentStore<
         unknown
       >({
         ...persistentStorageConfig,
+        onPersistentStorageError:
+          persistentStorageConfig.onPersistentStorageError ??
+          storeManager.onPersistentStorageError,
         offline: persistentStorageConfig.offline
           ? {
               ...persistentStorageConfig.offline,
@@ -1028,9 +1031,10 @@ export function createDocumentStore<
 
   async function preloadPersistentStorage(): Promise<void> {
     if (!persistence?.hasAsyncPreload) {
-      persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
-      );
+      (
+        resolvedPersistentStorageConfig?.onPersistentStorageError ??
+        storeManager.onPersistentStorageError
+      )?.(new Error('Async preload is not available'));
       return;
     }
 

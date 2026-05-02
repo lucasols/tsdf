@@ -51,6 +51,9 @@ const storeManager = createStoreManager({
   lowPriorityThrottleMs: 5,
   baseCoalescingWindowMs: 10,
   blockWindowClose: null,
+  onPersistentStorageError: (error) => {
+    console.error('TSDF persistence failed', error);
+  },
 });
 
 const userStore = createDocumentStore<User>({

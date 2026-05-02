@@ -19,19 +19,23 @@ const storeManager = createStoreManager({
   lowPriorityThrottleMs: 5,
   baseCoalescingWindowMs: 10,
   blockWindowClose: null,
+  onPersistentStorageError: (error) => {
+    console.error('TSDF persistence failed', error);
+  },
 });
 ```
 
 Options:
 
-| Option                   | Required | Description                                                                                 |
-| ------------------------ | -------- | ------------------------------------------------------------------------------------------- |
-| `getSessionKey`          | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.            |
-| `errorNormalizer`        | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                       |
-| `lowPriorityThrottleMs`  | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to `5`. |
-| `baseCoalescingWindowMs` | No       | Default window to group fetch requests for attached stores. Defaults to `10`.               |
-| `blockWindowClose`       | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.           |
-| `offlineSession`         | No       | Shared offline config used by stores with `persistentStorage.offline`.                      |
+| Option                     | Required | Description                                                                                    |
+| -------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `getSessionKey`            | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.               |
+| `errorNormalizer`          | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                          |
+| `lowPriorityThrottleMs`    | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to `5`.    |
+| `baseCoalescingWindowMs`   | No       | Default window to group fetch requests for attached stores. Defaults to `10`.                  |
+| `blockWindowClose`         | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.              |
+| `onPersistentStorageError` | No       | Global fallback for persistent storage failures when a store does not provide its own handler. |
+| `offlineSession`           | No       | Shared offline config used by stores with `persistentStorage.offline`.                         |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
 

@@ -15,18 +15,19 @@ See also: [Document Store](./document-store.md) | [Collection Store](./collectio
 
 Exported from `tsdf`:
 
-| Export                                                                                                                                        | Description                                                      |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `PersistentStorageSchema`                                                                                                                     | Schema type supported by cache validation                        |
-| `StorageAdapter`                                                                                                                              | `'local-sync'` or a managed async storage adapter                |
-| `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig`                                  | Store-level persistence config types                             |
-| `createStoreManager({ getSessionKey, errorNormalizer, lowPriorityThrottleMs?, baseCoalescingWindowMs?, blockWindowClose?, offlineSession? })` | Creates the shared store manager used by all stores              |
-| `PersistentStoragePreloadResult<Payload>`                                                                                                     | Return shape for preload methods                                 |
-| `clearSessionStorage(sessionKey, adapter)`                                                                                                    | Clears all TSDF entries for one session/adapter                  |
-| `clearAllSessionStorage(sessionKey)`                                                                                                          | Clears all TSDF entries for one session across built-in adapters |
-| `localPersistentStorage` / `opfsPersistentStorage` / `indexedDbPersistentStorage`                                                             | Built-in storage helpers and async adapters                      |
-| `createIndexedDbPersistentStorage(options?)`                                                                                                  | Creates an IndexedDB adapter, optionally with a database name    |
-| `createAsyncStorageAdapter(driver)`                                                                                                           | Wraps a custom async storage driver                              |
+| Export                                                                                                       | Description                                                      |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                        |
+| `PersistentStorageDataSchema` / `ConvertedPersistentStorageDataSchema`                                       | Direct or converted persisted data schema config                 |
+| `StorageAdapter`                                                                                             | `'local-sync'` or a managed async storage adapter                |
+| `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                             |
+| `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores              |
+| `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                                 |
+| `clearSessionStorage(sessionKey, adapter)`                                                                   | Clears all TSDF entries for one session/adapter                  |
+| `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across built-in adapters |
+| `localPersistentStorage` / `opfsPersistentStorage` / `indexedDbPersistentStorage`                            | Built-in storage helpers and async adapters                      |
+| `createIndexedDbPersistentStorage(options?)`                                                                 | Creates an IndexedDB adapter, optionally with a database name    |
+| `createAsyncStorageAdapter(driver)`                                                                          | Wraps a custom async storage driver                              |
 
 ## Configuration
 
@@ -40,12 +41,12 @@ Each store accepts `persistentStorage` in options:
 
 Common options (applies to all store configs):
 
-| Option                            | Required | Description                                                                                       |
-| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `schema`                          | Yes      | Schema used to validate restored data.                                                            |
-| `adapter`                         | Yes      | `'local-sync'`, `opfsPersistentStorage`, `indexedDbPersistentStorage`, or a custom async adapter. |
-| `version`                         | No       | Cache version; bump to invalidate old entries.                                                    |
-| `onPersistentStorageError(error)` | No       | Callback for write/read failures (quota, decode, etc.).                                           |
+| Option                            | Required | Description                                                                                            |
+| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `schema`                          | Yes      | Schema used to validate restored data.                                                                 |
+| `adapter`                         | Yes      | `'local-sync'`, `opfsPersistentStorage`, `indexedDbPersistentStorage`, or a custom async adapter.      |
+| `version`                         | No       | Cache version; bump to invalidate old entries.                                                         |
+| `onPersistentStorageError(error)` | No       | Store-specific callback for write/read failures (quota, decode, etc.). Overrides the manager fallback. |
 
 Store-specific options:
 
@@ -55,6 +56,52 @@ Store-specific options:
 | List Query Store | `itemPayloadSchema`, `queryPayloadSchema`, `maxItemBytes`, `maxQueryBytes`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
+
+## Converted Data Schemas
+
+Use `ConvertedPersistentStorageDataSchema<TStore, TStorage>` when the in-memory store shape should differ from the data saved in persistent storage. This is useful for compact cache formats, migration-friendly storage shapes, or persisted data that should omit derived fields.
+
+```ts
+import { rc_number, rc_object, rc_string } from 'runcheck';
+import type { ConvertedPersistentStorageDataSchema } from 'tsdf';
+
+type User = { profile: { name: string; score: number } };
+
+type StoredUser = { n: string; s: number };
+
+const userPersistenceSchema: ConvertedPersistentStorageDataSchema<
+  User,
+  StoredUser
+> = {
+  storeSchema: rc_object({
+    profile: rc_object({ name: rc_string(), score: rc_number() }),
+  }),
+  storageSchema: rc_object({ n: rc_string(), s: rc_number() }),
+  convertToStorage: (user) => ({ n: user.profile.name, s: user.profile.score }),
+  convertFromStorage: (stored) => ({
+    profile: { name: stored.n, score: stored.s },
+  }),
+};
+
+const userStore = createDocumentStore<User>({
+  id: 'document-user',
+  storeManager,
+  fetchFn: (signal) => api.getUser(signal),
+  lowPriorityThrottleMs: 2000,
+  baseCoalescingWindowMs: 100,
+  blockWindowClose: null,
+  persistentStorage: { adapter: 'local-sync', schema: userPersistenceSchema },
+});
+```
+
+Validation runs on both sides of the conversion:
+
+- Loaded cache data must pass `storageSchema`.
+- `convertFromStorage(...)` maps it to the store shape.
+- The converted result must pass `storeSchema`.
+- Successful fetch data passes through `convertToStorage(...)` before being saved.
+
+If `convertFromStorage(...)`, `convertToStorage(...)`, or either schema fails, TSDF reports the error through `onPersistentStorageError` when available and removes or skips the invalid cache entry.
 
 If `persistentStorage.offline` is configured, pass one shared offline session config to `createStoreManager(...)` and keep store-local offline behavior in `persistentStorage.offline.operations`. `createStoreManager(...)` owns that session internally and expects config, not an existing `OfflineSession` object.
 
@@ -120,6 +167,9 @@ const storeManager = createStoreManager({
   lowPriorityThrottleMs: 5,
   baseCoalescingWindowMs: 10,
   blockWindowClose: null,
+  onPersistentStorageError: (error) => {
+    console.error('TSDF persistence failed', error);
+  },
   offlineSession: {
     network: { enabled: true },
     mutationQueueing: { network: 'allow', outage: 'allow' },

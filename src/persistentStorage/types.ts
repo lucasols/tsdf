@@ -269,6 +269,8 @@ export type PersistentStoragePreloadResult<
 
 // --- Config Types ---
 
+export type PersistentStorageErrorHandler = (error: unknown) => void;
+
 /** Base config shared by all store types. */
 export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
   /** Unique storage namespace used internally for this store's persisted entries. Must not contain `.`. */
@@ -289,7 +291,7 @@ export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
    * Called when a storage write operation fails (e.g. quota exceeded, OPFS write error).
    * Use this to log or report persistence failures to your error tracking service.
    */
-  onPersistentStorageError?: (error: unknown) => void;
+  onPersistentStorageError?: PersistentStorageErrorHandler;
 };
 
 /** Store-level persistent storage config. Session scoping comes from the parent store. */

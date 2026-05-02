@@ -1121,6 +1121,9 @@ export function createListQueryStore<
         unknown
       >({
         ...persistentStorageConfig,
+        onPersistentStorageError:
+          persistentStorageConfig.onPersistentStorageError ??
+          storeManager.onPersistentStorageError,
         offline: persistentStorageConfig.offline
           ? {
               ...persistentStorageConfig.offline,
@@ -1472,9 +1475,10 @@ export function createListQueryStore<
     const payloads = Array.isArray(payload) ? payload : [payload];
 
     if (!persistence) {
-      persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Persistent storage preload is not available'),
-      );
+      (
+        resolvedPersistentStorageConfig?.onPersistentStorageError ??
+        storeManager.onPersistentStorageError
+      )?.(new Error('Persistent storage preload is not available'));
       return payloads.map((queryPayload) => ({
         payload: queryPayload,
         preloaded: false,
@@ -1513,9 +1517,10 @@ export function createListQueryStore<
     const payloads = Array.isArray(payload) ? payload : [payload];
 
     if (!persistence) {
-      persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Persistent storage preload is not available'),
-      );
+      (
+        resolvedPersistentStorageConfig?.onPersistentStorageError ??
+        storeManager.onPersistentStorageError
+      )?.(new Error('Persistent storage preload is not available'));
       return payloads.map((itemPayload) => ({
         payload: itemPayload,
         preloaded: false,

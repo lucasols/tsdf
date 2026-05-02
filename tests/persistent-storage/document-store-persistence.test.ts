@@ -369,6 +369,51 @@ describe('localStorage: document store persistence', () => {
     ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
   });
 
+  test('preload reports unavailable async preload through the manager fallback error handler', async () => {
+    const onPersistentStorageError = vi.fn();
+    const storeManager = createStoreManager({
+      getSessionKey: () => 'sess1',
+      errorNormalizer: normalizeError,
+      onPersistentStorageError,
+    });
+    const env = createDocumentStoreTestEnv(defaultServerData, {
+      id: 'doc-preload-manager-fallback',
+      storeManager,
+      persistentStorage: { adapter: 'local-sync', schema: wrappedSchema },
+    });
+
+    await env.apiStore.preloadPersistentStorage();
+
+    expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
+    expect(
+      pick(onPersistentStorageError.mock.calls[0]?.[0], ['message']),
+    ).toMatchInlineSnapshot(`message: 'Async preload is not available'`);
+  });
+
+  test('store persistent storage error handler overrides the manager fallback', async () => {
+    const managerOnPersistentStorageError = vi.fn();
+    const storeOnPersistentStorageError = vi.fn();
+    const storeManager = createStoreManager({
+      getSessionKey: () => 'sess1',
+      errorNormalizer: normalizeError,
+      onPersistentStorageError: managerOnPersistentStorageError,
+    });
+    const env = createDocumentStoreTestEnv(defaultServerData, {
+      id: 'doc-preload-store-error-handler',
+      storeManager,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: wrappedSchema,
+        onPersistentStorageError: storeOnPersistentStorageError,
+      },
+    });
+
+    await env.apiStore.preloadPersistentStorage();
+
+    expect(storeOnPersistentStorageError).toHaveBeenCalledTimes(1);
+    expect(managerOnPersistentStorageError).not.toHaveBeenCalled();
+  });
+
   test('save is debounced - only final state is saved', async () => {
     const env = createDocPersistenceEnv({
       storeName: 'doc6',
