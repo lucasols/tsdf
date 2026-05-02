@@ -49,7 +49,7 @@ const productStore = createCollectionStore<Product, string>({
 | `persistentStorage`            | `CollectionPersistentStorageConfig<ItemState, ItemPayload>`                                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)                                         |
 | `onInvalidate`                 | `(props: { itemState, payload, priority }) => void`                                                                 | No       | Called when an item is invalidated                                                                                     |
 | `onSchedulerEvent`             | `(event, data?) => void`                                                                                            | No       | Scheduler event listener                                                                                               |
-| `onMutationError`              | `(error, options: { silentErrors? }) => void`                                                                       | No       | Global mutation error handler                                                                                          |
+| `onMutationError`              | `(error, options: { silentErrors?: boolean }) => void`                                                              | No       | Global mutation error handler                                                                                          |
 
 ## Item State Shape
 

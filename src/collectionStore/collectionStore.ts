@@ -112,6 +112,7 @@ import {
   mutationSkipped,
   type MutationSkipped,
   type StoreError,
+  type StoreMutationErrorOptions,
 } from '../utils/storeShared';
 import { createCollectionCacheLimits } from './collectionCacheLimits';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
@@ -308,8 +309,14 @@ export type CollectionStoreOptions<
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
   ) => void;
+  /**
+   * Store-specific mutation error handler.
+   *
+   * Overrides the manager fallback. Use `null` to disable inherited mutation
+   * error handling for this store.
+   */
   onMutationError?:
-    | ((error: unknown, options: { silentErrors?: boolean }) => void)
+    | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
@@ -370,18 +377,33 @@ type CollectionMutationPayloadToUse<ItemPayload extends ValidPayload> =
   CollectionMutationTarget<ItemPayload>;
 
 type CollectionMutationArgsBase<T, ItemPayload extends ValidPayload> = {
+  /**
+   * Applies optimistic updates for the affected item payloads before the
+   * mutation runs. Return `false` to cancel the mutation before the async
+   * mutation function is called.
+   */
   optimisticUpdate?: (
     payload: CollectionMutationPayloadToUse<ItemPayload>,
   ) => void | boolean;
+  /** Performs the server mutation for the affected item payloads. */
   mutation: (
     payload: CollectionMutationPayloadToUse<ItemPayload>,
   ) => Promise<T>;
+  /** Called after a successful online mutation. */
   onSuccess?: (
     response: Awaited<T>,
     payload: CollectionMutationPayloadToUse<ItemPayload>,
   ) => void;
+  /** Invalidates affected items after a successful online mutation. */
   revalidateOnSuccess?: boolean;
+  /**
+   * Passes `{ silentErrors: true }` to `onMutationError`.
+   *
+   * The handler is still called so centralized logging and recovery can run,
+   * but UI handlers can suppress user-facing notifications.
+   */
   silentErrors?: boolean;
+  /** Debounces mutations with the same context and payload. Superseded calls are skipped. */
   debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
 };
 
@@ -2219,7 +2241,7 @@ export function createCollectionStore<
           }
         }
 
-        if (!silentErrors && resolvedOnMutationError) {
+        if (resolvedOnMutationError) {
           resolvedOnMutationError(exception, { silentErrors });
         }
 

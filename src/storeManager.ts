@@ -22,7 +22,11 @@ import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 import type { OfflineUpload } from './persistentStorage/offlineUploadTypes';
 import type { PersistentStorageErrorHandler } from './persistentStorage/types';
 import type { BlockWindowCloseHandler } from './utils/performMutation';
-import type { StoreError, ValidPayload } from './utils/storeShared';
+import type {
+  StoreError,
+  StoreMutationErrorOptions,
+  ValidPayload,
+} from './utils/storeShared';
 
 const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 5;
 const DEFAULT_BASE_COALESCING_WINDOW_MS = 10;
@@ -40,7 +44,7 @@ export type StoreManagerStoreDefaults = {
 
 export type StoreManagerMutationErrorHandler = (
   error: unknown,
-  options: { dontShowToast?: boolean; silentErrors?: boolean },
+  options: StoreMutationErrorOptions,
 ) => void;
 
 type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {

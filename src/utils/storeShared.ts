@@ -56,6 +56,18 @@ export type MutationSkipped = { kind: 'skipped' };
 
 export const mutationSkipped: MutationSkipped = { kind: 'skipped' };
 
+/** Options passed to mutation error handlers. */
+export type StoreMutationErrorOptions = {
+  /**
+   * True when the mutation caller asked the shared error handler to stay quiet.
+   *
+   * Handlers are still called so apps can keep centralized logging, metrics, or
+   * custom recovery behavior while suppressing user-facing noise such as toast
+   * notifications.
+   */
+  silentErrors?: boolean;
+};
+
 /**
  * Resolves a store-level option that may inherit from a manager-level fallback.
  * `undefined` means "use the manager value" and `null` means "explicit opt-out,

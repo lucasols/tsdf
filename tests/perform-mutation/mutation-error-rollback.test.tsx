@@ -66,9 +66,81 @@ test('document mutation failures use the manager onMutationError fallback', asyn
 
   expect(onMutationError).toHaveBeenCalledTimes(1);
   expect(onMutationError.mock.calls[0]?.[1]).toHaveProperty(
-    'dontShowToast',
+    'silentErrors',
     undefined,
   );
+});
+
+test('document mutation failures pass silentErrors to the shared onMutationError handler', async () => {
+  const onMutationError = vi.fn();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    onMutationError,
+  });
+  const env = createDocumentStoreTestEnv<DocumentValue>(
+    { hello: 'world' },
+    { testScenario: 'loaded', storeManager },
+  );
+
+  const result = await env.apiStore.performMutation({
+    silentErrors: true,
+    mutation: () => Promise.reject(new Error('boom')),
+  });
+
+  expect(result.ok).toBe(false);
+  expect(onMutationError).toHaveBeenCalledTimes(1);
+  expect(onMutationError.mock.calls[0]?.[1]).toMatchInlineSnapshot(`
+    silentErrors: '✅'
+  `);
+});
+
+test('collection mutation failures pass silentErrors to the shared onMutationError handler', async () => {
+  const onMutationError = vi.fn();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    onMutationError,
+  });
+  const env = createCollectionStoreTestEnv(
+    { 'item-1': { name: 'Item 1' } },
+    { testScenario: 'loaded', storeManager },
+  );
+
+  const result = await env.apiStore.performMutation('item-1', {
+    silentErrors: true,
+    mutation: () => Promise.reject(new Error('boom')),
+  });
+
+  expect(result.ok).toBe(false);
+  expect(onMutationError).toHaveBeenCalledTimes(1);
+  expect(onMutationError.mock.calls[0]?.[1]).toMatchInlineSnapshot(`
+    silentErrors: '✅'
+  `);
+});
+
+test('list query mutation failures pass silentErrors to the shared onMutationError handler', async () => {
+  const onMutationError = vi.fn();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    onMutationError,
+  });
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada', type: 'admin' }] },
+    { testScenario: { loaded: { items: ['users||1'] } }, storeManager },
+  );
+
+  const result = await env.apiStore.performMutation('users||1', {
+    silentErrors: true,
+    mutation: () => Promise.reject(new Error('boom')),
+  });
+
+  expect(result.ok).toBe(false);
+  expect(onMutationError).toHaveBeenCalledTimes(1);
+  expect(onMutationError.mock.calls[0]?.[1]).toMatchInlineSnapshot(`
+    silentErrors: '✅'
+  `);
 });
 
 test('document mutation failures use store onMutationError before manager fallback', async () => {

@@ -42,7 +42,7 @@ const userStore = createDocumentStore<User>({
 | `usesRealTimeUpdates`          | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                                               |
 | `persistentStorage`            | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)                                         |
 | `onSchedulerEvent`             | `(event) => void`                                                                | No       | Scheduler event listener                                                                                               |
-| `onMutationError`              | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                                                          |
+| `onMutationError`              | `(error, options: { silentErrors?: boolean }) => void`                           | No       | Global mutation error handler                                                                                          |
 
 ## State Shape
 

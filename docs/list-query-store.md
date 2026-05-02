@@ -80,7 +80,7 @@ The type parameters are:
 | `onInvalidateItem`             | `(props: { itemState, payload, priority }) => void`                      | Called when an item is invalidated                                                                |
 | `persistentStorage`            | `ListQueryPersistentStorageConfig<ItemState, QueryPayload, ItemPayload>` | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)                    |
 | `onSchedulerEvent`             | `(event, data?) => void`                                                 | Scheduler event listener                                                                          |
-| `onMutationError`              | `(error, options) => void`                                               | Global mutation error handler                                                                     |
+| `onMutationError`              | `(error, options: { silentErrors?: boolean }) => void`                   | Global mutation error handler                                                                     |
 
 ### FetchListFnReturn
 

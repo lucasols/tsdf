@@ -32,6 +32,18 @@ It contains the normalized `StoreError` fields plus:
 - `kind: 'error'`
 - `cause` — the original thrown value, preserved via `Error.cause`
 
+## StoreMutationErrorOptions
+
+Options passed to store-level and manager-level `onMutationError` handlers:
+
+```ts
+type StoreMutationErrorOptions = { silentErrors?: boolean };
+```
+
+When `silentErrors` is true, the handler is still called. Use the flag to keep
+centralized logging or recovery behavior while suppressing user-facing
+notifications such as error toasts.
+
 ## MutationSkipped
 
 A sentinel returned by `performMutation` when the mutation is intentionally not

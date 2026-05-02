@@ -62,6 +62,7 @@ export type {
   MutationSkipped,
   PayloadDebounce,
   StoreError,
+  StoreMutationErrorOptions,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,

@@ -115,6 +115,7 @@ import {
   mutationSkipped,
   type MutationSkipped,
   type StoreError,
+  type StoreMutationErrorOptions,
 } from './utils/storeShared';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
@@ -236,8 +237,14 @@ export type DocumentStoreOptions<
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
   ) => void;
+  /**
+   * Store-specific mutation error handler.
+   *
+   * Overrides the manager fallback. Use `null` to disable inherited mutation
+   * error handling for this store.
+   */
   onMutationError?:
-    | ((error: unknown, options: { dontShowToast?: boolean }) => void)
+    | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
@@ -278,15 +285,32 @@ type DocumentUpdateState<State extends ValidStoreState> = (
 ) => boolean;
 
 type DocumentMutationContext<State extends ValidStoreState> = {
+  /** Updates the current document state during the mutation. Returns `false` when no document data is loaded. */
   updateState: DocumentUpdateState<State>;
+  /** Document state at the moment the mutation function runs. */
   currentState: State | null;
 };
 
 type DocumentMutationArgsBase<State extends ValidStoreState, T> = {
+  /**
+   * Applies an optimistic document update before the mutation runs.
+   *
+   * Return `false` to cancel the mutation before the async mutation function is
+   * called.
+   */
   optimisticUpdate?: (currentState: State | null) => void | boolean;
+  /** Performs the server mutation. */
   mutation: (ctx: DocumentMutationContext<State>) => Promise<T>;
+  /** Debounces mutations with the same context and payload. Superseded calls are skipped. */
   debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-  dontShowErrorToast?: boolean;
+  /**
+   * Passes `{ silentErrors: true }` to `onMutationError`.
+   *
+   * The handler is still called so centralized logging and recovery can run,
+   * but UI handlers can suppress user-facing notifications.
+   */
+  silentErrors?: boolean;
+  /** Invalidates the document after a successful online mutation. */
   revalidateOnSuccess?: boolean;
 };
 
@@ -1211,7 +1235,7 @@ export function createDocumentStore<
     optimisticUpdate,
     mutation,
     debounce,
-    dontShowErrorToast,
+    silentErrors,
     revalidateOnSuccess,
     offline,
     upload,
@@ -1285,9 +1309,7 @@ export function createDocumentStore<
         }
 
         if (resolvedOnMutationError) {
-          resolvedOnMutationError(exception, {
-            dontShowToast: dontShowErrorToast,
-          });
+          resolvedOnMutationError(exception, { silentErrors });
         }
 
         return toStoreMutationError(exception, errorNormalizer);

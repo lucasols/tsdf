@@ -98,6 +98,7 @@ import {
   ValidPayload,
   ValidStoreState,
   type MutationSkipped,
+  type StoreMutationErrorOptions,
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
@@ -955,8 +956,14 @@ type ListQueryStoreOptionsBase<
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
   ) => void;
+  /**
+   * Store-specific mutation error handler.
+   *
+   * Overrides the manager fallback. Use `null` to disable inherited mutation
+   * error handling for this store.
+   */
   onMutationError?:
-    | ((error: unknown, options: { silentErrors?: boolean }) => void)
+    | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
   /** Opt-in hook-level query derivation from locally materialized items. */
   derivedQueries?: DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>;

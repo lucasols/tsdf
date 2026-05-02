@@ -25,6 +25,9 @@ const result = await store.performMutation({
 
   // After success, invalidate data to refetch from the server
   revalidateOnSuccess: true,
+
+  // Ask the global/store onMutationError handler to stay quiet
+  silentErrors: true,
 });
 
 if (result.ok) {
@@ -81,7 +84,7 @@ The payload can be:
 3. **Debounce** (optional): Waits for `ms` milliseconds. During debounce, the window close is blocked
 4. **Execute mutation**: The async mutation function runs
 5. **On success**: Calls `onSuccess`, optionally invalidates data
-6. **On error**: Reverts to server state by invalidating, normalizes the error, calls `onMutationError`
+6. **On error**: Rolls back optimistic state, normalizes the error, and calls `onMutationError` with the `silentErrors` flag
 7. **Unlock**: The scheduler is unlocked, pending fetches resume
 
 ## Return Value
@@ -178,7 +181,7 @@ await store.performMutation(payload, {
     items: false,
   },
 
-  // Suppress the global onMutationError handler
+  // Ask the global/store onMutationError handler to stay quiet
   silentErrors: true,
 
   // Callbacks

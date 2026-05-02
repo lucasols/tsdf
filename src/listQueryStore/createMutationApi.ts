@@ -25,6 +25,7 @@ import {
   mutationSkipped,
   type MutationSkipped,
   type StoreError,
+  type StoreMutationErrorOptions,
   StoreMutationError,
   toStoreMutationError,
   ValidPayload,
@@ -88,7 +89,7 @@ type CreateMutationApiOptions<
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
   onMutationError?: (
     error: unknown,
-    options: { silentErrors?: boolean },
+    options: StoreMutationErrorOptions,
   ) => void;
   errorNormalizer: (exception: Error) => StoreError;
   getItemKey: (params: ItemPayload) => string;
@@ -951,12 +952,28 @@ export function createMutationApi<
   }
 
   type ListQueryMutationArgs<T> = {
+    /**
+     * Applies optimistic updates for the affected item payloads before the
+     * mutation runs. Return `false` to cancel the mutation before the async
+     * mutation function is called.
+     */
     optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
+    /** Performs the server mutation for the affected item payloads. */
     mutation: (payload: MutationPayloadToUse) => Promise<T>;
+    /** Controls query/item invalidation after a successful online mutation. */
     revalidateOnSuccess?: RevalidateOnSuccessOption;
+    /** Called after a successful online mutation. */
     onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
+    /** Called after a failed mutation with the normalized mutation error. */
     onError?: (error: StoreMutationError | MutationSkipped) => void;
+    /**
+     * Passes `{ silentErrors: true }` to `onMutationError`.
+     *
+     * The handler is still called so centralized logging and recovery can run,
+     * but UI handlers can suppress user-facing notifications.
+     */
     silentErrors?: boolean;
+    /** Debounces mutations with the same context and payload. Superseded calls are skipped. */
     debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
   };
 
@@ -1174,7 +1191,7 @@ export function createMutationApi<
           });
         }
 
-        if (!silentErrors && onMutationError) {
+        if (onMutationError) {
           onMutationError(exception, { silentErrors });
         }
 

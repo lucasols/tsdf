@@ -133,6 +133,7 @@ if (result.ok) {
 
 - Result is `Result<T, StoreMutationError | MutationSkipped>` (`t-result`).
 - On error: optimistic updates roll back via automatic invalidation.
+- `silentErrors: true` still calls `onMutationError(error, { silentErrors: true })`; handlers should use the flag to suppress user-facing noise while preserving logging/recovery.
 - `revalidateOnSuccess`: `true | false | 'queries' | (queryPayload) => boolean | { queries, items }` (List Query).
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
 - `blockWindowClose` on `createStoreManager(...)` prevents accidental window close mid-mutation; it defaults to `null`.
@@ -255,6 +256,7 @@ Exported from `tsdf` (see `docs/shared-types.md`):
 - `StoreError` — normalized error shape produced by `errorNormalizer`.
 - `StoreFetchError` — returned by `awaitFetch*` and cache-or-fetch helpers (types: `'fetch' | 'timeout' | 'aborted'`).
 - `StoreMutationError` — `performMutation` failure with `cause` and normalized fields.
+- `StoreMutationErrorOptions` — options passed to `onMutationError`, including `silentErrors`.
 - `MutationSkipped` / `mutationSkipped` — sentinel for cancelled/superseded mutations.
 - `fetchTypePriority` — priority constants used by the scheduler.
 - `IsOffScreenContext` — React context that propagates `isOffScreen` to nested hooks.
