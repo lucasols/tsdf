@@ -23,6 +23,7 @@ TSDF provides three store types for different data patterns:
 | [Mutations](./mutations.md)                             | All                    | Data mutations with optimistic updates and revalidation                    |
 | [Invalidation](./invalidation.md)                       | All                    | Mark data as stale and trigger refetches                                   |
 | [Batch Fetching](./batch-fetching.md)                   | Collection, List Query | Fetch multiple items in a single request                                   |
+| [Cache Limits](./cache-limits.md)                       | Collection, List Query | Bound in-memory item/query caches with LRU eviction                        |
 | [Real-Time Updates](./real-time-updates.md)             | All                    | WebSocket/SSE integration with adaptive throttling                         |
 | [Persistent Storage](./persistent-storage.md)           | All                    | Restore cached data from localStorage, IndexedDB, or OPFS between sessions |
 | [Offline](./offline.md)                                 | All                    | Durable mutation queueing, replay, conflicts, temp entities, and uploads   |

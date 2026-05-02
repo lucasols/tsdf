@@ -21,11 +21,12 @@ Exported from `tsdf`:
 | `PersistentStorageDataSchema` / `ConvertedPersistentStorageDataSchema`                                       | Direct or converted persisted data schema config                 |
 | `StorageAdapter`                                                                                             | `'local-sync'` or a managed async storage adapter                |
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                             |
-| `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores              |
+| `createStoreManager(options)`                                                                                | Creates the shared store manager used by all stores              |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                                 |
 | `clearSessionStorage(sessionKey, adapter)`                                                                   | Clears all TSDF entries for one session/adapter                  |
 | `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across built-in adapters |
-| `localPersistentStorage` / `opfsPersistentStorage` / `indexedDbPersistentStorage`                            | Built-in storage helpers and async adapters                      |
+| `localPersistentStorage`                                                                                     | Built-in localStorage helper used by the `'local-sync'` adapter  |
+| `opfsPersistentStorage` / `indexedDbPersistentStorage`                                                       | Built-in async storage adapters                                  |
 | `createIndexedDbPersistentStorage(options?)`                                                                 | Creates an IndexedDB adapter, optionally with a database name    |
 | `createAsyncStorageAdapter(driver)`                                                                          | Wraps a custom async storage driver                              |
 
@@ -150,6 +151,35 @@ persistentStorage: {
 - Hydration is asynchronous, and can be triggered explicitly with preload APIs.
 
 Use `createIndexedDbPersistentStorage({ databaseName })` when an app needs an isolated IndexedDB database.
+
+### Custom async adapters
+
+Use `createAsyncStorageAdapter(driver)` only when the built-in OPFS and IndexedDB adapters are not a fit. It wraps an `AsyncStorageDriver`, which is the low-level async backend contract used by TSDF persistence internals.
+
+A driver is responsible for storing raw records by logical namespace:
+
+```ts
+import { createAsyncStorageAdapter } from 'tsdf';
+import type { AsyncStorageDriver } from 'tsdf';
+
+const driver: AsyncStorageDriver = {
+  get: (scope, key) => customStore.get(scope, key),
+  set: (scope, key, value) => customStore.set(scope, key, value),
+  remove: (scope, key) => customStore.remove(scope, key),
+  listKeys: (scope) => customStore.listKeys(scope),
+  clear: (scope) => customStore.clear(scope),
+  listScopes: (sessionKey) => customStore.listScopes(sessionKey),
+  listScopesWithKnownRecordKeys: (sessionKey) =>
+    customStore.listScopesWithKnownRecordKeys(sessionKey),
+  getMany: (scope, keys) => customStore.getMany(scope, keys),
+  setMany: (scope, entries) => customStore.setMany(scope, entries),
+  removeMany: (scope, keys) => customStore.removeMany(scope, keys),
+};
+
+const customPersistentStorage = createAsyncStorageAdapter(driver);
+```
+
+Driver methods should preserve the JSON-compatible values TSDF gives them, isolate data by the full namespace scope, and implement bulk methods consistently with their single-record equivalents. `listScopes(...)` and `listScopesWithKnownRecordKeys(...)` are required for cleanup, session clearing, and offline protected-key restoration.
 
 ## Example configuration
 

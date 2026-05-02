@@ -87,6 +87,14 @@ Batch fetching: `Collection` / `ListQuery` accept `batchFetchFn` + `getItemsBatc
 
 Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 
+## Cache limits
+
+`CollectionStore` and `ListQueryStore` bound in-memory state with LRU cache limits. Collection supports `maxItems` (default `5000`). List Query supports `maxItems` (default `5000`) and `maxQueries` (default `1000`).
+
+Mounted hooks, in-flight fetches, and in-flight mutations are protected from eviction. List Query may evict whole inactive queries under item pressure to avoid leaving cached queries partially loaded. Use `onStateCleanup` to release app resources after cache-limit eviction.
+
+Docs: `docs/cache-limits.md`.
+
 ## Mutations
 
 `performMutation` is the primary mutation API:
@@ -141,7 +149,7 @@ Per-store `persistentStorage`:
 
 ```ts
 persistentStorage: {
-  adapter: 'local-sync',     // or localPersistentStorage / opfsPersistentStorage / indexedDbPersistentStorage / createAsyncStorageAdapter(driver)
+  adapter: 'local-sync',     // or opfsPersistentStorage / indexedDbPersistentStorage / createAsyncStorageAdapter(driver)
   schema: stateSchema,        // PersistentStorageSchema or ConvertedPersistentStorageDataSchema
   version: 1,                 // bump to invalidate older entries
   // Collection / ListQuery: payloadSchema, itemPayloadSchema, queryPayloadSchema, maxBytes/maxItemBytes/maxQueryBytes, maxQuerySize, pinnedItems, pinnedQueries, ignoreItems
@@ -150,7 +158,7 @@ persistentStorage: {
 }
 ```
 
-The store reuses its `id` as the storage namespace and the manager's `getSessionKey` for session scoping. Async adapters (OPFS, IndexedDB, custom) require calling `preloadPersistentStorage()` / `preloadItemFromStorage(...)` / `preloadQueryFromStorage(...)` before reading.
+The store reuses its `id` as the storage namespace and the manager's `getSessionKey` for session scoping. Async adapters (OPFS, IndexedDB, custom) require calling `preloadPersistentStorage()` / `preloadItemFromStorage(...)` / `preloadQueryFromStorage(...)` before reading. Prefer the built-in OPFS/IndexedDB adapters; use `createAsyncStorageAdapter(driver)` only when a custom `AsyncStorageDriver` backend is needed.
 
 Use `ConvertedPersistentStorageDataSchema<TStore, TStorage>` when the in-memory store shape should differ from the persisted cache shape:
 
@@ -241,7 +249,7 @@ Exported from `tsdf` (see `docs/shared-types.md`):
 - `IsOffScreenContext` — React context that propagates `isOffScreen` to nested hooks.
 - `PayloadDebounce` — option type for hook `debouncePayload`.
 
-Persistent storage / offline types are re-exported (e.g. `PersistentStorageSchema`, `PersistentStorageDataSchema`, `ConvertedPersistentStorageDataSchema`, `StorageAdapter`, `DocumentPersistentStorageConfig`, `CollectionPersistentStorageConfig`, `ListQueryPersistentStorageConfig`, `DefineDocumentOfflineOperations`, `DefineCollectionOfflineOperations`, `DefineListQueryOfflineOperations`, `OfflineMutationResult`, `OfflineRuntimeConfig`, etc.) — read `node_modules/tsdf/dist/main.d.ts` for the authoritative list.
+Persistent storage / offline types are re-exported (e.g. `PersistentStorageSchema`, `PersistentStorageDataSchema`, `ConvertedPersistentStorageDataSchema`, `StorageAdapter`, `AsyncStorageAdapter`, `AsyncStorageDriver`, `DocumentPersistentStorageConfig`, `CollectionPersistentStorageConfig`, `ListQueryPersistentStorageConfig`, `DefineDocumentOfflineOperations`, `DefineCollectionOfflineOperations`, `DefineListQueryOfflineOperations`, `OfflineMutationResult`, `OfflineRuntimeConfig`, etc.) — read `node_modules/tsdf/dist/main.d.ts` for the authoritative list.
 
 ## Conventions when writing code with TSDF
 
@@ -262,7 +270,7 @@ Shipped under `node_modules/tsdf/docs/`:
 - `store-manager.md` — manager, registry, offline session, uploads
 - `hooks.md` — every hook with options/return values
 - `fetch-scheduling.md`, `invalidation.md`, `mutations.md` — runtime behavior
-- `persistent-storage.md`, `offline.md`, `real-time-updates.md`
+- `persistent-storage.md`, `offline.md`, `cache-limits.md`, `real-time-updates.md`
 - `optimistic-list-updates.md`, `partial-resources.md`, `offset-pagination.md`, `batch-fetching.md`, `browser-tabs-sync.md`
 - `shared-types.md` — error and utility types
 
