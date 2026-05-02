@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
 import {
   clearSessionStorage,
   createCollectionStore,
   createDocumentStore,
   createListQueryStore,
+  createStoreManager,
   indexedDbPersistentStorage,
   localPersistentStorage,
   opfsPersistentStorage,
@@ -18,6 +19,13 @@ type UserRow = { id: number; name: string };
 
 function normalizeError(error: Error): StoreError {
   return { code: 500, id: 'fixture-error', message: error.message };
+}
+
+function createFixtureStoreManager(sessionKey: string | false) {
+  return createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+  });
 }
 
 async function requestJson<T>(
@@ -78,7 +86,7 @@ function getPersistentStorageAdapter(
     case 'indexedDb':
       return indexedDbPersistentStorage;
     case 'localStorage':
-      return localPersistentStorage;
+      return 'local-sync';
     case 'opfs':
       return opfsPersistentStorage;
   }
@@ -147,10 +155,9 @@ function DocumentScenario({
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager: createFixtureStoreManager(sessionKey),
       fetchFn: (signal) =>
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
       baseCoalescingWindowMs: 50,
       backgroundCoalescingWindowMultiplier: 3,
@@ -256,12 +263,11 @@ function CollectionScenario({
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager: createFixtureStoreManager(sessionKey),
       fetchFn: (payload, signal) =>
         requestJson<CollectionItem>(pageId, `/api/collection/${payload}`, {
           signal,
         }),
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
       baseCoalescingWindowMs: 50,
       backgroundCoalescingWindowMultiplier: 3,
@@ -340,7 +346,7 @@ function ListScenario({
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager: createFixtureStoreManager(sessionKey),
       fetchListFn: async (payload, size, { signal }) => {
         const searchParams = new URLSearchParams({
           tableId: payload.tableId,
@@ -369,7 +375,6 @@ function ListScenario({
           { signal },
         );
       },
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
       baseCoalescingWindowMs: 50,
       backgroundCoalescingWindowMultiplier: 3,
@@ -469,10 +474,9 @@ function PersistDocumentScenario({
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager: createFixtureStoreManager(sessionKey),
       fetchFn: (signal) =>
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
       persistentStorage: { adapter, schema: documentSchema },
     }),
@@ -528,6 +532,7 @@ function PersistDocumentScenario({
 
 const collectionItemSchema = rc_object({ name: rc_string });
 const listItemSchema = rc_object({ id: rc_number, name: rc_string });
+const listQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
 
 function PersistCollectionScenario({
   pageId,
@@ -544,14 +549,17 @@ function PersistCollectionScenario({
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager: createFixtureStoreManager(sessionKey),
       fetchFn: (payload, signal) =>
         requestJson<CollectionItem>(pageId, `/api/collection/${payload}`, {
           signal,
         }),
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
-      persistentStorage: { adapter, schema: collectionItemSchema },
+      persistentStorage: {
+        adapter,
+        schema: collectionItemSchema,
+        payloadSchema: rc_string,
+      },
     }),
   );
 
@@ -616,7 +624,7 @@ function PersistListScenario({
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
-      getSessionKey: () => sessionKey,
+      storeManager: createFixtureStoreManager(sessionKey),
       fetchListFn: async (payload, size, { signal }) => {
         const searchParams = new URLSearchParams({
           tableId: payload.tableId,
@@ -635,10 +643,14 @@ function PersistListScenario({
           signal,
         });
       },
-      errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 10_000,
       defaultQuerySize: 10,
-      persistentStorage: { adapter, schema: listItemSchema },
+      persistentStorage: {
+        adapter,
+        schema: listItemSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryPayloadSchema,
+      },
     }),
   );
 
