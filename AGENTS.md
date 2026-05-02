@@ -164,6 +164,7 @@ When adding a new feature, or adjust a existing one:
   - when adding jsdoc to function arguments prefer adding them to the types/interfaces instead of the implementation, to ensure they are visible in IDEs when users hover the relevant types
 - if adding new public exports, update the relevant barrel file (`src/main.ts`)
 - if the feature requires changes to the documentation, update the relevant docs files in `docs/` and public api jsdoc comments in `src/`
+- if the feature changes the public API surface (new/removed/renamed exports, hooks, options, return shapes) or introduces/removes a concept covered in `skills/tsdf/SKILL.md`, update the skill so the high-level map stays accurate. Keep the skill concise — defer details to `docs/` and `src/main.ts` types
 - run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
 - after implementing the changes, check if there are no performance regressions compared to previous implementation that could be avoided with a better implementation
 
