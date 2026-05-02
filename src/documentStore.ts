@@ -9,7 +9,6 @@ import {
   type __LEGIT_ANY__,
 } from '@ls-stack/utils/saferTyping';
 import { evtmitter, type Emitter } from 'evtmitter';
-import { produce } from 'immer';
 import { klona } from 'klona/json';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Result, type Result as ResultType } from 't-result';
@@ -1151,12 +1150,14 @@ export function createDocumentStore<
   ): boolean {
     if (!store.state.data) return false;
 
-    store.setKey(
-      'data',
-      (current) => {
-        if (!current) return current;
+    store.produceState(
+      (draft) => {
+        if (!draft.data) return;
 
-        return produce(current, produceNewData);
+        const newData = produceNewData(draft.data);
+        if (newData !== undefined) {
+          draft.data = newData;
+        }
       },
       { action: 'update-state' },
     );
