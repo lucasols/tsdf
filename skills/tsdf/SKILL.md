@@ -150,6 +150,8 @@ Docs: `docs/mutations.md`.
 
 Same-or-higher pending invalidations swallow lower ones. Hooks with `disableRefetches` only refetch on `idle`/`error`; with `disableRefetchOnMount` only on explicit invalidation or first load. Window focus and transport reconnect can also auto-invalidate.
 
+Utilities: use `GET_ALL` as the all-payload predicate and `ALL_QUERY_AND_ITEMS` to invalidate every List Query query and item.
+
 Docs: `docs/invalidation.md`.
 
 ## Persistent storage

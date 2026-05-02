@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { ALL_QUERY_AND_ITEMS, GET_ALL } from '../../src/main';
 import { StoreFetchError } from '../../src/utils/storeShared';
 import {
   createListQueryStoreTestEnv,
@@ -1348,10 +1349,22 @@ test('invalidate everything does not cause a problem', () => {
     testScenario: { loaded: { tables: ['users'] } },
   });
 
-  env.apiStore.invalidateQueryAndItems({
-    queryPayload: () => true,
-    itemPayload: () => true,
-  });
+  expect(
+    env.apiStore.getQueriesState(GET_ALL).map(({ query }) => query.payload),
+  ).toMatchInlineSnapshot(`
+    - tableId: 'users'
+  `);
+  expect(
+    env.apiStore.getItemState(GET_ALL).map(({ payload }) => payload),
+  ).toMatchInlineSnapshot(
+    `['users||1', 'users||2', 'users||3', 'users||4', 'users||5']`,
+  );
+
+  const typedInvalidateAll: Parameters<
+    typeof env.apiStore.invalidateQueryAndItems
+  >[0] = ALL_QUERY_AND_ITEMS;
+
+  env.apiStore.invalidateQueryAndItems(typedInvalidateAll);
 
   expect(env.store.state).toMatchInlineSnapshot(`
     itemFieldInvalidationFields: {}

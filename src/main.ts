@@ -10,6 +10,7 @@ export {
   StoreFetchError,
   StoreMutationError,
 } from './utils/storeShared';
+export { ALL_QUERY_AND_ITEMS, GET_ALL } from './invalidationUtils';
 export { IsOffScreenContext } from './isOffScreenContext';
 export {
   createStoreManager,
