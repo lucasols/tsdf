@@ -53,6 +53,12 @@ export type ListQueryOfflineOverlay<
   keepVisibleWhileResolutionRequired?: boolean;
 };
 
+/**
+ * Partial-resource fields to request.
+ *
+ * Pass a field-name array to load only those fields, or `'*'` to load the
+ * complete item.
+ */
 export type FieldsInput = string[] | '*';
 
 export type TSFDUseListQueryReturn<
@@ -129,19 +135,34 @@ export type ListQueryUseMultipleItemsQuery<
   ItemPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
+  /** Item payload to subscribe to and fetch when needed. */
   payload: ItemPayload;
+  /**
+   * Partial-resource fields to request for this item.
+   *
+   * Pass `'*'` to fetch the complete item. This option is required when
+   * `partialResources` is enabled and optional otherwise.
+   */
   fields?: FieldsInput;
+  /** Metadata returned with this item result for caller-side bookkeeping. */
   queryMetadata?: QueryMetadata;
-  /** Only loads the data if it is not already loaded and skip any other refetches */
+  /**
+   * Only fetches when the item is missing from state, skipping stale-state and
+   * invalidation refetches.
+   */
   disableRefetches?: boolean;
+  /** Prevents the automatic mount refetch for stale loaded data. */
   disableRefetchOnMount?: boolean;
+  /** Returns `idle` instead of `loading` while the item has not been fetched. */
   returnIdleStatus?: boolean;
+  /** Returns `refetching` instead of keeping `loaded` status during refetches. */
   returnRefetchingStatus?: boolean;
   /**
    * When requested fields are missing but cached partial data exists, return
    * `refetching` instead of `loading`.
    */
   showPartialAsRefetching?: boolean;
+  /** Marks this subscription as off-screen, lowering automatic fetch priority. */
   isOffScreen?: boolean;
 };
 
@@ -149,21 +170,38 @@ export type ListQueryUseMultipleListQueriesQuery<
   QueryPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
+  /** Query payload to subscribe to and fetch when needed. */
   payload: QueryPayload;
+  /**
+   * Partial-resource fields to request for each item in this query.
+   *
+   * Pass `'*'` to fetch complete items. This option is required when
+   * `partialResources` is enabled and optional otherwise.
+   */
   fields?: FieldsInput;
+  /** Metadata returned with this query result for caller-side bookkeeping. */
   queryMetadata?: QueryMetadata;
+  /** Omits `payload` from this query result. */
   omitPayload?: boolean;
-  /** Only loads the data if it is not already loaded and skip any other refetches */
+  /**
+   * Only fetches when the query is missing from state, skipping stale-state and
+   * invalidation refetches.
+   */
   disableRefetches?: boolean;
+  /** Prevents the automatic mount refetch for stale loaded data. */
   disableRefetchOnMount?: boolean;
+  /** Returns `idle` instead of `loading` while the query has not been fetched. */
   returnIdleStatus?: boolean;
+  /** Returns `refetching` instead of keeping `loaded` status during refetches. */
   returnRefetchingStatus?: boolean;
   /**
    * When requested fields are missing but cached partial data exists, return
    * `refetching` instead of `loading`.
    */
   showPartialAsRefetching?: boolean;
+  /** Marks this subscription as off-screen, lowering automatic fetch priority. */
   isOffScreen?: boolean;
+  /** Number of items to request when fetching this query page. */
   loadSize?: number;
 };
 
@@ -200,10 +238,15 @@ export type OptimisticListUpdate<
 };
 
 export type QueryFetchPayload<QueryPayload extends ValidPayload> = {
+  /** Whether this request loads the first page or a later page. */
   type: 'load' | 'loadMore';
+  /** Query payload being fetched. */
   payload: QueryPayload;
+  /** Offset used for offset-paginated fetches. */
   offset: number;
+  /** Maximum number of items requested. */
   limit: number;
+  /** Partial-resource fields requested for each item in the fetched query. */
   fields?: string[];
 };
 
@@ -277,5 +320,21 @@ export type DerivedQueriesConfig<
 
 export type FieldsOption<HasPartialResources extends boolean> =
   HasPartialResources extends true
-    ? { fields: FieldsInput }
-    : { fields?: FieldsInput };
+    ? {
+        /**
+         * Partial-resource fields to request.
+         *
+         * Pass `'*'` to fetch complete items. This option is required when
+         * `partialResources` is enabled.
+         */
+        fields: FieldsInput;
+      }
+    : {
+        /**
+         * Partial-resource fields to request.
+         *
+         * Pass `'*'` to fetch complete items. This option is optional when
+         * `partialResources` is not enabled.
+         */
+        fields?: FieldsInput;
+      };

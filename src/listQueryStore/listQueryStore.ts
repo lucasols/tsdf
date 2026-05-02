@@ -176,8 +176,24 @@ type ListQueryHasPartialResources<TPartialResources extends boolean> = [
 
 type ListQueryFetchFieldsOption<TPartialResources extends boolean> =
   ListQueryHasPartialResources<TPartialResources> extends true
-    ? { fields: FieldsInput }
-    : { fields?: FieldsInput };
+    ? {
+        /**
+         * Partial-resource fields to request.
+         *
+         * Pass `'*'` to fetch complete items. This option is required when
+         * `partialResources` is enabled.
+         */
+        fields: FieldsInput;
+      }
+    : {
+        /**
+         * Partial-resource fields to request.
+         *
+         * Pass `'*'` to fetch complete items. This option is optional when
+         * `partialResources` is not enabled.
+         */
+        fields?: FieldsInput;
+      };
 
 type ListQueryScheduleFetchWithFieldsOption<TPartialResources extends boolean> =
   ScheduleFetchOptions & ListQueryFetchFieldsOption<TPartialResources>;
@@ -383,9 +399,8 @@ type ListQueryUseListQueryApi<
     payload: QueryPayload | false | null | undefined,
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
       ? [
-          options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> & {
-            fields: FieldsInput;
-          },
+          options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> &
+            FieldsOption<true>,
         ]
       : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
   ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
@@ -418,7 +433,7 @@ type ListQueryUseItemApi<
   <Selected = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
-      ? [options: UseItemOptions<ItemState, Selected> & { fields: FieldsInput }]
+      ? [options: UseItemOptions<ItemState, Selected> & FieldsOption<true>]
       : [options?: UseItemOptions<ItemState, Selected>]
   ): TSFDUseListItemReturn<Selected, ItemPayload>;
 };
@@ -634,24 +649,51 @@ type ListQueryInvalidateQueryAndItemsArgs<
   | {
       /** Invalidate every cached query and every cached item. */
       all: true;
+      /** Fetch priority used for refetches triggered by this invalidation. */
       type?: FetchType;
+      /**
+       * Partial-resource fields to invalidate on matching items.
+       *
+       * Omit to invalidate the full item data.
+       */
       fields?: string[];
+      /** Not allowed when invalidating every query and item. */
       itemPayload?: undefined;
+      /** Not allowed when invalidating every query and item. */
       queryPayload?: undefined;
     }
   | {
+      /** Leave unset when invalidating selected queries or items. */
       all?: undefined;
+      /**
+       * Items to invalidate.
+       *
+       * Pass one payload, many payloads, a predicate over cached items, or
+       * `false` to skip item invalidation.
+       */
       itemPayload:
         | ItemPayload
         | ItemPayload[]
         | ListQueryFilterItem<ItemState, ItemPayload>
         | false;
+      /**
+       * Queries to invalidate.
+       *
+       * Pass one payload, many payloads, a predicate over cached queries, or
+       * `false` to skip query invalidation.
+       */
       queryPayload:
         | QueryPayload
         | QueryPayload[]
         | ListQueryFilterQuery<QueryPayload>
         | false;
+      /** Fetch priority used for refetches triggered by this invalidation. */
       type?: FetchType;
+      /**
+       * Partial-resource fields to invalidate on matching items.
+       *
+       * Omit to invalidate the full item data.
+       */
       fields?: string[];
     };
 
@@ -804,7 +846,10 @@ export type ListQueryStore<
   useItem: ListQueryUseItemApi<ItemState, ItemPayload, TPartialResources>;
   useFindItem: <SelectedItem = ItemState | null>(
     findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
-    options?: { selector?: (data: ItemState, id: ItemPayload) => SelectedItem },
+    options?: {
+      /** Maps the matched item before it is returned from the hook. */
+      selector?: (data: ItemState, id: ItemPayload) => SelectedItem;
+    },
   ) => SelectedItem | null;
   onTransportReconnect: () => void;
 };
@@ -2542,11 +2587,8 @@ export function createListQueryStore<
       payload: QueryPayload | false | null | undefined,
       ...args: ListQueryHasPartialResources<TPartialResources> extends true
         ? [
-            options: UseListQueryOptions<
-              ItemState,
-              ItemPayload,
-              SelectedItem
-            > & { fields: FieldsInput },
+            options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> &
+              FieldsOption<true>,
           ]
         : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
     ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
@@ -2630,11 +2672,7 @@ export function createListQueryStore<
     <Selected = ItemState | null>(
       itemPayload: ItemPayload | false | null | undefined,
       ...args: ListQueryHasPartialResources<TPartialResources> extends true
-        ? [
-            options: UseItemOptions<ItemState, Selected> & {
-              fields: FieldsInput;
-            },
-          ]
+        ? [options: UseItemOptions<ItemState, Selected> & FieldsOption<true>]
         : [options?: UseItemOptions<ItemState, Selected>]
     ): TSFDUseListItemReturn<Selected, ItemPayload>;
   } = function useItem<Selected = ItemState | null>(
@@ -2706,6 +2744,7 @@ export function createListQueryStore<
   function useFindItem<SelectedItem = ItemState | null>(
     findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
     options: {
+      /** Maps the matched item before it is returned from the hook. */
       selector?: (data: ItemState, id: ItemPayload) => SelectedItem;
     } = {},
   ): SelectedItem | null {

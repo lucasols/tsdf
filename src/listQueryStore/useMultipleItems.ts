@@ -57,18 +57,27 @@ export type UseMultipleItemsOptions<
   ItemState extends ValidStoreState,
   Selected,
 > = {
+  /** Maps each item before it is returned from the hook. */
   selector?: (data: ItemState | null, payload: ValidPayload | null) => Selected;
+  /** Reads only from the current store state and never schedules fetches. */
   loadFromStateOnly?: boolean;
+  /** Returns `idle` instead of `loading` while items have not been fetched. */
   returnIdleStatus?: boolean;
+  /** Returns `refetching` instead of keeping `loaded` status during refetches. */
   returnRefetchingStatus?: boolean;
   /**
    * When requested fields are missing but cached partial data exists, return
    * `refetching` instead of `loading`.
    */
   showPartialAsRefetching?: boolean;
-  /** Only loads the data if it is not already loaded and skip any other refetches */
+  /**
+   * Only fetches when an item is missing from state, skipping stale-state and
+   * invalidation refetches.
+   */
   disableRefetches?: boolean;
+  /** Prevents automatic mount refetches for stale loaded data. */
   disableRefetchOnMount?: boolean;
+  /** Marks these subscriptions as off-screen, lowering automatic fetch priority. */
   isOffScreen?: boolean;
   /**
    * Debounces automatic fetches caused by payload changes, while selection

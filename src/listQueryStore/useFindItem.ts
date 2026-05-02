@@ -16,7 +16,10 @@ export function useFindItem<
   findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
   {
     selector,
-  }: { selector?: (data: ItemState, id: ItemPayload) => SelectedItem },
+  }: {
+    /** Maps the matched item before it is returned from the hook. */
+    selector?: (data: ItemState, id: ItemPayload) => SelectedItem;
+  },
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   registerActiveItems: (itemKeys: string[]) => () => void,
   touchItems: (itemKeys: string[]) => void,

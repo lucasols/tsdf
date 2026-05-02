@@ -56,23 +56,33 @@ export type UseMultipleListQueriesOptions<
   ItemPayload extends ValidPayload,
   SelectedItem,
 > = {
+  /** Maps each query item before it is returned from the hook. */
   itemSelector?: (
     data: ItemState,
     itemPayload: ItemPayload,
     itemKey: string,
   ) => SelectedItem;
+  /** Returns `idle` instead of `loading` while queries have not been fetched. */
   returnIdleStatus?: boolean;
+  /** Returns `refetching` instead of keeping `loaded` status during refetches. */
   returnRefetchingStatus?: boolean;
   /**
    * When requested fields are missing but cached partial data exists, return
    * `refetching` instead of `loading`.
    */
   showPartialAsRefetching?: boolean;
+  /** Omits `payload` from each query result unless overridden per query. */
   omitPayload?: boolean;
-  /** Only loads the data if it is not already loaded and skip any other refetches */
+  /**
+   * Only fetches when a query is missing from state, skipping stale-state and
+   * invalidation refetches.
+   */
   disableRefetches?: boolean;
+  /** Prevents automatic mount refetches for stale loaded data. */
   disableRefetchOnMount?: boolean;
+  /** Marks these subscriptions as off-screen, lowering automatic fetch priority. */
   isOffScreen?: boolean;
+  /** Number of items to request when fetching each query page. */
   loadSize?: number;
   /**
    * Debounces automatic fetches caused by payload changes, while selection

@@ -405,32 +405,59 @@ export type DocumentStore<
     >,
   ) => Promise<void> | void;
   useDocument: <Selected = State | null>(args?: {
+    /** Maps the document data before it is returned from the hook. */
     selector?: (data: State | null) => Selected;
+    /** Disables this hook subscription and prevents automatic fetches. */
     disabled?: boolean;
+    /** Marks this subscription as off-screen, lowering automatic fetch priority. */
     isOffScreen?: boolean;
+    /**
+     * Only fetches when the document is missing from state, skipping stale-state
+     * and invalidation refetches.
+     */
     disableRefetches?: boolean;
+    /** Prevents the automatic mount refetch for stale loaded data. */
     disableRefetchOnMount?: boolean;
+    /** Returns `idle` instead of `loading` while the document has not been fetched. */
     returnIdleStatus?: boolean;
+    /**
+     * Forces a high-priority fetch on mount and keeps the hook in `loading`
+     * until the document finishes loading.
+     */
     ensureIsLoaded?: boolean;
+    /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   }) => TSDFUseDocumentReturn<Selected>;
   useListItemIsLoading: (args: {
+    /** Unique identifier of the item within the document. */
     itemId: string;
+    /** Extracts the item from the document data. */
     selector: (data: State | null) => unknown;
+    /** Called if the item is still missing and no refetch is in progress. */
     loadItemFallback?: () => void;
+    /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
     ensureIsLoaded?: boolean;
   }) => boolean;
   useListItemIsDeleted: (args: {
+    /** Unique identifier of the item within the document. */
     itemId: string;
+    /** Extracts the item from the document data. */
     selector: (data: State | null) => unknown;
+    /** Called once when deletion is detected. */
     onDelete?: () => void;
+    /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
     ensureIsLoaded?: boolean;
   }) => boolean;
   useListItem: <Selected>(args: {
+    /** Unique identifier of the item within the document. */
     itemId: string;
+    /** Extracts and maps the item from the document data. */
     selector: (data: State | null) => Selected;
+    /** Called if the item is still missing and no refetch is in progress. */
     loadItemFallback?: () => void;
+    /** Called once when deletion is detected. */
     onDelete?: () => void;
+    /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
     ensureIsLoaded?: boolean;
   }) => { isLoading: boolean; isDeleted: boolean; data: Selected };
   performMutation: DocumentPerformMutation<State, TOfflineOperations>;
@@ -1354,14 +1381,27 @@ export function createDocumentStore<
     ensureIsLoaded,
     disableRefetches,
   }: {
+    /** Maps the document data before it is returned from the hook. */
     selector?: (data: State | null) => Selected;
+    /** Disables this hook subscription and prevents automatic fetches. */
     disabled?: boolean;
+    /** Marks this subscription as off-screen, lowering automatic fetch priority. */
     isOffScreen?: boolean;
-    /** only loads the data if it is not already loaded and skip any other refetches */
+    /**
+     * Only fetches when the document is missing from state, skipping stale-state
+     * and invalidation refetches.
+     */
     disableRefetches?: boolean;
+    /** Prevents the automatic mount refetch for stale loaded data. */
     disableRefetchOnMount?: boolean;
+    /** Returns `idle` instead of `loading` while the document has not been fetched. */
     returnIdleStatus?: boolean;
+    /**
+     * Forces a high-priority fetch on mount and keeps the hook in `loading`
+     * until the document finishes loading.
+     */
     ensureIsLoaded?: boolean;
+    /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   } = {}) {
     const offlineEntities = useOfflineStoreEntities({

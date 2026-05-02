@@ -161,14 +161,24 @@ export type CollectionUseMultipleItemsQuery<
   ItemPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
+  /** Item payload to subscribe to and fetch when needed. */
   payload: ItemPayload;
+  /** Metadata returned with this query result for caller-side bookkeeping. */
   queryMetadata?: QueryMetadata;
+  /** Omits `payload` from this query result. */
   omitPayload?: boolean;
-  /** Only loads the data if it is not already loaded and skip any other refetches */
+  /**
+   * Only fetches when the item is missing from state, skipping stale-state and
+   * invalidation refetches.
+   */
   disableRefetches?: boolean;
+  /** Prevents the automatic mount refetch for stale loaded data. */
   disableRefetchOnMount?: boolean;
+  /** Returns `idle` instead of `loading` while the item has not been fetched. */
   returnIdleStatus?: boolean;
+  /** Returns `refetching` instead of keeping `loaded` status during refetches. */
   returnRefetchingStatus?: boolean;
+  /** Marks this subscription as off-screen, lowering automatic fetch priority. */
   isOffScreen?: boolean;
 };
 
@@ -544,28 +554,41 @@ export type CollectionStore<
   useListItemIsLoading: (
     payload: ItemPayload,
     args: {
+      /** Unique identifier of the sub-item within the collection item. */
       itemId: string;
+      /** Extracts the sub-item from the collection item data. */
       selector: (data: ItemState | null) => unknown;
+      /** Called if the sub-item is still missing and no refetch is in progress. */
       loadItemFallback?: () => void;
+      /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
       ensureIsLoaded?: boolean;
     },
   ) => boolean;
   useListItemIsDeleted: (
     payload: ItemPayload,
     args: {
+      /** Unique identifier of the sub-item within the collection item. */
       itemId: string;
+      /** Extracts the sub-item from the collection item data. */
       selector: (data: ItemState | null) => unknown;
+      /** Called once when deletion is detected. */
       onDelete?: () => void;
+      /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
       ensureIsLoaded?: boolean;
     },
   ) => boolean;
   useListItem: <Selected>(
     payload: ItemPayload,
     args: {
+      /** Unique identifier of the sub-item within the collection item. */
       itemId: string;
+      /** Extracts and maps the sub-item from the collection item data. */
       selector: (data: ItemState | null) => Selected;
+      /** Called if the sub-item is still missing and no refetch is in progress. */
       loadItemFallback?: () => void;
+      /** Called once when deletion is detected. */
       onDelete?: () => void;
+      /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
       ensureIsLoaded?: boolean;
     },
   ) => { isLoading: boolean; isDeleted: boolean; data: Selected };

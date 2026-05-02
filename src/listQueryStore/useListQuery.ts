@@ -27,6 +27,12 @@ export type UseListQueryOptions<
    * `debouncePayload`.
    */
   ensureIsLoaded?: boolean;
+  /**
+   * Partial-resource fields to request for each item in this query.
+   *
+   * Pass `'*'` to fetch complete items. This option is required when
+   * `partialResources` is enabled and optional otherwise.
+   */
   fields?: FieldsInput;
   /**
    * When requested fields are missing but cached partial data exists, return

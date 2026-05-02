@@ -27,6 +27,12 @@ export type UseItemOptions<
    * `debouncePayload`.
    */
   ensureIsLoaded?: boolean;
+  /**
+   * Partial-resource fields to request for this item.
+   *
+   * Pass `'*'` to fetch the complete item. This option is required when
+   * `partialResources` is enabled and optional otherwise.
+   */
   fields?: FieldsInput;
   /**
    * When requested fields are missing but cached partial data exists, return
