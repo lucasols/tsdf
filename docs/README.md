@@ -17,6 +17,7 @@ TSDF provides three store types for different data patterns:
 | Feature                                                 | Applicable stores      | Description                                                                |
 | ------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
 | [React Hooks](./hooks.md)                               | All                    | `useDocument`, `useItem`, `useListQuery`, and more                         |
+| [Store Manager](./store-manager.md)                     | All                    | Session scoping, global resets, shared offline runtime state               |
 | [Fetch Scheduling](./fetch-scheduling.md)               | All                    | Priority levels, throttling, coalescing, and batching                      |
 | [Browser Tabs Sync](./browser-tabs-sync.md)             | All                    | Cross-tab fetch deduplication and snapshot synchronization                 |
 | [Mutations](./mutations.md)                             | All                    | Data mutations with optimistic updates and revalidation                    |
@@ -24,10 +25,11 @@ TSDF provides three store types for different data patterns:
 | [Batch Fetching](./batch-fetching.md)                   | Collection, List Query | Fetch multiple items in a single request                                   |
 | [Real-Time Updates](./real-time-updates.md)             | All                    | WebSocket/SSE integration with adaptive throttling                         |
 | [Persistent Storage](./persistent-storage.md)           | All                    | Restore cached data from localStorage, IndexedDB, or OPFS between sessions |
+| [Offline](./offline.md)                                 | All                    | Durable mutation queueing, replay, conflicts, temp entities, and uploads   |
 | [Optimistic List Updates](./optimistic-list-updates.md) | List Query             | Auto-sort/filter queries when item state changes                           |
 | [Partial Resources](./partial-resources.md)             | List Query             | Fetch only specific fields, with per-field invalidation                    |
 | [Offset Pagination](./offset-pagination.md)             | List Query             | Offset/limit-based pagination with chunked invalidation                    |
-| [Shared Types](./shared-types.md)                       | All                    | Common types (`StoreError`, `FetchType`, `IsOffScreenContext`, etc.)       |
+| [Shared Types](./shared-types.md)                       | All                    | Common types/utilities (`StoreError`, `IsOffScreenContext`, priorities)    |
 
 Notable additions:
 
@@ -54,7 +56,6 @@ const userStore = createDocumentStore<User>({
   fetchFn: (signal) => fetch('/api/user', { signal }).then((r) => r.json()),
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
-  backgroundCoalescingWindowMultiplier: 3,
   blockWindowClose: null,
 });
 
@@ -72,19 +73,19 @@ function UserProfile() {
 
 All three store types share these creation options:
 
-| Option                                 | Type                                                                                                                      | Required | Description                                                                             |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `debugName`                            | `string`                                                                                                                  | No       | Debug name for the store                                                                |
-| `storeManager`                         | `StoreManager`                                                                                                            | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
-| `lowPriorityThrottleMs`                | `number`                                                                                                                  | Yes      | Minimum interval between low-priority fetches                                           |
-| `baseCoalescingWindowMs`               | `number`                                                                                                                  | Yes      | Window to group multiple fetch requests into a batch                                    |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                                                                                  | Yes      | Multiplier for coalescing window when tab is in background                              |
-| `mediumPriorityDelayMs`                | `number`                                                                                                                  | No       | Delay before medium-priority fetches execute                                            |
-| `dynamicRealtimeThrottleMs`            | `(params) => number`                                                                                                      | No       | Dynamic throttle for [real-time updates](./real-time-updates.md)                        |
-| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                                                              | No       | Refetch data when window regains focus                                                  |
-| `persistentStorage`                    | `DocumentPersistentStorageConfig<...> \| CollectionPersistentStorageConfig<...> \| ListQueryPersistentStorageConfig<...>` | No       | Configure cache persistence and optional session-based offline behavior                 |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                                                         | Yes      | Blocks window close during [mutations](./mutations.md)                                  |
-| `usesRealTimeUpdates`                  | `boolean`                                                                                                                 | No       | Enables [real-time update mode](./real-time-updates.md)                                 |
-| `onSchedulerEvent`                     | `(event) => void`                                                                                                         | No       | Callback for [scheduler events](./fetch-scheduling.md)                                  |
-| `onMutationError`                      | `(error, options) => void`                                                                                                | No       | Global handler for [mutation](./mutations.md) errors                                    |
-| `id`                                   | `string`                                                                                                                  | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |
+| Option                         | Type                                                                                                                      | Required | Description                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `debugName`                    | `string`                                                                                                                  | No       | Debug name for the store                                                                |
+| `storeManager`                 | `StoreManager`                                                                                                            | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
+| `lowPriorityThrottleMs`        | `number`                                                                                                                  | Yes      | Minimum interval between low-priority fetches                                           |
+| `baseCoalescingWindowMs`       | `number`                                                                                                                  | Yes      | Window to group multiple fetch requests into a batch                                    |
+| `mediumPriorityDelayMs`        | `number`                                                                                                                  | No       | Delay before medium-priority fetches execute                                            |
+| `dynamicRealtimeThrottleMs`    | `(params) => number`                                                                                                      | No       | Dynamic throttle for [real-time updates](./real-time-updates.md)                        |
+| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                                                              | No       | Refetch data when window regains focus                                                  |
+| `transportReconnectCooldownMs` | `number`                                                                                                                  | No       | Cooldown for repeated transport reconnect revalidation                                  |
+| `persistentStorage`            | `DocumentPersistentStorageConfig<...> \| CollectionPersistentStorageConfig<...> \| ListQueryPersistentStorageConfig<...>` | No       | Configure cache persistence and optional session-based offline behavior                 |
+| `blockWindowClose`             | `BlockWindowCloseHandler \| null`                                                                                         | Yes      | Blocks window close during [mutations](./mutations.md)                                  |
+| `usesRealTimeUpdates`          | `boolean`                                                                                                                 | No       | Enables [real-time update mode](./real-time-updates.md)                                 |
+| `onSchedulerEvent`             | `(event) => void`                                                                                                         | No       | Callback for [scheduler events](./fetch-scheduling.md)                                  |
+| `onMutationError`              | `(error, options) => void`                                                                                                | No       | Global handler for [mutation](./mutations.md) errors                                    |
+| `id`                           | `string`                                                                                                                  | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |

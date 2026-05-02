@@ -433,7 +433,6 @@ type AsyncStorageManagedMetadataListArgs = {
   order?: AsyncStorageMetadataOrder;
 };
 
-/** @internal */
 export type AsyncStorageManagedDriverCapabilities = {
   applyManagedCommit?: (
     scope: AsyncStorageNamespaceScope,

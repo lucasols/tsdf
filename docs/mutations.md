@@ -2,6 +2,8 @@
 
 TSDF provides a structured mutation lifecycle that coordinates with the fetch scheduler to prevent conflicts, supports optimistic updates, and handles error recovery with automatic revalidation.
 
+See also: [Offline](./offline.md) for durable offline queueing and replay.
+
 ## performMutation
 
 The primary way to perform mutations. Available on all store types.
@@ -99,6 +101,11 @@ if (result.ok) {
   }
 }
 ```
+
+When a mutation uses the `offline` option, the success value is `OfflineMutationResult<T>`:
+
+- `{ kind: 'online', data }` when the direct mutation completed.
+- `{ kind: 'queued' }` when TSDF persisted the mutation for offline replay.
 
 ## Optimistic Updates
 

@@ -2,7 +2,7 @@
 
 A store for managing a key-value collection of independently fetched items. Each item is identified by a payload and has its own fetch lifecycle, loading state, and error handling.
 
-See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./invalidation.md) | [Batch Fetching](./batch-fetching.md) | [Persistent Storage](./persistent-storage.md)
+See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./invalidation.md) | [Batch Fetching](./batch-fetching.md) | [Persistent Storage](./persistent-storage.md) | [Offline](./offline.md)
 
 ## Creating a Collection Store
 
@@ -22,33 +22,35 @@ const productStore = createCollectionStore<Product, string>({
   fetchFn: (productId, signal) => api.getProduct(productId, signal),
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
-  backgroundCoalescingWindowMultiplier: 3,
   blockWindowClose: null,
 });
 ```
 
 ## Options
 
-| Option                                 | Type                                                                                                                | Required | Description                                                                             |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `id`                                   | `string`                                                                                                            | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |
-| `storeManager`                         | `StoreManager`                                                                                                      | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
-| `fetchFn`                              | `(params: ItemPayload, signal: AbortSignal) => Promise<ItemState>`                                                  | Yes      | Fetches a single item                                                                   |
-| `batchFetchFn`                         | `(payloads: ItemPayload[], signal: AbortSignal, batchKey: string) => Promise<Map<ItemPayload, ItemState \| Error>>` | No       | See [Batch Fetching](./batch-fetching.md)                                               |
-| `getItemsBatchKey`                     | `(payload: ItemPayload) => string \| false`                                                                         | No       | Groups batch fetches by key. `false` falls back to per-item fetch                       |
-| `maxBatchSize`                         | `number`                                                                                                            | No       | Triggers immediate fetch when batch reaches this size                                   |
-| `getCollectionItemKey`                 | `(params: ItemPayload) => ValidPayload \| unknown[]`                                                                | No       | Custom key derivation from payload                                                      |
-| `lowPriorityThrottleMs`                | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `baseCoalescingWindowMs`               | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                                                   | Yes      | See [Mutations](./mutations.md)                                                         |
-| `mediumPriorityDelayMs`                | `number`                                                                                                            | No       | Delay for medium-priority fetches                                                       |
-| `dynamicRealtimeThrottleMs`            | `(params) => number`                                                                                                | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
-| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                                                        | No       | Refetch on window focus                                                                 |
-| `usesRealTimeUpdates`                  | `boolean`                                                                                                           | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
-| `persistentStorage`                    | `CollectionPersistentStorageConfig<ItemState, ItemPayload>`                                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)          |
-| `onInvalidate`                         | `(props: { itemState, payload, priority }) => void`                                                                 | No       | Called when an item is invalidated                                                      |
-| `onMutationError`                      | `(error, options: { silentErrors? }) => void`                                                                       | No       | Global mutation error handler                                                           |
+| Option                         | Type                                                                                                                | Required | Description                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `id`                           | `string`                                                                                                            | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |
+| `storeManager`                 | `StoreManager`                                                                                                      | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
+| `fetchFn`                      | `(params: ItemPayload, signal: AbortSignal) => Promise<ItemState>`                                                  | Yes      | Fetches a single item                                                                   |
+| `batchFetchFn`                 | `(payloads: ItemPayload[], signal: AbortSignal, batchKey: string) => Promise<Map<ItemPayload, ItemState \| Error>>` | No       | See [Batch Fetching](./batch-fetching.md)                                               |
+| `getItemsBatchKey`             | `(payload: ItemPayload) => string \| false`                                                                         | No       | Groups batch fetches by key. `false` falls back to per-item fetch                       |
+| `maxBatchSize`                 | `number`                                                                                                            | No       | Triggers immediate fetch when batch reaches this size                                   |
+| `maxItems`                     | `number`                                                                                                            | No       | Maximum cached items kept in memory. Defaults to `5000`                                 |
+| `onStateCleanup`               | `(cleanup) => void`                                                                                                 | No       | Called when memory cache eviction removes items                                         |
+| `getCollectionItemKey`         | `(params: ItemPayload) => ValidPayload \| unknown[]`                                                                | No       | Custom key derivation from payload                                                      |
+| `lowPriorityThrottleMs`        | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `baseCoalescingWindowMs`       | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `blockWindowClose`             | `BlockWindowCloseHandler \| null`                                                                                   | Yes      | See [Mutations](./mutations.md)                                                         |
+| `mediumPriorityDelayMs`        | `number`                                                                                                            | No       | Delay for medium-priority fetches                                                       |
+| `dynamicRealtimeThrottleMs`    | `(params) => number`                                                                                                | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
+| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                                                        | No       | Refetch on window focus                                                                 |
+| `transportReconnectCooldownMs` | `number`                                                                                                            | No       | Cooldown for repeated transport reconnect revalidation                                  |
+| `usesRealTimeUpdates`          | `boolean`                                                                                                           | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
+| `persistentStorage`            | `CollectionPersistentStorageConfig<ItemState, ItemPayload>`                                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)          |
+| `onInvalidate`                 | `(props: { itemState, payload, priority }) => void`                                                                 | No       | Called when an item is invalidated                                                      |
+| `onSchedulerEvent`             | `(event, data?) => void`                                                                                            | No       | Scheduler event listener                                                                |
+| `onMutationError`              | `(error, options: { silentErrors? }) => void`                                                                       | No       | Global mutation error handler                                                           |
 
 ## Item State Shape
 
@@ -58,7 +60,12 @@ type TSFDCollectionItem<ItemState, ItemPayload> = {
   error: StoreError | null;
   status: 'loading' | 'error' | 'refetching' | 'success';
   payload: ItemPayload;
-  refetchOnMount: false | FetchType;
+  refetchOnMount:
+    | false
+    | 'lowPriority'
+    | 'mediumPriority'
+    | 'realtimeUpdate'
+    | 'highPriority';
   wasLoaded: boolean;
 };
 ```
@@ -96,7 +103,17 @@ The overall store state is `Record<string, TSFDCollectionItem | null>` where key
 | `startMutation`          | `(params) => () => void`                                             | Start mutation lock. See [Mutations](./mutations.md)     |
 | `performMutation`        | `(payload, options) => Promise<Result<T>>`                           | Full mutation lifecycle. See [Mutations](./mutations.md) |
 | `reset`                  | `() => void`                                                         | Reset store and all schedulers                           |
+| `dispose`                | `() => void`                                                         | Release listeners and store-manager registration         |
 | `onTransportReconnect`   | `() => void`                                                         | See [Real-Time Updates](./real-time-updates.md)          |
+
+### Offline Methods
+
+| Method                                                | Description                                                       |
+| ----------------------------------------------------- | ----------------------------------------------------------------- |
+| `getOfflineEntities()` / `useOfflineEntities()`       | Read offline entities scoped to this store                        |
+| `getOfflineResolutions()` / `useOfflineResolutions()` | Read manual conflict/retry resolutions scoped to this store       |
+| `parseOfflineResolutionConflict(resolution)`          | Narrow a persisted resolution to this store's operation types     |
+| `resolveOfflineResolution(id, operation, action)`     | Resolve, retry, discard, requeue, or commit an offline resolution |
 
 ### Payload Overloads
 

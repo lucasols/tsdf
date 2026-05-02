@@ -146,7 +146,6 @@ const taskStore = createListQueryStore<Task, { status: string }, string>({
   fetchItemFn: (id, { signal }) => api.getTask(id, signal),
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
-  backgroundCoalescingWindowMultiplier: 3,
   blockWindowClose: null,
 
   optimisticListUpdates: [

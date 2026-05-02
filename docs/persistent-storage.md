@@ -2,7 +2,7 @@
 
 TSDF can persist cached data across page reloads and browser sessions through the optional `persistentStorage` option on each store type.
 
-See also: [Document Store](./document-store.md) | [Collection Store](./collection-store.md) | [List Query Store](./list-query-store.md)
+See also: [Document Store](./document-store.md) | [Collection Store](./collection-store.md) | [List Query Store](./list-query-store.md) | [Offline](./offline.md)
 
 ## What it does
 
@@ -15,15 +15,18 @@ See also: [Document Store](./document-store.md) | [Collection Store](./collectio
 
 Exported from `tsdf`:
 
-| Export                                                                                                       | Description                                                 |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                   |
-| `StorageBackend`                                                                                             | `'localStorage' \| 'opfs' \| 'indexedDb'`                   |
-| `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                        |
-| `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores         |
-| `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                            |
-| `clearSessionStorage(sessionKey, backend)`                                                                   | Clears all TSDF entries for one session/backend             |
-| `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across all backends |
+| Export                                                                                                       | Description                                                      |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                        |
+| `StorageAdapter`                                                                                             | `'local-sync'` or a managed async storage adapter                |
+| `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                             |
+| `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores              |
+| `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                                 |
+| `clearSessionStorage(sessionKey, adapter)`                                                                   | Clears all TSDF entries for one session/adapter                  |
+| `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across built-in adapters |
+| `localPersistentStorage` / `opfsPersistentStorage` / `indexedDbPersistentStorage`                            | Built-in storage helpers and async adapters                      |
+| `createIndexedDbPersistentStorage(options?)`                                                                 | Creates an IndexedDB adapter, optionally with a database name    |
+| `createAsyncStorageAdapter(driver)`                                                                          | Wraps a custom async storage driver                              |
 
 ## Configuration
 
@@ -46,10 +49,10 @@ Common options (applies to all store configs):
 
 Store-specific options:
 
-| Store            | Additional options                                                                      |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| Collection Store | `maxItems`, `pinnedItems`, `ignoreItems`                                                |
-| List Query Store | `maxItems`, `maxQueries`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
+| Store            | Additional options                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Collection Store | `payloadSchema`, `maxBytes`, `pinnedItems`, `ignoreItems`                                                                                 |
+| List Query Store | `itemPayloadSchema`, `queryPayloadSchema`, `maxItemBytes`, `maxQueryBytes`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
@@ -68,26 +71,38 @@ snapshots.
 
 Session-level `mutationQueueing` can allow or disallow durable offline mutation queueing separately for `network` and `outage` causes. This only affects mutations using the `offline` option and does not change offline reads.
 
-## Backend behavior
+## Adapter behavior
 
-### `localStorage`
+TSDF does not choose a persistence adapter automatically. Pass one of the built-in adapters or a custom async adapter in every `persistentStorage` config.
 
-- Default behavior when `backend: 'localStorage'`.
+### `local-sync`
+
+- Uses managed `localStorage` entries.
 - Can hydrate synchronously during initial state creation for `DocumentStore`.
 - `CollectionStore` and `ListQueryStore` use lazy hydration for unknown entries from initial keys scan.
 - Writes are debounced and may be dropped if serialization or quota errors occur.
 
-### `opfs`
+Use it with:
 
-- Default behavior for all stores.
+```ts
+persistentStorage: {
+  adapter: 'local-sync',
+  schema: settingsSchema,
+}
+```
+
+### `opfsPersistentStorage`
+
 - Uses `FileSystemAccess`-backed persistent storage.
 - Hydration is asynchronous, and can be triggered explicitly with preload APIs.
 
-### `indexedDb`
+### `indexedDbPersistentStorage`
 
-- Alternative built-in async backend for browsers where IndexedDB is preferred.
+- Alternative built-in async adapter for browsers where IndexedDB is preferred.
 - Stores one logical row per entry and uses native indexes for recency ordering, group lookups, and protected-key scans.
 - Hydration is asynchronous, and can be triggered explicitly with preload APIs.
+
+Use `createIndexedDbPersistentStorage({ databaseName })` when an app needs an isolated IndexedDB database.
 
 ## Example configuration
 
@@ -95,7 +110,7 @@ Session-level `mutationQueueing` can allow or disallow durable offline mutation 
 import { rc_object, rc_string } from 'runcheck';
 import { createDocumentStore, createStoreManager } from 'tsdf';
 
-type Settings = { id: string; theme: 'light' | 'dark' };
+type Settings = { id: string; theme: string };
 
 const getSessionKey = () => (userId ? `tenant:${userId}` : false);
 
@@ -114,14 +129,11 @@ const settingsStore = createDocumentStore<Settings>({
   fetchFn: (signal) => api.getSettings(signal),
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
-  backgroundCoalescingWindowMultiplier: 2,
   blockWindowClose: null,
   persistentStorage: {
     adapter: 'local-sync',
     version: 2,
-    schema: rc_object({
-      data: rc_object({ id: rc_string(), theme: rc_string() }),
-    }),
+    schema: rc_object({ id: rc_string(), theme: rc_string() }),
     onPersistentStorageError: (error) => {
       console.error('Settings persistence failed', error);
     },
@@ -137,9 +149,9 @@ const settingsStore = createDocumentStore<Settings>({
 - When a store instance is permanently discarded, call `store.dispose()` to release listeners, browser-tab coordination, and store-manager registration.
 - Invalid or incompatible cache entries are removed automatically.
 - Expired entries are removed by a periodic scan:
-  - `localStorage`: ~1 week old entries
-  - `opfs`: ~2 weeks old entries
-  - `indexedDb`: ~2 weeks old entries
+  - `local-sync`: ~1 week old entries
+  - `opfsPersistentStorage`: ~2 weeks old entries
+  - `indexedDbPersistentStorage`: ~2 weeks old entries
 
 ## Preload APIs
 
@@ -167,13 +179,14 @@ directly into queued work.
 
 `preload*` returns `preloaded` boolean for each payload.
 
-When the selected backend does not support async preload, preload methods report errors to `onPersistentStorageError` and return `preloaded: false`.
+When the selected adapter does not support async preload, preload methods report errors to `onPersistentStorageError` and return `preloaded: false`.
 
 ## Cache retention controls
 
-- `maxItems` limits how many cached entries are kept.
-- `maxQueries` limits number of cached list queries (list query store only).
-- `maxQuerySize` limits how many items each cached query can keep (list query store only).
+- `maxBytes` limits the serialized storage budget for collection items.
+- `maxItemBytes` limits the serialized storage budget for list-query items.
+- `maxQueryBytes` limits the serialized storage budget for list-query query entries.
+- `maxQuerySize` limits how many items each cached query can keep.
 - Pinned entries are never evicted.
 - `ignoreItems` removes/blocks entries from being persisted or hydrated.
   - Can be an explicit list or predicate.
@@ -181,9 +194,9 @@ When the selected backend does not support async preload, preload methods report
 
 ## Clearing stored data
 
-- `clearSessionStorage(sessionKey, backend)`:
-  remove all TSDF entries for one session/backend.
+- `clearSessionStorage(sessionKey, adapter)`:
+  remove all TSDF entries for one session and adapter.
 - `clearAllSessionStorage(sessionKey)`:
-  remove TSDF entries for one session across localStorage, OPFS, and IndexedDB.
+  remove TSDF entries for one session across the built-in `local-sync`, OPFS, and IndexedDB adapters.
 
 Use these on logout, user switch, or explicit privacy actions.

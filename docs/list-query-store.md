@@ -2,7 +2,7 @@
 
 The most feature-rich store type. It manages paginated lists (queries) combined with individual item queries. Items are shared across queries, so updating an item in one query automatically reflects in all other queries that reference it.
 
-See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./invalidation.md) | [Optimistic List Updates](./optimistic-list-updates.md) | [Partial Resources](./partial-resources.md) | [Offset Pagination](./offset-pagination.md) | [Batch Fetching](./batch-fetching.md) | [Persistent Storage](./persistent-storage.md)
+See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./invalidation.md) | [Optimistic List Updates](./optimistic-list-updates.md) | [Partial Resources](./partial-resources.md) | [Offset Pagination](./offset-pagination.md) | [Batch Fetching](./batch-fetching.md) | [Persistent Storage](./persistent-storage.md) | [Offline](./offline.md)
 
 ## Creating a List Query Store
 
@@ -29,7 +29,6 @@ const taskStore = createListQueryStore<Task, TaskFilter, string>({
   fetchItemFn: (taskId, { signal }) => api.getTask(taskId, signal),
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
-  backgroundCoalescingWindowMultiplier: 3,
   blockWindowClose: null,
 });
 ```
@@ -46,37 +45,43 @@ The type parameters are:
 
 ### Required Options
 
-| Option                                 | Type                                                                | Description                                                                             |
-| -------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `id`                                   | `string`                                                            | Stable logical store id shared across tabs                                              |
-| `storeManager`                         | `StoreManager`                                                      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
-| `fetchListFn`                          | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                     |
-| `lowPriorityThrottleMs`                | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `baseCoalescingWindowMs`               | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                                         |
+| Option                   | Type                                                                | Description                                                                             |
+| ------------------------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `id`                     | `string`                                                            | Stable logical store id shared across tabs                                              |
+| `storeManager`           | `StoreManager`                                                      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
+| `fetchListFn`            | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                     |
+| `lowPriorityThrottleMs`  | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `baseCoalescingWindowMs` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `blockWindowClose`       | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                                         |
 
 ### Optional Options
 
-| Option                    | Type                                                                     | Description                                                                          |
-| ------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `fetchItemFn`             | `(payload, options: { signal, fields? }) => Promise<ItemState>`          | Fetches a single item. Required for `useItem`, `invalidateItem`, `scheduleItemFetch` |
-| `batchFetchItemFn`        | `(requests, options) => Promise<Map<ItemPayload, ItemState \| Error>>`   | See [Batch Fetching](./batch-fetching.md)                                            |
-| `getItemsBatchKey`        | `(payload: ItemPayload) => string \| false`                              | See [Batch Fetching](./batch-fetching.md)                                            |
-| `defaultQuerySize`        | `number`                                                                 | Default page size (default: `50`)                                                    |
-| `maxItemBatchSize`        | `number`                                                                 | Max items per batch fetch                                                            |
-| `optimisticListUpdates`   | `OptimisticListUpdate[]`                                                 | See [Optimistic List Updates](./optimistic-list-updates.md)                          |
-| `partialResources`        | `PartialResourcesConfig`                                                 | See [Partial Resources](./partial-resources.md)                                      |
-| `derivedQueries`          | `DerivedQueriesConfig`                                                   | Derive hook results from local items instead of fetching when possible               |
-| `offsetPagination`        | `OffsetPaginationConfig`                                                 | See [Offset Pagination](./offset-pagination.md)                                      |
-| `getQueryKey`             | `(params) => ValidPayload \| unknown[]`                                  | Custom query key derivation                                                          |
-| `getItemKey`              | `(params) => ValidPayload \| unknown[]`                                  | Custom item key derivation                                                           |
-| `revalidateOnWindowFocus` | `boolean \| (() => boolean)`                                             | Refetch on window focus                                                              |
-| `usesRealTimeUpdates`     | `boolean`                                                                | See [Real-Time Updates](./real-time-updates.md)                                      |
-| `onInvalidateQuery`       | `(query, priority) => void`                                              | Called when a query is invalidated                                                   |
-| `onInvalidateItem`        | `(props: { itemState, payload, priority }) => void`                      | Called when an item is invalidated                                                   |
-| `persistentStorage`       | `ListQueryPersistentStorageConfig<ItemState, QueryPayload, ItemPayload>` | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)       |
-| `onMutationError`         | `(error, options) => void`                                               | Global mutation error handler                                                        |
+| Option                         | Type                                                                     | Description                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `fetchItemFn`                  | `(payload, options: { signal, fields? }) => Promise<ItemState>`          | Fetches a single item. Required for `useItem`, `invalidateItem`, `scheduleItemFetch` |
+| `batchFetchItemFn`             | `(requests, options) => Promise<Map<ItemPayload, ItemState \| Error>>`   | See [Batch Fetching](./batch-fetching.md)                                            |
+| `getItemsBatchKey`             | `(payload: ItemPayload) => string \| false`                              | See [Batch Fetching](./batch-fetching.md)                                            |
+| `defaultQuerySize`             | `number`                                                                 | Default page size (default: `50`)                                                    |
+| `maxItemBatchSize`             | `number`                                                                 | Max items per batch fetch                                                            |
+| `maxItems`                     | `number`                                                                 | Maximum cached items kept in memory. Defaults to `5000`                              |
+| `maxQueries`                   | `number`                                                                 | Maximum cached queries kept in memory. Defaults to `1000`                            |
+| `onStateCleanup`               | `(cleanup) => void`                                                      | Called when memory cache eviction removes items or queries                           |
+| `optimisticListUpdates`        | `OptimisticListUpdate[]`                                                 | See [Optimistic List Updates](./optimistic-list-updates.md)                          |
+| `partialResources`             | `PartialResourcesConfig`                                                 | See [Partial Resources](./partial-resources.md)                                      |
+| `derivedQueries`               | `DerivedQueriesConfig`                                                   | Derive hook results from local items instead of fetching when possible               |
+| `offsetPagination`             | `OffsetPaginationConfig`                                                 | See [Offset Pagination](./offset-pagination.md)                                      |
+| `getQueryKey`                  | `(params) => ValidPayload \| unknown[]`                                  | Custom query key derivation                                                          |
+| `getItemKey`                   | `(params) => ValidPayload \| unknown[]`                                  | Custom item key derivation                                                           |
+| `mediumPriorityDelayMs`        | `number`                                                                 | Delay before medium-priority fetches execute                                         |
+| `dynamicRealtimeThrottleMs`    | `(params) => number`                                                     | See [Real-Time Updates](./real-time-updates.md)                                      |
+| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                             | Refetch on window focus                                                              |
+| `transportReconnectCooldownMs` | `number`                                                                 | Cooldown for repeated transport reconnect revalidation                               |
+| `usesRealTimeUpdates`          | `boolean`                                                                | See [Real-Time Updates](./real-time-updates.md)                                      |
+| `onInvalidateQuery`            | `(query, priority) => void`                                              | Called when a query is invalidated                                                   |
+| `onInvalidateItem`             | `(props: { itemState, payload, priority }) => void`                      | Called when an item is invalidated                                                   |
+| `persistentStorage`            | `ListQueryPersistentStorageConfig<ItemState, QueryPayload, ItemPayload>` | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)       |
+| `onSchedulerEvent`             | `(event, data?) => void`                                                 | Scheduler event listener                                                             |
+| `onMutationError`              | `(error, options) => void`                                               | Global mutation error handler                                                        |
 
 ### FetchListFnReturn
 
@@ -126,7 +131,12 @@ type TSFDListQuery<QueryPayload> = {
   payload: QueryPayload;
   hasMore: boolean;
   wasLoaded: boolean;
-  refetchOnMount: false | FetchType;
+  refetchOnMount:
+    | false
+    | 'lowPriority'
+    | 'mediumPriority'
+    | 'realtimeUpdate'
+    | 'highPriority';
   items: string[]; // Array of item keys
 };
 ```
@@ -138,7 +148,12 @@ type TSDFItemQuery<ItemPayload> = {
   error: StoreError | null;
   status: 'loading' | 'error' | 'refetching' | 'success';
   wasLoaded: boolean;
-  refetchOnMount: false | FetchType;
+  refetchOnMount:
+    | false
+    | 'lowPriority'
+    | 'mediumPriority'
+    | 'realtimeUpdate'
+    | 'highPriority';
   payload: ItemPayload;
 };
 ```
@@ -205,7 +220,7 @@ Behavior:
 | `loadMore`                | `(params, size?, options?) => ScheduleFetchResults`                     | Load more items (pagination)                                 |
 | `getQueryState`           | `(params) => TSFDListQuery`                                             | Get query state                                              |
 | `getQueryKey`             | `(params) => string`                                                    | Get composite key for a query payload                        |
-| `getQueriesState`         | `(params) => TSFDListQuery[]`                                           | Get multiple query states                                    |
+| `getQueriesState`         | `(params) => { query, key }[]`                                          | Get multiple query states                                    |
 | `getQueriesRelatedToItem` | `(itemPayload) => TSFDListQuery[]`                                      | Find queries containing an item                              |
 
 ### Item Methods
@@ -217,6 +232,15 @@ Behavior:
 | `preloadItemFromStorage` | `(params) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>` | Preload cached list items from async storage (OPFS) |
 | `getItemKey`             | `(params) => string`                                                 | Get composite key for an item payload               |
 | `getItemState`           | `(payload) => ItemState \| null`                                     | Get item data                                       |
+
+### Offline Methods
+
+| Method                                                | Description                                                       |
+| ----------------------------------------------------- | ----------------------------------------------------------------- |
+| `getOfflineEntities()` / `useOfflineEntities()`       | Read offline entities scoped to this store                        |
+| `getOfflineResolutions()` / `useOfflineResolutions()` | Read manual conflict/retry resolutions scoped to this store       |
+| `parseOfflineResolutionConflict(resolution)`          | Narrow a persisted resolution to this store's operation types     |
+| `resolveOfflineResolution(id, operation, action)`     | Resolve, retry, discard, requeue, or commit an offline resolution |
 
 ### Offline Queue Hook
 

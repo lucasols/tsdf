@@ -33,16 +33,9 @@ baseCoalescingWindowMs: 100
 
 If three `useItem` hooks mount within 100ms, their fetches are grouped and executed as one request (when using batch fetching) or sequentially but without duplicate requests for the same item.
 
-### Background Multiplier
+### Background Tabs
 
-When synced browser tabs are open, the coalescing window can be extended in background tabs:
-
-```
-backgroundCoalescingWindowMultiplier: 3
-// Effective coalescing window when tab is in background: 100 * 3 = 300ms
-```
-
-This reduces unnecessary network activity for background tabs.
+When synced browser tabs are open, TSDF can extend coalescing internally for background tabs based on focus ranking. Focused tabs keep `baseCoalescingWindowMs`; background tabs may wait longer so duplicate background work can be dropped when another tab is already fetching the same data.
 
 See [Browser Tabs Sync](./browser-tabs-sync.md) for focus ranking and request deduplication behavior across tabs.
 
@@ -76,14 +69,13 @@ This is useful for background refetches that should yield to user-initiated acti
 
 ## Configuration Reference
 
-| Option                                 | Required | Description                                                                                                 |
-| -------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `lowPriorityThrottleMs`                | Yes      | Minimum interval between low-priority fetches for the same item                                             |
-| `baseCoalescingWindowMs`               | Yes      | Time window to group multiple requests into a single batch                                                  |
-| `backgroundCoalescingWindowMultiplier` | Yes      | Multiplier for coalescing window when the tab is in background                                              |
-| `mediumPriorityDelayMs`                | No       | Delay before medium-priority fetches execute                                                                |
-| `dynamicRealtimeThrottleMs`            | No       | Function returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md) |
-| `maxBatchSize`                         | No       | (Collection/ListQuery) Triggers immediate fetch when batch size is reached, skipping the coalescing window  |
+| Option                      | Required | Description                                                                                                 |
+| --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `lowPriorityThrottleMs`     | Yes      | Minimum interval between low-priority fetches for the same item                                             |
+| `baseCoalescingWindowMs`    | Yes      | Time window to group multiple requests into a single batch                                                  |
+| `mediumPriorityDelayMs`     | No       | Delay before medium-priority fetches execute                                                                |
+| `dynamicRealtimeThrottleMs` | No       | Function returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md) |
+| `maxBatchSize`              | No       | (Collection/ListQuery) Triggers immediate fetch when batch size is reached, skipping the coalescing window  |
 
 ## Typical Configuration
 
@@ -94,9 +86,6 @@ This is useful for background refetches that should yield to user-initiated acti
 
   // Group fetches within 100ms
   baseCoalescingWindowMs: 100,
-
-  // Triple the coalescing window when tab is in background
-  backgroundCoalescingWindowMultiplier: 3,
 
   // Wait 300ms before executing medium-priority fetches
   mediumPriorityDelayMs: 300,

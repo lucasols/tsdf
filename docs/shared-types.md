@@ -46,7 +46,7 @@ Shape:
 type MutationSkipped = { kind: 'skipped' };
 ```
 
-## FetchType
+## Fetch Priorities
 
 Priority levels for [fetch scheduling](./fetch-scheduling.md). Higher priority fetches override lower ones:
 
