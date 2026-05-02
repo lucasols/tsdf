@@ -469,7 +469,7 @@ describe('useListQuery with partial resources', () => {
       `);
   });
 
-  test('getQueryFromStateOrFetch fetches fields missing from cached state', async () => {
+  test('getQueryFromStateOrFetch fetches all requested fields when cached query is missing fields', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
     });
@@ -480,6 +480,16 @@ describe('useListQuery with partial resources', () => {
     );
     await flushAllTimers();
     await firstResultPromise;
+
+    // The follow-up query may return different items than the cached query.
+    // Fetch the full requested field set so newly returned items are complete.
+    env.serverTable.setItem('users||6', {
+      id: 6,
+      name: 'User 6',
+      address: 'Address 6',
+      age: 60,
+      country: 'Country 6',
+    });
 
     const secondResultPromise = env.apiStore.getQueryFromStateOrFetch(
       { tableId: 'users' },
@@ -496,6 +506,18 @@ describe('useListQuery with partial resources', () => {
         id: 1
         name: 'User 1'
       `);
+    expect(
+      secondResult.ok
+        ? secondResult.value.items.find(
+            (item) => item.itemPayload === 'users||6',
+          )?.data
+        : null,
+    ).toMatchInlineSnapshot(`
+      address: 'Address 6'
+      country: 'Country 6'
+      id: 6
+      name: 'User 6'
+    `);
     expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
       .toMatchInlineSnapshot(`
         - _type: 'list'
@@ -505,9 +527,9 @@ describe('useListQuery with partial resources', () => {
           returned_items: 5
         - _type: 'list'
           payload:
-            fields: ['address', 'country']
+            fields: ['id', 'name', 'address', 'country']
             pos: { limit: 50, offset: 0 }
-          returned_items: 5
+          returned_items: 6
       `);
   });
 
@@ -579,7 +601,7 @@ describe('useListQuery with partial resources', () => {
       .toMatchInlineSnapshot(`
         - _type: 'list'
           payload:
-            fields: ['address']
+            fields: ['id', 'name', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
       `);

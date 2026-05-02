@@ -1087,8 +1087,6 @@ export function createFetchApi<
       (!includeStale ||
         (query.status === 'success' && !query.error && !query.refetchOnMount));
 
-    let fieldsToFetch: FieldsInput | undefined = options.fields;
-
     if (query && cachedQueryCanBeUsed) {
       const needsFieldCheck =
         partialResources && Array.isArray(fields) && fields.length > 0;
@@ -1103,25 +1101,20 @@ export function createFetchApi<
         });
       }
 
-      // Single pass over items: collect fields missing or (when ignoreStaleState) stale somewhere.
-      const fieldsNeedingFetch = new Set<string>();
-      for (const itemKey of query.items) {
-        if (fieldsNeedingFetch.size === fields.length) break;
+      const queryNeedsFieldFetch = query.items.some((itemKey) => {
         const itemState = readItemState(itemKey);
         const invalidation = includeStale
           ? store.state.itemFieldInvalidationFields[itemKey]
           : undefined;
-        for (const field of fields) {
-          if (fieldsNeedingFetch.has(field)) continue;
-          if (!fallbackItemHasRequestedFields(itemState, [field])) {
-            fieldsNeedingFetch.add(field);
-          } else if (invalidation?.includes(field)) {
-            fieldsNeedingFetch.add(field);
-          }
-        }
-      }
 
-      if (fieldsNeedingFetch.size === 0) {
+        return fields.some(
+          (field) =>
+            !fallbackItemHasRequestedFields(itemState, [field]) ||
+            (invalidation?.includes(field) ?? false),
+        );
+      });
+
+      if (!queryNeedsFieldFetch) {
         return Result.ok({
           items: getQueryItems(query, (data, itemPayload) => ({
             data,
@@ -1131,13 +1124,14 @@ export function createFetchApi<
         });
       }
 
-      fieldsToFetch = fields.filter((field) => fieldsNeedingFetch.has(field));
+      // Query refetches can return a different item set than the cached query.
+      // Fetch the full requested field set so newly returned items are complete.
     }
 
     const result = await awaitListQueryFetch(params, {
       size: options.size,
       timeoutMs: options.timeoutMs,
-      fields: fieldsToFetch,
+      fields: options.fields,
     });
 
     if (result.error) {
