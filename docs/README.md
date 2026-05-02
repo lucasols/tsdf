@@ -36,7 +36,7 @@ Notable additions:
 
 - Hook payload debouncing is documented in [React Hooks](./hooks.md#debouncepayload)
 - The exported `PayloadDebounce` type is documented in [Shared Types](./shared-types.md#payloaddebounce)
-- `GET_ALL` and `ALL_QUERY_AND_ITEMS` are documented in [Invalidation](./invalidation.md#list-query-store)
+- `GET_ALL` and `{ all: true }` invalidation are documented in [Invalidation](./invalidation.md#list-query-store)
 
 ## Quick Start
 

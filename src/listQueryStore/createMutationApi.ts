@@ -5,6 +5,7 @@ import { klona } from 'klona/json';
 import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import type { TestOfflineTimelineEvent } from '../internal/testTimelineTypes';
+import { GET_ALL } from '../invalidationUtils';
 import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
@@ -178,6 +179,21 @@ export function createMutationApi<
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
   type MutationPayload = ItemPayload | ItemPayload[] | FilterItem | null;
   type MutationPayloadToUse = ItemPayload | ItemPayload[] | FilterItem;
+  type InvalidateQueryAndItemsArgs =
+    | {
+        all: true;
+        type?: FetchType;
+        fields?: string[];
+        itemPayload?: never;
+        queryPayload?: never;
+      }
+    | {
+        all?: never;
+        itemPayload: ItemPayload | ItemPayload[] | FilterItem | false;
+        queryPayload: QueryPayload | QueryPayload[] | FilterQuery | false;
+        type?: FetchType;
+        fields?: string[];
+      };
   type MutationItemRollbackSnapshot = {
     itemKey: string;
     item: ItemState | null | undefined;
@@ -345,17 +361,13 @@ export function createMutationApi<
   const itemFieldInvalidationPriorities = new Map<string, FetchType>();
   const itemPendingInvalidationFields = new Map<string, string[]>();
 
-  function invalidateQueryAndItems({
-    itemPayload,
-    queryPayload,
-    type: priority = 'highPriority',
-    fields: invalidateFields,
-  }: {
-    itemPayload: ItemPayload | ItemPayload[] | FilterItem | false;
-    queryPayload: QueryPayload | QueryPayload[] | FilterQuery | false;
-    type?: FetchType;
-    fields?: string[];
-  }) {
+  function invalidateQueryAndItems(args: InvalidateQueryAndItemsArgs) {
+    const itemPayload: ItemPayload | ItemPayload[] | FilterItem | false =
+      args.all ? GET_ALL : args.itemPayload;
+    const queryPayload: QueryPayload | QueryPayload[] | FilterQuery | false =
+      args.all ? GET_ALL : args.queryPayload;
+    const priority = args.type ?? 'highPriority';
+    const invalidateFields = args.fields;
     const queriesKey = queryPayload ? getQueriesKeyArray(queryPayload) : [];
 
     for (const { key, payload } of queriesKey) {

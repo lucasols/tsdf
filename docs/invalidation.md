@@ -45,10 +45,10 @@ store.invalidateItem('item-1', 'lowPriority');
 The List Query Store has the most flexible invalidation through `invalidateQueryAndItems`:
 
 ```ts
-import { ALL_QUERY_AND_ITEMS, GET_ALL } from 'tsdf';
+import { GET_ALL } from 'tsdf';
 
 // Invalidate all queries and all items
-store.invalidateQueryAndItems(ALL_QUERY_AND_ITEMS);
+store.invalidateQueryAndItems({ all: true });
 
 // Invalidate specific queries only (skip items)
 store.invalidateQueryAndItems({
@@ -69,7 +69,7 @@ store.invalidateQueryAndItems({
   type: 'lowPriority',
 });
 
-// Reuse the all-payload predicate with one side disabled
+// Reuse the all-payload predicate when only one side should match everything
 store.invalidateQueryAndItems({ queryPayload: GET_ALL, itemPayload: false });
 ```
 

@@ -626,6 +626,35 @@ type ListQueryDeleteItemStateApi<
     | ListQueryFilterItem<ItemState, ItemPayload>,
 ) => void;
 
+type ListQueryInvalidateQueryAndItemsArgs<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> =
+  | {
+      /** Invalidate every cached query and every cached item. */
+      all: true;
+      type?: FetchType;
+      fields?: string[];
+      itemPayload?: undefined;
+      queryPayload?: undefined;
+    }
+  | {
+      all?: undefined;
+      itemPayload:
+        | ItemPayload
+        | ItemPayload[]
+        | ListQueryFilterItem<ItemState, ItemPayload>
+        | false;
+      queryPayload:
+        | QueryPayload
+        | QueryPayload[]
+        | ListQueryFilterQuery<QueryPayload>
+        | false;
+      type?: FetchType;
+      fields?: string[];
+    };
+
 export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -722,20 +751,13 @@ export type ListQueryStore<
     ItemPayload,
     TPartialResources
   >;
-  invalidateQueryAndItems: (args: {
-    itemPayload:
-      | ItemPayload
-      | ItemPayload[]
-      | ListQueryFilterItem<ItemState, ItemPayload>
-      | false;
-    queryPayload:
-      | QueryPayload
-      | QueryPayload[]
-      | ListQueryFilterQuery<QueryPayload>
-      | false;
-    type?: FetchType;
-    fields?: string[];
-  }) => void;
+  invalidateQueryAndItems: (
+    args: ListQueryInvalidateQueryAndItemsArgs<
+      ItemState,
+      QueryPayload,
+      ItemPayload
+    >,
+  ) => void;
   invalidateItem: (
     itemId:
       | ItemPayload
@@ -2703,18 +2725,10 @@ export function createListQueryStore<
     getWindowIsFocused,
     onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
-      invalidateQueryAndItems({
-        queryPayload: () => true,
-        itemPayload: () => true,
-        type: 'lowPriority',
-      });
+      invalidateQueryAndItems({ all: true, type: 'lowPriority' });
     },
     onTransportReconnectRevalidate: () => {
-      invalidateQueryAndItems({
-        queryPayload: () => true,
-        itemPayload: () => true,
-        type: 'realtimeUpdate',
-      });
+      invalidateQueryAndItems({ all: true, type: 'realtimeUpdate' });
     },
   });
 

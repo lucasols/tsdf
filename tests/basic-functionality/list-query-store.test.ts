@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-import { ALL_QUERY_AND_ITEMS, GET_ALL } from '../../src/main';
+import { GET_ALL } from '../../src/main';
 import { StoreFetchError } from '../../src/utils/storeShared';
 import {
   createListQueryStoreTestEnv,
@@ -1360,11 +1360,7 @@ test('invalidate everything does not cause a problem', () => {
     `['users||1', 'users||2', 'users||3', 'users||4', 'users||5']`,
   );
 
-  const typedInvalidateAll: Parameters<
-    typeof env.apiStore.invalidateQueryAndItems
-  >[0] = ALL_QUERY_AND_ITEMS;
-
-  env.apiStore.invalidateQueryAndItems(typedInvalidateAll);
+  env.apiStore.invalidateQueryAndItems({ all: true });
 
   expect(env.store.state).toMatchInlineSnapshot(`
     itemFieldInvalidationFields: {}

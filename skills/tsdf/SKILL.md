@@ -143,15 +143,15 @@ Docs: `docs/mutations.md`.
 
 ## Invalidation
 
-| Store             | API                                                                                             |
-| ----------------- | ----------------------------------------------------------------------------------------------- |
-| `DocumentStore`   | `invalidateData(priority?)`                                                                     |
-| `CollectionStore` | `invalidateItem(payload \| payload[] \| filterFn, priority?)`                                   |
-| `ListQueryStore`  | `invalidateQueryAndItems({ queryPayload, itemPayload, fields?, type? })`, `invalidateItem(...)` |
+| Store             | API                                                                                                                              |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `DocumentStore`   | `invalidateData(priority?)`                                                                                                      |
+| `CollectionStore` | `invalidateItem(payload \| payload[] \| filterFn, priority?)`                                                                    |
+| `ListQueryStore`  | `invalidateQueryAndItems({ all: true, fields?, type? } \| { queryPayload, itemPayload, fields?, type? })`, `invalidateItem(...)` |
 
 Same-or-higher pending invalidations swallow lower ones. Hooks with `disableRefetches` only refetch on `idle`/`error`; with `disableRefetchOnMount` only on explicit invalidation or first load. Window focus and transport reconnect can also auto-invalidate.
 
-Utilities: use `GET_ALL` as the all-payload predicate and `ALL_QUERY_AND_ITEMS` to invalidate every List Query query and item.
+Utilities: use `GET_ALL` as the all-payload predicate and `{ all: true }` to invalidate every List Query query and item.
 
 Docs: `docs/invalidation.md`.
 
