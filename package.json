@@ -2,7 +2,7 @@
   "name": "tsdf",
   "version": "17.0.0-alpha.7",
   "description": "A data fetching solution based on t-state",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Lucas Santos",
   "repository": "github:lucasols/tsdf",
   "type": "module",
