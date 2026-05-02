@@ -179,7 +179,5 @@ export {
   clearAllSessionStorage,
 } from './persistentStorage/persistentStorageManager';
 
-export {
-  localPersistentStorage,
-} from './persistentStorage/storageAdapter';
+export { localPersistentStorage } from './persistentStorage/storageAdapter';
 export { opfsOfflineUploadAdapter } from './persistentStorage/opfsOfflineUploadAdapter';

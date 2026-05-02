@@ -1251,9 +1251,8 @@ export async function clearSessionStorage(
 export async function clearAllSessionStorage(
   sessionKey: string,
 ): Promise<void> {
-  const { indexedDbPersistentStorage, opfsPersistentStorage } = await import(
-    './asyncStorageAdapters'
-  );
+  const { indexedDbPersistentStorage, opfsPersistentStorage } =
+    await import('./asyncStorageAdapters');
 
   await Promise.all([
     clearSessionStorage(sessionKey, 'local-sync'),
