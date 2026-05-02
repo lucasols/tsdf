@@ -782,7 +782,6 @@ describe('standard schema support', () => {
       fetchFn: () => Promise.resolve({ name: 'fresh', value: 1 }),
       lowPriorityThrottleMs: 200,
       baseCoalescingWindowMs: 10,
-      blockWindowClose: null,
       persistentStorage: { adapter: 'local-sync', schema: standardSchema },
     });
 

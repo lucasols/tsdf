@@ -30,7 +30,7 @@ function createBlockWindowCloseSpy() {
 }
 
 describe('performMutation blockWindowClose', () => {
-  test('document store supports custom blockWindowClose option', async () => {
+  test('document store uses the manager blockWindowClose default', async () => {
     const { blockWindowClose, unblock } = createBlockWindowCloseSpy();
     const env = createDocumentStoreTestEnv(1, { blockWindowClose });
 
@@ -52,7 +52,7 @@ describe('performMutation blockWindowClose', () => {
     expect(unblock).toHaveBeenCalledTimes(1);
   });
 
-  test('collection store supports custom blockWindowClose option', async () => {
+  test('collection store uses the manager blockWindowClose default', async () => {
     const { blockWindowClose, unblock } = createBlockWindowCloseSpy();
     const env = createCollectionStoreTestEnv(
       { 'item-1': { name: 'Item 1' } },
@@ -77,7 +77,7 @@ describe('performMutation blockWindowClose', () => {
     expect(unblock).toHaveBeenCalledTimes(1);
   });
 
-  test('list query store supports custom blockWindowClose option', async () => {
+  test('list query store uses the manager blockWindowClose default', async () => {
     const { blockWindowClose, unblock } = createBlockWindowCloseSpy();
     const env = createListQueryStoreTestEnv(
       { users: [{ id: 1, name: 'User 1' }] },
@@ -102,7 +102,7 @@ describe('performMutation blockWindowClose', () => {
     expect(unblock).toHaveBeenCalledTimes(1);
   });
 
-  test('blockWindowClose disabled when store option is null', async () => {
+  test('blockWindowClose is disabled when the manager default is null', async () => {
     const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
     const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener');
 

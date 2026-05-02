@@ -20,7 +20,20 @@ import type {
 } from './persistentStorage/offline/types';
 import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 import type { OfflineUpload } from './persistentStorage/offlineUploadTypes';
+import type { BlockWindowCloseHandler } from './utils/performMutation';
 import type { StoreError, ValidPayload } from './utils/storeShared';
+
+const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 5;
+const DEFAULT_BASE_COALESCING_WINDOW_MS = 10;
+
+export type StoreManagerStoreDefaults = {
+  /** Default minimum interval between low-priority fetches for attached stores. */
+  readonly lowPriorityThrottleMs: number;
+  /** Default coalescing window used by attached stores when they do not override it. */
+  readonly baseCoalescingWindowMs: number;
+  /** Shared window-close blocker used by mutations in attached stores. */
+  readonly blockWindowClose: BlockWindowCloseHandler | null;
+};
 
 type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the shared offline config, when configured. */
@@ -76,6 +89,8 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   getSessionKey: () => string | false;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
+  /** Shared defaults used by attached stores unless a store-level override exists. */
+  storeDefaults: StoreManagerStoreDefaults;
   /** Returns the unique ids of all currently registered store instances. */
   getAllStoreIds: () => string[];
   /** Resets all registered stores except the ignored logical ids. */
@@ -180,6 +195,12 @@ export type CreateStoreManagerOptions<
   getSessionKey: () => string | false;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
+  /** Default minimum interval between low-priority fetches for attached stores. Defaults to 5ms. */
+  lowPriorityThrottleMs?: number;
+  /** Default coalescing window for attached stores. Defaults to 10ms. */
+  baseCoalescingWindowMs?: number;
+  /** Shared window-close blocker used by mutations in attached stores. Pass `null` to disable. */
+  blockWindowClose?: BlockWindowCloseHandler | null;
   /** Optional shared offline session config for every attached store. */
   offlineSession?: OfflineSessionConfig<TUploadRef>;
 };
@@ -256,6 +277,13 @@ export function createStoreManager<
   const storeManager: StoreManager<TUploadRef> = {
     getSessionKey: options.getSessionKey,
     errorNormalizer: options.errorNormalizer,
+    storeDefaults: Object.freeze({
+      lowPriorityThrottleMs:
+        options.lowPriorityThrottleMs ?? DEFAULT_LOW_PRIORITY_THROTTLE_MS,
+      baseCoalescingWindowMs:
+        options.baseCoalescingWindowMs ?? DEFAULT_BASE_COALESCING_WINDOW_MS,
+      blockWindowClose: options.blockWindowClose ?? null,
+    }),
     getAllStoreIds: () => Array.from(registry.stores.values(), ({ id }) => id),
     resetAll: (ignoreStores) => {
       const ignoredStoreIds = new Set(ignoreStores);

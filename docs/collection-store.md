@@ -14,15 +14,15 @@ const storeManager = createStoreManager({
   getSessionKey: () =>
     authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
 });
 
 const productStore = createCollectionStore<Product, string>({
   id: 'collection-products',
   storeManager,
   fetchFn: (productId, signal) => api.getProduct(productId, signal),
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
 });
 ```
 
@@ -39,9 +39,8 @@ const productStore = createCollectionStore<Product, string>({
 | `maxItems`                     | `number`                                                                                                            | No       | Maximum cached items kept in memory. Defaults to `5000`                                 |
 | `onStateCleanup`               | `(cleanup) => void`                                                                                                 | No       | Called when memory cache eviction removes items                                         |
 | `getCollectionItemKey`         | `(params: ItemPayload) => ValidPayload \| unknown[]`                                                                | No       | Custom key derivation from payload                                                      |
-| `lowPriorityThrottleMs`        | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `baseCoalescingWindowMs`       | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `blockWindowClose`             | `BlockWindowCloseHandler \| null`                                                                                   | Yes      | See [Mutations](./mutations.md)                                                         |
+| `lowPriorityThrottleMs`        | `number`                                                                                                            | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)            |
+| `baseCoalescingWindowMs`       | `number`                                                                                                            | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)            |
 | `mediumPriorityDelayMs`        | `number`                                                                                                            | No       | Delay for medium-priority fetches                                                       |
 | `dynamicRealtimeThrottleMs`    | `(params) => number`                                                                                                | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
 | `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                                                        | No       | Refetch on window focus                                                                 |

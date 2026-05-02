@@ -215,17 +215,12 @@ While a mutation lock is held, the scheduler defers any fetch requests for the l
 
 ## Window Close Blocking
 
-The `blockWindowClose` option prevents the user from accidentally closing the browser during a mutation:
+The manager-level `blockWindowClose` option prevents the user from accidentally closing the browser during a mutation:
 
 ```ts
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
   errorNormalizer: normalizeError,
-});
-
-const store = createDocumentStore({
-  id: 'document-store',
-  storeManager,
   blockWindowClose: () => {
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -236,6 +231,11 @@ const store = createDocumentStore({
       unblock: () => window.removeEventListener('beforeunload', handler),
     };
   },
+});
+
+const store = createDocumentStore({
+  id: 'document-store',
+  storeManager,
   // ...
 });
 ```

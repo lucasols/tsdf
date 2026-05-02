@@ -137,6 +137,9 @@ They are **not** triggered by:
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
 });
 
 const taskStore = createListQueryStore<Task, { status: string }, string>({
@@ -144,9 +147,6 @@ const taskStore = createListQueryStore<Task, { status: string }, string>({
   storeManager,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
   fetchItemFn: (id, { signal }) => api.getTask(id, signal),
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
 
   optimisticListUpdates: [
     {

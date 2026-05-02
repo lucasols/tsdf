@@ -160,6 +160,9 @@ export function createDocumentStoreTestEnv<
     createStoreManager({
       getSessionKey: getSessionKeyOption,
       errorNormalizer: normalizeError,
+      lowPriorityThrottleMs,
+      baseCoalescingWindowMs,
+      blockWindowClose: blockWindowClose ?? null,
     });
   if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {
     throw new Error(
@@ -237,7 +240,6 @@ export function createDocumentStoreTestEnv<
       revalidateOnWindowFocus,
       transportReconnectCooldownMs,
       mediumPriorityDelayMs,
-      blockWindowClose: blockWindowClose ?? null,
       persistentStorage: resolvedPersistentStorage,
       '~test': {
         ...testOptions,

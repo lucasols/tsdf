@@ -20,6 +20,9 @@ const storeManager = createStoreManager({
   getSessionKey: () =>
     authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
 });
 
 const taskStore = createListQueryStore<Task, TaskFilter, string>({
@@ -27,9 +30,6 @@ const taskStore = createListQueryStore<Task, TaskFilter, string>({
   storeManager,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
   fetchItemFn: (taskId, { signal }) => api.getTask(taskId, signal),
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
 });
 ```
 
@@ -45,19 +45,18 @@ The type parameters are:
 
 ### Required Options
 
-| Option                   | Type                                                                | Description                                                                             |
-| ------------------------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `id`                     | `string`                                                            | Stable logical store id shared across tabs                                              |
-| `storeManager`           | `StoreManager`                                                      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
-| `fetchListFn`            | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                     |
-| `lowPriorityThrottleMs`  | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `baseCoalescingWindowMs` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `blockWindowClose`       | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                                         |
+| Option         | Type                                                                | Description                                                                             |
+| -------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `id`           | `string`                                                            | Stable logical store id shared across tabs                                              |
+| `storeManager` | `StoreManager`                                                      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
+| `fetchListFn`  | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                     |
 
 ### Optional Options
 
 | Option                         | Type                                                                     | Description                                                                          |
 | ------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `lowPriorityThrottleMs`        | `number`                                                                 | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)         |
+| `baseCoalescingWindowMs`       | `number`                                                                 | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)         |
 | `fetchItemFn`                  | `(payload, options: { signal, fields? }) => Promise<ItemState>`          | Fetches a single item. Required for `useItem`, `invalidateItem`, `scheduleItemFetch` |
 | `batchFetchItemFn`             | `(requests, options) => Promise<Map<ItemPayload, ItemState \| Error>>`   | See [Batch Fetching](./batch-fetching.md)                                            |
 | `getItemsBatchKey`             | `(payload: ItemPayload) => string \| false`                              | See [Batch Fetching](./batch-fetching.md)                                            |

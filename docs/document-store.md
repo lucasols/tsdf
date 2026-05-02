@@ -14,15 +14,15 @@ const storeManager = createStoreManager({
   getSessionKey: () =>
     authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
 });
 
 const userStore = createDocumentStore<User>({
   id: 'document-user',
   storeManager,
   fetchFn: (signal) => api.getUser(signal),
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
 });
 ```
 
@@ -33,9 +33,8 @@ const userStore = createDocumentStore<User>({
 | `id`                           | `string`                                                                         | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |
 | `storeManager`                 | `StoreManager`                                                                   | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
 | `fetchFn`                      | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                               |
-| `lowPriorityThrottleMs`        | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `baseCoalescingWindowMs`       | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                           |
-| `blockWindowClose`             | `BlockWindowCloseHandler \| null`                                                | Yes      | See [Mutations](./mutations.md)                                                         |
+| `lowPriorityThrottleMs`        | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)            |
+| `baseCoalescingWindowMs`       | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)            |
 | `debugName`                    | `string`                                                                         | No       | Debug name for logging                                                                  |
 | `dynamicRealtimeThrottleMs`    | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
 | `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                 |
@@ -115,6 +114,9 @@ const storeManager = createStoreManager({
   getSessionKey: () =>
     authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
 });
 
 const settingsStore = createDocumentStore<AppSettings>({
@@ -124,7 +126,6 @@ const settingsStore = createDocumentStore<AppSettings>({
   lowPriorityThrottleMs: 5000,
   baseCoalescingWindowMs: 200,
   revalidateOnWindowFocus: true,
-  blockWindowClose: null,
 });
 
 function Settings() {

@@ -34,6 +34,9 @@ type UserOfflineOperations = DefineListQueryOfflineOperations<
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
   offlineSession: {
     network: { enabled: true },
     mutationQueueing: { network: 'allow', outage: 'allow' },
@@ -53,9 +56,6 @@ const userStore = createListQueryStore<
   fetchListFn: (query, size, { signal }) => api.listUsers(query, size, signal),
   fetchItemFn: (payload, { signal }) => api.getUser(payload, signal),
   getItemKey: (payload) => payload.id,
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
   persistentStorage: {
     adapter: 'local-sync',
     schema: userSchema,

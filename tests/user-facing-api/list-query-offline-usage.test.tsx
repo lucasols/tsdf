@@ -235,7 +235,6 @@ test('direct list-query store offline public api', async () => {
       defaultQuerySize: 3,
       lowPriorityThrottleMs: 5,
       baseCoalescingWindowMs: 10,
-      blockWindowClose: null,
       persistentStorage: {
         adapter: 'local-sync',
         schema: userSchema,
@@ -401,7 +400,6 @@ test('direct list-query store offline public api', async () => {
       defaultQuerySize: 3,
       lowPriorityThrottleMs: 5,
       baseCoalescingWindowMs: 10,
-      blockWindowClose: null,
       persistentStorage: {
         adapter: 'local-sync',
         schema: userSchema,
@@ -889,7 +887,6 @@ test('usePendingOfflineItems restores deleted object payloads after offline rest
       defaultQuerySize: 3,
       lowPriorityThrottleMs: 5,
       baseCoalescingWindowMs: 10,
-      blockWindowClose: null,
       persistentStorage: {
         adapter: 'local-sync',
         schema: userSchema,

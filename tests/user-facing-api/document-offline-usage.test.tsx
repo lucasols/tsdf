@@ -147,7 +147,6 @@ function assertTypedUploadRefsInPublicApi() {
     fetchFn: () => Promise.resolve({ value: 1, label: 'server' }),
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
@@ -193,7 +192,6 @@ test('direct document store runtime offline controls public api', async () => {
     fetchFn: () => Promise.resolve({ value: 1, label: 'server' }),
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
@@ -310,7 +308,6 @@ function createLifecycleDocumentStore(sessionKey: string) {
     fetchFn: () => Promise.resolve({ ...serverMock.current }),
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
@@ -499,7 +496,6 @@ test('direct document store offline public api', async () => {
     },
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,

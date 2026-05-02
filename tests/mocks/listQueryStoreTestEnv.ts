@@ -268,6 +268,9 @@ export function createListQueryStoreTestEnv<
     createStoreManager({
       getSessionKey: getSessionKeyOption,
       errorNormalizer: normalizeError,
+      lowPriorityThrottleMs,
+      baseCoalescingWindowMs,
+      blockWindowClose: blockWindowClose ?? null,
     });
   if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {
     throw new Error(
@@ -401,7 +404,6 @@ export function createListQueryStoreTestEnv<
     onStateCleanup,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
-    blockWindowClose: blockWindowClose ?? null,
     persistentStorage: resolvedPersistentStorage,
     optimisticListUpdates,
     partialResources,

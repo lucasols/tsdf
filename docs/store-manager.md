@@ -16,18 +16,26 @@ const storeManager = createStoreManager({
     id: 'unknown-error',
     message: error.message,
   }),
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
 });
 ```
 
 Options:
 
-| Option            | Required | Description                                                                      |
-| ----------------- | -------- | -------------------------------------------------------------------------------- |
-| `getSessionKey`   | Yes      | Returns the active tenant/account key. Return `false` while no session is ready. |
-| `errorNormalizer` | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.            |
-| `offlineSession`  | No       | Shared offline config used by stores with `persistentStorage.offline`.           |
+| Option                   | Required | Description                                                                                 |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------- |
+| `getSessionKey`          | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.            |
+| `errorNormalizer`        | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                       |
+| `lowPriorityThrottleMs`  | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to `5`. |
+| `baseCoalescingWindowMs` | No       | Default window to group fetch requests for attached stores. Defaults to `10`.               |
+| `blockWindowClose`       | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.           |
+| `offlineSession`         | No       | Shared offline config used by stores with `persistentStorage.offline`.                      |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
+
+Stores inherit the manager's `lowPriorityThrottleMs` and `baseCoalescingWindowMs` unless they provide their own store-level overrides. `blockWindowClose` is manager-only so window-close mutation protection is consistent across attached stores.
 
 ## Store Registry
 

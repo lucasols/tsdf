@@ -94,10 +94,7 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
-import {
-  performMutationWithLifecycle,
-  type BlockWindowCloseHandler,
-} from '../utils/performMutation';
+import { performMutationWithLifecycle } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   AbortedStoreError,
@@ -289,8 +286,10 @@ export type CollectionStoreOptions<
   /** Called when cache-limit eviction removes items from in-memory state. */
   onStateCleanup?: (cleanup: CollectionStateCleanup<ItemPayload>) => void;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
-  lowPriorityThrottleMs: number;
-  baseCoalescingWindowMs: number;
+  /** Overrides the manager's default minimum interval between low-priority fetches for this store. */
+  lowPriorityThrottleMs?: number;
+  /** Overrides the manager's default coalescing window for this store. */
+  baseCoalescingWindowMs?: number;
   mediumPriorityDelayMs?: number;
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
@@ -310,7 +309,6 @@ export type CollectionStoreOptions<
     error: unknown,
     options: { silentErrors?: boolean },
   ) => void;
-  blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
@@ -634,8 +632,8 @@ export function createCollectionStore<
   maxBatchSize,
   maxItems = 5_000,
   onStateCleanup,
-  lowPriorityThrottleMs,
-  baseCoalescingWindowMs,
+  lowPriorityThrottleMs: storeLowPriorityThrottleMs,
+  baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
   mediumPriorityDelayMs,
   dynamicRealtimeThrottleMs,
   revalidateOnWindowFocus,
@@ -644,7 +642,6 @@ export function createCollectionStore<
   onInvalidate,
   onSchedulerEvent,
   onMutationError,
-  blockWindowClose,
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
@@ -654,6 +651,14 @@ export function createCollectionStore<
   TOfflineOperations,
   StorageState
 >): CollectionStore<ItemState, ItemPayload, TOfflineOperations> {
+  const lowPriorityThrottleMs =
+    storeLowPriorityThrottleMs ??
+    storeManager.storeDefaults.lowPriorityThrottleMs;
+  const baseCoalescingWindowMs =
+    storeBaseCoalescingWindowMs ??
+    storeManager.storeDefaults.baseCoalescingWindowMs;
+  const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
+
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
   type CollectionOfflineOverlay = {

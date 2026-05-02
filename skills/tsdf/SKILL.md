@@ -35,6 +35,9 @@ const storeManager = createStoreManager({
     id: 'fetch-error',
     message: err.message,
   }),
+  lowPriorityThrottleMs: 5, // optional; defaults to 5
+  baseCoalescingWindowMs: 10, // optional; defaults to 10
+  blockWindowClose: null, // optional manager-wide mutation close blocker
   offlineSession: undefined, // optional; required for offline queueing
 });
 
@@ -42,9 +45,8 @@ const userStore = createDocumentStore<User>({
   id: 'document-user', // stable id; also used for browser tab sync
   storeManager,
   fetchFn: (signal) => api.getUser(signal),
-  lowPriorityThrottleMs: 2000, // required
-  baseCoalescingWindowMs: 100, // required
-  blockWindowClose: null, // required (or a handler — see Mutations)
+  lowPriorityThrottleMs: 2000, // optional store override
+  baseCoalescingWindowMs: 100, // optional store override
 });
 ```
 
@@ -118,7 +120,7 @@ if (result.ok) {
 - On error: optimistic updates roll back via automatic invalidation.
 - `revalidateOnSuccess`: `true | false | 'queries' | (queryPayload) => boolean | { queries, items }` (List Query).
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).
-- `blockWindowClose` (required) prevents accidental window close mid-mutation; pass `null` to opt out.
+- `blockWindowClose` on `createStoreManager(...)` prevents accidental window close mid-mutation; it defaults to `null`.
 - Lifecycle events: `store.storeEvents.on('mutationStart' | 'mutationEnd', ...)`.
 
 Docs: `docs/mutations.md`.

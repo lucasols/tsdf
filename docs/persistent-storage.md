@@ -15,18 +15,18 @@ See also: [Document Store](./document-store.md) | [Collection Store](./collectio
 
 Exported from `tsdf`:
 
-| Export                                                                                                       | Description                                                      |
-| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `PersistentStorageSchema`                                                                                    | Schema type supported by cache validation                        |
-| `StorageAdapter`                                                                                             | `'local-sync'` or a managed async storage adapter                |
-| `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                             |
-| `createStoreManager({ getSessionKey, errorNormalizer, offlineSession? })`                                    | Creates the shared store manager used by all stores              |
-| `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                                 |
-| `clearSessionStorage(sessionKey, adapter)`                                                                   | Clears all TSDF entries for one session/adapter                  |
-| `clearAllSessionStorage(sessionKey)`                                                                         | Clears all TSDF entries for one session across built-in adapters |
-| `localPersistentStorage` / `opfsPersistentStorage` / `indexedDbPersistentStorage`                            | Built-in storage helpers and async adapters                      |
-| `createIndexedDbPersistentStorage(options?)`                                                                 | Creates an IndexedDB adapter, optionally with a database name    |
-| `createAsyncStorageAdapter(driver)`                                                                          | Wraps a custom async storage driver                              |
+| Export                                                                                                                                        | Description                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `PersistentStorageSchema`                                                                                                                     | Schema type supported by cache validation                        |
+| `StorageAdapter`                                                                                                                              | `'local-sync'` or a managed async storage adapter                |
+| `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig`                                  | Store-level persistence config types                             |
+| `createStoreManager({ getSessionKey, errorNormalizer, lowPriorityThrottleMs?, baseCoalescingWindowMs?, blockWindowClose?, offlineSession? })` | Creates the shared store manager used by all stores              |
+| `PersistentStoragePreloadResult<Payload>`                                                                                                     | Return shape for preload methods                                 |
+| `clearSessionStorage(sessionKey, adapter)`                                                                                                    | Clears all TSDF entries for one session/adapter                  |
+| `clearAllSessionStorage(sessionKey)`                                                                                                          | Clears all TSDF entries for one session across built-in adapters |
+| `localPersistentStorage` / `opfsPersistentStorage` / `indexedDbPersistentStorage`                                                             | Built-in storage helpers and async adapters                      |
+| `createIndexedDbPersistentStorage(options?)`                                                                                                  | Creates an IndexedDB adapter, optionally with a database name    |
+| `createAsyncStorageAdapter(driver)`                                                                                                           | Wraps a custom async storage driver                              |
 
 ## Configuration
 
@@ -117,6 +117,9 @@ const getSessionKey = () => (userId ? `tenant:${userId}` : false);
 const storeManager = createStoreManager({
   getSessionKey,
   errorNormalizer: normalizeError,
+  lowPriorityThrottleMs: 5,
+  baseCoalescingWindowMs: 10,
+  blockWindowClose: null,
   offlineSession: {
     network: { enabled: true },
     mutationQueueing: { network: 'allow', outage: 'allow' },
@@ -127,9 +130,6 @@ const settingsStore = createDocumentStore<Settings>({
   id: 'document-settings',
   storeManager,
   fetchFn: (signal) => api.getSettings(signal),
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
   persistentStorage: {
     adapter: 'local-sync',
     version: 2,

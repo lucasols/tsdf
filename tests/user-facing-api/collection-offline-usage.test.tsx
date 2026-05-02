@@ -190,7 +190,6 @@ test('direct collection store offline public api', async () => {
     getCollectionItemKey: (payload: TodoPayload) => payload,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: todoSchema,
@@ -355,7 +354,6 @@ test('direct collection store offline public api', async () => {
     getCollectionItemKey: (payload: TodoPayload) => payload,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
     persistentStorage: {
       adapter: 'local-sync',
       schema: todoSchema,

@@ -98,10 +98,7 @@ import {
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
 } from './utils/browserTabsSync';
-import {
-  performMutationWithLifecycle,
-  type BlockWindowCloseHandler,
-} from './utils/performMutation';
+import { performMutationWithLifecycle } from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
@@ -218,8 +215,10 @@ export type DocumentStoreOptions<
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
   fetchFn: (signal: AbortSignal) => Promise<State>;
-  lowPriorityThrottleMs: number;
-  baseCoalescingWindowMs: number;
+  /** Overrides the manager's default minimum interval between low-priority fetches for this store. */
+  lowPriorityThrottleMs?: number;
+  /** Overrides the manager's default coalescing window for this store. */
+  baseCoalescingWindowMs?: number;
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
@@ -238,7 +237,6 @@ export type DocumentStoreOptions<
     error: unknown,
     options: { dontShowToast?: boolean },
   ) => void;
-  blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
@@ -422,15 +420,14 @@ export function createDocumentStore<
   id,
   storeManager,
   fetchFn,
-  lowPriorityThrottleMs,
-  baseCoalescingWindowMs,
+  lowPriorityThrottleMs: storeLowPriorityThrottleMs,
+  baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
   revalidateOnWindowFocus,
   transportReconnectCooldownMs = 2_000,
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
-  blockWindowClose,
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
@@ -439,6 +436,14 @@ export function createDocumentStore<
   TOfflineOperations,
   StorageState
 >): DocumentStore<State, TOfflineOperations> {
+  const lowPriorityThrottleMs =
+    storeLowPriorityThrottleMs ??
+    storeManager.storeDefaults.lowPriorityThrottleMs;
+  const baseCoalescingWindowMs =
+    storeBaseCoalescingWindowMs ??
+    storeManager.storeDefaults.baseCoalescingWindowMs;
+  const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
+
   let invalidationWasTriggered = false;
   type ResolvedOfflineOperations = TOfflineOperations extends null
     ? Record<never, never>

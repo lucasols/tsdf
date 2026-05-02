@@ -18,20 +18,20 @@ Every fetch request has a priority that determines its behavior:
 Low-priority fetches are throttled to avoid redundant requests:
 
 ```
-lowPriorityThrottleMs: 2000
+lowPriorityThrottleMs: 5
 ```
 
-If a hook mounts 500ms after the last fetch completed, the low-priority fetch is **skipped** because the data is still fresh enough.
+If a hook mounts within the configured throttle window after the last fetch completed, the low-priority fetch is **skipped** because the data is still fresh enough.
 
 ## Coalescing
 
 When multiple fetch requests arrive in a short window, they are coalesced into a single batch:
 
 ```
-baseCoalescingWindowMs: 100
+baseCoalescingWindowMs: 10
 ```
 
-If three `useItem` hooks mount within 100ms, their fetches are grouped and executed as one request (when using batch fetching) or sequentially but without duplicate requests for the same item.
+If three `useItem` hooks mount within the configured coalescing window, their fetches are grouped and executed as one request (when using batch fetching) or sequentially but without duplicate requests for the same item.
 
 ### Background Tabs
 
@@ -69,23 +69,23 @@ This is useful for background refetches that should yield to user-initiated acti
 
 ## Configuration Reference
 
-| Option                      | Required | Description                                                                                                 |
-| --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `lowPriorityThrottleMs`     | Yes      | Minimum interval between low-priority fetches for the same item                                             |
-| `baseCoalescingWindowMs`    | Yes      | Time window to group multiple requests into a single batch                                                  |
-| `mediumPriorityDelayMs`     | No       | Delay before medium-priority fetches execute                                                                |
-| `dynamicRealtimeThrottleMs` | No       | Function returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md) |
-| `maxBatchSize`              | No       | (Collection/ListQuery) Triggers immediate fetch when batch size is reached, skipping the coalescing window  |
+| Option                      | Required | Description                                                                                                             |
+| --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `lowPriorityThrottleMs`     | No       | Manager default minimum interval between low-priority fetches, or a store-level override. Defaults to `5`               |
+| `baseCoalescingWindowMs`    | No       | Manager default time window to group multiple requests into a single batch, or a store-level override. Defaults to `10` |
+| `mediumPriorityDelayMs`     | No       | Delay before medium-priority fetches execute                                                                            |
+| `dynamicRealtimeThrottleMs` | No       | Function returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md)             |
+| `maxBatchSize`              | No       | (Collection/ListQuery) Triggers immediate fetch when batch size is reached, skipping the coalescing window              |
 
 ## Typical Configuration
 
 ```ts
 {
-  // Skip refetch if one happened in the last 2 seconds
-  lowPriorityThrottleMs: 2000,
+  // Skip refetch if one happened in the last 5ms
+  lowPriorityThrottleMs: 5,
 
-  // Group fetches within 100ms
-  baseCoalescingWindowMs: 100,
+  // Group fetches within 10ms
+  baseCoalescingWindowMs: 10,
 
   // Wait 300ms before executing medium-priority fetches
   mediumPriorityDelayMs: 300,

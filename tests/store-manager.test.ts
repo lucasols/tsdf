@@ -43,6 +43,40 @@ test('getAllStoreIds returns the registered ids across mixed store types', () =>
   `);
 });
 
+test('store defaults use built-in timing values and disabled window-close blocking', () => {
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+  });
+
+  expect(storeManager.storeDefaults).toMatchInlineSnapshot(`
+    baseCoalescingWindowMs: 10
+    blockWindowClose: null
+    lowPriorityThrottleMs: 5
+  `);
+});
+
+test('store defaults can be configured on the store manager', () => {
+  const blockWindowClose = vi.fn(() => ({ unblock: vi.fn() }));
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 25,
+    baseCoalescingWindowMs: 50,
+    blockWindowClose,
+  });
+
+  expect({
+    ...storeManager.storeDefaults,
+    blockWindowClose:
+      storeManager.storeDefaults.blockWindowClose === blockWindowClose,
+  }).toMatchInlineSnapshot(`
+    baseCoalescingWindowMs: 50
+    blockWindowClose: '✅'
+    lowPriorityThrottleMs: 25
+  `);
+});
+
 test('duplicate ids are rejected within the same store manager', () => {
   const storeManager = createStoreManager({
     getSessionKey: () => 'shared-session',

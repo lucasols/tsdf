@@ -158,7 +158,7 @@ const blockWindowClose = () => {
 };
 ```
 
-Pass `null` to any store's `blockWindowClose` option to disable this behavior.
+Pass `null` to `createStoreManager({ blockWindowClose })` to disable this behavior.
 
 ## MutationDebounce
 

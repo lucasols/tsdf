@@ -89,7 +89,6 @@ import {
   type BrowserTabsTransportFactory,
   type SnapshotConsistency,
 } from '../utils/browserTabsSync';
-import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
@@ -871,8 +870,10 @@ type ListQueryStoreOptionsBase<
     onSessionKeyChanged?: (event: TestSessionKeyChangedEvent) => void;
     onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
   };
-  lowPriorityThrottleMs: number;
-  baseCoalescingWindowMs: number;
+  /** Overrides the manager's default minimum interval between low-priority fetches for this store. */
+  lowPriorityThrottleMs?: number;
+  /** Overrides the manager's default coalescing window for this store. */
+  baseCoalescingWindowMs?: number;
   mediumPriorityDelayMs?: number;
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
@@ -898,7 +899,6 @@ type ListQueryStoreOptionsBase<
     error: unknown,
     options: { silentErrors?: boolean },
   ) => void;
-  blockWindowClose: BlockWindowCloseHandler | null;
   /** Opt-in hook-level query derivation from locally materialized items. */
   derivedQueries?: DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
@@ -995,8 +995,8 @@ export function createListQueryStore<
     onStateCleanup,
     usesRealTimeUpdates = false,
     '~test': testOptions,
-    lowPriorityThrottleMs,
-    baseCoalescingWindowMs,
+    lowPriorityThrottleMs: storeLowPriorityThrottleMs,
+    baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
     mediumPriorityDelayMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
@@ -1006,13 +1006,20 @@ export function createListQueryStore<
     onInvalidateItem,
     onSchedulerEvent,
     onMutationError,
-    blockWindowClose,
     derivedQueries,
     getQueryKey: customGetQueryKey,
     getItemKey: customGetItemKey,
     partialResources,
     persistentStorage: persistentStorageConfig,
   } = storeOptions;
+
+  const lowPriorityThrottleMs =
+    storeLowPriorityThrottleMs ??
+    storeManager.storeDefaults.lowPriorityThrottleMs;
+  const baseCoalescingWindowMs =
+    storeBaseCoalescingWindowMs ??
+    storeManager.storeDefaults.baseCoalescingWindowMs;
+  const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
 
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
