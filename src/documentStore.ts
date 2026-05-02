@@ -210,8 +210,10 @@ export type DocumentStoreOptions<
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
 > = {
-  debugName?: string;
-  /** Stable id shared by the same logical document store across browser tabs. */
+  /**
+   * Stable id for this logical document store. Used for debug labels,
+   * persistence namespaces, and browser tab sync.
+   */
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
@@ -420,7 +422,6 @@ export function createDocumentStore<
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
 >({
-  debugName,
   id,
   storeManager,
   fetchFn,
@@ -676,7 +677,7 @@ export function createDocumentStore<
       : null;
 
   const store = new Store<DocumentStoreState<State>>({
-    debugName,
+    debugName: id,
     state: () =>
       persistence?.createInitialState({
         data: initialData,

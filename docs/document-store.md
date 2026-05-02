@@ -28,22 +28,21 @@ const userStore = createDocumentStore<User>({
 
 ## Options
 
-| Option                         | Type                                                                             | Required | Description                                                                             |
-| ------------------------------ | -------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `id`                           | `string`                                                                         | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                 |
-| `storeManager`                 | `StoreManager`                                                                   | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
-| `fetchFn`                      | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                               |
-| `lowPriorityThrottleMs`        | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)            |
-| `baseCoalescingWindowMs`       | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)            |
-| `debugName`                    | `string`                                                                         | No       | Debug name for logging                                                                  |
-| `dynamicRealtimeThrottleMs`    | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                         |
-| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                 |
-| `transportReconnectCooldownMs` | `number`                                                                         | No       | Cooldown for repeated transport reconnect revalidation                                  |
-| `mediumPriorityDelayMs`        | `number`                                                                         | No       | Delay for medium-priority fetches                                                       |
-| `usesRealTimeUpdates`          | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                |
-| `persistentStorage`            | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)          |
-| `onSchedulerEvent`             | `(event) => void`                                                                | No       | Scheduler event listener                                                                |
-| `onMutationError`              | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                           |
+| Option                         | Type                                                                             | Required | Description                                                                                                            |
+| ------------------------------ | -------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`                           | `string`                                                                         | Yes      | Stable logical store id used for debug labels, persistence namespaces, and [Browser Tabs Sync](./browser-tabs-sync.md) |
+| `storeManager`                 | `StoreManager`                                                                   | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls                                |
+| `fetchFn`                      | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                                                              |
+| `lowPriorityThrottleMs`        | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `baseCoalescingWindowMs`       | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)                                           |
+| `dynamicRealtimeThrottleMs`    | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                                                        |
+| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                                                |
+| `transportReconnectCooldownMs` | `number`                                                                         | No       | Cooldown for repeated transport reconnect revalidation                                                                 |
+| `mediumPriorityDelayMs`        | `number`                                                                         | No       | Delay for medium-priority fetches                                                                                      |
+| `usesRealTimeUpdates`          | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                                               |
+| `persistentStorage`            | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)                                         |
+| `onSchedulerEvent`             | `(event) => void`                                                                | No       | Scheduler event listener                                                                                               |
+| `onMutationError`              | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                                                          |
 
 ## State Shape
 

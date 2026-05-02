@@ -879,8 +879,10 @@ type ListQueryStoreOptionsBase<
   > = null,
   StorageState = unknown,
 > = {
-  debugName?: string;
-  /** Stable id shared by the same logical list-query store across browser tabs. */
+  /**
+   * Stable id for this logical list-query store. Used for debug labels,
+   * persistence namespaces, and browser tab sync.
+   */
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
@@ -1039,7 +1041,6 @@ export function createListQueryStore<
   TOfflineOperations
 > {
   const {
-    debugName,
     id,
     storeManager,
     fetchItemFn,
@@ -1228,7 +1229,7 @@ export function createListQueryStore<
       : resolvedOfflineOperations;
 
   const store = new Store<State>({
-    debugName,
+    debugName: id,
     state: () => {
       const initialState: State = {
         items: {},

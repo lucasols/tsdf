@@ -47,7 +47,7 @@ The type parameters are:
 
 | Option         | Type                                                                | Description                                                                             |
 | -------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `id`           | `string`                                                            | Stable logical store id shared across tabs                                              |
+| `id`           | `string`                                                            | Stable logical store id used for debug labels, persistence namespaces, and tab sync     |
 | `storeManager` | `StoreManager`                                                      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls |
 | `fetchListFn`  | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                     |
 

@@ -266,8 +266,10 @@ export type CollectionStoreOptions<
   > = null,
   StorageState = unknown,
 > = {
-  debugName?: string;
-  /** Stable id shared by the same logical collection store across browser tabs. */
+  /**
+   * Stable id for this logical collection store. Used for debug labels,
+   * persistence namespaces, and browser tab sync.
+   */
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
@@ -627,7 +629,6 @@ export function createCollectionStore<
   > = null,
   StorageState = unknown,
 >({
-  debugName,
   id,
   storeManager,
   fetchFn,
@@ -797,7 +798,7 @@ export function createCollectionStore<
     : storeManager.onPersistentStorageError;
 
   const store = new Store<CollectionState>({
-    debugName,
+    debugName: id,
     state: () => {
       const initialState: CollectionState = {};
 
