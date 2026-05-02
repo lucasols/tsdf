@@ -35,6 +35,12 @@ const storeManager = createStoreManager({
     id: 'fetch-error',
     message: err.message,
   }),
+  lowPriorityThrottleMs: 5, // optional; defaults to 5
+  baseCoalescingWindowMs: 10, // optional; defaults to 10
+  blockWindowClose: null, // optional manager-wide mutation close blocker
+  revalidateOnWindowFocus: true, // optional default for attached stores
+  onMutationError: (err) => log(err), // optional global mutation fallback
+  onPersistentStorageError: (err) => log(err), // optional global persistence fallback
   offlineSession: undefined, // optional; required for offline queueing
 });
 
@@ -42,9 +48,10 @@ const userStore = createDocumentStore<User>({
   id: 'document-user', // stable id; also used for browser tab sync
   storeManager,
   fetchFn: (signal) => api.getUser(signal),
-  lowPriorityThrottleMs: 2000,
-  baseCoalescingWindowMs: 100,
-  blockWindowClose: null,
+  lowPriorityThrottleMs: 2000, // optional store override
+  baseCoalescingWindowMs: 100, // optional store override
+  revalidateOnWindowFocus: false, // disables inherited manager default
+  onMutationError: null, // disables inherited manager fallback
 });
 ```
 
@@ -84,6 +91,8 @@ Every fetch has a priority:
 Requests within `baseCoalescingWindowMs` are merged into a single batch. Mutation locks defer fetches for affected items until the mutation finishes.
 
 Batch fetching: `Collection` / `ListQuery` accept `batchFetchFn` + `getItemsBatchKey` + optional `maxBatchSize` to coalesce multiple item fetches into one request returning a `Map<payload, ItemState | Error>`.
+
+Imperative cache-or-fetch reads return `t-result` values with `StoreFetchError` errors: Document `getDataFromStateOrFetch`, Collection `getItemFromStateOrFetch`, List Query `getQueryFromStateOrFetch` / `getItemFromStateOrFetch`. They return loaded state by default, fetch if missing, and accept `ignoreStaleState` to fetch when cached state has `refetchOnMount`.
 
 Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 
@@ -154,7 +163,7 @@ persistentStorage: {
   version: 1,                 // bump to invalidate older entries
   // Collection / ListQuery: payloadSchema, itemPayloadSchema, queryPayloadSchema, maxBytes/maxItemBytes/maxQueryBytes, maxQuerySize, pinnedItems, pinnedQueries, ignoreItems
   // optional: offline: { operations: { ... } }
-  onPersistentStorageError: (err) => log(err),
+  onPersistentStorageError: (err) => log(err), // overrides the manager fallback; use null to disable it
 }
 ```
 
@@ -216,7 +225,7 @@ createDocumentStore({
 socket.on('user-updated', (data) =>
   store.updateState((d) => Object.assign(d, data)),
 );
-store.onTransportReconnect(); // invalidate at realtimeUpdate priority after reconnect
+storeManager.onTransportReconnect(); // notify attached realtime stores after reconnect
 ```
 
 `usesRealTimeUpdates: true` auto-disables `revalidateOnWindowFocus` and defaults hooks to `disableRefetchOnMount: true`.
@@ -242,7 +251,7 @@ Docs: `docs/browser-tabs-sync.md`.
 Exported from `tsdf` (see `docs/shared-types.md`):
 
 - `StoreError` — normalized error shape produced by `errorNormalizer`.
-- `StoreFetchError` — thrown by `awaitFetch*` (types: `'fetch' | 'timeout' | 'aborted'`).
+- `StoreFetchError` — returned by `awaitFetch*` and cache-or-fetch helpers (types: `'fetch' | 'timeout' | 'aborted'`).
 - `StoreMutationError` — `performMutation` failure with `cause` and normalized fields.
 - `MutationSkipped` / `mutationSkipped` — sentinel for cancelled/superseded mutations.
 - `fetchTypePriority` — priority constants used by the scheduler.

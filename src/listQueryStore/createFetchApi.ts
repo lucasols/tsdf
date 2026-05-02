@@ -1,4 +1,5 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
+import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import {
@@ -23,6 +24,7 @@ import {
 } from '../utils/storeShared';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
+import { fallbackItemHasRequestedFields } from './itemFieldUtils';
 import {
   type FieldsInput,
   type OffsetPaginationConfig,
@@ -966,6 +968,15 @@ export function createFetchApi<
     });
   }
 
+  function hasStaleRequestedFields(
+    itemKey: string,
+    fields: readonly string[],
+  ): boolean {
+    const invalidationFields = store.state.itemFieldInvalidationFields[itemKey];
+    if (!invalidationFields || invalidationFields.length === 0) return false;
+    return fields.some((field) => invalidationFields.includes(field));
+  }
+
   async function awaitListQueryFetch(
     params: QueryPayload,
     options: { size?: number; timeoutMs?: number; fields?: FieldsInput } = {},
@@ -1048,6 +1059,92 @@ export function createFetchApi<
       error: null,
       hasMore: query.hasMore,
     };
+  }
+
+  async function getQueryFromStateOrFetch(
+    params: QueryPayload,
+    options: {
+      ignoreStaleState?: boolean;
+      size?: number;
+      timeoutMs?: number;
+      fields?: FieldsInput;
+    } = {},
+  ): Promise<
+    ResultType<
+      {
+        items: { data: ItemState; itemPayload: ItemPayload }[];
+        hasMore: boolean;
+      },
+      StoreFetchError
+    >
+  > {
+    const queryKey = getQueryKey(params);
+    const fields = normalizeFieldsOption(options.fields);
+    const query = getQueryStateByKey(queryKey);
+    const includeStale = !!options.ignoreStaleState;
+    const cachedQueryCanBeUsed =
+      !!query?.wasLoaded &&
+      (!includeStale ||
+        (query.status === 'success' && !query.error && !query.refetchOnMount));
+
+    let fieldsToFetch: FieldsInput | undefined = options.fields;
+
+    if (query && cachedQueryCanBeUsed) {
+      const needsFieldCheck =
+        partialResources && Array.isArray(fields) && fields.length > 0;
+
+      if (!needsFieldCheck) {
+        return Result.ok({
+          items: getQueryItems(query, (data, itemPayload) => ({
+            data,
+            itemPayload,
+          })),
+          hasMore: query.hasMore,
+        });
+      }
+
+      // Single pass over items: collect fields missing or (when ignoreStaleState) stale somewhere.
+      const fieldsNeedingFetch = new Set<string>();
+      for (const itemKey of query.items) {
+        if (fieldsNeedingFetch.size === fields.length) break;
+        const itemState = readItemState(itemKey);
+        const invalidation = includeStale
+          ? store.state.itemFieldInvalidationFields[itemKey]
+          : undefined;
+        for (const field of fields) {
+          if (fieldsNeedingFetch.has(field)) continue;
+          if (!fallbackItemHasRequestedFields(itemState, [field])) {
+            fieldsNeedingFetch.add(field);
+          } else if (invalidation?.includes(field)) {
+            fieldsNeedingFetch.add(field);
+          }
+        }
+      }
+
+      if (fieldsNeedingFetch.size === 0) {
+        return Result.ok({
+          items: getQueryItems(query, (data, itemPayload) => ({
+            data,
+            itemPayload,
+          })),
+          hasMore: query.hasMore,
+        });
+      }
+
+      fieldsToFetch = fields.filter((field) => fieldsNeedingFetch.has(field));
+    }
+
+    const result = await awaitListQueryFetch(params, {
+      size: options.size,
+      timeoutMs: options.timeoutMs,
+      fields: fieldsToFetch,
+    });
+
+    if (result.error) {
+      return Result.err(result.error);
+    }
+
+    return Result.ok({ items: result.items, hasMore: result.hasMore });
   }
 
   function scheduleItemFetch(
@@ -1165,6 +1262,68 @@ export function createFetchApi<
     return { data: item, error: null };
   }
 
+  async function getItemFromStateOrFetch(
+    itemPayload: ItemPayload,
+    options: {
+      ignoreStaleState?: boolean;
+      timeoutMs?: number;
+      fields?: FieldsInput;
+    } = {},
+  ): Promise<ResultType<ItemState, StoreFetchError>> {
+    const itemKey = getItemKey(itemPayload);
+    const fields = normalizeFieldsOption(options.fields);
+    const itemState = readItemState(itemKey);
+    const item = itemState?.item;
+    const itemQuery = itemState?.itemQuery;
+    const includeStale = !!options.ignoreStaleState;
+    const needsFieldCheck =
+      partialResources && Array.isArray(fields) && fields.length > 0;
+    const itemHasAllFields =
+      !needsFieldCheck || fallbackItemHasRequestedFields(itemState, fields);
+    const itemQueryFresh =
+      itemQuery?.status === 'success' &&
+      !itemQuery.error &&
+      !itemQuery.refetchOnMount;
+    const cachedItemCanBeUsed =
+      item != null &&
+      itemHasAllFields &&
+      (!includeStale ||
+        (itemQueryFresh &&
+          (!needsFieldCheck || !hasStaleRequestedFields(itemKey, fields))));
+
+    if (cachedItemCanBeUsed) {
+      return Result.ok(item);
+    }
+
+    if (!fetchItemFn) {
+      throw new Error(noFetchItemFnError);
+    }
+
+    let fieldsToFetch: FieldsInput | undefined = options.fields;
+
+    if (needsFieldCheck && item != null && itemQueryFresh) {
+      const invalidation = includeStale
+        ? store.state.itemFieldInvalidationFields[itemKey]
+        : undefined;
+      fieldsToFetch = fields.filter(
+        (field) =>
+          !fallbackItemHasRequestedFields(itemState, [field]) ||
+          (invalidation?.includes(field) ?? false),
+      );
+    }
+
+    const result = await awaitItemFetch(itemPayload, {
+      timeoutMs: options.timeoutMs,
+      fields: fieldsToFetch,
+    });
+
+    if (result.error) {
+      return Result.err(result.error);
+    }
+
+    return Result.ok(result.data);
+  }
+
   function resetSchedulers() {
     for (const scheduler of querySchedulers.values()) {
       scheduler.reset();
@@ -1262,8 +1421,10 @@ export function createFetchApi<
     scheduleListQueryFetch,
     loadMore,
     awaitListQueryFetch,
+    getQueryFromStateOrFetch,
     scheduleItemFetch,
     awaitItemFetch,
+    getItemFromStateOrFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
     syncRemoteFetchStart,

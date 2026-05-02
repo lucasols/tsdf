@@ -52,6 +52,10 @@ const storeManager = createStoreManager({
   lowPriorityThrottleMs: 5,
   baseCoalescingWindowMs: 10,
   blockWindowClose: null,
+  revalidateOnWindowFocus: true,
+  onMutationError: (error) => {
+    console.error('TSDF mutation failed', error);
+  },
   onPersistentStorageError: (error) => {
     console.error('TSDF persistence failed', error);
   },
@@ -77,18 +81,18 @@ function UserProfile() {
 
 All three store types share these creation options:
 
-| Option                         | Type                                                                                                                      | Required | Description                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
-| `debugName`                    | `string`                                                                                                                  | No       | Debug name for the store                                                             |
-| `storeManager`                 | `StoreManager`                                                                                                            | Yes      | Shared global config with session scoping, store defaults, and global store controls |
-| `lowPriorityThrottleMs`        | `number`                                                                                                                  | No       | Overrides the manager default minimum interval between low-priority fetches          |
-| `baseCoalescingWindowMs`       | `number`                                                                                                                  | No       | Overrides the manager default window to group multiple fetch requests into a batch   |
-| `mediumPriorityDelayMs`        | `number`                                                                                                                  | No       | Delay before medium-priority fetches execute                                         |
-| `dynamicRealtimeThrottleMs`    | `(params) => number`                                                                                                      | No       | Dynamic throttle for [real-time updates](./real-time-updates.md)                     |
-| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                                                              | No       | Refetch data when window regains focus                                               |
-| `transportReconnectCooldownMs` | `number`                                                                                                                  | No       | Cooldown for repeated transport reconnect revalidation                               |
-| `persistentStorage`            | `DocumentPersistentStorageConfig<...> \| CollectionPersistentStorageConfig<...> \| ListQueryPersistentStorageConfig<...>` | No       | Configure cache persistence and optional session-based offline behavior              |
-| `usesRealTimeUpdates`          | `boolean`                                                                                                                 | No       | Enables [real-time update mode](./real-time-updates.md)                              |
-| `onSchedulerEvent`             | `(event) => void`                                                                                                         | No       | Callback for [scheduler events](./fetch-scheduling.md)                               |
-| `onMutationError`              | `(error, options) => void`                                                                                                | No       | Global handler for [mutation](./mutations.md) errors                                 |
-| `id`                           | `string`                                                                                                                  | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)              |
+| Option                         | Type                                                                                                                      | Required | Description                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `debugName`                    | `string`                                                                                                                  | No       | Debug name for the store                                                                                               |
+| `storeManager`                 | `StoreManager`                                                                                                            | Yes      | Shared global config with session scoping, store defaults, and global store controls                                   |
+| `lowPriorityThrottleMs`        | `number`                                                                                                                  | No       | Overrides the manager default minimum interval between low-priority fetches                                            |
+| `baseCoalescingWindowMs`       | `number`                                                                                                                  | No       | Overrides the manager default window to group multiple fetch requests into a batch                                     |
+| `mediumPriorityDelayMs`        | `number`                                                                                                                  | No       | Delay before medium-priority fetches execute                                                                           |
+| `dynamicRealtimeThrottleMs`    | `(params) => number`                                                                                                      | No       | Dynamic throttle for [real-time updates](./real-time-updates.md)                                                       |
+| `revalidateOnWindowFocus`      | `boolean \| (() => boolean)`                                                                                              | No       | Overrides the manager default for refetching data when window regains focus. Use `false` to disable                    |
+| `transportReconnectCooldownMs` | `number`                                                                                                                  | No       | Cooldown for repeated transport reconnect revalidation                                                                 |
+| `persistentStorage`            | `DocumentPersistentStorageConfig<...> \| CollectionPersistentStorageConfig<...> \| ListQueryPersistentStorageConfig<...>` | No       | Configure cache persistence and optional session-based offline behavior                                                |
+| `usesRealTimeUpdates`          | `boolean`                                                                                                                 | No       | Enables [real-time update mode](./real-time-updates.md)                                                                |
+| `onSchedulerEvent`             | `(event) => void`                                                                                                         | No       | Callback for [scheduler events](./fetch-scheduling.md)                                                                 |
+| `onMutationError`              | `(error, options) => void \| null`                                                                                        | No       | Store-specific handler for [mutation](./mutations.md) errors. Overrides the manager fallback; use `null` to disable it |
+| `id`                           | `string`                                                                                                                  | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                                                |

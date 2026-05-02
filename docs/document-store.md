@@ -78,17 +78,18 @@ type DocumentStoreState<State> = {
 
 ### Methods
 
-| Method                     | Signature                                       | Description                                                     |
-| -------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| `scheduleFetch`            | `(fetchType, options?) => ScheduleFetchResults` | Schedule a fetch. See [Fetch Scheduling](./fetch-scheduling.md) |
-| `awaitFetch`               | `(options?) => Promise<{ data, error }>`        | Await a fetch with optional `timeoutMs`                         |
-| `preloadPersistentStorage` | `() => Promise<void>`                           | Preload cached document data from async storage (OPFS)          |
-| `invalidateData`           | `(priority?) => void`                           | Invalidate data. See [Invalidation](./invalidation.md)          |
-| `updateState`              | `(produceFn) => boolean`                        | Immer-based state update. Returns `false` if no data exists     |
-| `reset`                    | `() => void`                                    | Reset store to idle state                                       |
-| `startMutation`            | `() => () => boolean`                           | Manually start a mutation lock. See [Mutations](./mutations.md) |
-| `performMutation`          | `(options) => Promise<Result<T>>`               | Full mutation lifecycle. See [Mutations](./mutations.md)        |
-| `onTransportReconnect`     | `() => void`                                    | See [Real-Time Updates](./real-time-updates.md)                 |
+| Method                     | Signature                                               | Description                                                                                                                                     |
+| -------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scheduleFetch`            | `(fetchType, options?) => ScheduleFetchResults`         | Schedule a fetch. See [Fetch Scheduling](./fetch-scheduling.md)                                                                                 |
+| `awaitFetch`               | `(options?) => Promise<{ data, error }>`                | Await a fetch with optional `timeoutMs`                                                                                                         |
+| `getDataFromStateOrFetch`  | `(options?) => Promise<Result<State, StoreFetchError>>` | Return loaded state or fetch it if missing                                                                                                      |
+| `preloadPersistentStorage` | `() => Promise<void>`                                   | Preload cached document data from async storage (OPFS)                                                                                          |
+| `invalidateData`           | `(priority?) => void`                                   | Invalidate data. See [Invalidation](./invalidation.md)                                                                                          |
+| `updateState`              | `(produceFn) => boolean`                                | Immer-based state update. Returns `false` if no data exists                                                                                     |
+| `reset`                    | `() => void`                                            | Reset store to idle state                                                                                                                       |
+| `startMutation`            | `() => () => boolean`                                   | Manually start a mutation lock. See [Mutations](./mutations.md)                                                                                 |
+| `performMutation`          | `(options) => Promise<Result<T>>`                       | Full mutation lifecycle. See [Mutations](./mutations.md)                                                                                        |
+| `onTransportReconnect`     | `() => void`                                            | Store-level reconnect hook. Prefer `storeManager.onTransportReconnect()` for shared transports. See [Real-Time Updates](./real-time-updates.md) |
 
 ### Offline Methods
 

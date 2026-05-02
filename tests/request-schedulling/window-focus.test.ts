@@ -1,10 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { createStoreManager } from '../../src/storeManager';
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 beforeEach(() => {
@@ -61,6 +62,58 @@ test('document store: focus does nothing when revalidateOnWindowFocus is not set
 
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useDocument().data?.value);
+
+  await flushAllTimers();
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
+});
+
+test('document store: focus uses manager revalidateOnWindowFocus default', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    revalidateOnWindowFocus: true,
+  });
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    storeManager,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useDocument().data?.value);
+
+  await flushAllTimers();
+
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
+});
+
+test('document store: store revalidateOnWindowFocus overrides manager default', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], null);
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    revalidateOnWindowFocus: true,
+  });
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    storeManager,
+    revalidateOnWindowFocus: false,
     bindFocusController: tabs.bind('a'),
   });
 

@@ -291,7 +291,7 @@ export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
    * Called when a storage write operation fails (e.g. quota exceeded, OPFS write error).
    * Use this to log or report persistence failures to your error tracking service.
    */
-  onPersistentStorageError?: PersistentStorageErrorHandler;
+  onPersistentStorageError?: PersistentStorageErrorHandler | null;
 };
 
 /** Store-level persistent storage config. Session scoping comes from the parent store. */
@@ -364,11 +364,16 @@ export type DocumentPersistentStorageConfig<
 type ResolvedStorePersistentStorageBaseConfig<
   TFinal,
   TStorage = unknown,
-> = StorePersistentStorageBaseConfig<TFinal, TStorage> & {
+> = Omit<
+  StorePersistentStorageBaseConfig<TFinal, TStorage>,
+  'onPersistentStorageError'
+> & {
   /** Internal resolved namespace reused from the parent store id. */
   storeName: string;
   /** Internal resolved session scoping reused from the parent store. */
   getSessionKey: () => string | false;
+  /** Store-specific handler or manager fallback. `undefined` means errors are ignored. */
+  onPersistentStorageError?: PersistentStorageErrorHandler;
 };
 
 export type ResolvedDocumentPersistentStorageConfig<

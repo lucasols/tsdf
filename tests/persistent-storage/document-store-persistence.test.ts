@@ -80,7 +80,7 @@ function createDocPersistenceEnv(options: {
   version?: number;
   getSessionKey?: () => string | false;
   serverData?: TestData;
-  onPersistentStorageError?: (error: unknown) => void;
+  onPersistentStorageError?: ((error: unknown) => void) | null;
 }) {
   const getSessionKey =
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
@@ -411,6 +411,28 @@ describe('localStorage: document store persistence', () => {
     await env.apiStore.preloadPersistentStorage();
 
     expect(storeOnPersistentStorageError).toHaveBeenCalledTimes(1);
+    expect(managerOnPersistentStorageError).not.toHaveBeenCalled();
+  });
+
+  test('store persistent storage error handler can disable the manager fallback', async () => {
+    const managerOnPersistentStorageError = vi.fn();
+    const storeManager = createStoreManager({
+      getSessionKey: () => 'sess1',
+      errorNormalizer: normalizeError,
+      onPersistentStorageError: managerOnPersistentStorageError,
+    });
+    const env = createDocumentStoreTestEnv(defaultServerData, {
+      id: 'doc-preload-disabled-error-handler',
+      storeManager,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: wrappedSchema,
+        onPersistentStorageError: null,
+      },
+    });
+
+    await env.apiStore.preloadPersistentStorage();
+
     expect(managerOnPersistentStorageError).not.toHaveBeenCalled();
   });
 

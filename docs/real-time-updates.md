@@ -92,13 +92,15 @@ This prevents the UI from being overwhelmed by rapid updates while keeping data 
 
 ## Transport Reconnection
 
-When your WebSocket or SSE connection drops and reconnects, events may have been missed. Call `onTransportReconnect()` to revalidate:
+When your WebSocket or SSE connection drops and reconnects, events may have been missed. Call the manager-level `onTransportReconnect()` once for the shared transport:
 
 ```ts
 websocket.on('reconnect', () => {
-  store.onTransportReconnect();
+  storeManager.onTransportReconnect();
 });
 ```
+
+Store-level `store.onTransportReconnect()` remains available for stores backed by a dedicated transport.
 
 Behavior:
 
@@ -151,6 +153,6 @@ ws.on('task:deleted', ({ taskId }) => {
 });
 
 ws.on('reconnect', () => {
-  taskStore.onTransportReconnect();
+  storeManager.onTransportReconnect();
 });
 ```

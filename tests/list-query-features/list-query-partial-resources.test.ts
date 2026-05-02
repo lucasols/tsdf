@@ -70,6 +70,142 @@ afterAll(() => {
 });
 
 describe('useItem with partial resources', () => {
+  test('getItemFromStateOrFetch forwards requested fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const resultPromise = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: ['id', 'name'],
+    });
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok ? result.value : null).toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
+    `);
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+      `);
+  });
+
+  test('getItemFromStateOrFetch fetches fields missing from cached state', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const listResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+    await flushAllTimers();
+    await listResultPromise;
+
+    const itemResultPromise = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: ['id', 'name', 'address', 'country'],
+    });
+    await flushAllTimers();
+
+    const itemResult = await itemResultPromise;
+
+    expect(itemResult.ok ? itemResult.value : null).toMatchInlineSnapshot(`
+      address: 'Address 1'
+      country: 'Country 1'
+      id: 1
+      name: 'User 1'
+    `);
+    expect(env.serverTable.getRequestHistory('all', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'item'
+          payload:
+            fields: ['address', 'country']
+            itemId: 'users||1'
+      `);
+  });
+
+  test('getItemFromStateOrFetch hits cache when requested fields are loaded', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const firstResultPromise = env.apiStore.getItemFromStateOrFetch(
+      'users||1',
+      { fields: ['id', 'name', 'address'] },
+    );
+    await flushAllTimers();
+    await firstResultPromise;
+
+    env.serverTable.fetchHistory.length = 0;
+
+    const secondResult = await env.apiStore.getItemFromStateOrFetch(
+      'users||1',
+      { fields: ['id', 'name'] },
+    );
+
+    expect(secondResult.ok ? secondResult.value : null).toMatchInlineSnapshot(`
+      address: 'Address 1'
+      id: 1
+      name: 'User 1'
+    `);
+    expect(
+      env.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('getItemFromStateOrFetch refetches a stale requested field when stale state is ignored', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const firstResultPromise = env.apiStore.getItemFromStateOrFetch(
+      'users||1',
+      { fields: ['id', 'name', 'address'] },
+    );
+    await flushAllTimers();
+    await firstResultPromise;
+
+    env.serverTable.updateItem('users||1', { address: 'Fresh Address 1' });
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: 'users||1',
+      queryPayload: false,
+      fields: ['address'],
+    });
+    env.serverTable.fetchHistory.length = 0;
+
+    const freshResultPromise = env.apiStore.getItemFromStateOrFetch(
+      'users||1',
+      { fields: ['id', 'name', 'address'], ignoreStaleState: true },
+    );
+    await flushAllTimers();
+
+    const freshResult = await freshResultPromise;
+
+    expect(freshResult.ok ? freshResult.value : null).toMatchInlineSnapshot(`
+      address: 'Fresh Address 1'
+      id: 1
+      name: 'User 1'
+    `);
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['address']
+            itemId: 'users||1'
+      `);
+  });
+
   test('load only the selected fields', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
@@ -304,6 +440,151 @@ describe('useItem with partial resources', () => {
 });
 
 describe('useListQuery with partial resources', () => {
+  test('getQueryFromStateOrFetch forwards requested fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const resultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok ? result.value.items[0]?.data : null)
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'User 1'
+      `);
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+  });
+
+  test('getQueryFromStateOrFetch fetches fields missing from cached state', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const firstResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+    await flushAllTimers();
+    await firstResultPromise;
+
+    const secondResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name', 'address', 'country'] },
+    );
+    await flushAllTimers();
+
+    const secondResult = await secondResultPromise;
+
+    expect(secondResult.ok ? secondResult.value.items[0]?.data : null)
+      .toMatchInlineSnapshot(`
+        address: 'Address 1'
+        country: 'Country 1'
+        id: 1
+        name: 'User 1'
+      `);
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'list'
+          payload:
+            fields: ['address', 'country']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+  });
+
+  test('getQueryFromStateOrFetch hits cache when requested fields are loaded', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const firstResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name', 'address'] },
+    );
+    await flushAllTimers();
+    await firstResultPromise;
+
+    env.serverTable.fetchHistory.length = 0;
+
+    const secondResult = await env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+
+    expect(secondResult.ok ? secondResult.value.items[0]?.data : null)
+      .toMatchInlineSnapshot(`
+        address: 'Address 1'
+        id: 1
+        name: 'User 1'
+      `);
+    expect(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('getQueryFromStateOrFetch refetches a stale requested field when stale state is ignored', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const firstResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name', 'address'] },
+    );
+    await flushAllTimers();
+    await firstResultPromise;
+
+    env.serverTable.updateItem('users||1', { address: 'Fresh Address 1' });
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: 'users||1',
+      queryPayload: false,
+      fields: ['address'],
+    });
+    env.serverTable.fetchHistory.length = 0;
+
+    const freshResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name', 'address'], ignoreStaleState: true },
+    );
+    await flushAllTimers();
+
+    const freshResult = await freshResultPromise;
+
+    expect(freshResult.ok ? freshResult.value.items[0]?.data : null)
+      .toMatchInlineSnapshot(`
+        address: 'Fresh Address 1'
+        id: 1
+        name: 'User 1'
+      `);
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+  });
+
   test('load only the selected fields', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,

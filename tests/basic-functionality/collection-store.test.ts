@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import { createStoreManager } from '../../src/storeManager';
+import { StoreFetchError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -297,6 +298,94 @@ test('onStateCleanup is called when cache-limit eviction removes items from memo
       payloads: ['1']
       reason: 'cacheLimitEviction'
   `);
+});
+
+describe('getItemFromStateOrFetch', () => {
+  test('returns loaded item state without fetching', async () => {
+    const env = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
+    );
+
+    const result = await env.apiStore.getItemFromStateOrFetch('1');
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.value : null).toMatchInlineSnapshot(`
+      value: { completed: '❌', title: 'todo' }
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
+  test('fetches when the item is missing from state', async () => {
+    const env = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { testScenario: 'idle', usesRealTimeUpdates: true },
+    );
+
+    const resultPromise = env.apiStore.getItemFromStateOrFetch('1');
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.value : null).toMatchInlineSnapshot(`
+      value: { completed: '❌', title: 'todo' }
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('can ignore stale state and fetch fresh item data', async () => {
+    const env = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
+    );
+
+    env.apiStore.invalidateItem('1');
+    env.serverTable.updateItem('1', {
+      title: 'server title',
+      completed: false,
+    });
+
+    const cachedResult = await env.apiStore.getItemFromStateOrFetch('1');
+    expect(cachedResult.ok ? cachedResult.value.value.title : null).toBe(
+      'todo',
+    );
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+
+    const freshResultPromise = env.apiStore.getItemFromStateOrFetch('1', {
+      ignoreStaleState: true,
+    });
+
+    await flushAllTimers();
+
+    const freshResult = await freshResultPromise;
+
+    expect(freshResult.ok ? freshResult.value.value.title : null).toBe(
+      'server title',
+    );
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('returns fetch errors as Error instances', async () => {
+    const env = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { testScenario: 'idle', usesRealTimeUpdates: true },
+    );
+
+    env.serverTable.setNextFetchError('1', 'Network error');
+
+    const resultPromise = env.apiStore.getItemFromStateOrFetch('1');
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.error).toBeInstanceOf(Error);
+    expect(result.ok ? null : result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.ok ? null : result.error.message).toBe('Network error');
+  });
 });
 
 test('await fetch', async () => {

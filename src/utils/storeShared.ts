@@ -56,6 +56,19 @@ export type MutationSkipped = { kind: 'skipped' };
 
 export const mutationSkipped: MutationSkipped = { kind: 'skipped' };
 
+/**
+ * Resolves a store-level option that may inherit from a manager-level fallback.
+ * `undefined` means "use the manager value" and `null` means "explicit opt-out,
+ * ignore the manager value".
+ */
+export function resolveManagerFallback<T>(
+  storeLevel: T | null | undefined,
+  managerLevel: NoInfer<T> | undefined,
+): T | undefined {
+  if (storeLevel === null) return undefined;
+  return storeLevel ?? managerLevel;
+}
+
 function getStoreErrorLike(value: unknown): StoreError | null {
   if (
     value === null ||

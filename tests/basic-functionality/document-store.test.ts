@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { StoreFetchError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
@@ -13,6 +14,86 @@ afterEach(() => {
 });
 
 describe('basic fetch lifecycle', () => {
+  test('getDataFromStateOrFetch returns loaded state without fetching', async () => {
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
+
+    const result = await env.apiStore.getDataFromStateOrFetch();
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.value : null).toMatchInlineSnapshot(`
+      value: 42
+    `);
+    expect(env.serverMock.numOfFinishedFetches).toBe(0);
+  });
+
+  test('getDataFromStateOrFetch fetches when state is idle', async () => {
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'idle',
+      usesRealTimeUpdates: true,
+    });
+
+    const resultPromise = env.apiStore.getDataFromStateOrFetch();
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.value : null).toMatchInlineSnapshot(`
+      value: 42
+    `);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
+  test('getDataFromStateOrFetch can ignore stale state and fetch fresh data', async () => {
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
+
+    env.apiStore.invalidateData();
+    env.setServerData(100);
+
+    const cachedResult = await env.apiStore.getDataFromStateOrFetch();
+
+    expect(cachedResult.ok ? cachedResult.value.value : null).toBe(42);
+    expect(env.serverMock.numOfFinishedFetches).toBe(0);
+
+    const freshResultPromise = env.apiStore.getDataFromStateOrFetch({
+      ignoreStaleState: true,
+    });
+
+    await flushAllTimers();
+
+    const freshResult = await freshResultPromise;
+
+    expect(freshResult.ok ? freshResult.value.value : null).toBe(100);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
+  test('getDataFromStateOrFetch returns fetch errors as Error instances', async () => {
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'idle',
+      usesRealTimeUpdates: true,
+    });
+
+    env.errorInNextFetch('Network error');
+
+    const resultPromise = env.apiStore.getDataFromStateOrFetch();
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.error).toBeInstanceOf(Error);
+    expect(result.ok ? null : result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.ok ? null : result.error.message).toBe('Network error');
+  });
+
   test('idle -> loading -> success state transitions', async () => {
     const env = createDocumentStoreTestEnv(42, {
       testScenario: 'idle',

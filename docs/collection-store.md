@@ -88,22 +88,23 @@ The overall store state is `Record<string, TSFDCollectionItem | null>` where key
 
 ### Methods
 
-| Method                   | Signature                                                            | Description                                              |
-| ------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------- |
-| `scheduleFetch`          | `(fetchType, payload(s), options?) => ScheduleFetchResults`          | Schedule fetch for one or more items                     |
-| `awaitFetch`             | `(params, options?) => Promise<{ data, error }>`                     | Await fetch with optional `timeoutMs`                    |
-| `preloadItemFromStorage` | `(params) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>` | Preload cached item payloads from async storage (OPFS)   |
-| `getItemKey`             | `(params) => string`                                                 | Get the composite key for a payload                      |
-| `getItemState`           | `(params) => CollectionItem`                                         | Get item state (single, array, or filter function)       |
-| `invalidateItem`         | `(payload(s), priority?) => void`                                    | See [Invalidation](./invalidation.md)                    |
-| `updateItemState`        | `(params, produceFn, options?) => boolean`                           | Immer-based state update                                 |
-| `addItemToState`         | `(payload, data) => void`                                            | Add a new item to the store                              |
-| `deleteItemState`        | `(params) => void`                                                   | Delete item(s) and cleanup scheduler resources           |
-| `startMutation`          | `(params) => () => void`                                             | Start mutation lock. See [Mutations](./mutations.md)     |
-| `performMutation`        | `(payload, options) => Promise<Result<T>>`                           | Full mutation lifecycle. See [Mutations](./mutations.md) |
-| `reset`                  | `() => void`                                                         | Reset store and all schedulers                           |
-| `dispose`                | `() => void`                                                         | Release listeners and store-manager registration         |
-| `onTransportReconnect`   | `() => void`                                                         | See [Real-Time Updates](./real-time-updates.md)          |
+| Method                    | Signature                                                            | Description                                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scheduleFetch`           | `(fetchType, payload(s), options?) => ScheduleFetchResults`          | Schedule fetch for one or more items                                                                                                            |
+| `awaitFetch`              | `(params, options?) => Promise<{ data, error }>`                     | Await fetch with optional `timeoutMs`                                                                                                           |
+| `getItemFromStateOrFetch` | `(params, options?) => Promise<Result<ItemState, StoreFetchError>>`  | Return loaded item data or fetch it if missing                                                                                                  |
+| `preloadItemFromStorage`  | `(params) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>` | Preload cached item payloads from async storage (OPFS)                                                                                          |
+| `getItemKey`              | `(params) => string`                                                 | Get the composite key for a payload                                                                                                             |
+| `getItemState`            | `(params) => CollectionItem`                                         | Get item state (single, array, or filter function)                                                                                              |
+| `invalidateItem`          | `(payload(s), priority?) => void`                                    | See [Invalidation](./invalidation.md)                                                                                                           |
+| `updateItemState`         | `(params, produceFn, options?) => boolean`                           | Immer-based state update                                                                                                                        |
+| `addItemToState`          | `(payload, data) => void`                                            | Add a new item to the store                                                                                                                     |
+| `deleteItemState`         | `(params) => void`                                                   | Delete item(s) and cleanup scheduler resources                                                                                                  |
+| `startMutation`           | `(params) => () => void`                                             | Start mutation lock. See [Mutations](./mutations.md)                                                                                            |
+| `performMutation`         | `(payload, options) => Promise<Result<T>>`                           | Full mutation lifecycle. See [Mutations](./mutations.md)                                                                                        |
+| `reset`                   | `() => void`                                                         | Reset store and all schedulers                                                                                                                  |
+| `dispose`                 | `() => void`                                                         | Release listeners and store-manager registration                                                                                                |
+| `onTransportReconnect`    | `() => void`                                                         | Store-level reconnect hook. Prefer `storeManager.onTransportReconnect()` for shared transports. See [Real-Time Updates](./real-time-updates.md) |
 
 ### Offline Methods
 

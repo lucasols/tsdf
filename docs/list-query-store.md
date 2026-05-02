@@ -211,26 +211,28 @@ Behavior:
 
 ### Query Methods
 
-| Method                    | Signature                                                               | Description                                                  |
-| ------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `scheduleListQueryFetch`  | `(fetchType, payload(s), size?, options?) => ScheduleFetchResults`      | Schedule a list fetch                                        |
-| `awaitListQueryFetch`     | `(params, options?) => Promise<{ items, error, hasMore }>`              | Await a list fetch                                           |
-| `preloadQueryFromStorage` | `(payloads) => Promise<PersistentStoragePreloadResult<QueryPayload>[]>` | Preload cached list query payloads from async storage (OPFS) |
-| `loadMore`                | `(params, size?, options?) => ScheduleFetchResults`                     | Load more items (pagination)                                 |
-| `getQueryState`           | `(params) => TSFDListQuery`                                             | Get query state                                              |
-| `getQueryKey`             | `(params) => string`                                                    | Get composite key for a query payload                        |
-| `getQueriesState`         | `(params) => { query, key }[]`                                          | Get multiple query states                                    |
-| `getQueriesRelatedToItem` | `(itemPayload) => TSFDListQuery[]`                                      | Find queries containing an item                              |
+| Method                     | Signature                                                                    | Description                                                  |
+| -------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `scheduleListQueryFetch`   | `(fetchType, payload(s), size?, options?) => ScheduleFetchResults`           | Schedule a list fetch                                        |
+| `awaitListQueryFetch`      | `(params, options?) => Promise<{ items, error, hasMore }>`                   | Await a list fetch                                           |
+| `getQueryFromStateOrFetch` | `(params, options?) => Promise<Result<{ items, hasMore }, StoreFetchError>>` | Return loaded query data or fetch it if missing              |
+| `preloadQueryFromStorage`  | `(payloads) => Promise<PersistentStoragePreloadResult<QueryPayload>[]>`      | Preload cached list query payloads from async storage (OPFS) |
+| `loadMore`                 | `(params, size?, options?) => ScheduleFetchResults`                          | Load more items (pagination)                                 |
+| `getQueryState`            | `(params) => TSFDListQuery`                                                  | Get query state                                              |
+| `getQueryKey`              | `(params) => string`                                                         | Get composite key for a query payload                        |
+| `getQueriesState`          | `(params) => { query, key }[]`                                               | Get multiple query states                                    |
+| `getQueriesRelatedToItem`  | `(itemPayload) => TSFDListQuery[]`                                           | Find queries containing an item                              |
 
 ### Item Methods
 
-| Method                   | Signature                                                            | Description                                         |
-| ------------------------ | -------------------------------------------------------------------- | --------------------------------------------------- |
-| `scheduleItemFetch`      | `(fetchType, payload(s), options?) => ScheduleFetchResults`          | Schedule an item fetch                              |
-| `awaitItemFetch`         | `(itemPayload, options?) => Promise<{ data, error }>`                | Await an item fetch                                 |
-| `preloadItemFromStorage` | `(params) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>` | Preload cached list items from async storage (OPFS) |
-| `getItemKey`             | `(params) => string`                                                 | Get composite key for an item payload               |
-| `getItemState`           | `(payload) => ItemState \| null`                                     | Get item data                                       |
+| Method                    | Signature                                                                | Description                                         |
+| ------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------- |
+| `scheduleItemFetch`       | `(fetchType, payload(s), options?) => ScheduleFetchResults`              | Schedule an item fetch                              |
+| `awaitItemFetch`          | `(itemPayload, options?) => Promise<{ data, error }>`                    | Await an item fetch                                 |
+| `getItemFromStateOrFetch` | `(itemPayload, options?) => Promise<Result<ItemState, StoreFetchError>>` | Return loaded item data or fetch it if missing      |
+| `preloadItemFromStorage`  | `(params) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>`     | Preload cached list items from async storage (OPFS) |
+| `getItemKey`              | `(params) => string`                                                     | Get composite key for an item payload               |
+| `getItemState`            | `(payload) => ItemState \| null`                                         | Get item data                                       |
 
 ### Offline Methods
 
@@ -271,10 +273,10 @@ kind so pending deletes do not need item hydration before they appear.
 
 ### Other
 
-| Method                   | Description                                     |
-| ------------------------ | ----------------------------------------------- |
-| `reset()`                | Full reset of all state and schedulers          |
-| `onTransportReconnect()` | See [Real-Time Updates](./real-time-updates.md) |
+| Method                   | Description                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reset()`                | Full reset of all state and schedulers                                                                                                          |
+| `onTransportReconnect()` | Store-level reconnect hook. Prefer `storeManager.onTransportReconnect()` for shared transports. See [Real-Time Updates](./real-time-updates.md) |
 
 ### Properties
 

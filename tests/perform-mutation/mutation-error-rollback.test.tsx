@@ -9,6 +9,7 @@ import {
   test,
   vi,
 } from 'vitest';
+import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -16,7 +17,7 @@ import {
   type ListQueryParams,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
 
 beforeAll(() => {
@@ -42,6 +43,85 @@ function byTypeFilter(
 }
 
 type DocumentValue = { hello: string };
+
+test('document mutation failures use the manager onMutationError fallback', async () => {
+  const onMutationError = vi.fn();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    onMutationError,
+  });
+  const env = createDocumentStoreTestEnv<DocumentValue>(
+    { hello: 'world' },
+    { testScenario: 'loaded', storeManager },
+  );
+
+  const resultPromise = env.performClientUpdateAction(
+    { hello: 'ignored' },
+    { error: 'boom' },
+  );
+
+  await flushAllTimers();
+  await resultPromise;
+
+  expect(onMutationError).toHaveBeenCalledTimes(1);
+  expect(onMutationError.mock.calls[0]?.[1]).toHaveProperty(
+    'dontShowToast',
+    undefined,
+  );
+});
+
+test('document mutation failures use store onMutationError before manager fallback', async () => {
+  const managerOnMutationError = vi.fn();
+  const storeOnMutationError = vi.fn();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    onMutationError: managerOnMutationError,
+  });
+  const env = createDocumentStoreTestEnv<DocumentValue>(
+    { hello: 'world' },
+    {
+      testScenario: 'loaded',
+      storeManager,
+      onMutationError: storeOnMutationError,
+    },
+  );
+
+  const resultPromise = env.performClientUpdateAction(
+    { hello: 'ignored' },
+    { error: 'boom' },
+  );
+
+  await flushAllTimers();
+  await resultPromise;
+
+  expect(storeOnMutationError).toHaveBeenCalledTimes(1);
+  expect(managerOnMutationError).not.toHaveBeenCalled();
+});
+
+test('document mutation failures skip manager onMutationError when store disables it', async () => {
+  const managerOnMutationError = vi.fn();
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    onMutationError: managerOnMutationError,
+  });
+  const env = createDocumentStoreTestEnv<DocumentValue>(
+    { hello: 'world' },
+    { testScenario: 'loaded', storeManager, onMutationError: null },
+  );
+
+  const resultPromise = env.performClientUpdateAction(
+    { hello: 'ignored' },
+    { error: 'boom' },
+  );
+
+  await flushAllTimers();
+  await resultPromise;
+
+  expect(managerOnMutationError).not.toHaveBeenCalled();
+});
 
 test('document optimistic mutation failures roll back without entering refetching', async () => {
   const env = createDocumentStoreTestEnv<DocumentValue>(

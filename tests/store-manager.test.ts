@@ -1,7 +1,8 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { rc_number, rc_object } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createStoreManager } from '../src/storeManager';
+import { createFocusChangeCoordinator } from './browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from './mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from './mocks/listQueryStoreTestEnv';
@@ -64,6 +65,7 @@ test('store defaults can be configured on the store manager', () => {
     lowPriorityThrottleMs: 25,
     baseCoalescingWindowMs: 50,
     blockWindowClose,
+    revalidateOnWindowFocus: true,
   });
 
   expect({
@@ -74,6 +76,7 @@ test('store defaults can be configured on the store manager', () => {
     baseCoalescingWindowMs: 50
     blockWindowClose: '✅'
     lowPriorityThrottleMs: 25
+    revalidateOnWindowFocus: '✅'
   `);
 });
 
@@ -180,6 +183,133 @@ test('resetAll resets every registered store except ignored ids', async () => {
 
     queries: {}
   `);
+});
+
+test('onTransportReconnect broadcasts reconnect revalidation to registered realtime stores', async () => {
+  const tabs = createFocusChangeCoordinator(['app'], 'app');
+  const bindFocusController = tabs.bind('app');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+  });
+
+  const documentEnv = createDocumentStoreTestEnv(1, {
+    id: 'realtime-doc-store',
+    storeManager,
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController,
+  });
+  const nonRealtimeDocumentEnv = createDocumentStoreTestEnv(2, {
+    id: 'non-realtime-doc-store',
+    storeManager,
+    testScenario: 'loaded',
+    bindFocusController,
+  });
+  const collectionEnv = createCollectionStoreTestEnv(
+    { '1': { title: 'Todo', completed: false } },
+    {
+      id: 'realtime-collection-store',
+      storeManager,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 300,
+      bindFocusController,
+    },
+  );
+  const listQueryEnv = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: 'realtime-list-store',
+      storeManager,
+      testScenario: { loaded: { tables: ['users'] } },
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 300,
+      bindFocusController,
+    },
+  );
+
+  renderHook(() => documentEnv.apiStore.useDocument().data?.value);
+  renderHook(() => nonRealtimeDocumentEnv.apiStore.useDocument().data?.value);
+  renderHook(() => collectionEnv.apiStore.useItem('1'));
+  renderHook(() => listQueryEnv.apiStore.useListQuery({ tableId: 'users' }));
+  renderHook(() => listQueryEnv.apiStore.useItem('users||1'));
+
+  await flushAllTimers();
+
+  const documentFetchesBeforeReconnect =
+    documentEnv.serverMock.numOfStartedFetches;
+  const nonRealtimeDocumentFetchesBeforeReconnect =
+    nonRealtimeDocumentEnv.serverMock.numOfStartedFetches;
+  collectionEnv.serverTable.fetchHistory.length = 0;
+  listQueryEnv.serverTable.fetchHistory.length = 0;
+
+  // A transport reconnect is an app-level event. The manager should fan it out
+  // to every attached realtime store while non-realtime stores stay untouched.
+  act(() => {
+    storeManager.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(documentEnv.serverMock.numOfStartedFetches).toBe(
+    documentFetchesBeforeReconnect + 1,
+  );
+  expect(nonRealtimeDocumentEnv.serverMock.numOfStartedFetches).toBe(
+    nonRealtimeDocumentFetchesBeforeReconnect,
+  );
+
+  expect(
+    collectionEnv.serverTable.getRequestHistory('item', { includeTime: false }),
+  ).toMatchInlineSnapshot(`
+    - _type: 'item'
+      payload: { itemId: '1' }
+  `);
+
+  expect(
+    listQueryEnv.serverTable.getRequestHistory('all', { includeTime: false }),
+  ).toMatchInlineSnapshot(`
+    - _type: 'list'
+      payload:
+        fields: '*'
+        pos: { limit: 50, offset: 0 }
+      returned_items: 1
+    - _type: 'item'
+      payload: { itemId: 'users||1' }
+  `);
+});
+
+test('onTransportReconnect does not notify disposed stores', async () => {
+  const tabs = createFocusChangeCoordinator(['app'], 'app');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+  });
+  const documentEnv = createDocumentStoreTestEnv(1, {
+    id: 'disposed-realtime-doc-store',
+    storeManager,
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('app'),
+  });
+
+  renderHook(() => documentEnv.apiStore.useDocument().data?.value);
+
+  await flushAllTimers();
+
+  const fetchesBeforeDispose = documentEnv.serverMock.numOfStartedFetches;
+
+  documentEnv.apiStore.dispose();
+
+  act(() => {
+    storeManager.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(documentEnv.serverMock.numOfStartedFetches).toBe(fetchesBeforeDispose);
 });
 
 test('store with persistentStorage.offline throws when storeManager has no offlineSession', () => {

@@ -34,7 +34,14 @@ export type StoreManagerStoreDefaults = {
   readonly baseCoalescingWindowMs: number;
   /** Shared window-close blocker used by mutations in attached stores. */
   readonly blockWindowClose: BlockWindowCloseHandler | null;
+  /** Default focus revalidation policy for attached stores. */
+  readonly revalidateOnWindowFocus: boolean | (() => boolean) | undefined;
 };
+
+export type StoreManagerMutationErrorHandler = (
+  error: unknown,
+  options: { dontShowToast?: boolean; silentErrors?: boolean },
+) => void;
 
 type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the shared offline config, when configured. */
@@ -92,15 +99,23 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   errorNormalizer: (exception: Error) => StoreError;
   /** Global fallback for persistent storage failures in attached stores. */
   onPersistentStorageError: PersistentStorageErrorHandler | undefined;
+  /** Global fallback for mutation failures in attached stores. */
+  onMutationError: StoreManagerMutationErrorHandler | undefined;
   /** Shared defaults used by attached stores unless a store-level override exists. */
   storeDefaults: StoreManagerStoreDefaults;
   /** Returns the unique ids of all currently registered store instances. */
   getAllStoreIds: () => string[];
   /** Resets all registered stores except the ignored logical ids. */
   resetAll: (ignoreStores: string[]) => void;
+  /** Signals a shared real-time transport reconnect to all registered stores. */
+  onTransportReconnect: () => void;
 } & StoreManagerOfflineApi<TUploadRef>;
 
-type RegisteredStore = { id: string; reset: () => void };
+type RegisteredStore = {
+  id: string;
+  reset: () => void;
+  onTransportReconnect: () => void;
+};
 
 type StoreManagerRegistry = {
   nextStoreRegistrationId: number;
@@ -206,6 +221,10 @@ export type CreateStoreManagerOptions<
   blockWindowClose?: BlockWindowCloseHandler | null;
   /** Global fallback for persistent storage failures when a store does not provide its own handler. */
   onPersistentStorageError?: PersistentStorageErrorHandler;
+  /** Global fallback for mutation failures when a store does not provide its own handler. */
+  onMutationError?: StoreManagerMutationErrorHandler;
+  /** Default focus revalidation policy for attached stores. Store-level values override it. */
+  revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Optional shared offline session config for every attached store. */
   offlineSession?: OfflineSessionConfig<TUploadRef>;
 };
@@ -283,12 +302,14 @@ export function createStoreManager<
     getSessionKey: options.getSessionKey,
     errorNormalizer: options.errorNormalizer,
     onPersistentStorageError: options.onPersistentStorageError,
+    onMutationError: options.onMutationError,
     storeDefaults: Object.freeze({
       lowPriorityThrottleMs:
         options.lowPriorityThrottleMs ?? DEFAULT_LOW_PRIORITY_THROTTLE_MS,
       baseCoalescingWindowMs:
         options.baseCoalescingWindowMs ?? DEFAULT_BASE_COALESCING_WINDOW_MS,
       blockWindowClose: options.blockWindowClose ?? null,
+      revalidateOnWindowFocus: options.revalidateOnWindowFocus,
     }),
     getAllStoreIds: () => Array.from(registry.stores.values(), ({ id }) => id),
     resetAll: (ignoreStores) => {
@@ -297,6 +318,11 @@ export function createStoreManager<
       for (const registeredStore of [...registry.stores.values()]) {
         if (ignoredStoreIds.has(registeredStore.id)) continue;
         registeredStore.reset();
+      }
+    },
+    onTransportReconnect: () => {
+      for (const registeredStore of [...registry.stores.values()]) {
+        registeredStore.onTransportReconnect();
       }
     },
     ...offlineApi,

@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { StoreFetchError } from '../../src/utils/storeShared';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -78,6 +79,103 @@ describe('test helpers', () => {
 });
 
 describe('fetch query', () => {
+  test('getQueryFromStateOrFetch returns loaded query state without fetching', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
+    });
+
+    const result =
+      await env.apiStore.getQueryFromStateOrFetch(usersQueryParams);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.value : null).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items:
+        - data: { id: 1, name: 'User 1' }
+          itemPayload: 'users||1'
+        - data: { id: 2, name: 'User 2' }
+          itemPayload: 'users||2'
+        - data: { id: 3, name: 'User 3' }
+          itemPayload: 'users||3'
+        - data: { id: 4, name: 'User 4' }
+          itemPayload: 'users||4'
+        - data: { id: 5, name: 'User 5' }
+          itemPayload: 'users||5'
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
+  test('getQueryFromStateOrFetch fetches when query state is missing', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+
+    const resultPromise =
+      env.apiStore.getQueryFromStateOrFetch(usersQueryParams);
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(
+      result.ok ? result.value.items.map((item) => item.itemPayload) : [],
+    ).toMatchInlineSnapshot(
+      `['users||1', 'users||2', 'users||3', 'users||4', 'users||5']`,
+    );
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('getQueryFromStateOrFetch can ignore stale query state', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
+      usesRealTimeUpdates: true,
+    });
+
+    env.apiStore.invalidateQueryAndItems({
+      queryPayload: usersQueryParams,
+      itemPayload: false,
+    });
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
+
+    const cachedResult =
+      await env.apiStore.getQueryFromStateOrFetch(usersQueryParams);
+    expect(
+      cachedResult.ok ? cachedResult.value.items[0]?.data.name : null,
+    ).toBe('User 1');
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+
+    const freshResultPromise = env.apiStore.getQueryFromStateOrFetch(
+      usersQueryParams,
+      { ignoreStaleState: true },
+    );
+
+    await flushAllTimers();
+
+    const freshResult = await freshResultPromise;
+
+    expect(freshResult.ok ? freshResult.value.items[0]?.data.name : null).toBe(
+      'Updated User 1',
+    );
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('getQueryFromStateOrFetch returns fetch errors as Error instances', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+
+    env.serverTable.setNextListFetchError('Network error');
+
+    const resultPromise =
+      env.apiStore.getQueryFromStateOrFetch(usersQueryParams);
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.error).toBeInstanceOf(Error);
+    expect(result.ok ? null : result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.ok ? null : result.error.message).toBe('Network error');
+  });
+
   test('fetch query', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 
@@ -695,6 +793,57 @@ test('await fetch', async () => {
 });
 
 describe('fetch item', () => {
+  test('getItemFromStateOrFetch returns loaded item state without fetching', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
+    });
+
+    const result = await env.apiStore.getItemFromStateOrFetch('users||1');
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? pick(result.value, ['id', 'name']) : null)
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'User 1'
+      `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
+  test('getItemFromStateOrFetch fetches when item state is missing', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+
+    const resultPromise = env.apiStore.getItemFromStateOrFetch('users||1');
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? pick(result.value, ['id', 'name']) : null)
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'User 1'
+      `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('getItemFromStateOrFetch returns fetch errors as Error instances', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+
+    env.serverTable.setNextFetchError('users||1', 'Network error');
+
+    const resultPromise = env.apiStore.getItemFromStateOrFetch('users||1');
+
+    await flushAllTimers();
+
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.error).toBeInstanceOf(Error);
+    expect(result.ok ? null : result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.ok ? null : result.error.message).toBe('Network error');
+  });
+
   test('fetch item', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 

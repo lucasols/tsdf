@@ -3,6 +3,7 @@ import { act } from 'react';
 import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
+  type DocumentStoreOptions,
 } from '../../src/documentStore';
 import type { AnyOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type {
@@ -89,6 +90,11 @@ type DocumentStoreTestEnvOptions<
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  onMutationError?: DocumentStoreOptions<
+    { value: D },
+    TOfflineOperations,
+    StorageState
+  >['onMutationError'];
   transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
@@ -122,6 +128,7 @@ export function createDocumentStoreTestEnv<
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    onMutationError,
     transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
@@ -238,6 +245,7 @@ export function createDocumentStoreTestEnv<
       usesRealTimeUpdates,
       dynamicRealtimeThrottleMs,
       revalidateOnWindowFocus,
+      onMutationError,
       transportReconnectCooldownMs,
       mediumPriorityDelayMs,
       persistentStorage: resolvedPersistentStorage,

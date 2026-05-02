@@ -92,6 +92,7 @@ import {
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
+  resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
   ValidPayload,
@@ -277,6 +278,34 @@ type ListQueryAwaitListQueryFetchApi<
     }
 >;
 
+type ListQueryGetQueryFromStateOrFetchOptions<
+  TPartialResources extends boolean,
+> = {
+  ignoreStaleState?: boolean;
+  size?: number;
+  timeoutMs?: number;
+} & ListQueryFetchFieldsOption<TPartialResources>;
+
+type ListQueryGetQueryFromStateOrFetchApi<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = (
+  params: QueryPayload,
+  ...args: ListQueryHasPartialResources<TPartialResources> extends true
+    ? [options: ListQueryGetQueryFromStateOrFetchOptions<TPartialResources>]
+    : [options?: ListQueryGetQueryFromStateOrFetchOptions<TPartialResources>]
+) => Promise<
+  ResultType<
+    {
+      items: { data: ItemState; itemPayload: ItemPayload }[];
+      hasMore: boolean;
+    },
+    StoreFetchError
+  >
+>;
+
 type ListQueryAwaitItemFetchOptions<TPartialResources extends boolean> = {
   timeoutMs?: number;
 } & ListQueryFetchFieldsOption<TPartialResources>;
@@ -293,6 +322,24 @@ type ListQueryAwaitItemFetchApi<
 ) => Promise<
   { data: null; error: StoreFetchError } | { data: ItemState; error: null }
 >;
+
+type ListQueryGetItemFromStateOrFetchOptions<
+  TPartialResources extends boolean,
+> = {
+  ignoreStaleState?: boolean;
+  timeoutMs?: number;
+} & ListQueryFetchFieldsOption<TPartialResources>;
+
+type ListQueryGetItemFromStateOrFetchApi<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends boolean,
+> = (
+  itemPayload: ItemPayload,
+  ...args: ListQueryHasPartialResources<TPartialResources> extends true
+    ? [options: ListQueryGetItemFromStateOrFetchOptions<TPartialResources>]
+    : [options?: ListQueryGetItemFromStateOrFetchOptions<TPartialResources>]
+) => Promise<ResultType<ItemState, StoreFetchError>>;
 
 type ListQueryUseMultipleListQueriesApi<
   ItemState extends ValidStoreState,
@@ -616,6 +663,12 @@ export type ListQueryStore<
     ItemPayload,
     TPartialResources
   >;
+  getQueryFromStateOrFetch: ListQueryGetQueryFromStateOrFetchApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  >;
   preloadQueryFromStorage: (
     params: QueryPayload | QueryPayload[],
   ) => Promise<PersistentStoragePreloadResult<QueryPayload>[]>;
@@ -659,6 +712,11 @@ export type ListQueryStore<
     TPartialResources
   >;
   awaitItemFetch: ListQueryAwaitItemFetchApi<
+    ItemState,
+    ItemPayload,
+    TPartialResources
+  >;
+  getItemFromStateOrFetch: ListQueryGetItemFromStateOrFetchApi<
     ItemState,
     ItemPayload,
     TPartialResources
@@ -895,10 +953,9 @@ type ListQueryStoreOptionsBase<
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
   ) => void;
-  onMutationError?: (
-    error: unknown,
-    options: { silentErrors?: boolean },
-  ) => void;
+  onMutationError?:
+    | ((error: unknown, options: { silentErrors?: boolean }) => void)
+    | null;
   /** Opt-in hook-level query derivation from locally materialized items. */
   derivedQueries?: DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
@@ -1020,6 +1077,13 @@ export function createListQueryStore<
     storeBaseCoalescingWindowMs ??
     storeManager.storeDefaults.baseCoalescingWindowMs;
   const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
+  const resolvedRevalidateOnWindowFocus =
+    revalidateOnWindowFocus ??
+    storeManager.storeDefaults.revalidateOnWindowFocus;
+  const resolvedOnMutationError = resolveManagerFallback(
+    onMutationError,
+    storeManager.onMutationError,
+  );
 
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
@@ -1121,9 +1185,10 @@ export function createListQueryStore<
         unknown
       >({
         ...persistentStorageConfig,
-        onPersistentStorageError:
-          persistentStorageConfig.onPersistentStorageError ??
+        onPersistentStorageError: resolveManagerFallback(
+          persistentStorageConfig.onPersistentStorageError,
           storeManager.onPersistentStorageError,
+        ),
         offline: persistentStorageConfig.offline
           ? {
               ...persistentStorageConfig.offline,
@@ -1143,6 +1208,9 @@ export function createListQueryStore<
         getQueryKey,
       })
     : null;
+  const persistentStorageErrorReporter = resolvedPersistentStorageConfig
+    ? resolvedPersistentStorageConfig.onPersistentStorageError
+    : storeManager.onPersistentStorageError;
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
   // WORKAROUND: Session-only offline config omits operations, so list-query stores normalize that case to an empty registry before passing it through the generic offline controller surface.
   const resolvedOfflineOperations = __LEGIT_CAST__<
@@ -1475,10 +1543,9 @@ export function createListQueryStore<
     const payloads = Array.isArray(payload) ? payload : [payload];
 
     if (!persistence) {
-      (
-        resolvedPersistentStorageConfig?.onPersistentStorageError ??
-        storeManager.onPersistentStorageError
-      )?.(new Error('Persistent storage preload is not available'));
+      persistentStorageErrorReporter?.(
+        new Error('Persistent storage preload is not available'),
+      );
       return payloads.map((queryPayload) => ({
         payload: queryPayload,
         preloaded: false,
@@ -1517,10 +1584,9 @@ export function createListQueryStore<
     const payloads = Array.isArray(payload) ? payload : [payload];
 
     if (!persistence) {
-      (
-        resolvedPersistentStorageConfig?.onPersistentStorageError ??
-        storeManager.onPersistentStorageError
-      )?.(new Error('Persistent storage preload is not available'));
+      persistentStorageErrorReporter?.(
+        new Error('Persistent storage preload is not available'),
+      );
       return payloads.map((itemPayload) => ({
         payload: itemPayload,
         preloaded: false,
@@ -1552,8 +1618,10 @@ export function createListQueryStore<
     scheduleListQueryFetch,
     loadMore,
     awaitListQueryFetch,
+    getQueryFromStateOrFetch,
     scheduleItemFetch,
     awaitItemFetch,
+    getItemFromStateOrFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
     syncRemoteFetchStart,
@@ -1714,7 +1782,7 @@ export function createListQueryStore<
     optimisticListUpdates,
     onInvalidateQuery,
     onInvalidateItem,
-    onMutationError,
+    onMutationError: resolvedOnMutationError,
     errorNormalizer,
     getItemKey,
     getQueriesKeyArray,
@@ -2621,7 +2689,7 @@ export function createListQueryStore<
   }
 
   const focusLifecycle = createStoreFocusLifecycle({
-    revalidateOnWindowFocus,
+    revalidateOnWindowFocus: resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
     getWindowIsFocused,
@@ -2904,6 +2972,16 @@ export function createListQueryStore<
     return awaitListQueryFetch(params, options);
   };
 
+  const getQueryFromStateOrFetchApi: ListQueryGetQueryFromStateOrFetchApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  > = (params, ...args) => {
+    const [options] = args;
+    return getQueryFromStateOrFetch(params, options);
+  };
+
   const awaitItemFetchApi: ListQueryAwaitItemFetchApi<
     ItemState,
     ItemPayload,
@@ -2911,6 +2989,15 @@ export function createListQueryStore<
   > = (itemPayload, ...args) => {
     const [options] = args;
     return awaitItemFetch(itemPayload, options);
+  };
+
+  const getItemFromStateOrFetchApi: ListQueryGetItemFromStateOrFetchApi<
+    ItemState,
+    ItemPayload,
+    TPartialResources
+  > = (itemPayload, ...args) => {
+    const [options] = args;
+    return getItemFromStateOrFetch(itemPayload, options);
   };
 
   function getRelatedQueryKeysForItemEntries(
@@ -2979,6 +3066,7 @@ export function createListQueryStore<
   const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
     id,
     reset,
+    onTransportReconnect,
   });
 
   return {
@@ -2999,6 +3087,7 @@ export function createListQueryStore<
     getQueriesState,
     getQueriesRelatedToItem,
     awaitListQueryFetch: awaitListQueryFetchApi,
+    getQueryFromStateOrFetch: getQueryFromStateOrFetchApi,
     preloadQueryFromStorage: preloadQueryFromPersistentStorage,
     loadMore: loadMoreApi,
     getItemKey,
@@ -3063,6 +3152,7 @@ export function createListQueryStore<
     preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,
+    getItemFromStateOrFetch: getItemFromStateOrFetchApi,
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,

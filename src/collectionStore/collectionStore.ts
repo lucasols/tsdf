@@ -101,6 +101,7 @@ import {
   DEFAULT_BATCH_KEY,
   fetchTypePriority,
   NotFoundStoreError,
+  resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
   TimeoutStoreError,
@@ -305,10 +306,9 @@ export type CollectionStoreOptions<
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
   ) => void;
-  onMutationError?: (
-    error: unknown,
-    options: { silentErrors?: boolean },
-  ) => void;
+  onMutationError?:
+    | ((error: unknown, options: { silentErrors?: boolean }) => void)
+    | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
@@ -498,6 +498,10 @@ export type CollectionStore<
   ) => Promise<
     { data: ItemState; error: null } | { data: null; error: StoreFetchError }
   >;
+  getItemFromStateOrFetch: (
+    params: ItemPayload,
+    options?: { ignoreStaleState?: boolean; timeoutMs?: number },
+  ) => Promise<ResultType<ItemState, StoreFetchError>>;
   useMultipleItems: <
     Selected = ItemState | null,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -658,6 +662,13 @@ export function createCollectionStore<
     storeBaseCoalescingWindowMs ??
     storeManager.storeDefaults.baseCoalescingWindowMs;
   const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
+  const resolvedRevalidateOnWindowFocus =
+    revalidateOnWindowFocus ??
+    storeManager.storeDefaults.revalidateOnWindowFocus;
+  const resolvedOnMutationError = resolveManagerFallback(
+    onMutationError,
+    storeManager.onMutationError,
+  );
 
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
@@ -742,9 +753,10 @@ export function createCollectionStore<
         unknown
       >({
         ...persistentStorageConfig,
-        onPersistentStorageError:
-          persistentStorageConfig.onPersistentStorageError ??
+        onPersistentStorageError: resolveManagerFallback(
+          persistentStorageConfig.onPersistentStorageError,
           storeManager.onPersistentStorageError,
+        ),
         offline: persistentStorageConfig.offline
           ? {
               ...persistentStorageConfig.offline,
@@ -780,6 +792,9 @@ export function createCollectionStore<
         getItemKey,
       })
     : null;
+  const persistentStorageErrorReporter = resolvedPersistentStorageConfig
+    ? resolvedPersistentStorageConfig.onPersistentStorageError
+    : storeManager.onPersistentStorageError;
 
   const store = new Store<CollectionState>({
     debugName,
@@ -1625,6 +1640,35 @@ export function createCollectionStore<
     return { data: item.data, error: null };
   }
 
+  async function getItemFromStateOrFetch(
+    params: ItemPayload,
+    {
+      ignoreStaleState,
+      timeoutMs,
+    }: { ignoreStaleState?: boolean; timeoutMs?: number } = {},
+  ): Promise<ResultType<ItemState, StoreFetchError>> {
+    const itemKey = getItemKey(params);
+    const item = getItemFromStateOrPersistence(itemKey, {
+      materializeSyncState: true,
+    });
+
+    if (
+      item?.data &&
+      (!ignoreStaleState ||
+        (item.status === 'success' && !item.error && !item.refetchOnMount))
+    ) {
+      return Result.ok(item.data);
+    }
+
+    const result = await awaitFetch(params, { timeoutMs });
+
+    if (result.error) {
+      return Result.err(result.error);
+    }
+
+    return Result.ok(result.data);
+  }
+
   function getItemFromStateOrPersistence(
     itemKey: string,
     options: { materializeSyncState?: boolean } = {},
@@ -1776,10 +1820,9 @@ export function createCollectionStore<
     const payloads = Array.isArray(params) ? params : [params];
 
     if (!persistence) {
-      (
-        resolvedPersistentStorageConfig?.onPersistentStorageError ??
-        storeManager.onPersistentStorageError
-      )?.(new Error('Persistent storage preload is not available'));
+      persistentStorageErrorReporter?.(
+        new Error('Persistent storage preload is not available'),
+      );
       return payloads.map((payload) => ({ payload, preloaded: false }));
     }
 
@@ -2175,8 +2218,8 @@ export function createCollectionStore<
           }
         }
 
-        if (!silentErrors && onMutationError) {
-          onMutationError(exception, { silentErrors });
+        if (!silentErrors && resolvedOnMutationError) {
+          resolvedOnMutationError(exception, { silentErrors });
         }
 
         return error;
@@ -2213,7 +2256,7 @@ export function createCollectionStore<
   }
 
   const focusLifecycle = createStoreFocusLifecycle({
-    revalidateOnWindowFocus,
+    revalidateOnWindowFocus: resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
     getWindowIsFocused,
@@ -2451,6 +2494,7 @@ export function createCollectionStore<
   const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
     id,
     reset,
+    onTransportReconnect,
   });
 
   return {
@@ -2462,6 +2506,7 @@ export function createCollectionStore<
     },
     scheduleFetch,
     awaitFetch,
+    getItemFromStateOrFetch,
     useMultipleItems,
     useItem,
     useListItemIsLoading,

@@ -42,12 +42,12 @@ Each store accepts `persistentStorage` in options:
 
 Common options (applies to all store configs):
 
-| Option                            | Required | Description                                                                                            |
-| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `schema`                          | Yes      | Schema used to validate restored data.                                                                 |
-| `adapter`                         | Yes      | `'local-sync'`, `opfsPersistentStorage`, `indexedDbPersistentStorage`, or a custom async adapter.      |
-| `version`                         | No       | Cache version; bump to invalidate old entries.                                                         |
-| `onPersistentStorageError(error)` | No       | Store-specific callback for write/read failures (quota, decode, etc.). Overrides the manager fallback. |
+| Option                            | Required | Description                                                                                                                      |
+| --------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                          | Yes      | Schema used to validate restored data.                                                                                           |
+| `adapter`                         | Yes      | `'local-sync'`, `opfsPersistentStorage`, `indexedDbPersistentStorage`, or a custom async adapter.                                |
+| `version`                         | No       | Cache version; bump to invalidate old entries.                                                                                   |
+| `onPersistentStorageError(error)` | No       | Store-specific callback for write/read failures (quota, decode, etc.). Overrides the manager fallback; use `null` to disable it. |
 
 Store-specific options:
 

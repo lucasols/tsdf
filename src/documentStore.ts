@@ -105,6 +105,7 @@ import {
   AbortedStoreError,
   fetchTypePriority,
   NotFoundStoreError,
+  resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
   TimeoutStoreError,
@@ -233,10 +234,9 @@ export type DocumentStoreOptions<
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
   ) => void;
-  onMutationError?: (
-    error: unknown,
-    options: { dontShowToast?: boolean },
-  ) => void;
+  onMutationError?:
+    | ((error: unknown, options: { dontShowToast?: boolean }) => void)
+    | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
@@ -348,6 +348,10 @@ export type DocumentStore<
   }) => Promise<
     { data: State; error: null } | { data: null; error: StoreFetchError }
   >;
+  getDataFromStateOrFetch: (options?: {
+    ignoreStaleState?: boolean;
+    timeoutMs?: number;
+  }) => Promise<ResultType<State, StoreFetchError>>;
   preloadPersistentStorage: () => Promise<void>;
   invalidateData: (priority?: FetchType) => void;
   updateState: DocumentUpdateState<State>;
@@ -443,6 +447,13 @@ export function createDocumentStore<
     storeBaseCoalescingWindowMs ??
     storeManager.storeDefaults.baseCoalescingWindowMs;
   const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
+  const resolvedRevalidateOnWindowFocus =
+    revalidateOnWindowFocus ??
+    storeManager.storeDefaults.revalidateOnWindowFocus;
+  const resolvedOnMutationError = resolveManagerFallback(
+    onMutationError,
+    storeManager.onMutationError,
+  );
 
   let invalidationWasTriggered = false;
   type ResolvedOfflineOperations = TOfflineOperations extends null
@@ -521,9 +532,10 @@ export function createDocumentStore<
         unknown
       >({
         ...persistentStorageConfig,
-        onPersistentStorageError:
-          persistentStorageConfig.onPersistentStorageError ??
+        onPersistentStorageError: resolveManagerFallback(
+          persistentStorageConfig.onPersistentStorageError,
           storeManager.onPersistentStorageError,
+        ),
         offline: persistentStorageConfig.offline
           ? {
               ...persistentStorageConfig.offline,
@@ -557,6 +569,9 @@ export function createDocumentStore<
   const persistence = resolvedPersistentStorageConfig
     ? setupDocumentPersistence(resolvedPersistentStorageConfig)
     : null;
+  const persistentStorageErrorReporter = resolvedPersistentStorageConfig
+    ? resolvedPersistentStorageConfig.onPersistentStorageError
+    : storeManager.onPersistentStorageError;
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
   // WORKAROUND: Session-only offline config omits operations, so document stores normalize that case to an empty registry before passing it through the generic offline controller surface.
   const resolvedOfflineOperations = __LEGIT_CAST__<
@@ -972,7 +987,7 @@ export function createDocumentStore<
   }
 
   const focusLifecycle = createStoreFocusLifecycle({
-    revalidateOnWindowFocus,
+    revalidateOnWindowFocus: resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
     getWindowIsFocused,
@@ -1029,12 +1044,36 @@ export function createDocumentStore<
     return { data: store.state.data, error: null };
   }
 
+  async function getDataFromStateOrFetch({
+    ignoreStaleState,
+    timeoutMs,
+  }: { ignoreStaleState?: boolean; timeoutMs?: number } = {}): Promise<
+    ResultType<State, StoreFetchError>
+  > {
+    const state = store.state;
+
+    if (
+      state.data !== null &&
+      (!ignoreStaleState ||
+        (state.status === 'success' && !state.error && !state.refetchOnMount))
+    ) {
+      return Result.ok(state.data);
+    }
+
+    const result = await awaitFetch({ timeoutMs });
+
+    if (result.error) {
+      return Result.err(result.error);
+    }
+
+    return Result.ok(result.data);
+  }
+
   async function preloadPersistentStorage(): Promise<void> {
     if (!persistence?.hasAsyncPreload) {
-      (
-        resolvedPersistentStorageConfig?.onPersistentStorageError ??
-        storeManager.onPersistentStorageError
-      )?.(new Error('Async preload is not available'));
+      persistentStorageErrorReporter?.(
+        new Error('Async preload is not available'),
+      );
       return;
     }
 
@@ -1244,8 +1283,10 @@ export function createDocumentStore<
           });
         }
 
-        if (onMutationError) {
-          onMutationError(exception, { dontShowToast: dontShowErrorToast });
+        if (resolvedOnMutationError) {
+          resolvedOnMutationError(exception, {
+            dontShowToast: dontShowErrorToast,
+          });
         }
 
         return toStoreMutationError(exception, errorNormalizer);
@@ -1558,6 +1599,7 @@ export function createDocumentStore<
   const unregisterStoreFromManager = registerStoreWithManager(storeManager, {
     id,
     reset,
+    onTransportReconnect,
   });
 
   return {
@@ -1569,6 +1611,7 @@ export function createDocumentStore<
     },
     scheduleFetch,
     awaitFetch,
+    getDataFromStateOrFetch,
     preloadPersistentStorage,
     invalidateData,
     updateState,
