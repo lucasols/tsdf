@@ -16,7 +16,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "docs"
   ],
   "sideEffects": false,
   "engines": {
