@@ -900,6 +900,7 @@ type ListQuerySnapshotItemEntry<
   loadedFields: string[];
 };
 
+/** @internal */
 export type ListQueryBrowserTabsMessage<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -974,6 +975,7 @@ type ListQueryStoreOptionsBase<
     cleanup: ListQueryStateCleanup<QueryPayload, ItemPayload>,
   ) => void;
   usesRealTimeUpdates?: boolean;
+  /** @internal */
   '~test'?: {
     initialData?: ListQueryStoreInitialData<
       ItemState,

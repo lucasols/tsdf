@@ -122,6 +122,7 @@ export type FetchListFnReturn<
   hasMore: boolean;
 };
 
+/** @internal */
 export type ListQueryStoreInitialData<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,

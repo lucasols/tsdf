@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  deps: { neverBundle: ['runcheck'] },
+  deps: { skipNodeModulesBundle: true },
   entry: {
     main: 'src/main.ts',
     'async-storage': 'src/async-storage.ts',

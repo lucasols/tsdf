@@ -410,9 +410,4 @@ export const localPersistentStorage: LocalPersistentStorage = {
   },
 };
 
-export {
-  createIndexedDbPersistentStorage,
-  indexedDbPersistentStorage,
-  opfsPersistentStorage,
-  type IndexedDbPersistentStorageOptions,
-} from './asyncStorageAdapters';
+export { opfsPersistentStorage } from './opfsPersistentStorage';

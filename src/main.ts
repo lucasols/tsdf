@@ -39,7 +39,6 @@ export type {
   FieldsInput,
   FieldsOption,
   DerivedQuerySource,
-  ListQueryStoreInitialData,
   ListQueryUseMultipleItemsQuery,
   ListQueryUseMultipleListQueriesQuery,
   OffsetPaginationConfig,

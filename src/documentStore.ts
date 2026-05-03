@@ -151,6 +151,7 @@ export type DocumentStoreStoreEvents = {
   mutationEnd: { mutationId: number; status: 'success' | 'error' | 'skipped' };
 };
 
+/** @internal */
 export type DocumentBrowserTabsMessage<State extends ValidStoreState> =
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
   | (BrowserTabsMessageMeta & {
@@ -471,26 +472,26 @@ export function createDocumentStore<
   State extends ValidStoreState,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
->({
-  id,
-  storeManager,
-  fetchFn,
-  lowPriorityThrottleMs: storeLowPriorityThrottleMs,
-  baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
-  dynamicRealtimeThrottleMs,
-  revalidateOnWindowFocus,
-  transportReconnectCooldownMs = 2_000,
-  mediumPriorityDelayMs,
-  onSchedulerEvent,
-  onMutationError,
-  usesRealTimeUpdates = false,
-  persistentStorage: persistentStorageConfig,
-  '~test': testOptions,
-}: DocumentStoreOptions<
-  State,
-  TOfflineOperations,
-  StorageState
->): DocumentStore<State, TOfflineOperations> {
+>(
+  storeOptions: DocumentStoreOptions<State, TOfflineOperations, StorageState>,
+): DocumentStore<State, TOfflineOperations> {
+  const {
+    id,
+    storeManager,
+    fetchFn,
+    lowPriorityThrottleMs: storeLowPriorityThrottleMs,
+    baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
+    dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    transportReconnectCooldownMs = 2_000,
+    mediumPriorityDelayMs,
+    onSchedulerEvent,
+    onMutationError,
+    usesRealTimeUpdates = false,
+    persistentStorage: persistentStorageConfig,
+    '~test': testOptions,
+  } = storeOptions;
+
   const lowPriorityThrottleMs =
     storeLowPriorityThrottleMs ??
     storeManager.storeDefaults.lowPriorityThrottleMs;

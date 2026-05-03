@@ -191,6 +191,7 @@ export type OnCollectionItemInvalidate<
   priority: FetchType;
 }) => void;
 
+/** @internal */
 export type CollectionInitialStateItem<
   ItemPayload extends ValidPayload,
   ItemState extends ValidStoreState,
@@ -215,6 +216,7 @@ export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
   payloads: ItemPayload[];
 };
 
+/** @internal */
 export type CollectionBrowserTabsMessage<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -673,34 +675,38 @@ export function createCollectionStore<
     ItemPayload
   > = null,
   StorageState = unknown,
->({
-  id,
-  storeManager,
-  fetchFn,
-  batchFetchFn,
-  getItemsBatchKey,
-  maxBatchSize,
-  maxItems = 5_000,
-  onStateCleanup,
-  lowPriorityThrottleMs: storeLowPriorityThrottleMs,
-  baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
-  mediumPriorityDelayMs,
-  dynamicRealtimeThrottleMs,
-  revalidateOnWindowFocus,
-  transportReconnectCooldownMs = 2_000,
-  getCollectionItemKey: filterCollectionItemObjKey,
-  onInvalidate,
-  onSchedulerEvent,
-  onMutationError,
-  usesRealTimeUpdates = false,
-  persistentStorage: persistentStorageConfig,
-  '~test': testOptions,
-}: CollectionStoreOptions<
-  ItemState,
-  ItemPayload,
-  TOfflineOperations,
-  StorageState
->): CollectionStore<ItemState, ItemPayload, TOfflineOperations> {
+>(
+  storeOptions: CollectionStoreOptions<
+    ItemState,
+    ItemPayload,
+    TOfflineOperations,
+    StorageState
+  >,
+): CollectionStore<ItemState, ItemPayload, TOfflineOperations> {
+  const {
+    id,
+    storeManager,
+    fetchFn,
+    batchFetchFn,
+    getItemsBatchKey,
+    maxBatchSize,
+    maxItems = 5_000,
+    onStateCleanup,
+    lowPriorityThrottleMs: storeLowPriorityThrottleMs,
+    baseCoalescingWindowMs: storeBaseCoalescingWindowMs,
+    mediumPriorityDelayMs,
+    dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    transportReconnectCooldownMs = 2_000,
+    getCollectionItemKey: filterCollectionItemObjKey,
+    onInvalidate,
+    onSchedulerEvent,
+    onMutationError,
+    usesRealTimeUpdates = false,
+    persistentStorage: persistentStorageConfig,
+    '~test': testOptions,
+  } = storeOptions;
+
   const lowPriorityThrottleMs =
     storeLowPriorityThrottleMs ??
     storeManager.storeDefaults.lowPriorityThrottleMs;
