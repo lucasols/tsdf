@@ -11,6 +11,7 @@ export type ApiFetchCall = {
 };
 
 const subscribers = new Set<() => void>();
+const MAX_API_FETCH_CALLS = 80;
 
 let apiFetchCalls: ApiFetchCall[] = [];
 
@@ -30,7 +31,10 @@ function getSnapshot(): ApiFetchCall[] {
 }
 
 export function startApiFetchCall(call: Omit<ApiFetchCall, 'status'>): void {
-  apiFetchCalls = [{ ...call, status: 'pending' }, ...apiFetchCalls];
+  apiFetchCalls = [
+    { ...call, status: 'pending' as const },
+    ...apiFetchCalls,
+  ].slice(0, MAX_API_FETCH_CALLS);
   emit();
 }
 

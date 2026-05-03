@@ -266,6 +266,16 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(body) as unknown;
 }
 
+function readJsonParam(url: URL, name: string): unknown {
+  const rawValue = url.searchParams.get(name);
+
+  if (rawValue === null) {
+    return undefined;
+  }
+
+  return JSON.parse(rawValue) as unknown;
+}
+
 function broadcast(event: PlaygroundRealtimeEvent): void {
   const data = realtimeEventSchema.parse(event);
   const frame = `data: ${JSON.stringify(data)}\n\n`;
@@ -387,8 +397,8 @@ async function handleRoute(
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/projects/item') {
-    const payload = projectPayloadSchema.parse(await readJson(request));
+  if (request.method === 'GET' && url.pathname === '/api/projects/item') {
+    const payload = projectPayloadSchema.parse(readJsonParam(url, 'payload'));
     sendJson(
       response,
       200,
@@ -399,10 +409,13 @@ async function handleRoute(
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/projects/batch') {
+  if (request.method === 'GET' && url.pathname === '/api/projects/batch') {
     const { payloads } = z
       .object({ payloads: z.array(projectPayloadSchema), batchKey: z.string() })
-      .parse(await readJson(request));
+      .parse({
+        payloads: readJsonParam(url, 'payloads'),
+        batchKey: readJsonParam(url, 'batchKey'),
+      });
     const result = await delayed(delayMs.collection, () =>
       payloads.map((payload) => {
         try {
@@ -471,7 +484,7 @@ async function handleRoute(
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/contacts/list') {
+  if (request.method === 'GET' && url.pathname === '/api/contacts/list') {
     const { filter, offset, limit, fields } = z
       .object({
         filter: contactFilterSchema,
@@ -479,7 +492,12 @@ async function handleRoute(
         limit: z.number(),
         fields: z.array(z.string()).optional(),
       })
-      .parse(await readJson(request));
+      .parse({
+        filter: readJsonParam(url, 'filter'),
+        offset: readJsonParam(url, 'offset'),
+        limit: readJsonParam(url, 'limit'),
+        fields: readJsonParam(url, 'fields'),
+      });
     const result = await delayed(delayMs.list, () => {
       const rows = sortedContacts(database, filter);
       const page = rows.slice(offset, offset + limit);
@@ -497,10 +515,13 @@ async function handleRoute(
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/contacts/item') {
+  if (request.method === 'GET' && url.pathname === '/api/contacts/item') {
     const { id, fields } = z
       .object({ id: z.string(), fields: z.array(z.string()).optional() })
-      .parse(await readJson(request));
+      .parse({
+        id: readJsonParam(url, 'id'),
+        fields: readJsonParam(url, 'fields'),
+      });
     sendJson(
       response,
       200,
@@ -511,7 +532,7 @@ async function handleRoute(
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/contacts/batch') {
+  if (request.method === 'GET' && url.pathname === '/api/contacts/batch') {
     const { requests } = z
       .object({
         requests: z.array(
@@ -522,7 +543,10 @@ async function handleRoute(
         ),
         batchKey: z.string(),
       })
-      .parse(await readJson(request));
+      .parse({
+        requests: readJsonParam(url, 'requests'),
+        batchKey: readJsonParam(url, 'batchKey'),
+      });
     const result = await delayed(delayMs.list, () =>
       requests.map((itemRequest) => {
         try {

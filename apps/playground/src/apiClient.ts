@@ -34,7 +34,7 @@ const playgroundApiLogger: TypedFetchLogger = (
   startApiFetchCall({
     id: logId,
     method,
-    path: `${url.pathname}${url.search}`,
+    path: url.pathname,
     startedAt: startTimestamp,
   });
 
@@ -123,8 +123,8 @@ export const apiClient = {
 
   fetchProject(payload: ProjectPayload, signal: AbortSignal): Promise<Project> {
     return apiRequest<Project>('api/projects/item', {
-      method: 'POST',
-      payload,
+      method: 'GET',
+      jsonPathParams: { payload },
       signal,
       responseSchema: projectSchema,
     });
@@ -138,8 +138,8 @@ export const apiClient = {
     const response = await apiRequest<ProjectBatchResponse>(
       'api/projects/batch',
       {
-        method: 'POST',
-        payload: { payloads, batchKey },
+        method: 'GET',
+        jsonPathParams: { payloads, batchKey },
         signal,
         responseSchema: projectBatchResponseSchema,
       },
@@ -170,8 +170,8 @@ export const apiClient = {
     options: { signal: AbortSignal; fields?: string[] },
   ): Promise<ContactListResponse> {
     return apiRequest<ContactListResponse>('api/contacts/list', {
-      method: 'POST',
-      payload: {
+      method: 'GET',
+      jsonPathParams: {
         filter,
         offset: pagination.offset,
         limit: pagination.limit,
@@ -187,8 +187,8 @@ export const apiClient = {
     options: { signal: AbortSignal; fields?: string[] },
   ): Promise<Contact> {
     return apiRequest<Contact>('api/contacts/item', {
-      method: 'POST',
-      payload: { id, fields: options.fields },
+      method: 'GET',
+      jsonPathParams: { id, fields: options.fields },
       signal: options.signal,
       responseSchema: contactSchema,
     });
@@ -201,8 +201,8 @@ export const apiClient = {
     const response = await apiRequest<ContactBatchResponse>(
       'api/contacts/batch',
       {
-        method: 'POST',
-        payload: { requests, batchKey: options.batchKey },
+        method: 'GET',
+        jsonPathParams: { requests, batchKey: options.batchKey },
         signal: options.signal,
         responseSchema: contactBatchResponseSchema,
       },

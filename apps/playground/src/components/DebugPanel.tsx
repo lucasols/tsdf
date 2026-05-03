@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useApiFetchCalls } from '../apiFetchCounter';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ATLAS_PROJECT_PAYLOAD,
   getProjectLabel,
   PROJECT_PAYLOADS,
+  type Contact,
   type ContactFilter,
 } from '../apiTypes';
 import {
@@ -35,6 +35,7 @@ import {
   type LogFn,
 } from '../utils/activityLog';
 import { ActionLog } from './ActionLog';
+import { ApiCallsPanel } from './ApiCallsPanel';
 import { Metric } from './common';
 
 const CONTACT_ROW_FIELDS = ['id', 'name', 'team', 'status'];
@@ -51,8 +52,31 @@ export function DebugPanel({
   onClose: () => void;
 }) {
   const [selectedContactId, setSelectedContactId] = useState('ada');
-  const apiFetchCalls = useApiFetchCalls();
   const offlineStatus = storeManager.useOfflineStatus();
+  const queryItemSelector = useCallback(
+    (item: Contact) => item.name ?? item.id,
+    [],
+  );
+  const multipleItemSelector = useCallback(
+    (item: Contact | null) => item?.name ?? 'Loading',
+    [],
+  );
+  const pendingOfflineItemSelector = useCallback(
+    (item: Contact) => item.name ?? item.id,
+    [],
+  );
+  const multipleQueriesOptions = useMemo(
+    () => ({ itemSelector: queryItemSelector }),
+    [queryItemSelector],
+  );
+  const multipleItemsOptions = useMemo(
+    () => ({ selector: multipleItemSelector, showPartialAsRefetching: true }),
+    [multipleItemSelector],
+  );
+  const pendingOfflineItemsOptions = useMemo(
+    () => ({ selector: pendingOfflineItemSelector }),
+    [pendingOfflineItemSelector],
+  );
   const overviewQueries = useMemo(
     () => [
       {
@@ -85,15 +109,15 @@ export function DebugPanel({
   );
   const multipleQueries = contactListStore.useMultipleListQueries(
     overviewQueries,
-    { itemSelector: (item) => item.name ?? item.id },
+    multipleQueriesOptions,
   );
-  const multipleItems = contactListStore.useMultipleItems(pinnedItems, {
-    selector: (item) => item?.name ?? 'Loading',
-    showPartialAsRefetching: true,
-  });
-  const pendingOfflineItems = contactListStore.usePendingOfflineItems({
-    selector: (item) => item.name ?? item.id,
-  });
+  const multipleItems = contactListStore.useMultipleItems(
+    pinnedItems,
+    multipleItemsOptions,
+  );
+  const pendingOfflineItems = contactListStore.usePendingOfflineItems(
+    pendingOfflineItemsOptions,
+  );
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -178,40 +202,7 @@ export function DebugPanel({
             </div>
           </section>
 
-          <section className="api-calls-section">
-            <div className="activity-header">
-              <h3>API calls</h3>
-              <Metric
-                label="Total"
-                value={apiFetchCalls.length}
-              />
-            </div>
-            <ol className="api-call-list">
-              {apiFetchCalls.length === 0 ? (
-                <li>
-                  <span>No API calls yet</span>
-                </li>
-              ) : (
-                apiFetchCalls.map((call) => (
-                  <li key={call.id}>
-                    <span>
-                      <strong>{call.method}</strong> {call.path}
-                    </span>
-                    <em className={`api-call-status api-call-${call.status}`}>
-                      {call.status}
-                      {call.errorStatus ? ` ${call.errorStatus}` : ''}
-                    </em>
-                    <time>
-                      {new Date(call.startedAt).toLocaleTimeString()}
-                      {call.durationMs === undefined
-                        ? ''
-                        : ` · ${call.durationMs}ms`}
-                    </time>
-                  </li>
-                ))
-              )}
-            </ol>
-          </section>
+          <ApiCallsPanel />
 
           <section>
             <h3>Document store</h3>
