@@ -665,13 +665,17 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   };
 
   #databasePromise: Promise<IDBDatabase> | null = null;
+  readonly #instrumentation: IndexedDbDriverInstrumentation | undefined;
+
+  readonly databaseName: string;
 
   constructor(
-    readonly databaseName: string = DEFAULT_INDEXED_DB_NAME,
-    private readonly instrumentation:
-      | IndexedDbDriverInstrumentation
-      | undefined = undefined,
-  ) {}
+    databaseName: string = DEFAULT_INDEXED_DB_NAME,
+    instrumentation: IndexedDbDriverInstrumentation | undefined = undefined,
+  ) {
+    this.databaseName = databaseName;
+    this.#instrumentation = instrumentation;
+  }
 
   async get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown> {
     const parsedKey = parseAsyncStorageRecordKey(key);
@@ -797,8 +801,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     }
 
     await transactionDone(transaction);
-    this.instrumentation?.onRemoveMany?.(scope, keys);
-    this.instrumentation?.record({
+    this.#instrumentation?.onRemoveMany?.(scope, keys);
+    this.#instrumentation?.record({
       keys: [...keys].sort((left, right) => left.localeCompare(right)),
       scope,
       time: Date.now(),
@@ -874,7 +878,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       getNamespaceId(left.scope).localeCompare(getNamespaceId(right.scope)),
     );
 
-    this.instrumentation?.record({
+    this.#instrumentation?.record({
       scopeIds: discoveredScopes.map(({ scope }) => getNamespaceId(scope)),
       ...(sessionKey !== undefined ? { sessionKey } : {}),
       time: Date.now(),
@@ -928,7 +932,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     await transactionDone(transaction);
 
-    this.instrumentation?.record({
+    this.#instrumentation?.record({
       keys: uniqueKeys,
       resultKeys: [...result.entries()]
         .flatMap(([key, value]) => (value === null ? [] : [key]))
@@ -1019,7 +1023,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       );
     }
 
-    this.instrumentation?.record({
+    this.#instrumentation?.record({
       order,
       resultKeys: filteredEntries.map((entry) => entry.key),
       scope,
@@ -1057,8 +1061,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     policyStore.delete(createScopePolicyKey(scope));
     await transactionDone(transaction);
 
-    this.instrumentation?.onClearManagedNamespace?.(scope);
-    this.instrumentation?.record({
+    this.#instrumentation?.onClearManagedNamespace?.(scope);
+    this.#instrumentation?.record({
       scope,
       time: Date.now(),
       type: 'clearManagedNamespace',
@@ -1212,8 +1216,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
     await transactionDone(transaction);
 
-    this.instrumentation?.onApplyManagedCommit?.(scope, args);
-    this.instrumentation?.record({
+    this.#instrumentation?.onApplyManagedCommit?.(scope, args);
+    this.#instrumentation?.record({
       removes,
       scope,
       staticPolicyChanged: 'staticPolicy' in args,
@@ -1276,7 +1280,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         staticPolicy: null,
         valid: false,
       };
-      this.instrumentation?.record({
+      this.#instrumentation?.record({
         exists: result.exists,
         keyCount: entries.size,
         scope,
@@ -1294,7 +1298,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         staticPolicy: null,
         valid: false,
       };
-      this.instrumentation?.record({
+      this.#instrumentation?.record({
         exists: result.exists,
         keyCount: entries.size,
         scope,
@@ -1316,7 +1320,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         staticPolicy: null,
         valid: false,
       };
-      this.instrumentation?.record({
+      this.#instrumentation?.record({
         exists: result.exists,
         keyCount: entries.size,
         scope,
@@ -1337,7 +1341,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       ),
       valid: true,
     };
-    this.instrumentation?.record({
+    this.#instrumentation?.record({
       exists: result.exists,
       keyCount: result.entries.size,
       scope,
@@ -1427,8 +1431,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     }
 
     await transactionDone(writeTransaction);
-    this.instrumentation?.onPersistNamespaceIndexState?.(scope, state);
-    this.instrumentation?.record({
+    this.#instrumentation?.onPersistNamespaceIndexState?.(scope, state);
+    this.#instrumentation?.record({
       keyCount: state.entries.size,
       scope,
       staticPolicy: state.staticPolicy,
@@ -1469,7 +1473,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     });
     await transactionDone(transaction);
 
-    this.instrumentation?.record({
+    this.#instrumentation?.record({
       sessionKey,
       time: Date.now(),
       type: 'readProtectedStorageKeys',
@@ -1523,7 +1527,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     await transactionDone(transaction);
 
-    this.instrumentation?.record({
+    this.#instrumentation?.record({
       sessionKey,
       time: Date.now(),
       type: 'syncSessionProtectedKeys',
@@ -1552,7 +1556,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       this.#databasePromise = null;
     }
     await deleteDatabase(this.databaseName);
-    this.instrumentation?.reset();
+    this.#instrumentation?.reset();
   }
 
   async __inspectStructureForTests(): Promise<IndexedDbStructureInspection> {
