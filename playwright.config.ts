@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/playwright',
   timeout: 30_000,
+  fullyParallel: true,
   use: { baseURL: 'http://127.0.0.1:42173', trace: 'on-first-retry' },
   webServer: {
     command:
