@@ -6,6 +6,11 @@ import {
   unknownToError,
 } from 't-result';
 import {
+  resolveTSDFDebugLogger,
+  type TSDFDebugLogger,
+  type TSDFDebugOptions,
+} from './debug';
+import {
   createDefaultStatus,
   createOfflineSession,
 } from './persistentStorage/offline/sessionCoordinator';
@@ -99,6 +104,8 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
 export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active shared session / tenant key. */
   getSessionKey: () => string | false;
+  /** Shared debug logger for browser-tab sync and persistent storage internals. */
+  debugLogger: TSDFDebugLogger | undefined;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
   /** Global fallback for persistent storage failures in attached stores. */
@@ -229,6 +236,11 @@ export type CreateStoreManagerOptions<
   onMutationError?: StoreManagerMutationErrorHandler;
   /** Default focus revalidation policy for attached stores. Store-level values override it. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  /**
+   * Enables debug logs for browser-tab sync and persistent storage operations.
+   * Pass `true` to use console logging, a logger function, or `{ logger }`.
+   */
+  debug?: TSDFDebugOptions;
   /** Optional shared offline session config for every attached store. */
   offlineSession?: OfflineSessionConfig<TUploadRef>;
 };
@@ -236,10 +248,12 @@ export type CreateStoreManagerOptions<
 export function createStoreManager<
   TUploadRef extends ValidPayload = ValidPayload,
 >(options: CreateStoreManagerOptions<TUploadRef>): StoreManager<TUploadRef> {
+  const debugLogger = resolveTSDFDebugLogger(options.debug);
   const resolvedOfflineSession = options.offlineSession
     ? createOfflineSession<TUploadRef>({
         config: options.offlineSession,
         getSessionKey: options.getSessionKey,
+        debugLogger,
       })
     : undefined;
   const offlineApi: StoreManagerOfflineApi<TUploadRef> = resolvedOfflineSession
@@ -304,6 +318,7 @@ export function createStoreManager<
 
   const storeManager: StoreManager<TUploadRef> = {
     getSessionKey: options.getSessionKey,
+    debugLogger,
     errorNormalizer: options.errorNormalizer,
     onPersistentStorageError: options.onPersistentStorageError,
     onMutationError: options.onMutationError,

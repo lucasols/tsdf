@@ -436,9 +436,14 @@ type CollectionOfflineMutationArgs<
     ItemPayload
   >,
 > = CollectionMutationArgsBase<T, ItemPayload> & {
+  /**
+   * Queues this mutation through the store's registered offline operation when
+   * the session is offline or the direct request fails with an offline outage.
+   */
   offline: TOfflineOperations extends null
     ? never
     : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  /** Files to attach if this mutation is queued for offline replay. */
   upload?: OfflineMutationUploadsInput;
 };
 
@@ -450,10 +455,23 @@ type CollectionPerformMutation<
     ItemPayload
   >,
 > = {
+  /**
+   * Runs a collection mutation for one or more existing item payloads.
+   *
+   * Returns the direct server result when offline replay is not configured for
+   * this call.
+   */
   <T>(
     payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOnlineMutationArgs<T, ItemPayload>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  /**
+   * Runs a collection mutation for one or more existing item payloads, with
+   * durable offline queueing as a fallback.
+   *
+   * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
+   * the server payload.
+   */
   <T>(
     payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOfflineMutationArgs<
@@ -465,6 +483,12 @@ type CollectionPerformMutation<
   ): Promise<
     ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
   >;
+  /**
+   * Runs a collection mutation with no current item target.
+   *
+   * Use this for create mutations that do not have a pre-generated item payload
+   * yet. Optimistic updates are not available without a target payload.
+   */
   <T>(
     payload: null,
     args: Omit<
@@ -472,6 +496,12 @@ type CollectionPerformMutation<
       'optimisticUpdate'
     >,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  /**
+   * Runs an offline-capable collection mutation with no current item target.
+   *
+   * Use this for create mutations that do not have a pre-generated item payload
+   * yet. When the mutation is queued, the result is `{ kind: 'queued' }`.
+   */
   <T>(
     payload: null,
     args: Omit<
@@ -659,6 +689,10 @@ export type CollectionStore<
       | ItemPayload[]
       | CollectionFilterItemsFn<ItemState, ItemPayload>,
   ) => void;
+  /**
+   * Runs the full mutation lifecycle: optional optimistic update, async
+   * mutation, rollback/error handling, revalidation, and offline queue fallback.
+   */
   performMutation: CollectionPerformMutation<
     ItemState,
     ItemPayload,
@@ -815,6 +849,7 @@ export function createCollectionStore<
               session: resolvedOfflineSessionForPersistentStorage,
             }
           : undefined,
+        debugLogger: storeManager.debugLogger,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })
@@ -939,6 +974,7 @@ export function createCollectionStore<
           getSessionKey: getSessionKeyForRuntime,
           onPersistentStorageError:
             resolvedPersistentStorageConfig.onPersistentStorageError,
+          debugLogger: storeManager.debugLogger,
           adapter: resolvedPersistentStorageConfig.adapter,
           offlineSession: resolvedOfflineConfig.session,
           // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
@@ -1509,6 +1545,7 @@ export function createCollectionStore<
         clearOfflineOverlays();
       },
       transportFactory: testOptions?.browserTabsTransportFactory,
+      debugLogger: storeManager.debugLogger,
       getWindowIsFocused,
       onWindowFocusChange: testOptions?.onWindowFocusChange,
       priorityTimings:

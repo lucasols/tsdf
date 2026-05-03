@@ -488,19 +488,41 @@ type ListQueryMutationArgsBase<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > = {
+  /**
+   * Applies optimistic updates for the affected item payloads before the
+   * mutation runs. Return `false` to cancel the mutation before the async
+   * mutation function is called.
+   */
   optimisticUpdate?: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
   ) => void | boolean;
+  /** Performs the server mutation for the affected item payloads. */
   mutation: (
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
   ) => Promise<T>;
+  /**
+   * Controls query and item invalidation after a successful online mutation.
+   *
+   * Use `true` to invalidate affected items and all queries, `'queries'` to
+   * invalidate only queries, a query filter to invalidate affected items and
+   * matching queries, or `{ queries, items }` to choose both explicitly.
+   */
   revalidateOnSuccess?: ListQueryRevalidateOnSuccessOption<QueryPayload>;
+  /** Called after a successful online mutation. */
   onSuccess?: (
     response: Awaited<T>,
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
   ) => void;
+  /** Called after a failed or skipped mutation. */
   onError?: (error: StoreMutationError | MutationSkipped) => void;
+  /**
+   * Passes `{ silentErrors: true }` to `onMutationError`.
+   *
+   * The handler is still called so centralized logging and recovery can run,
+   * but UI handlers can suppress user-facing notifications.
+   */
   silentErrors?: boolean;
+  /** Debounces mutations with the same context and payload. Superseded calls are skipped. */
   debounce?: { context: string; payload: unknown; ms: number };
 };
 
@@ -525,9 +547,14 @@ type ListQueryOfflineMutationArgs<
     ItemPayload
   >,
 > = ListQueryMutationArgsBase<T, ItemState, QueryPayload, ItemPayload> & {
+  /**
+   * Queues this mutation through the store's registered offline operation when
+   * the session is offline or the direct request fails with an offline outage.
+   */
   offline: TOfflineOperations extends null
     ? never
     : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  /** Files to attach if this mutation is queued for offline replay. */
   upload?: OfflineMutationUploadsInput;
 };
 
@@ -541,10 +568,23 @@ type ListQueryPerformMutationApi<
     ItemPayload
   >,
 > = {
+  /**
+   * Runs a list-query mutation for existing item payloads or an item filter.
+   *
+   * Returns the direct server result when offline replay is not configured for
+   * this call.
+   */
   <T>(
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  /**
+   * Runs a list-query mutation for existing item payloads or an item filter,
+   * with durable offline queueing as a fallback.
+   *
+   * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
+   * the server payload.
+   */
   <T>(
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOfflineMutationArgs<
@@ -557,6 +597,12 @@ type ListQueryPerformMutationApi<
   ): Promise<
     ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
   >;
+  /**
+   * Runs a list-query mutation with no current item target.
+   *
+   * Use this for create mutations that do not have a pre-generated item payload
+   * yet. Optimistic updates are not available without a target payload.
+   */
   <T>(
     payload: null,
     args: Omit<
@@ -564,6 +610,12 @@ type ListQueryPerformMutationApi<
       'optimisticUpdate'
     >,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  /**
+   * Runs an offline-capable list-query mutation with no current item target.
+   *
+   * Use this for create mutations that do not have a pre-generated item payload
+   * yet. When the mutation is queued, the result is `{ kind: 'queued' }`.
+   */
   <T>(
     payload: null,
     args: Omit<
@@ -820,6 +872,10 @@ export type ListQueryStore<
     ItemPayload
   >;
   deleteItemState: ListQueryDeleteItemStateApi<ItemState, ItemPayload>;
+  /**
+   * Runs the full mutation lifecycle: optional optimistic update, async
+   * mutation, rollback/error handling, revalidation, and offline queue fallback.
+   */
   performMutation: ListQueryPerformMutationApi<
     ItemState,
     QueryPayload,
@@ -1272,6 +1328,7 @@ export function createListQueryStore<
               session: resolvedOfflineSessionForPersistentStorage,
             }
           : undefined,
+        debugLogger: storeManager.debugLogger,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })
@@ -1893,6 +1950,7 @@ export function createListQueryStore<
         getSessionKey: getSessionKeyForRuntime,
         onPersistentStorageError:
           resolvedPersistentStorageConfig.onPersistentStorageError,
+        debugLogger: storeManager.debugLogger,
         adapter: resolvedPersistentStorageConfig.adapter,
         offlineSession: resolvedOfflineConfig.session,
         // WORKAROUND: The list-query persistent config keeps operations behind a
@@ -2485,6 +2543,7 @@ export function createListQueryStore<
         clearOfflineOverlays();
       },
       transportFactory: testOptions?.browserTabsTransportFactory,
+      debugLogger: storeManager.debugLogger,
       getWindowIsFocused,
       onWindowFocusChange: testOptions?.onWindowFocusChange,
       priorityTimings:

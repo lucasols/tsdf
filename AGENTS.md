@@ -137,6 +137,7 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 - Prefer simple, direct solutions — don't over-engineer or add unnecessary layers of abstraction
 - Only introduce abstractions when they make the code simpler, more maintainable, or more readable — duplicating a few lines is preferable to a forced abstraction
 - Avoid unnecessary boilerplate
+- Internal-only functions (not part of the public API) should use positional arguments instead of object parameters to allow better minification. Reserve object parameters for the public API surface where named arguments improve call-site readability for library consumers.
 
 ## Alpha-stage API policy
 

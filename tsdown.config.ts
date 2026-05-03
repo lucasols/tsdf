@@ -10,7 +10,7 @@ export default defineConfig({
   },
   clean: true,
   env: { TEST: false },
-  minify: true,
+  minify: 'dce-only',
   dts: true,
   fixedExtension: false,
   format: 'esm',

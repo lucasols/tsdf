@@ -17,6 +17,13 @@ export {
   type CreateStoreManagerOptions,
   type StoreManager,
 } from './storeManager';
+export type {
+  TSDFDebugLogArea,
+  TSDFDebugLogger,
+  TSDFDebugLogEntry,
+  TSDFDebugLogLevel,
+  TSDFDebugOptions,
+} from './debug';
 
 // Document Store types
 export * from './documentStore';

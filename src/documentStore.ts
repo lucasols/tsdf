@@ -327,9 +327,14 @@ type DocumentOfflineMutationArgs<
   T,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
 > = DocumentMutationArgsBase<State, T> & {
+  /**
+   * Queues this mutation through the store's registered offline operation when
+   * the session is offline or the direct request fails with an offline outage.
+   */
   offline: TOfflineOperations extends null
     ? never
     : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
+  /** Files to attach if this mutation is queued for offline replay. */
   upload?: OfflineMutationUploadsInput;
 };
 
@@ -337,9 +342,21 @@ type DocumentPerformMutation<
   State extends ValidStoreState,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State>,
 > = {
+  /**
+   * Runs a document mutation with optional optimistic updates and revalidation.
+   *
+   * Returns the direct server result when offline replay is not configured for
+   * this call.
+   */
   <T>(
     args: DocumentOnlineMutationArgs<State, T>,
   ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  /**
+   * Runs a document mutation that may fall back to durable offline queueing.
+   *
+   * When the mutation is queued, the result is `{ kind: 'queued' }` instead of
+   * the server payload.
+   */
   <T>(
     args: DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
@@ -460,6 +477,10 @@ export type DocumentStore<
     /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
     ensureIsLoaded?: boolean;
   }) => { isLoading: boolean; isDeleted: boolean; data: Selected };
+  /**
+   * Runs the full mutation lifecycle: optional optimistic update, async
+   * mutation, rollback/error handling, revalidation, and offline queue fallback.
+   */
   performMutation: DocumentPerformMutation<State, TOfflineOperations>;
   onTransportReconnect: () => void;
 };
@@ -594,6 +615,7 @@ export function createDocumentStore<
               session: resolvedOfflineSessionForPersistentStorage,
             }
           : undefined,
+        debugLogger: storeManager.debugLogger,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })
@@ -658,6 +680,7 @@ export function createDocumentStore<
           getSessionKey: getSessionKeyForRuntime,
           onPersistentStorageError:
             resolvedPersistentStorageConfig.onPersistentStorageError,
+          debugLogger: storeManager.debugLogger,
           adapter: resolvedPersistentStorageConfig.adapter,
           offlineSession: resolvedOfflineConfig.session,
           // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
@@ -897,6 +920,7 @@ export function createDocumentStore<
           clearOfflineOverlay();
         },
         transportFactory: testOptions?.browserTabsTransportFactory,
+        debugLogger: storeManager.debugLogger,
         getWindowIsFocused,
         onWindowFocusChange: testOptions?.onWindowFocusChange,
         priorityTimings:
