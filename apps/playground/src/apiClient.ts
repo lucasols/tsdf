@@ -1,4 +1,9 @@
-import { typedFetch } from '@ls-stack/typed-fetch';
+import {
+  setTypedFetchGlobalDefaults,
+  typedFetch,
+  type TypedFetchLogger,
+} from '@ls-stack/typed-fetch';
+import { finishApiFetchCall, startApiFetchCall } from './apiFetchCounter';
 import {
   contactBatchResponseSchema,
   contactListResponseSchema,
@@ -19,6 +24,34 @@ import {
 } from './apiTypes';
 
 const apiHost = window.location.origin;
+
+const playgroundApiLogger: TypedFetchLogger = (
+  logId,
+  url,
+  method,
+  startTimestamp,
+) => {
+  startApiFetchCall({
+    id: logId,
+    method,
+    path: `${url.pathname}${url.search}`,
+    startedAt: startTimestamp,
+  });
+
+  return {
+    success() {
+      finishApiFetchCall(logId, { status: 'success' });
+    },
+    error(status) {
+      finishApiFetchCall(logId, {
+        status: 'error',
+        errorStatus: String(status),
+      });
+    },
+  };
+};
+
+setTypedFetchGlobalDefaults({ logger: playgroundApiLogger });
 
 async function apiRequest<Response>(
   path: string,

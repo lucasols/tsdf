@@ -1,3 +1,4 @@
+import { useApiFetchCount } from '../apiFetchCounter';
 import { storeManager } from '../stores/storeManager';
 
 export function AppHeader({
@@ -7,6 +8,8 @@ export function AppHeader({
   debugOpen: boolean;
   setDebugOpen: (value: boolean) => void;
 }) {
+  const apiFetchCount = useApiFetchCount();
+
   return (
     <header className="app-header">
       <div>
@@ -15,6 +18,7 @@ export function AppHeader({
       </div>
       <div className="header-actions">
         <span>{storeManager.getAllStoreIds().length} live stores</span>
+        <span>{apiFetchCount} API fetches</span>
         <button
           type="button"
           className={debugOpen ? 'primary-button' : ''}

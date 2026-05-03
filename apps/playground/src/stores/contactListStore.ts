@@ -32,6 +32,7 @@ export const contactListStore = createListQueryStore<
 >({
   id: 'playground-contacts',
   storeManager,
+  usesRealTimeUpdates: true,
   fetchListFn: (filter, pagination, { signal, fields }) =>
     apiClient.fetchContacts(filter, pagination, { signal, fields }),
   fetchItemFn: (id, { signal, fields }) =>

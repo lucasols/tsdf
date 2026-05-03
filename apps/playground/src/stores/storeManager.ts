@@ -11,6 +11,7 @@ export const storeManager = createStoreManager({
   getSessionKey: () => PLAYGROUND_SESSION_KEY,
   errorNormalizer: normalizeError,
   revalidateOnWindowFocus: true,
+  debug: true,
   onMutationError(error) {
     console.warn('[tsdf playground] mutation failed', error);
   },

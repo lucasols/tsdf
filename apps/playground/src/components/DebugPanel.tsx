@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useApiFetchCalls } from '../apiFetchCounter';
 import {
   ATLAS_PROJECT_PAYLOAD,
   getProjectLabel,
@@ -50,6 +51,7 @@ export function DebugPanel({
   onClose: () => void;
 }) {
   const [selectedContactId, setSelectedContactId] = useState('ada');
+  const apiFetchCalls = useApiFetchCalls();
   const offlineStatus = storeManager.useOfflineStatus();
   const overviewQueries = useMemo(
     () => [
@@ -174,6 +176,41 @@ export function DebugPanel({
                 Clear storage
               </button>
             </div>
+          </section>
+
+          <section className="api-calls-section">
+            <div className="activity-header">
+              <h3>API calls</h3>
+              <Metric
+                label="Total"
+                value={apiFetchCalls.length}
+              />
+            </div>
+            <ol className="api-call-list">
+              {apiFetchCalls.length === 0 ? (
+                <li>
+                  <span>No API calls yet</span>
+                </li>
+              ) : (
+                apiFetchCalls.map((call) => (
+                  <li key={call.id}>
+                    <span>
+                      <strong>{call.method}</strong> {call.path}
+                    </span>
+                    <em className={`api-call-status api-call-${call.status}`}>
+                      {call.status}
+                      {call.errorStatus ? ` ${call.errorStatus}` : ''}
+                    </em>
+                    <time>
+                      {new Date(call.startedAt).toLocaleTimeString()}
+                      {call.durationMs === undefined
+                        ? ''
+                        : ` · ${call.durationMs}ms`}
+                    </time>
+                  </li>
+                ))
+              )}
+            </ol>
           </section>
 
           <section>

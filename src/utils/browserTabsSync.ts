@@ -71,7 +71,7 @@ type BrowserTabsCoordinatorWithPriority<Message extends { kind: string }> = {
 };
 
 const PROTOCOL_VERSION = 1 as const;
-const CHANNEL_PREFIX = 'tsdf-browser-tabs-v1';
+const CHANNEL_PREFIX = 'tsdf';
 
 type RawBrowserTabsMessage = BrowserTabsMessageMeta & { kind: string };
 

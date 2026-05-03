@@ -100,6 +100,8 @@ h3 {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .header-actions span {
@@ -450,6 +452,10 @@ dd {
   background: #ffffff;
 }
 
+.api-calls-section {
+  grid-column: 1 / -1;
+}
+
 .debug-grid h3 {
   font-size: 15px;
 }
@@ -516,6 +522,60 @@ pre {
   overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.api-call-list {
+  display: grid;
+  gap: 7px;
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.api-call-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid #dde3ea;
+  padding-top: 7px;
+}
+
+.api-call-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.api-call-list time {
+  color: #637382;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.api-call-status {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 720;
+}
+
+.api-call-pending {
+  color: #745500;
+  background: #fff3bd;
+}
+
+.api-call-success {
+  color: #17623d;
+  background: #dff6e8;
+}
+
+.api-call-error {
+  color: #8f1f2c;
+  background: #ffe1e5;
 }
 
 @media (max-width: 1180px) {
