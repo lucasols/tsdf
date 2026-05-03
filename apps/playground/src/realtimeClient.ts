@@ -11,7 +11,6 @@ const listeners = new Set<RealtimeListener>();
 let source: EventSource | null = null;
 let connectionWasInterrupted = false;
 let hasConnected = false;
-let initialSyncWasTriggered = false;
 let lastReconnectInvalidationAt = 0;
 
 function emit(message: string): void {
@@ -26,16 +25,6 @@ function invalidateAllStores(): void {
   contactListStore.invalidateQueryAndItems({
     all: true,
     type: 'realtimeUpdate',
-  });
-}
-
-function triggerInitialSync(): void {
-  if (initialSyncWasTriggered) return;
-
-  initialSyncWasTriggered = true;
-  window.setTimeout(() => {
-    storeManager.onTransportReconnect();
-    emit('realtime initial sync');
   });
 }
 
@@ -97,7 +86,6 @@ export function startRealtimeClient(): void {
   source.onopen = () => {
     if (!hasConnected) {
       hasConnected = true;
-      triggerInitialSync();
       emit('realtime transport connected');
       return;
     }
