@@ -47,6 +47,7 @@ async function openScenario(
     storeId: string;
     adapterKey: AdapterCase['adapterKey'];
     sessionKey?: string;
+    debug?: boolean;
   },
 ) {
   const page = await context.newPage();
@@ -62,13 +63,141 @@ async function openScenario(
     searchParams.set('sessionKey', options.sessionKey);
   }
 
+  if (options.debug) {
+    searchParams.set('debug', '1');
+  }
+
   await page.goto(`/?${searchParams.toString()}`);
   return page;
+}
+
+type PersistentStorageDebugLogSummary = {
+  adapter: unknown;
+  area: string;
+  durationType: string;
+  operation: string;
+  status: unknown;
+  storeName: unknown;
+};
+
+async function readPersistentStorageDebugLogSummaries(
+  page: Page,
+): Promise<PersistentStorageDebugLogSummary[]> {
+  return page.evaluate(() => {
+    const logs = window.__tsdfDebugLogs ?? [];
+
+    return logs.map((entry) => ({
+      adapter: entry.details?.adapter,
+      area: entry.area,
+      durationType: typeof entry.details?.durationMs,
+      operation: entry.operation,
+      status: entry.details?.status,
+      storeName: entry.details?.storeName,
+    }));
+  });
 }
 
 async function waitForDebounce(page: Page): Promise<void> {
   await page.waitForTimeout(SAVE_DEBOUNCE_MS + 200);
 }
+
+test.describe('persistent storage debug logging', () => {
+  test('debug logger records sync persistent storage operations', async ({
+    browser,
+    fixtureScopeId,
+  }) => {
+    const context = await browser.newContext();
+    const storeId = 'debug-local-persistence-document';
+    const page = await openScenario(
+      context,
+      'persist-document',
+      'page-a',
+      fixtureScopeId,
+      { adapterKey: 'localStorage', debug: true, storeId },
+    );
+
+    await expect(page.getByTestId('persist-doc-status')).toHaveText('success');
+    await waitForDebounce(page);
+
+    await expect
+      .poll(async () => {
+        const logs = await readPersistentStorageDebugLogSummaries(page);
+        const scheduledSave = logs.some(
+          (entry) =>
+            entry.adapter === 'local-sync' &&
+            entry.area === 'persistent-storage' &&
+            entry.operation === 'schedule-save' &&
+            entry.status === 'success' &&
+            entry.storeName === storeId,
+        );
+        const syncLoad = logs.some(
+          (entry) =>
+            entry.adapter === 'local-sync' &&
+            entry.area === 'persistent-storage' &&
+            entry.operation === 'sync-load' &&
+            entry.storeName === storeId,
+        );
+        const write = logs.some(
+          (entry) =>
+            entry.adapter === 'local-sync' &&
+            entry.area === 'persistent-storage' &&
+            entry.operation === 'write' &&
+            entry.status === 'success' &&
+            entry.storeName === storeId,
+        );
+
+        return `${syncLoad}:${scheduledSave}:${write}`;
+      })
+      .toBe('true:true:true');
+
+    await context.close();
+  });
+
+  test('debug logger records async persistent storage timings', async ({
+    browser,
+    fixtureScopeId,
+  }) => {
+    const context = await browser.newContext();
+    const storeId = 'debug-async-persistence-document';
+    const page = await openScenario(
+      context,
+      'persist-document',
+      'page-a',
+      fixtureScopeId,
+      { adapterKey: 'opfs', debug: true, storeId },
+    );
+
+    await expect(page.getByTestId('persist-doc-status')).toHaveText('success');
+    await waitForDebounce(page);
+
+    await expect
+      .poll(async () => {
+        const logs = await readPersistentStorageDebugLogSummaries(page);
+        const loadWithTiming = logs.some(
+          (entry) =>
+            entry.adapter === 'async' &&
+            entry.area === 'persistent-storage' &&
+            entry.durationType === 'number' &&
+            entry.operation === 'load' &&
+            entry.storeName === storeId,
+        );
+        const writeWithTiming = logs.some(
+          (entry) =>
+            entry.adapter === 'async' &&
+            entry.area === 'persistent-storage' &&
+            entry.durationType === 'number' &&
+            entry.operation === 'write' &&
+            entry.status === 'success' &&
+            entry.storeName === storeId,
+        );
+
+        return `${loadWithTiming}:${writeWithTiming}`;
+      })
+      .toBe('true:true');
+
+    await context.close();
+  });
+});
 
 type AdapterCase = {
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';

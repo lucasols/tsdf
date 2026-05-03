@@ -35,6 +35,8 @@ Tabs use a versioned message model so later snapshots do not overwrite fresher r
 - When `sessionKey` changes (for example, login/logout), sync state is refreshed for the new session.
 - If transport is unavailable, sync becomes inactive silently.
 
+Enable `createStoreManager({ debug: true, ... })` to inspect transport open/close, publish, receive, and skipped-message events. Pass a logger function as `debug` to route those entries to your own observability tool.
+
 ## Required options
 
 Add the following options to any store that should sync:

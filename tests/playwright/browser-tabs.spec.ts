@@ -92,7 +92,7 @@ async function openScenario(
   scenario: 'document' | 'collection' | 'list',
   pageId: string,
   fixtureScopeId: string,
-  options?: { storeId?: string; sessionKey?: string },
+  options?: { storeId?: string; sessionKey?: string; debug?: boolean },
 ) {
   const page = await context.newPage();
   const searchParams = new URLSearchParams({
@@ -109,8 +109,30 @@ async function openScenario(
     searchParams.set('sessionKey', options.sessionKey);
   }
 
+  if (options?.debug) {
+    searchParams.set('debug', '1');
+  }
+
   await page.goto(`/?${searchParams.toString()}`);
   return page;
+}
+
+type DebugLogSummary = {
+  area: string;
+  operation: string;
+  messageKind: unknown;
+};
+
+async function readDebugLogSummaries(page: Page): Promise<DebugLogSummary[]> {
+  return page.evaluate(() => {
+    const logs = window.__tsdfDebugLogs ?? [];
+
+    return logs.map((entry) => ({
+      area: entry.area,
+      messageKind: entry.details?.messageKind,
+      operation: entry.operation,
+    }));
+  });
 }
 
 async function waitForPageSettle(page: Page): Promise<void> {
@@ -135,6 +157,66 @@ async function setAllPagesBackgroundInOrder(
     await page.getByTestId(`${prefix}-focus-background`).click();
   }
 }
+
+test('debug logger records browser-tab sync operations', async ({
+  browser,
+  fixtureScopeId,
+}) => {
+  const context = await browser.newContext();
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+    { storeId: 'debug-browser-tabs-document', debug: true },
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+    { storeId: 'debug-browser-tabs-document', debug: true },
+  );
+
+  await expect(pageA.getByTestId('document-value')).toHaveText('0');
+  await expect(pageB.getByTestId('document-value')).toHaveText('0');
+
+  await pageA.getByTestId('document-mutate-optimistic').click();
+  await expect(pageB.getByTestId('document-value')).toHaveText('1');
+
+  await expect
+    .poll(async () => {
+      const logs = await readDebugLogSummaries(pageA);
+      const openedTransport = logs.some(
+        (entry) =>
+          entry.area === 'browser-tabs' && entry.operation === 'transport-open',
+      );
+      const publishedSnapshot = logs.some(
+        (entry) =>
+          entry.area === 'browser-tabs' &&
+          entry.operation === 'publish' &&
+          entry.messageKind === 'document-snapshot',
+      );
+
+      return `${openedTransport}:${publishedSnapshot}`;
+    })
+    .toBe('true:true');
+
+  await expect
+    .poll(async () => {
+      const logs = await readDebugLogSummaries(pageB);
+
+      return logs.some(
+        (entry) =>
+          entry.area === 'browser-tabs' &&
+          entry.operation === 'receive' &&
+          entry.messageKind === 'document-snapshot',
+      );
+    })
+    .toBe(true);
+
+  await context.close();
+});
 
 test('document optimistic mutation updates a sibling page without sibling network work', async ({
   browser,

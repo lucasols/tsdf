@@ -26,6 +26,7 @@ const storeManager = createStoreManager({
   onPersistentStorageError: (error) => {
     console.error('TSDF persistence failed', error);
   },
+  debug: true,
 });
 ```
 
@@ -41,6 +42,7 @@ Options:
 | `revalidateOnWindowFocus`  | No       | Default focus revalidation policy for attached stores. Store options override it.              |
 | `onMutationError`          | No       | Global fallback for mutation failures when a store does not provide its own handler.           |
 | `onPersistentStorageError` | No       | Global fallback for persistent storage failures when a store does not provide its own handler. |
+| `debug`                    | No       | Enables browser-tab sync and persistent-storage debug logs. Pass `true` or a logger function.  |
 | `offlineSession`           | No       | Shared offline config used by stores with `persistentStorage.offline`.                         |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
@@ -48,6 +50,20 @@ The session key is used by browser-tab sync, persistent storage, and offline sta
 Stores inherit the manager's `lowPriorityThrottleMs` and `baseCoalescingWindowMs` unless they provide their own store-level overrides. `blockWindowClose` is manager-only so window-close mutation protection is consistent across attached stores.
 
 Store-level options can explicitly disable inherited defaults when the option supports disabling: use `revalidateOnWindowFocus: false`, `onMutationError: null`, or `persistentStorage.onPersistentStorageError: null`.
+
+## Debug Logging
+
+Pass `debug: true` to log browser-tab sync operations and persistent-storage operations through `console.log`, `console.warn`, and `console.error`. Async persistent storage logs include `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
+
+```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  debug: ({ level, message, details }) => {
+    observability[level](message, details);
+  },
+});
+```
 
 ## Store Registry
 

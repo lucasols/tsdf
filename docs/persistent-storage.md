@@ -64,6 +64,8 @@ Store-specific options:
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
+Enable `createStoreManager({ debug: true, ... })` to inspect load, save/write, commit, clear, metadata, and offline protection persistence operations. Async adapters include `durationMs` on debug entries so OPFS, IndexedDB, or custom driver performance can be inspected.
+
 ## Converted Data Schemas
 
 Use `ConvertedPersistentStorageDataSchema<TStore, TStorage>` when the in-memory store shape should differ from the data saved in persistent storage. This is useful for compact cache formats, migration-friendly storage shapes, or persisted data that should omit derived fields.
