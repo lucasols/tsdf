@@ -89,13 +89,26 @@ Every fetch has a priority:
 | `highPriority`   | User action, explicit invalidation | Runs immediately after the coalescing window; never throttled                                                     |
 | `realtimeUpdate` | Push-driven updates                | Adaptive throttle via `dynamicRealtimeThrottleMs(...)`                                                            |
 
-Requests within `baseCoalescingWindowMs` are merged into a single batch. Mutation locks defer fetches for affected items until the mutation finishes.
-
-Batch fetching: `Collection` / `ListQuery` accept `batchFetchFn` + `getItemsBatchKey` + optional `maxBatchSize` to coalesce multiple item fetches into one request returning a `Map<payload, ItemState | Error>`.
+Requests within `baseCoalescingWindowMs` are merged into a single scheduler flush. Mutation locks defer fetches for affected items until the mutation finishes.
 
 Imperative cache-or-fetch reads return `t-result` values with `StoreFetchError` errors: Document `getDataFromStateOrFetch`, Collection `getItemFromStateOrFetch`, List Query `getQueryFromStateOrFetch` / `getItemFromStateOrFetch`. They return loaded state by default, fetch if missing, and accept `ignoreStaleState` to fetch when cached state has `refetchOnMount`.
 
 Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
+
+## Optimization features
+
+- **Batch item fetching** — coalesce multiple item fetches in the same scheduler window into one network request returning `Map<payload, ItemState | Error>`.
+- **Collection batch fetch** — `batchFetchFn(payloads, signal, batchKey)` plus optional `getItemsBatchKey(payload)` and `maxBatchSize`.
+- **List Query batch item fetch** — `batchFetchItemFn(requests, { signal, batchKey })` plus optional `getItemsBatchKey(payload)` and `maxItemBatchSize`. Each request is `{ payload, fields? }`, so batch item fetching works with partial resources.
+- **Batch groups** — `getItemsBatchKey` groups items into separate batch schedulers; return `false` to opt out for that item and use the per-item fetch function.
+- **Bulk hooks** — `useMultipleItems` and `useMultipleListQueries` let callers subscribe to many resources through one hook while sharing the same scheduler/cache machinery.
+- **Selectors + deep equality** — hook `selector` options reduce re-renders by returning only the data the component needs.
+- **Partial resources** — List Query stores with `TPartialResources = true` can fetch only requested item fields and track field-level invalidation.
+- **Derived queries** — `derivedQueries` compute list results from already-loaded items when `isComplete(...)` returns `true`, avoiding unnecessary query fetches and query cache entries.
+- **Cache limits** — `maxItems`, `maxQueries`, and `onStateCleanup` bound memory while protecting mounted, fetching, and mutating entries.
+- **Adaptive throttling** — `lowPriorityThrottleMs`, `mediumPriorityDelayMs`, `baseCoalescingWindowMs`, and `dynamicRealtimeThrottleMs(...)` tune work for hook mounts, background refetches, focus/reconnect, and realtime updates.
+
+Docs: `docs/batch-fetching.md`, `docs/cache-limits.md`, `docs/partial-resources.md`, `docs/list-query-store.md`, `docs/fetch-scheduling.md`.
 
 ## Cache limits
 

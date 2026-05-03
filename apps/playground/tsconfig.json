@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "react-jsx",
+    "paths": {
+      "tsdf": ["../../src/main.ts"],
+      "tsdf/async-storage": ["../../src/async-storage.ts"],
+      "tsdf/indexed-db-storage": ["../../src/indexed-db-storage.ts"],
+      "tsdf/opfs-storage": ["../../src/opfs-storage.ts"]
+    }
+  },
+  "include": ["src/**/*", "server/**/*", "vite.config.ts"]
+}

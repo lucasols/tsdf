@@ -21,3 +21,4 @@ notes
 .vscode/review-state.json
 .jscpd-review/jscpd-report.json
 report/jscpd-report.json
+apps/playground/.playground-data
