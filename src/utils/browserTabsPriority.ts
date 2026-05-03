@@ -18,6 +18,22 @@ type PresenceState = {
   lastPresenceAt: number;
 };
 
+export type BrowserTabsLeaderPresence = {
+  tabId: string;
+  isFocused: boolean;
+  lastFocusedAt: number;
+  lastPresenceAt: number;
+};
+
+export type BrowserTabsLeaderChangeDetails = {
+  isLocalLeader: boolean;
+  leaderTabId: string;
+  liveTabs: readonly BrowserTabsLeaderPresence[];
+  localRank: number;
+  localTabId: string;
+  reason: 'local-focus' | 'local-status' | 'priority-read' | 'remote-status';
+};
+
 type BrowserTabsPriorityOptions = {
   transportEnabled: boolean;
   getIsEnabled: () => boolean;
@@ -27,6 +43,7 @@ type BrowserTabsPriorityOptions = {
   onWindowFocusChange?: (handler: () => void) => () => void;
   publishStatus: (status: BrowserTabsTabStatusMessage) => void;
   timings?: BrowserTabsPriorityTimings;
+  onLeaderChange?: (details: BrowserTabsLeaderChangeDetails) => void;
 };
 
 type BrowserTabsRemoteLeaseState = {
@@ -78,9 +95,11 @@ export function createBrowserTabsPriority({
   onWindowFocusChange,
   publishStatus,
   timings,
+  onLeaderChange,
 }: BrowserTabsPriorityOptions): BrowserTabsPriority {
   const knownTabs = new Map<string, PresenceState>();
   const remoteFetchLeases = new Map<string, BrowserTabsRemoteLeaseState>();
+  let lastLeaderTabId: string | undefined;
 
   const localPresence: PresenceState = {
     tabId,
@@ -151,6 +170,32 @@ export function createBrowserTabsPriority({
     });
   }
 
+  function reportLeaderChange(
+    reason: BrowserTabsLeaderChangeDetails['reason'],
+    tabs = getRankedLiveTabs(),
+  ): void {
+    if (!import.meta.env.DEV) return;
+    if (!onLeaderChange) return;
+
+    const leader = tabs[0];
+    if (!leader) return;
+    if (leader.tabId === lastLeaderTabId) return;
+
+    lastLeaderTabId = leader.tabId;
+    const localTabIndex = tabs.findIndex(
+      (presence) => presence.tabId === tabId,
+    );
+
+    onLeaderChange({
+      isLocalLeader: leader.tabId === tabId,
+      leaderTabId: leader.tabId,
+      liveTabs: tabs.map((presence) => ({ ...presence })),
+      localRank: localTabIndex >= 0 ? localTabIndex + 1 : 1,
+      localTabId: tabId,
+      reason,
+    });
+  }
+
   function publishLocalStatus(): void {
     if (!getIsEnabled()) return;
 
@@ -163,6 +208,9 @@ export function createBrowserTabsPriority({
       lastFocusedAt: localPresence.lastFocusedAt,
       lastPresenceAt: localPresence.lastPresenceAt,
     });
+    if (import.meta.env.DEV) {
+      reportLeaderChange('local-status');
+    }
   }
 
   function noteLocalFocusState(): void {
@@ -184,17 +232,29 @@ export function createBrowserTabsPriority({
       lastFocusedAt: localPresence.lastFocusedAt,
       lastPresenceAt: localPresence.lastPresenceAt,
     });
+    if (import.meta.env.DEV) {
+      reportLeaderChange('local-focus');
+    }
   }
 
   function getPriorityRank(): number {
     if (!getIsEnabled()) return 1;
 
-    const localTabIndex = getLocalTabIndex();
+    const tabs = getRankedLiveTabs();
+    if (import.meta.env.DEV) {
+      reportLeaderChange('priority-read', tabs);
+    }
+    const localTabIndex = tabs.findIndex(
+      (presence) => presence.tabId === tabId,
+    );
     return localTabIndex >= 0 ? localTabIndex + 1 : 1;
   }
 
   function getCoalescingRank(): number {
     const tabs = getRankedLiveTabs();
+    if (import.meta.env.DEV) {
+      reportLeaderChange('priority-read', tabs);
+    }
     const localTabIndex = tabs.findIndex(
       (presence) => presence.tabId === tabId,
     );
@@ -214,12 +274,6 @@ export function createBrowserTabsPriority({
 
     return baseCoalescingWindowMs + coalescingRank * COALESCING_WINDOW_STEP_MS;
   }
-
-  function getLocalTabIndex(): number {
-    const tabs = getRankedLiveTabs();
-    return tabs.findIndex((presence) => presence.tabId === tabId);
-  }
-
   function onTabStatusMessage(
     remoteTabId: string,
     message: BrowserTabsTabStatusMessage,
@@ -240,6 +294,9 @@ export function createBrowserTabsPriority({
       lastFocusedAt: message.lastFocusedAt,
       lastPresenceAt: message.lastPresenceAt,
     });
+    if (import.meta.env.DEV) {
+      reportLeaderChange('remote-status');
+    }
   }
 
   function noteRemoteFetchStart(

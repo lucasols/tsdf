@@ -24,6 +24,7 @@ export type TSDFPersistentStorageDebugOperation =
 
 /** Operations emitted by the browser-tab sync subsystem. */
 export type TSDFBrowserTabsDebugOperation =
+  | 'leader-change'
   | 'publish'
   | 'publish-skipped'
   | 'receive'

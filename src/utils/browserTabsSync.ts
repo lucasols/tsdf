@@ -7,6 +7,7 @@ import {
 } from '../debug';
 import {
   createBrowserTabsPriority,
+  type BrowserTabsLeaderChangeDetails,
   type BrowserTabsTabStatusMessage,
   type BrowserTabsPriorityTimings,
 } from './browserTabsPriority';
@@ -349,6 +350,8 @@ export function createBrowserTabsCoordinatorWithPriority<
     onWindowFocusChange,
     priorityTimings,
   } = options;
+  const debugLogger = import.meta.env.DEV ? options.debugLogger : undefined;
+  const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
   const priorityRef: {
     current: ReturnType<typeof createBrowserTabsPriority> | null;
   } = { current: null };
@@ -384,6 +387,27 @@ export function createBrowserTabsCoordinatorWithPriority<
       );
     },
     timings: priorityTimings,
+    ...(import.meta.env.DEV
+      ? {
+          onLeaderChange(details: BrowserTabsLeaderChangeDetails) {
+            if (!debugLogger) return;
+
+            emitTSDFDebugLog(debugLogger, {
+              area: 'browser-tabs',
+              level: 'log',
+              message: 'browser-tab sync leader changed',
+              operation: 'leader-change',
+              details: {
+                channelName,
+                storeKey,
+                storeType,
+                tabId: details.localTabId,
+                ...details,
+              },
+            });
+          },
+        }
+      : undefined),
   });
   priorityRef.current = priority;
 

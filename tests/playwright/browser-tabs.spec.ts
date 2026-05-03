@@ -119,6 +119,9 @@ async function openScenario(
 
 type DebugLogSummary = {
   area: string;
+  isLocalLeader: unknown;
+  leaderTabId: unknown;
+  localRank: unknown;
   operation: string;
   messageKind: unknown;
 };
@@ -129,6 +132,9 @@ async function readDebugLogSummaries(page: Page): Promise<DebugLogSummary[]> {
 
     return logs.map((entry) => ({
       area: entry.area,
+      isLocalLeader: entry.details?.isLocalLeader,
+      leaderTabId: entry.details?.leaderTabId,
+      localRank: entry.details?.localRank,
       messageKind: entry.details?.messageKind,
       operation: entry.operation,
     }));
@@ -197,10 +203,18 @@ test('debug logger records browser-tab sync operations', async ({
           entry.operation === 'publish' &&
           entry.messageKind === 'document-snapshot',
       );
+      const reportedLeader = logs.some(
+        (entry) =>
+          entry.area === 'browser-tabs' &&
+          entry.operation === 'leader-change' &&
+          typeof entry.leaderTabId === 'string' &&
+          typeof entry.isLocalLeader === 'boolean' &&
+          typeof entry.localRank === 'number',
+      );
 
-      return `${openedTransport}:${publishedSnapshot}`;
+      return `${openedTransport}:${publishedSnapshot}:${reportedLeader}`;
     })
-    .toBe('true:true');
+    .toBe('true:true:true');
 
   await expect
     .poll(async () => {
