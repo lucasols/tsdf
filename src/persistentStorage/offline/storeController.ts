@@ -13,6 +13,7 @@ import {
   rc_unknown,
 } from 'runcheck';
 import { Result, unknownToError } from 't-result';
+import type { TSDFDebugLogger } from '../../debug';
 import type { ValidPayload } from '../../utils/storeShared';
 import type {
   OfflineAttachedUploadIds,
@@ -111,6 +112,7 @@ type CreateOfflineStoreControllerOptions<
   storeType: OfflineStoreType;
   getSessionKey: () => string | false;
   onPersistentStorageError?: (error: unknown) => void;
+  debugLogger?: TSDFDebugLogger;
   adapter: StorageAdapter;
   storeAdapter: OfflineStoreAdapter;
   offlineSession: OfflineSession;
@@ -491,17 +493,23 @@ export function createOfflineStoreController<
     string,
     AnyOfflineOperationDefinition<__LEGIT_ANY__>
   >,
->({
-  storeName,
-  storeType,
-  getSessionKey,
-  onPersistentStorageError,
-  adapter,
-  storeAdapter,
-  offlineSession,
-  operations,
-}: CreateOfflineStoreControllerOptions<TOperations>): OfflineStoreController<TOperations> {
+>(
+  options: CreateOfflineStoreControllerOptions<TOperations>,
+): OfflineStoreController<TOperations> {
+  const {
+    storeName,
+    storeType,
+    getSessionKey,
+    onPersistentStorageError,
+    adapter,
+    storeAdapter,
+    offlineSession,
+    operations,
+  } = options;
   const sessionConfig = offlineSession.getConfig();
+  const activeDebugLogger = import.meta.env.DEV
+    ? options.debugLogger
+    : undefined;
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
   let isDisposed = false;
   let activeSession: ActiveSessionState | null = null;
@@ -758,6 +766,7 @@ export function createOfflineStoreController<
     const session = getOrCreateSessionOfflineCoordinator(targetSessionKey, {
       adapter,
       onPersistentStorageError,
+      ...(import.meta.env.DEV ? { debugLogger: activeDebugLogger } : undefined),
       config: sessionConfig,
       uploads: getOfflineSessionUploadsConfig(offlineSession),
     });
@@ -769,6 +778,9 @@ export function createOfflineStoreController<
           adapter,
           getSessionKey: () => targetSessionKey,
           onPersistentStorageError,
+          ...(import.meta.env.DEV
+            ? { debugLogger: activeDebugLogger }
+            : undefined),
           entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
         },
         {
@@ -866,6 +878,9 @@ export function createOfflineStoreController<
         adapter,
         getSessionKey: () => targetSessionKey,
         onPersistentStorageError,
+        ...(import.meta.env.DEV
+          ? { debugLogger: activeDebugLogger }
+          : undefined),
         entryPrefix: OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
       });
     const entityNamespace =
@@ -875,6 +890,9 @@ export function createOfflineStoreController<
           adapter,
           getSessionKey: () => targetSessionKey,
           onPersistentStorageError,
+          ...(import.meta.env.DEV
+            ? { debugLogger: activeDebugLogger }
+            : undefined),
           entryPrefix: OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
         },
         {

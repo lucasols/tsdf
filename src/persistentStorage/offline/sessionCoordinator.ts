@@ -4,6 +4,11 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useCallback, useMemo } from 'react';
 import { rc_object, rc_parse } from 'runcheck';
 import { Store } from 't-state';
+import {
+  emitTSDFDebugLog,
+  getTSDFDebugTimingMs,
+  type TSDFDebugLogger,
+} from '../../debug';
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,
@@ -109,6 +114,7 @@ type SessionCoordinatorOptions = {
   sessionKey: string;
   adapter?: StorageAdapter;
   onPersistentStorageError?: (error: unknown) => void;
+  debugLogger?: TSDFDebugLogger;
   config?: OfflineSessionConfig;
   uploads?: OfflineSessionUploadsConfig;
   bootstrapStatusFromLocalStorage?: boolean;
@@ -518,19 +524,21 @@ function normalizePersistedLocalSessionSnapshot(
   return { status };
 }
 
-function createSessionPersistenceHandle(args: {
-  sessionKey: string;
-  enabled: boolean;
-  onPersistentStorageError?: (error: unknown) => void;
-}): PersistentStorageHandle<PersistedLocalSessionSnapshot> {
-  if (!args.enabled) return createNoopPersistentStorageHandle();
+function createSessionPersistenceHandle(
+  sessionKey: string,
+  enabled: boolean,
+  onPersistentStorageError?: (error: unknown) => void,
+  debugLogger?: TSDFDebugLogger,
+): PersistentStorageHandle<PersistedLocalSessionSnapshot> {
+  if (!enabled) return createNoopPersistentStorageHandle();
 
   return createPersistentStorageHandle<PersistedLocalSessionSnapshot>(
     {
       storeName: '_o_.s',
       adapter: 'local-sync',
-      getSessionKey: () => args.sessionKey,
-      onPersistentStorageError: args.onPersistentStorageError,
+      getSessionKey: () => sessionKey,
+      onPersistentStorageError,
+      ...(import.meta.env.DEV ? { debugLogger } : undefined),
     },
     {
       valueCodec: {
@@ -538,7 +546,7 @@ function createSessionPersistenceHandle(args: {
           return { d: serializeOfflineStatusSnapshot(snapshot.status) };
         },
         deserialize(raw) {
-          return normalizePersistedLocalSessionSnapshot(args.sessionKey, raw);
+          return normalizePersistedLocalSessionSnapshot(sessionKey, raw);
         },
       },
     },
@@ -606,22 +614,26 @@ class SessionOfflineCoordinator {
   #hasPersistedSessionSnapshot = false;
   #lastPersistedStatus: GlobalOfflineStatus | null = null;
   #disposed = false;
+  #debugLogger: TSDFDebugLogger | undefined;
   readonly #bootstrapStatusFromLocalStorage: boolean;
 
-  constructor({
-    sessionKey,
-    adapter,
-    onPersistentStorageError,
-    config,
-    uploads,
-    bootstrapStatusFromLocalStorage = false,
-  }: SessionCoordinatorOptions) {
+  constructor(options: SessionCoordinatorOptions) {
+    const {
+      sessionKey,
+      adapter,
+      onPersistentStorageError,
+      config,
+      uploads,
+      bootstrapStatusFromLocalStorage = false,
+    } = options;
+    const debugLogger = import.meta.env.DEV ? options.debugLogger : undefined;
     this.sessionKey = sessionKey;
     this.#bootstrapStatusFromLocalStorage = bootstrapStatusFromLocalStorage;
     if (adapter !== undefined) {
       this.#adapters.add(adapter);
     }
     this.#onPersistentStorageError = onPersistentStorageError;
+    this.#debugLogger = debugLogger;
     this.#uploadsConfig = uploads;
     if (uploads) {
       registerOfflineUploadAdapterForSession(this.sessionKey, uploads.adapter);
@@ -635,11 +647,12 @@ class SessionOfflineCoordinator {
     const bootstrappedLocalSnapshot = shouldBootstrapFromStorage
       ? readPersistedLocalSessionSnapshot(sessionKey)
       : null;
-    this.#sessionHandle = createSessionPersistenceHandle({
+    this.#sessionHandle = createSessionPersistenceHandle(
       sessionKey,
-      enabled: shouldBootstrapFromStorage,
+      shouldBootstrapFromStorage,
       onPersistentStorageError,
-    });
+      debugLogger,
+    );
     this.#canonicalConfig = toCanonicalConfig(config);
     this.#hasCanonicalConfig = config !== undefined;
     this.#hasPersistedSessionSnapshot = bootstrappedLocalSnapshot !== null;
@@ -680,6 +693,7 @@ class SessionOfflineCoordinator {
           }
           this.#applyRemoteSnapshot(message);
         },
+        ...(import.meta.env.DEV ? { debugLogger } : undefined),
       });
 
     this.#refreshLeadership();
@@ -727,7 +741,7 @@ class SessionOfflineCoordinator {
     if (this.#adapters.size > 0) {
       const protectedKeySetResults = await Promise.allSettled(
         [...this.#adapters].map((adapter) =>
-          readProtectedStorageKeys(adapter, this.sessionKey),
+          readProtectedStorageKeys(adapter, this.sessionKey, this.#debugLogger),
         ),
       );
       for (const result of protectedKeySetResults) {
@@ -763,6 +777,7 @@ class SessionOfflineCoordinator {
   configure(options: {
     adapter?: StorageAdapter;
     onPersistentStorageError?: (error: unknown) => void;
+    debugLogger?: TSDFDebugLogger;
     config?: OfflineSessionConfig;
     uploads?: OfflineSessionUploadsConfig;
   }): void {
@@ -771,6 +786,9 @@ class SessionOfflineCoordinator {
     }
     if (options.onPersistentStorageError !== undefined) {
       this.#onPersistentStorageError = options.onPersistentStorageError;
+    }
+    if (import.meta.env.DEV && options.debugLogger !== undefined) {
+      this.#debugLogger = options.debugLogger;
     }
     if (options.uploads !== undefined) {
       if (
@@ -807,11 +825,12 @@ class SessionOfflineCoordinator {
 
     if (options.onPersistentStorageError !== undefined) {
       this.#sessionHandle.dispose();
-      this.#sessionHandle = createSessionPersistenceHandle({
-        sessionKey: this.sessionKey,
-        enabled: true,
-        onPersistentStorageError: this.#onPersistentStorageError,
-      });
+      this.#sessionHandle = createSessionPersistenceHandle(
+        this.sessionKey,
+        true,
+        this.#onPersistentStorageError,
+        this.#debugLogger,
+      );
     }
 
     const nextConfig =
@@ -840,13 +859,13 @@ class SessionOfflineCoordinator {
     this.#sessionHandle.dispose();
     this.#onPersistentStorageError =
       args.onPersistentStorageError ?? this.#onPersistentStorageError;
-    this.#sessionHandle = createSessionPersistenceHandle({
-      sessionKey: this.sessionKey,
-      enabled:
-        args.enabled ??
+    this.#sessionHandle = createSessionPersistenceHandle(
+      this.sessionKey,
+      args.enabled ??
         (this.#hasCanonicalConfig || this.#bootstrapStatusFromLocalStorage),
-      onPersistentStorageError: this.#onPersistentStorageError,
-    });
+      this.#onPersistentStorageError,
+      this.#debugLogger,
+    );
     this.#hasPersistedSessionSnapshot = false;
     this.#lastPersistedStatus = null;
     this.#hydrated = false;
@@ -1849,6 +1868,42 @@ class SessionOfflineCoordinator {
       ...this.#protectedKeysByAdapter.keys(),
       ...nextProtectedKeysByAdapter.keys(),
     ]);
+
+    const debugLogger = this.#debugLogger;
+    const sessionKey = this.sessionKey;
+    const emitSyncProtectedKeysLog = (
+      adapterKind: 'local-sync' | 'async',
+      status: 'success' | 'error',
+      count: number,
+      startTime: number | null,
+      error?: unknown,
+    ): void => {
+      if (!import.meta.env.DEV) return;
+      if (!debugLogger) return;
+
+      const details: Record<string, unknown> = {
+        adapter: adapterKind,
+        count,
+        sessionKey,
+        status,
+        storeName: '_offline_',
+      };
+      if (startTime !== null) {
+        details.durationMs = getTSDFDebugTimingMs() - startTime;
+      }
+      if (error !== undefined) {
+        details.error = error;
+      }
+
+      emitTSDFDebugLog(debugLogger, {
+        area: 'persistent-storage',
+        level: status === 'error' ? 'error' : 'log',
+        message: `persistent storage sync-protected-keys ${status}`,
+        operation: 'sync-protected-keys',
+        details,
+      });
+    };
+
     for (const adapter of adaptersToSync) {
       const previousProtectedKeys =
         this.#protectedKeysByAdapter.get(adapter) ?? [];
@@ -1864,17 +1919,46 @@ class SessionOfflineCoordinator {
           this.sessionKey,
           nextAdapterProtectedKeys,
         );
+        if (import.meta.env.DEV) {
+          emitSyncProtectedKeysLog(
+            'local-sync',
+            'success',
+            nextAdapterProtectedKeys.length,
+            null,
+          );
+        }
         continue;
       }
 
       if (adapter !== 'local-sync') {
+        const startTime =
+          import.meta.env.DEV && debugLogger ? getTSDFDebugTimingMs() : null;
         void adapter
           .syncSessionProtectedKeys(
             this.sessionKey,
             nextAdapterProtectedKeys,
             previousProtectedKeys,
           )
+          .then(() => {
+            if (import.meta.env.DEV) {
+              emitSyncProtectedKeysLog(
+                'async',
+                'success',
+                nextAdapterProtectedKeys.length,
+                startTime,
+              );
+            }
+          })
           .catch((error: unknown) => {
+            if (import.meta.env.DEV) {
+              emitSyncProtectedKeysLog(
+                'async',
+                'error',
+                nextAdapterProtectedKeys.length,
+                startTime,
+                error,
+              );
+            }
             this.#onPersistentStorageError?.(error);
           });
       }
@@ -2173,6 +2257,9 @@ export function getOrCreateSessionOfflineCoordinator(
     existing.configure({
       adapter: options.adapter,
       onPersistentStorageError: options.onPersistentStorageError,
+      ...(import.meta.env.DEV
+        ? { debugLogger: options.debugLogger }
+        : undefined),
       config: options.config,
       uploads: options.uploads,
     });
@@ -2183,6 +2270,7 @@ export function getOrCreateSessionOfflineCoordinator(
     sessionKey,
     adapter: options.adapter,
     onPersistentStorageError: options.onPersistentStorageError,
+    ...(import.meta.env.DEV ? { debugLogger: options.debugLogger } : undefined),
     config: options.config,
     uploads: options.uploads,
     bootstrapStatusFromLocalStorage: options.bootstrapStatusFromLocalStorage,
@@ -2263,6 +2351,7 @@ export function createOfflineSession<
 >(args: {
   config: OfflineSessionConfig<TUploadRef>;
   getSessionKey?: () => string | false;
+  debugLogger?: TSDFDebugLogger;
 }): OfflineSession<TUploadRef> {
   const getSessionKey = args.getSessionKey ?? (() => false);
   const { config } = args;
@@ -2285,6 +2374,7 @@ export function createOfflineSession<
 
     return getOrCreateSessionOfflineCoordinator(sessionKey, {
       config,
+      ...(import.meta.env.DEV ? { debugLogger: args.debugLogger } : undefined),
       uploads: eraseUploadsConfig(uploads),
       bootstrapStatusFromLocalStorage,
     });
@@ -2299,6 +2389,7 @@ export function createOfflineSession<
       activeSessionKey === false ? undefined : config,
       eraseUploadsConfig(activeSessionKey === false ? undefined : uploads),
       activeSessionKey !== false,
+      import.meta.env.DEV ? args.debugLogger : undefined,
     );
   }
 
@@ -2470,15 +2561,17 @@ function useConfiguredSessionOfflineCoordinator(
   config: OfflineSessionConfig | undefined,
   uploads: OfflineSessionUploadsConfig | undefined,
   bootstrapStatusFromLocalStorage = false,
+  debugLogger?: TSDFDebugLogger,
 ): SessionOfflineCoordinator {
   return useMemo(
     () =>
       getOrCreateSessionOfflineCoordinator(sessionKey, {
         config,
+        ...(import.meta.env.DEV ? { debugLogger } : undefined),
         uploads,
         bootstrapStatusFromLocalStorage,
       }),
-    [bootstrapStatusFromLocalStorage, config, sessionKey, uploads],
+    [bootstrapStatusFromLocalStorage, config, debugLogger, sessionKey, uploads],
   );
 }
 

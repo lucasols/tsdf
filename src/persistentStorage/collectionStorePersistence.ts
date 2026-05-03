@@ -48,6 +48,7 @@ import {
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import {
   assertValidPersistentStoreName,
+  createPersistentStorageDebugContext,
   createPersistentStorageNamespaceHandle,
   getLocalStorageAdapter,
   isOfflineNetworkModeActiveSync,
@@ -565,6 +566,20 @@ export function setupCollectionPersistence<
       version,
       {
         allowExpiredRead: isOfflineNetworkActive(),
+        debug: import.meta.env.DEV
+          ? {
+              context: createPersistentStorageDebugContext(
+                'local-sync',
+                config.storeName,
+                config.debugLogger,
+                COLLECTION_STORAGE_ENTRY_PREFIX,
+                storageKey,
+                'collection.item',
+              ),
+              details: { allowExpiredRead: isOfflineNetworkActive(), itemKey },
+              operation: 'sync-load',
+            }
+          : undefined,
         metadata: 'namespace',
         namespacePrefix: prefix,
       },

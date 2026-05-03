@@ -1,6 +1,7 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { type RcType } from 'runcheck';
+import type { TSDFDebugLogger } from '../debug';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
   AnyOfflineOperationDefinition,
@@ -374,6 +375,8 @@ type ResolvedStorePersistentStorageBaseConfig<
   getSessionKey: () => string | false;
   /** Store-specific handler or manager fallback. `undefined` means errors are ignored. */
   onPersistentStorageError?: PersistentStorageErrorHandler;
+  /** Manager-owned debug logger for persistence internals. */
+  debugLogger?: TSDFDebugLogger;
 };
 
 export type ResolvedDocumentPersistentStorageConfig<

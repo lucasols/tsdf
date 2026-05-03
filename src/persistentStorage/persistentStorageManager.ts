@@ -1,6 +1,12 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
+  emitTSDFDebugLog,
+  getTSDFDebugTimingMs,
+  type TSDFDebugLogger,
+  type TSDFPersistentStorageDebugOperation,
+} from '../debug';
+import {
   parsePersistedAsyncNamespaceKind,
   serializeProtectedRef,
 } from './asyncStorageShared';
@@ -55,6 +61,105 @@ const scheduledAsyncMaintenance = new Map<
     rerunRequested: boolean;
   }
 >();
+
+type PersistentStorageRuntimeConfig = Omit<
+  PersistentStorageBaseConfig<never>,
+  'schema'
+> & { debugLogger?: TSDFDebugLogger };
+
+export type PersistentStorageDebugContext = {
+  adapterKind: 'async' | 'local-sync';
+  debugLogger?: TSDFDebugLogger;
+  entryPrefix?: string;
+  key?: string;
+  namespaceKind?: AsyncStorageNamespaceKind;
+  storeName: string;
+};
+
+export function createPersistentStorageDebugContext(
+  adapter: StorageAdapter,
+  storeName: string,
+  debugLogger?: TSDFDebugLogger,
+  entryPrefix?: string,
+  key?: string,
+  namespaceKind?: AsyncStorageNamespaceKind,
+): PersistentStorageDebugContext {
+  return {
+    adapterKind: adapter === 'local-sync' ? 'local-sync' : 'async',
+    debugLogger,
+    entryPrefix,
+    key,
+    namespaceKind,
+    storeName,
+  };
+}
+
+function startPersistentStorageDebugTiming(
+  context: PersistentStorageDebugContext | undefined,
+): number | null {
+  if (!import.meta.env.DEV) return null;
+  if (!context?.debugLogger) return null;
+  return context.adapterKind === 'async' ? getTSDFDebugTimingMs() : null;
+}
+
+type PersistentStorageDebugStatus = 'success' | 'miss' | 'skipped' | 'error';
+
+function logPersistentStorageOperation(
+  context: PersistentStorageDebugContext | undefined,
+  operation: TSDFPersistentStorageDebugOperation,
+  status: PersistentStorageDebugStatus,
+  startTime: number | null,
+  details?: Readonly<Record<string, unknown>>,
+  error?: unknown,
+): void {
+  if (!import.meta.env.DEV) return;
+  if (!context?.debugLogger) return;
+
+  const durationMs =
+    startTime === null ? undefined : getTSDFDebugTimingMs() - startTime;
+
+  const logDetails: Record<string, unknown> = {
+    adapter: context.adapterKind,
+    storeName: context.storeName,
+    status,
+  };
+  if (context.entryPrefix !== undefined) {
+    logDetails.entryPrefix = context.entryPrefix;
+  }
+  if (context.key !== undefined) {
+    logDetails.key = context.key;
+  }
+  if (context.namespaceKind !== undefined) {
+    logDetails.namespaceKind = context.namespaceKind;
+  }
+  if (durationMs !== undefined) {
+    logDetails.durationMs = durationMs;
+  }
+  if (error !== undefined) {
+    logDetails.error = error;
+  }
+  if (details !== undefined) {
+    Object.assign(logDetails, details);
+  }
+
+  emitTSDFDebugLog(context.debugLogger, {
+    area: 'persistent-storage',
+    level: status === 'error' ? 'error' : 'log',
+    message: `persistent storage ${operation} ${status}`,
+    operation,
+    details: logDetails,
+  });
+}
+
+function withPersistentStorageDebugKey(
+  context: PersistentStorageDebugContext | undefined,
+  key: string,
+): PersistentStorageDebugContext | undefined {
+  if (!import.meta.env.DEV) return undefined;
+  if (context === undefined) return undefined;
+
+  return { ...context, key };
+}
 
 export function getLocalStorageAdapter(
   adapter: StorageAdapter,
@@ -324,7 +429,7 @@ export type PersistentStorageHandle<T> = {
  *   items within collections/queries.
  */
 export function createPersistentStorageHandle<T>(
-  config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
+  config: PersistentStorageRuntimeConfig,
   {
     asyncValueCodec,
     getManifestMeta,
@@ -348,6 +453,16 @@ export function createPersistentStorageHandle<T>(
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncEntryKey =
     asyncNamespace?.entryKey ?? DOCUMENT_PERSISTED_ENTRY_KEY;
+  const debugContext = import.meta.env.DEV
+    ? createPersistentStorageDebugContext(
+        adapter,
+        config.storeName,
+        config.debugLogger,
+        undefined,
+        asyncEntryKey,
+        asyncNamespace?.kind ?? 'document',
+      )
+    : undefined;
   const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -387,18 +502,57 @@ export function createPersistentStorageHandle<T>(
   async function load(
     options: { touch?: AsyncStorageTouchMode } = {},
   ): Promise<T | null> {
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return null;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'load',
+              'skipped',
+              startTime,
+              { reason: 'inactive-session', touch: options.touch },
+            );
+          }
+          return null;
+        }
 
         const entry = await namespace.get(asyncEntryKey, {
           touch: options.touch ?? 'coarse',
         });
-        if (!entry) return null;
+        if (!entry) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'load',
+              'miss',
+              startTime,
+              { reason: 'missing-entry', touch: options.touch },
+            );
+          }
+          return null;
+        }
 
         if (entry.metadata.version !== asyncVersion) {
           await namespace.commit({ removes: [asyncEntryKey] });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'load',
+              'miss',
+              startTime,
+              {
+                expectedVersion: asyncVersion,
+                reason: 'version-mismatch',
+                storedVersion: entry.metadata.version,
+                touch: options.touch,
+              },
+            );
+          }
           return null;
         }
 
@@ -411,14 +565,43 @@ export function createPersistentStorageHandle<T>(
             __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [asyncEntryKey] });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'load',
+              'miss',
+              startTime,
+              { reason: 'decode-failed', touch: options.touch },
+            );
+          }
           return null;
         }
 
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'load',
+            'success',
+            startTime,
+            { touch: options.touch },
+          );
+        }
         return decoded;
       }
 
       const key = getKey();
-      if (key === false) return null;
+      if (key === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'load',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session', touch: options.touch },
+          );
+        }
+        return null;
+      }
 
       const entry = readStorageEntryFromLocalStorageSync<T>(
         key,
@@ -426,13 +609,43 @@ export function createPersistentStorageHandle<T>(
         { metadata: 'single' },
         localCodec,
       );
-      if (!entry) return null;
+      if (!entry) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            withPersistentStorageDebugKey(debugContext, key),
+            'load',
+            'miss',
+            startTime,
+            { touch: options.touch },
+          );
+        }
+        return null;
+      }
 
       scheduleIdleCleanup(() =>
         refreshLocalStorageTimestamp(key, { metadata: 'single' }),
       );
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          withPersistentStorageDebugKey(debugContext, key),
+          'load',
+          'success',
+          startTime,
+          { touch: options.touch },
+        );
+      }
       return entry.data;
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'load',
+          'error',
+          startTime,
+          { touch: options.touch },
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
       return null;
     }
@@ -440,11 +653,25 @@ export function createPersistentStorageHandle<T>(
 
   async function writeEntry(data: T): Promise<void> {
     const key = getKey();
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
 
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'write',
+              'skipped',
+              startTime,
+              { reason: 'inactive-session' },
+            );
+          }
+          return;
+        }
 
         await namespace.commit({
           upserts: [
@@ -458,12 +685,43 @@ export function createPersistentStorageHandle<T>(
             },
           ],
         });
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'write',
+            'success',
+            startTime,
+            { upserts: 1 },
+          );
+        }
         return;
       }
 
-      if (key === false) return;
+      if (key === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'write',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
       const sessionKey = config.getSessionKey();
-      if (sessionKey === false) return;
+      if (sessionKey === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            withPersistentStorageDebugKey(debugContext, key),
+            'write',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
       const timestamp = Date.now();
       const entry = createCompactLocalStorageEntry(
         localCodec.serialize(data),
@@ -486,13 +744,43 @@ export function createPersistentStorageHandle<T>(
         });
         recordLocalStorageTouch(key, timestamp);
       });
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          withPersistentStorageDebugKey(debugContext, key),
+          'write',
+          'success',
+          startTime,
+          { upserts: 1 },
+        );
+      }
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          key === false
+            ? debugContext
+            : withPersistentStorageDebugKey(debugContext, key),
+          'write',
+          'error',
+          startTime,
+          undefined,
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
     }
   }
 
   function scheduleSave(getData: () => T): void {
     clearTimer();
+    if (import.meta.env.DEV) {
+      logPersistentStorageOperation(
+        debugContext,
+        'schedule-save',
+        'success',
+        null,
+        { debounceMs: DEBOUNCE_MS },
+      );
+    }
 
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
@@ -512,24 +800,76 @@ export function createPersistentStorageHandle<T>(
 
   async function clear(): Promise<void> {
     clearTimer();
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
 
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'clear',
+              'skipped',
+              startTime,
+              { reason: 'inactive-session' },
+            );
+          }
+          return;
+        }
         await namespace.commit({ removes: [asyncEntryKey] });
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'clear',
+            'success',
+            startTime,
+            { removes: 1 },
+          );
+        }
         return;
       }
 
       const key = getKey();
-      if (key === false) return;
+      if (key === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'clear',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
 
       await runLocalStorageMutation(() => {
         localPersistentStorage.clearManifest(
           localPersistentStorage.getManifestKeyForSingle(key),
         );
       });
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          withPersistentStorageDebugKey(debugContext, key),
+          'clear',
+          'success',
+          startTime,
+        );
+      }
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'clear',
+          'error',
+          startTime,
+          undefined,
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
     }
   }
@@ -620,9 +960,7 @@ export function createPersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 >(
-  config: Omit<PersistentStorageBaseConfig<never>, 'schema'> & {
-    entryPrefix: string;
-  },
+  config: PersistentStorageRuntimeConfig & { entryPrefix: string },
   {
     asyncValueCodec,
     getManifestMeta,
@@ -639,6 +977,16 @@ export function createPersistentStorageNamespaceHandle<
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncNamespaceKind = ensureAsyncNamespaceKind(config.entryPrefix);
+  const debugContext = import.meta.env.DEV
+    ? createPersistentStorageDebugContext(
+        adapter,
+        config.storeName,
+        config.debugLogger,
+        config.entryPrefix,
+        undefined,
+        asyncNamespaceKind,
+      )
+    : undefined;
   const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
   scheduleAdapterExpirationScan(adapter);
@@ -670,10 +1018,32 @@ export function createPersistentStorageNamespaceHandle<
   async function commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
   ): Promise<void> {
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
+    const operationDetails = import.meta.env.DEV
+      ? {
+          removes: args.removes?.length ?? 0,
+          touches: args.touches?.length ?? 0,
+          upserts: args.upserts?.length ?? 0,
+        }
+      : undefined;
+
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'commit',
+              'skipped',
+              startTime,
+              { ...operationDetails, reason: 'inactive-session' },
+            );
+          }
+          return;
+        }
 
         await namespace.commit({
           removes: args.removes,
@@ -698,13 +1068,44 @@ export function createPersistentStorageNamespaceHandle<
               upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
           })),
         });
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'commit',
+            'success',
+            startTime,
+            operationDetails,
+          );
+        }
         return;
       }
 
       const prefix = getPrefix();
-      if (prefix === false) return;
+      if (prefix === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'commit',
+            'skipped',
+            startTime,
+            { ...operationDetails, reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
       const sessionKey = config.getSessionKey();
-      if (sessionKey === false) return;
+      if (sessionKey === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'commit',
+            'skipped',
+            startTime,
+            { ...operationDetails, reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
       const now = Date.now();
       const touchTimestamps = new Map(
         (args.touches ?? []).map((touch) => [touch.key, touch.lastAccessAt]),
@@ -756,7 +1157,26 @@ export function createPersistentStorageNamespaceHandle<
           recordLocalStorageTouch(key, touch.lastAccessAt ?? now);
         }
       });
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'commit',
+          'success',
+          startTime,
+          operationDetails,
+        );
+      }
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'commit',
+          'error',
+          startTime,
+          operationDetails,
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
     }
   }
@@ -765,18 +1185,60 @@ export function createPersistentStorageNamespaceHandle<
     entryKey: string,
     options: { touch?: AsyncStorageTouchMode } = {},
   ): Promise<StorageCacheEntry<T> | null> {
+    const context = import.meta.env.DEV
+      ? withPersistentStorageDebugKey(debugContext, entryKey)
+      : undefined;
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(context)
+      : null;
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return null;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              context,
+              'read-entry',
+              'skipped',
+              startTime,
+              { reason: 'inactive-session', touch: options.touch },
+            );
+          }
+          return null;
+        }
 
         const entry = await namespace.get(entryKey, {
           touch: options.touch ?? 'never',
         });
-        if (!entry) return null;
+        if (!entry) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              context,
+              'read-entry',
+              'miss',
+              startTime,
+              { reason: 'missing-entry', touch: options.touch },
+            );
+          }
+          return null;
+        }
 
         if (entry.metadata.version !== asyncVersion) {
           await namespace.commit({ removes: [entryKey] });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              context,
+              'read-entry',
+              'miss',
+              startTime,
+              {
+                expectedVersion: asyncVersion,
+                reason: 'version-mismatch',
+                storedVersion: entry.metadata.version,
+                touch: options.touch,
+              },
+            );
+          }
           return null;
         }
 
@@ -789,9 +1251,27 @@ export function createPersistentStorageNamespaceHandle<
             __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              context,
+              'read-entry',
+              'miss',
+              startTime,
+              { reason: 'decode-failed', touch: options.touch },
+            );
+          }
           return null;
         }
 
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            context,
+            'read-entry',
+            'success',
+            startTime,
+            { touch: options.touch },
+          );
+        }
         return {
           data: decoded,
           timestamp: entry.metadata.lastAccessAt,
@@ -800,16 +1280,47 @@ export function createPersistentStorageNamespaceHandle<
       }
 
       const prefix = getPrefix();
-      if (prefix === false) return null;
+      if (prefix === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            context,
+            'read-entry',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session', touch: options.touch },
+          );
+        }
+        return null;
+      }
       const key = `${prefix}${entryKey}`;
 
-      return readStorageEntryFromLocalStorageSync<T>(
+      const entry = readStorageEntryFromLocalStorageSync<T>(
         key,
         version,
         { metadata: 'namespace', namespacePrefix: prefix },
         localCodec,
       );
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          withPersistentStorageDebugKey(context, key),
+          'read-entry',
+          entry ? 'success' : 'miss',
+          startTime,
+          { touch: options.touch },
+        );
+      }
+      return entry;
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          context,
+          'read-entry',
+          'error',
+          startTime,
+          { touch: options.touch },
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
       return null;
     }
@@ -819,18 +1330,51 @@ export function createPersistentStorageNamespaceHandle<
     entryKey: string,
     options: { touch?: AsyncStorageTouchMode } = {},
   ): Promise<T | null> {
+    const context = import.meta.env.DEV
+      ? withPersistentStorageDebugKey(debugContext, entryKey)
+      : undefined;
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(context)
+      : null;
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return null;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              context,
+              'load',
+              'skipped',
+              startTime,
+              { reason: 'inactive-session', touch: options.touch },
+            );
+          }
+          return null;
+        }
 
         const entry = await namespace.get(entryKey, {
           touch: options.touch ?? 'coarse',
         });
-        if (!entry) return null;
+        if (!entry) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(context, 'load', 'miss', startTime, {
+              reason: 'missing-entry',
+              touch: options.touch,
+            });
+          }
+          return null;
+        }
 
         if (entry.metadata.version !== asyncVersion) {
           await namespace.commit({ removes: [entryKey] });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(context, 'load', 'miss', startTime, {
+              expectedVersion: asyncVersion,
+              reason: 'version-mismatch',
+              storedVersion: entry.metadata.version,
+              touch: options.touch,
+            });
+          }
           return null;
         }
 
@@ -843,18 +1387,48 @@ export function createPersistentStorageNamespaceHandle<
             __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(context, 'load', 'miss', startTime, {
+              reason: 'decode-failed',
+              touch: options.touch,
+            });
+          }
           return null;
         }
 
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(context, 'load', 'success', startTime, {
+            touch: options.touch,
+          });
+        }
         return decoded;
       }
 
       const prefix = getPrefix();
-      if (prefix === false) return null;
+      if (prefix === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(context, 'load', 'skipped', startTime, {
+            reason: 'inactive-session',
+            touch: options.touch,
+          });
+        }
+        return null;
+      }
 
       const key = `${prefix}${entryKey}`;
       const entry = await readEntry(entryKey);
-      if (!entry) return null;
+      if (!entry) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            withPersistentStorageDebugKey(context, key),
+            'load',
+            'miss',
+            startTime,
+            { touch: options.touch },
+          );
+        }
+        return null;
+      }
 
       scheduleIdleCleanup(() =>
         refreshLocalStorageTimestamp(key, {
@@ -863,8 +1437,27 @@ export function createPersistentStorageNamespaceHandle<
         }),
       );
 
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          withPersistentStorageDebugKey(context, key),
+          'load',
+          'success',
+          startTime,
+          { touch: options.touch },
+        );
+      }
       return entry.data;
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          context,
+          'load',
+          'error',
+          startTime,
+          { touch: options.touch },
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
       return null;
     }
@@ -876,10 +1469,28 @@ export function createPersistentStorageNamespaceHandle<
   ): Promise<Array<T | null>> {
     if (entryKeys.length === 0) return [];
 
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return entryKeys.map(() => null);
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'load-many',
+              'skipped',
+              startTime,
+              {
+                keyCount: entryKeys.length,
+                reason: 'inactive-session',
+                touch: options.touch,
+              },
+            );
+          }
+          return entryKeys.map(() => null);
+        }
 
         const entries = await namespace.getMany(entryKeys, {
           touch: options.touch ?? 'coarse',
@@ -917,11 +1528,51 @@ export function createPersistentStorageNamespaceHandle<
           await namespace.commit({ removes: staleKeys });
         }
 
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'load-many',
+            'success',
+            startTime,
+            {
+              hitCount: values.filter((value) => value !== null).length,
+              keyCount: entryKeys.length,
+              staleCount: staleKeys.length,
+              touch: options.touch,
+            },
+          );
+        }
         return values;
       }
 
-      return Promise.all(entryKeys.map((entryKey) => load(entryKey)));
+      const values = await Promise.all(
+        entryKeys.map((entryKey) => load(entryKey)),
+      );
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'load-many',
+          'success',
+          startTime,
+          {
+            hitCount: values.filter((value) => value !== null).length,
+            keyCount: entryKeys.length,
+            touch: options.touch,
+          },
+        );
+      }
+      return values;
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'load-many',
+          'error',
+          startTime,
+          { keyCount: entryKeys.length, touch: options.touch },
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
       return entryKeys.map(() => null);
     }
@@ -938,20 +1589,55 @@ export function createPersistentStorageNamespaceHandle<
   async function listMetadata(
     args: { order?: AsyncStorageMetadataOrder } = {},
   ): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return [];
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'list-metadata',
+              'skipped',
+              startTime,
+              { order: args.order, reason: 'inactive-session' },
+            );
+          }
+          return [];
+        }
 
-        return namespace.listMetadata(args);
+        const entries = await namespace.listMetadata(args);
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-metadata',
+            'success',
+            startTime,
+            { count: entries.length, order: args.order },
+          );
+        }
+        return entries;
       }
 
       const prefix = getPrefix();
-      if (prefix === false) return [];
+      if (prefix === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-metadata',
+            'skipped',
+            startTime,
+            { order: args.order, reason: 'inactive-session' },
+          );
+        }
+        return [];
+      }
 
       const order = args.order ?? 'key';
 
-      return localPersistentStorage
+      const entries = localPersistentStorage
         .listManifestEntries(prefix)
         .sort((left, right) => {
           if (order === 'key') {
@@ -977,7 +1663,27 @@ export function createPersistentStorageNamespaceHandle<
           writtenAt: entry.lastAccessAt,
           version: asyncVersion,
         }));
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'list-metadata',
+          'success',
+          startTime,
+          { count: entries.length, order },
+        );
+      }
+      return entries;
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'list-metadata',
+          'error',
+          startTime,
+          { order: args.order },
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
       return [];
     }
@@ -988,35 +1694,83 @@ export function createPersistentStorageNamespaceHandle<
     key: string;
     order?: AsyncStorageMetadataOrder;
   }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
+    const operationDetails = import.meta.env.DEV
+      ? { filterKey: args.key, order: args.order }
+      : undefined;
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return [];
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'list-metadata-by-filter',
+              'skipped',
+              startTime,
+              { ...operationDetails, reason: 'inactive-session' },
+            );
+          }
+          return [];
+        }
 
         if (typeof namespace.listMetadataByFilter === 'function') {
-          return namespace.listMetadataByFilter({
+          const entries = await namespace.listMetadataByFilter({
             filter: { equals: args.equals, key: args.key },
             order: args.order,
           });
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'list-metadata-by-filter',
+              'success',
+              startTime,
+              { ...operationDetails, count: entries.length },
+            );
+          }
+          return entries;
         }
 
-        return (await namespace.listMetadata({ order: args.order })).filter(
-          (entry) => {
-            // WORKAROUND: Async metadata is normalized to a plain record before
-            // reaching this fallback path.
-            const metadata = __LEGIT_CAST__<Record<string, unknown>, unknown>(
-              entry.customMetadata,
-            );
-            return metadata[args.key] === args.equals;
-          },
-        );
+        const entries = (
+          await namespace.listMetadata({ order: args.order })
+        ).filter((entry) => {
+          // WORKAROUND: Async metadata is normalized to a plain record before
+          // reaching this fallback path.
+          const metadata = __LEGIT_CAST__<Record<string, unknown>, unknown>(
+            entry.customMetadata,
+          );
+          return metadata[args.key] === args.equals;
+        });
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-metadata-by-filter',
+            'success',
+            startTime,
+            { ...operationDetails, count: entries.length },
+          );
+        }
+        return entries;
       }
 
       const prefix = getPrefix();
-      if (prefix === false) return [];
+      if (prefix === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-metadata-by-filter',
+            'skipped',
+            startTime,
+            { ...operationDetails, reason: 'inactive-session' },
+          );
+        }
+        return [];
+      }
 
       const order = args.order ?? 'key';
-      return localPersistentStorage
+      const entries = localPersistentStorage
         .listManifestEntries(prefix)
         .filter((entry) => {
           const metadata = isObject(entry.meta) ? entry.meta : null;
@@ -1049,43 +1803,163 @@ export function createPersistentStorageNamespaceHandle<
           writtenAt: entry.lastAccessAt,
           version: asyncVersion,
         }));
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'list-metadata-by-filter',
+          'success',
+          startTime,
+          { ...operationDetails, count: entries.length, order },
+        );
+      }
+      return entries;
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'list-metadata-by-filter',
+          'error',
+          startTime,
+          operationDetails,
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
       return [];
     }
   }
 
   async function listKeys(): Promise<string[]> {
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
     if (asyncAdapter !== null) {
       const namespace = getAsyncNamespace();
-      if (!namespace) return [];
+      if (!namespace) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-keys',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session' },
+          );
+        }
+        return [];
+      }
 
-      return namespace.listKeys();
+      try {
+        const keys = await namespace.listKeys();
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-keys',
+            'success',
+            startTime,
+            { count: keys.length },
+          );
+        }
+        return keys;
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'list-keys',
+            'error',
+            startTime,
+            undefined,
+            error,
+          );
+        }
+        onPersistentStorageError?.(error);
+        return [];
+      }
     }
 
     const entries = await listMetadata({ order: 'key' });
-    return entries.map((entry) => entry.key);
+    const keys = entries.map((entry) => entry.key);
+    if (import.meta.env.DEV) {
+      logPersistentStorageOperation(
+        debugContext,
+        'list-keys',
+        'success',
+        startTime,
+        { count: keys.length },
+      );
+    }
+    return keys;
   }
 
   async function clear(): Promise<void> {
     const prefix = getPrefix();
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
 
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) return;
+        if (!namespace) {
+          if (import.meta.env.DEV) {
+            logPersistentStorageOperation(
+              debugContext,
+              'clear',
+              'skipped',
+              startTime,
+              { reason: 'inactive-session' },
+            );
+          }
+          return;
+        }
         await namespace.clear();
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'clear',
+            'success',
+            startTime,
+          );
+        }
         return;
       }
 
-      if (prefix === false) return;
+      if (prefix === false) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'clear',
+            'skipped',
+            startTime,
+            { reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
 
       await runLocalStorageMutation(() => {
         localPersistentStorage.clearManifest(
           localPersistentStorage.getManifestKeyForPrefix(prefix),
         );
       });
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'clear',
+          'success',
+          startTime,
+        );
+      }
     } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'clear',
+          'error',
+          startTime,
+          undefined,
+          error,
+        );
+      }
       onPersistentStorageError?.(error);
     }
   }
@@ -1112,13 +1986,44 @@ export function createPersistentStorageNamespaceHandle<
 export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number | undefined,
-  options: LocalStorageMetadataOptions & { allowExpiredRead?: boolean },
+  options: LocalStorageMetadataOptions & {
+    allowExpiredRead?: boolean;
+    debug?: {
+      context: PersistentStorageDebugContext;
+      details?: Readonly<Record<string, unknown>>;
+      operation: TSDFPersistentStorageDebugOperation;
+    };
+  },
   // WORKAROUND: The default local-storage codec is generic over unknown and simply forwards JSON-compatible values, so callers rebind it to their T when no custom codec is supplied.
   valueCodec: LocalStorageValueCodec<T> = __LEGIT_CAST__<
     LocalStorageValueCodec<T>,
     LocalStorageValueCodec<unknown>
   >(defaultLocalStorageValueCodec),
 ): StorageCacheEntry<T> | null {
+  function logRead(
+    status: PersistentStorageDebugStatus,
+    reason?: string,
+  ): void {
+    if (!import.meta.env.DEV) return;
+    if (!options.debug) return;
+
+    const details: Record<string, unknown> = {};
+    if (reason !== undefined) {
+      details.reason = reason;
+    }
+    if (options.debug.details !== undefined) {
+      Object.assign(details, options.debug.details);
+    }
+
+    logPersistentStorageOperation(
+      withPersistentStorageDebugKey(options.debug.context, key),
+      options.debug.operation,
+      status,
+      null,
+      details,
+    );
+  }
+
   const metadata =
     options.metadata === 'single'
       ? localPersistentStorage.readSingleEntryMetadataByPayload(key)
@@ -1132,29 +2037,58 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
     return null;
   }
 
-  if (metadata === null) return null;
+  if (metadata === null) {
+    if (import.meta.env.DEV) {
+      logRead('miss', 'missing-metadata');
+    }
+    return null;
+  }
 
   if (
     Date.now() - metadata.lastAccessAt >
       getManagedLocalStorageRuntimeConfig().maxAgeMs &&
     !options.allowExpiredRead
   ) {
+    if (import.meta.env.DEV) {
+      logRead('miss', 'expired-entry');
+    }
     return removeAndReturnNull();
   }
 
   const raw = localPersistentStorage.readRaw(key);
-  if (raw === null) return removeAndReturnNull();
+  if (raw === null) {
+    if (import.meta.env.DEV) {
+      logRead('miss', 'missing-entry');
+    }
+    return removeAndReturnNull();
+  }
 
   const entry = parseCompactLocalStorageEntry(raw);
-  if (entry === null) return removeAndReturnNull();
+  if (entry === null) {
+    if (import.meta.env.DEV) {
+      logRead('miss', 'invalid-entry');
+    }
+    return removeAndReturnNull();
+  }
 
   if (!doesStorageEntryVersionMatch(entry.version, version)) {
+    if (import.meta.env.DEV) {
+      logRead('miss', 'version-mismatch');
+    }
     return removeAndReturnNull();
   }
 
   const decoded = valueCodec.deserialize(entry.value);
-  if (decoded === null) return removeAndReturnNull();
+  if (decoded === null) {
+    if (import.meta.env.DEV) {
+      logRead('miss', 'decode-failed');
+    }
+    return removeAndReturnNull();
+  }
 
+  if (import.meta.env.DEV) {
+    logRead('success');
+  }
   return {
     data: decoded,
     timestamp: metadata.lastAccessAt,
@@ -1299,12 +2233,61 @@ export function resetExpirationScanTracking(): void {
 export async function readProtectedStorageKeys(
   adapter: StorageAdapter,
   sessionKey: string,
+  debugLogger?: TSDFDebugLogger,
 ): Promise<Set<string>> {
+  const debugContext = import.meta.env.DEV
+    ? createPersistentStorageDebugContext(
+        adapter,
+        '_offline_',
+        debugLogger,
+        undefined,
+        undefined,
+        '__internal.protected',
+      )
+    : undefined;
+  const startTime = import.meta.env.DEV
+    ? startPersistentStorageDebugTiming(debugContext)
+    : null;
+
   if (adapter === 'local-sync') {
-    return localPersistentStorage.readProtectedStorageKeys(sessionKey);
+    const keys = localPersistentStorage.readProtectedStorageKeys(sessionKey);
+    if (import.meta.env.DEV) {
+      logPersistentStorageOperation(
+        debugContext,
+        'read-protected-keys',
+        'success',
+        startTime,
+        { count: keys.size, sessionKey },
+      );
+    }
+    return keys;
   }
 
-  return adapter.readProtectedStorageKeys(sessionKey);
+  try {
+    const keys = await adapter.readProtectedStorageKeys(sessionKey);
+    if (import.meta.env.DEV) {
+      logPersistentStorageOperation(
+        debugContext,
+        'read-protected-keys',
+        'success',
+        startTime,
+        { count: keys.size, sessionKey },
+      );
+    }
+    return keys;
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      logPersistentStorageOperation(
+        debugContext,
+        'read-protected-keys',
+        'error',
+        startTime,
+        { sessionKey },
+        error,
+      );
+    }
+    throw error;
+  }
 }
 
 export function scheduleAsyncStorageMaintenance(

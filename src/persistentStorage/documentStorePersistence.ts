@@ -10,6 +10,7 @@ import {
 } from './parsePersistedData';
 import {
   assertValidPersistentStoreName,
+  createPersistentStorageDebugContext,
   createPersistentStorageHandle,
   getLocalStorageAdapter,
   isOfflineNetworkModeActiveSync,
@@ -40,13 +41,37 @@ function readDocumentFromLocalStorageSync(
   key: string,
   version: number | undefined,
   allowExpiredRead: boolean,
+  debug:
+    | {
+        debugLogger: ResolvedDocumentPersistentStorageConfig<ValidStoreState>['debugLogger'];
+        storeName: string;
+      }
+    | undefined,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
   >(
     key,
     version,
-    { allowExpiredRead, metadata: 'single' },
+    {
+      allowExpiredRead,
+      debug:
+        import.meta.env.DEV && debug
+          ? {
+              context: createPersistentStorageDebugContext(
+                'local-sync',
+                debug.storeName,
+                debug.debugLogger,
+                undefined,
+                key,
+                'document',
+              ),
+              details: { allowExpiredRead },
+              operation: 'sync-load',
+            }
+          : undefined,
+      metadata: 'single',
+    },
     documentStorageValueCodec,
   );
   if (!entry) return { persisted: null, foundEntry: false };
@@ -124,6 +149,9 @@ export function setupDocumentPersistence<
       key,
       version,
       isOfflineNetworkActive(),
+      import.meta.env.DEV
+        ? { debugLogger: config.debugLogger, storeName: config.storeName }
+        : undefined,
     );
 
     if (!persisted) {

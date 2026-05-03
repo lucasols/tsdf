@@ -16,6 +16,7 @@
     "strictPropertyInitialization": true,
     "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true,
+    "erasableSyntaxOnly": true,
     "stripInternal": true,
     "allowImportingTsExtensions": true,
     "types": ["vite/client", "vitest/globals"]

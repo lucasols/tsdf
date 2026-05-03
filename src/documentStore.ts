@@ -615,7 +615,9 @@ export function createDocumentStore<
               session: resolvedOfflineSessionForPersistentStorage,
             }
           : undefined,
-        debugLogger: storeManager.debugLogger,
+        ...(import.meta.env.DEV
+          ? { debugLogger: storeManager.debugLogger }
+          : undefined),
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })
@@ -680,7 +682,9 @@ export function createDocumentStore<
           getSessionKey: getSessionKeyForRuntime,
           onPersistentStorageError:
             resolvedPersistentStorageConfig.onPersistentStorageError,
-          debugLogger: storeManager.debugLogger,
+          ...(import.meta.env.DEV
+            ? { debugLogger: storeManager.debugLogger }
+            : undefined),
           adapter: resolvedPersistentStorageConfig.adapter,
           offlineSession: resolvedOfflineConfig.session,
           // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
@@ -920,7 +924,9 @@ export function createDocumentStore<
           clearOfflineOverlay();
         },
         transportFactory: testOptions?.browserTabsTransportFactory,
-        debugLogger: storeManager.debugLogger,
+        ...(import.meta.env.DEV
+          ? { debugLogger: storeManager.debugLogger }
+          : undefined),
         getWindowIsFocused,
         onWindowFocusChange: testOptions?.onWindowFocusChange,
         priorityTimings:

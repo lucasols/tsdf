@@ -105,7 +105,7 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active shared session / tenant key. */
   getSessionKey: () => string | false;
   /** Shared debug logger for browser-tab sync and persistent storage internals. */
-  debugLogger: TSDFDebugLogger | undefined;
+  debugLogger?: TSDFDebugLogger;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
   /** Global fallback for persistent storage failures in attached stores. */
@@ -238,7 +238,7 @@ export type CreateStoreManagerOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /**
    * Enables debug logs for browser-tab sync and persistent storage operations.
-   * Pass `true` to use console logging, a logger function, or `{ logger }`.
+   * Pass `true` to use console logging, or pass a logger function.
    */
   debug?: TSDFDebugOptions;
   /** Optional shared offline session config for every attached store. */
@@ -248,14 +248,24 @@ export type CreateStoreManagerOptions<
 export function createStoreManager<
   TUploadRef extends ValidPayload = ValidPayload,
 >(options: CreateStoreManagerOptions<TUploadRef>): StoreManager<TUploadRef> {
-  const debugLogger = resolveTSDFDebugLogger(options.debug);
-  const resolvedOfflineSession = options.offlineSession
-    ? createOfflineSession<TUploadRef>({
-        config: options.offlineSession,
-        getSessionKey: options.getSessionKey,
-        debugLogger,
-      })
+  const debugLogger = import.meta.env.DEV
+    ? resolveTSDFDebugLogger(options.debug)
     : undefined;
+  let resolvedOfflineSession: OfflineSession<TUploadRef> | undefined;
+  if (options.offlineSession) {
+    const createOfflineSessionOptions: Parameters<
+      typeof createOfflineSession<TUploadRef>
+    >[0] = {
+      config: options.offlineSession,
+      getSessionKey: options.getSessionKey,
+    };
+    if (debugLogger !== undefined) {
+      createOfflineSessionOptions.debugLogger = debugLogger;
+    }
+    resolvedOfflineSession = createOfflineSession<TUploadRef>(
+      createOfflineSessionOptions,
+    );
+  }
   const offlineApi: StoreManagerOfflineApi<TUploadRef> = resolvedOfflineSession
     ? {
         getOfflineConfig: () => resolvedOfflineSession.getConfig(),
@@ -318,7 +328,6 @@ export function createStoreManager<
 
   const storeManager: StoreManager<TUploadRef> = {
     getSessionKey: options.getSessionKey,
-    debugLogger,
     errorNormalizer: options.errorNormalizer,
     onPersistentStorageError: options.onPersistentStorageError,
     onMutationError: options.onMutationError,
@@ -346,6 +355,9 @@ export function createStoreManager<
     },
     ...offlineApi,
   };
+  if (debugLogger !== undefined) {
+    storeManager.debugLogger = debugLogger;
+  }
 
   storeManagerRegistry.set(storeManager, registry);
   storeManagerOfflineSessionRegistry.set(storeManager, resolvedOfflineSession);

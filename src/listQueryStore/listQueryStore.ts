@@ -1328,7 +1328,9 @@ export function createListQueryStore<
               session: resolvedOfflineSessionForPersistentStorage,
             }
           : undefined,
-        debugLogger: storeManager.debugLogger,
+        ...(import.meta.env.DEV
+          ? { debugLogger: storeManager.debugLogger }
+          : undefined),
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })
@@ -1950,7 +1952,9 @@ export function createListQueryStore<
         getSessionKey: getSessionKeyForRuntime,
         onPersistentStorageError:
           resolvedPersistentStorageConfig.onPersistentStorageError,
-        debugLogger: storeManager.debugLogger,
+        ...(import.meta.env.DEV
+          ? { debugLogger: storeManager.debugLogger }
+          : undefined),
         adapter: resolvedPersistentStorageConfig.adapter,
         offlineSession: resolvedOfflineConfig.session,
         // WORKAROUND: The list-query persistent config keeps operations behind a
@@ -2543,7 +2547,9 @@ export function createListQueryStore<
         clearOfflineOverlays();
       },
       transportFactory: testOptions?.browserTabsTransportFactory,
-      debugLogger: storeManager.debugLogger,
+      ...(import.meta.env.DEV
+        ? { debugLogger: storeManager.debugLogger }
+        : undefined),
       getWindowIsFocused,
       onWindowFocusChange: testOptions?.onWindowFocusChange,
       priorityTimings:
