@@ -1,20 +1,13 @@
-import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 
-type DocumentState = {
-  value: number;
-};
+type DocumentState = { value: number };
 
-type CollectionItem = {
-  name: string;
-};
+type CollectionItem = { name: string };
 
-type UserRow = {
-  id: number;
-  name: string;
-};
+type UserRow = { id: number; name: string };
 
 const workspaceRoot = fileURLToPath(new URL('.', import.meta.url));
 const fixtureRoot = resolve(workspaceRoot, 'playwright-fixture');
@@ -28,10 +21,7 @@ type FixtureState = {
 function createDefaultState(): FixtureState {
   return {
     document: { value: 0 },
-    collection: {
-      item1: { name: 'Item 1' },
-      item2: { name: 'Item 2' },
-    },
+    collection: { item1: { name: 'Item 1' }, item2: { name: 'Item 2' } },
     users: [
       { id: 1, name: 'Alice' },
       { id: 2, name: 'Bob' },
@@ -104,17 +94,46 @@ type RequestHistoryEntry = {
   timestamp: number;
 };
 
-function createFixtureApiPlugin(): Plugin {
-  let state = createDefaultState();
-  let requestHistory: RequestHistoryEntry[] = [];
+type FixtureApiScope = {
+  requestHistory: RequestHistoryEntry[];
+  state: FixtureState;
+};
 
-  function resetState(): void {
-    state = createDefaultState();
-    requestHistory = [];
+function createFixtureApiScope(): FixtureApiScope {
+  return { requestHistory: [], state: createDefaultState() };
+}
+
+function createFixtureApiPlugin(): Plugin {
+  const scopes = new Map<string, FixtureApiScope>();
+
+  function getScopeId(req: IncomingMessage, url: URL): string {
+    const headerScopeId = req.headers['x-scope-id'];
+    if (typeof headerScopeId === 'string' && headerScopeId) {
+      return headerScopeId;
+    }
+
+    return url.searchParams.get('scopeId') ?? 'default';
   }
 
-  function addHistoryEntry(req: IncomingMessage, pathname: string): void {
-    requestHistory.push({
+  function getScope(scopeId: string): FixtureApiScope {
+    const currentScope = scopes.get(scopeId);
+    if (currentScope) return currentScope;
+
+    const scope = createFixtureApiScope();
+    scopes.set(scopeId, scope);
+    return scope;
+  }
+
+  function resetScope(scopeId: string): void {
+    scopes.set(scopeId, createFixtureApiScope());
+  }
+
+  function addHistoryEntry(
+    scope: FixtureApiScope,
+    req: IncomingMessage,
+    pathname: string,
+  ): void {
+    scope.requestHistory.push({
       method: req.method ?? 'GET',
       path: pathname,
       pageId:
@@ -136,35 +155,37 @@ function createFixtureApiPlugin(): Plugin {
 
         const url = new URL(req.url, 'http://127.0.0.1:42173');
         const { pathname, searchParams } = url;
+        const scopeId = getScopeId(req, url);
+        const scope = getScope(scopeId);
 
         if (pathname === '/api/test/reset' && req.method === 'POST') {
-          resetState();
+          resetScope(scopeId);
           sendJson(res, 200, { ok: true });
           return;
         }
 
         if (pathname === '/api/test/history/reset' && req.method === 'POST') {
-          requestHistory = [];
+          scope.requestHistory = [];
           sendJson(res, 200, { ok: true });
           return;
         }
 
         if (pathname === '/api/test/history' && req.method === 'GET') {
-          sendJson(res, 200, { history: requestHistory });
+          sendJson(res, 200, { history: scope.requestHistory });
           return;
         }
 
         if (pathname === '/api/document' && req.method === 'GET') {
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(75);
-          sendJson(res, 200, state.document);
+          sendJson(res, 200, scope.state.document);
           return;
         }
 
         if (pathname === '/api/document/set' && req.method === 'POST') {
           const body = await readJsonBody<{ value: number }>(req);
-          state.document = { value: body.value };
-          sendJson(res, 200, state.document);
+          scope.state.document = { value: body.value };
+          sendJson(res, 200, scope.state.document);
           return;
         }
 
@@ -172,10 +193,10 @@ function createFixtureApiPlugin(): Plugin {
           const body = await readJsonBody<{ value: number; delayMs?: number }>(
             req,
           );
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(body.delayMs ?? 0);
-          state.document = { value: body.value };
-          sendJson(res, 200, state.document);
+          scope.state.document = { value: body.value };
+          sendJson(res, 200, scope.state.document);
           return;
         }
 
@@ -184,7 +205,7 @@ function createFixtureApiPlugin(): Plugin {
         );
         if (collectionItemMatch && req.method === 'GET') {
           const itemId = collectionItemMatch[1];
-          const item = itemId ? state.collection[itemId] : undefined;
+          const item = itemId ? scope.state.collection[itemId] : undefined;
 
           if (!item) {
             sendJson(res, 404, {
@@ -193,7 +214,7 @@ function createFixtureApiPlugin(): Plugin {
             return;
           }
 
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(75);
           sendJson(res, 200, item);
           return;
@@ -205,12 +226,12 @@ function createFixtureApiPlugin(): Plugin {
             .map((itemId) => itemId.trim())
             .filter(Boolean);
 
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(75);
           sendJson(res, 200, {
             items: itemIds.map((itemId) => ({
               itemId,
-              data: state.collection[itemId] ?? null,
+              data: scope.state.collection[itemId] ?? null,
             })),
           });
           return;
@@ -221,23 +242,21 @@ function createFixtureApiPlugin(): Plugin {
         );
         if (collectionMutationMatch && req.method === 'POST') {
           const itemId = collectionMutationMatch[1];
-          const item = itemId ? state.collection[itemId] : undefined;
-
-          if (!item) {
+          if (!itemId || !scope.state.collection[itemId]) {
             sendJson(res, 404, {
               message: `Unknown collection item: ${itemId}`,
             });
             return;
           }
 
-          const body = await readJsonBody<{
-            name: string;
-            delayMs?: number;
-          }>(req);
-          addHistoryEntry(req, pathname);
+          const body = await readJsonBody<{ name: string; delayMs?: number }>(
+            req,
+          );
+          addHistoryEntry(scope, req, pathname);
           await sleep(body.delayMs ?? 0);
-          state.collection[itemId] = { name: body.name };
-          sendJson(res, 200, state.collection[itemId]);
+          const updatedItem = { name: body.name };
+          scope.state.collection[itemId] = updatedItem;
+          sendJson(res, 200, updatedItem);
           return;
         }
 
@@ -249,17 +268,19 @@ function createFixtureApiPlugin(): Plugin {
           }
 
           const offset = Number(searchParams.get('offset') ?? 0);
-          const limit = Number(searchParams.get('limit') ?? state.users.length);
-          const users = state.users.slice(offset, offset + limit);
+          const limit = Number(
+            searchParams.get('limit') ?? scope.state.users.length,
+          );
+          const users = scope.state.users.slice(offset, offset + limit);
 
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(75);
           sendJson(res, 200, {
             items: users.map((user) => ({
               itemPayload: `users||${user.id}`,
               data: user,
             })),
-            hasMore: offset + limit < state.users.length,
+            hasMore: offset + limit < scope.state.users.length,
           });
           return;
         }
@@ -274,13 +295,13 @@ function createFixtureApiPlugin(): Plugin {
             return;
           }
 
-          const item = state.users.find((user) => user.id === itemId);
+          const item = scope.state.users.find((user) => user.id === itemId);
           if (!item) {
             sendJson(res, 404, { message: `Unknown user: ${itemId}` });
             return;
           }
 
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(75);
           sendJson(res, 200, selectFields(item, parseFields(searchParams)));
           return;
@@ -302,26 +323,25 @@ function createFixtureApiPlugin(): Plugin {
             patch: Partial<UserRow>;
             delayMs?: number;
           }>(req);
-          const index = state.users.findIndex((user) => user.id === itemId);
+          const index = scope.state.users.findIndex(
+            (user) => user.id === itemId,
+          );
 
           if (index === -1) {
             sendJson(res, 404, { message: `Unknown user: ${itemId}` });
             return;
           }
 
-          addHistoryEntry(req, pathname);
+          addHistoryEntry(scope, req, pathname);
           await sleep(body.delayMs ?? 0);
-          const current = state.users[index];
+          const current = scope.state.users[index];
           if (!current) {
             sendJson(res, 404, { message: `Unknown user: ${itemId}` });
             return;
           }
 
-          state.users[index] = {
-            ...current,
-            ...body.patch,
-          };
-          sendJson(res, 200, state.users[index]);
+          scope.state.users[index] = { ...current, ...body.patch };
+          sendJson(res, 200, scope.state.users[index]);
           return;
         }
 
@@ -333,20 +353,8 @@ function createFixtureApiPlugin(): Plugin {
 
 export default defineConfig({
   root: fixtureRoot,
-  esbuild: {
-    jsx: 'automatic',
-  },
-  resolve: {
-    alias: {
-      '@src': resolve(workspaceRoot, 'src'),
-    },
-  },
-  server: {
-    fs: {
-      allow: [workspaceRoot],
-    },
-    port: 42173,
-    strictPort: true,
-  },
+  esbuild: { jsx: 'automatic' },
+  resolve: { alias: { '@src': resolve(workspaceRoot, 'src') } },
+  server: { fs: { allow: [workspaceRoot] }, port: 42173, strictPort: true },
   plugins: [createFixtureApiPlugin()],
 });

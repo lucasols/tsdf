@@ -1,17 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
+import { indexedDbPersistentStorage } from '../../src/indexed-db-storage';
 import {
   clearSessionStorage,
   createCollectionStore,
   createDocumentStore,
   createListQueryStore,
   createStoreManager,
-  indexedDbPersistentStorage,
-  localPersistentStorage,
-  opfsPersistentStorage,
+  type StorageAdapter,
   type StoreError,
 } from '../../src/main';
+import { opfsPersistentStorage } from '../../src/opfs-storage';
 
 type ListQueryPayload = { tableId: 'users' };
 
@@ -28,6 +28,12 @@ function createFixtureStoreManager(sessionKey: string | false) {
   });
 }
 
+function getFixtureScopeId(): string {
+  return (
+    new URLSearchParams(window.location.search).get('scopeId') ?? 'default'
+  );
+}
+
 async function requestJson<T>(
   pageId: string,
   path: string,
@@ -35,6 +41,7 @@ async function requestJson<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('x-page-id', pageId);
+  headers.set('x-scope-id', getFixtureScopeId());
 
   if (init.body && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
@@ -81,7 +88,7 @@ function getQueryParams(): {
 
 function getPersistentStorageAdapter(
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs',
-) {
+): StorageAdapter {
   switch (adapterKey) {
     case 'indexedDb':
       return indexedDbPersistentStorage;
@@ -160,10 +167,8 @@ function DocumentScenario({
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
       lowPriorityThrottleMs: 10_000,
       baseCoalescingWindowMs: 50,
-      backgroundCoalescingWindowMultiplier: 3,
       dynamicRealtimeThrottleMs: () => 100,
       usesRealTimeUpdates: true,
-      blockWindowClose: null,
       '~test': { getWindowIsFocused: () => focusRef.current },
     }),
   );
@@ -270,9 +275,7 @@ function CollectionScenario({
         }),
       lowPriorityThrottleMs: 10_000,
       baseCoalescingWindowMs: 50,
-      backgroundCoalescingWindowMultiplier: 3,
       usesRealTimeUpdates: true,
-      blockWindowClose: null,
       '~test': { getWindowIsFocused: () => focusRef.current },
     }),
   );
@@ -377,7 +380,6 @@ function ListScenario({
       },
       lowPriorityThrottleMs: 10_000,
       baseCoalescingWindowMs: 50,
-      backgroundCoalescingWindowMultiplier: 3,
       defaultQuerySize: 10,
       usesRealTimeUpdates: true,
       optimisticListUpdates: [
@@ -386,7 +388,6 @@ function ListScenario({
           sort: { sortBy: (item) => item.name, order: 'asc' },
         },
       ],
-      blockWindowClose: null,
       '~test': { getWindowIsFocused: () => focusRef.current },
     }),
   );
@@ -428,7 +429,6 @@ function ListScenario({
                 body: JSON.stringify({ patch: { name: 'Zoe' } }),
               });
             },
-            getRelatedQueries: (payload) => payload.tableId === 'users',
           });
         }}
         type="button"
@@ -681,7 +681,6 @@ function PersistListScenario({
                 body: JSON.stringify({ patch: { name: 'Persisted' } }),
               });
             },
-            getRelatedQueries: (payload) => payload.tableId === 'users',
           });
         }}
         type="button"

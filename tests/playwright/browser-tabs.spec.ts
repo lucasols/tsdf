@@ -1,18 +1,53 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   expect,
-  test,
+  test as base,
   type APIRequestContext,
   type BrowserContext,
   type Page,
+  type TestInfo,
 } from '@playwright/test';
 
-async function resetFixture(request: APIRequestContext): Promise<void> {
-  await request.post('/api/test/reset');
+const test = base.extend<{ fixtureScopeId: string }>({
+  fixtureScopeId: async ({ request }, run, testInfo) => {
+    const fixtureScopeId = createFixtureScopeId(testInfo);
+    await resetFixture(request, fixtureScopeId);
+    await run(fixtureScopeId);
+  },
+});
+
+function createFixtureScopeId(testInfo: TestInfo): string {
+  return encodeURIComponent(
+    [
+      testInfo.project.name,
+      String(testInfo.workerIndex),
+      String(testInfo.repeatEachIndex),
+      String(testInfo.retry),
+      ...testInfo.titlePath,
+    ].join('/'),
+  );
 }
 
-async function resetHistory(request: APIRequestContext): Promise<void> {
-  await request.post('/api/test/history/reset');
+function scopeHeaders(fixtureScopeId: string): Record<string, string> {
+  return { 'x-scope-id': fixtureScopeId };
+}
+
+async function resetFixture(
+  request: APIRequestContext,
+  fixtureScopeId: string,
+): Promise<void> {
+  await request.post('/api/test/reset', {
+    headers: scopeHeaders(fixtureScopeId),
+  });
+}
+
+async function resetHistory(
+  request: APIRequestContext,
+  fixtureScopeId: string,
+): Promise<void> {
+  await request.post('/api/test/history/reset', {
+    headers: scopeHeaders(fixtureScopeId),
+  });
 }
 
 type RequestHistoryEntry = {
@@ -24,8 +59,11 @@ type RequestHistoryEntry = {
 
 async function getHistory(
   request: APIRequestContext,
+  fixtureScopeId: string,
 ): Promise<RequestHistoryEntry[]> {
-  const response = await request.get('/api/test/history');
+  const response = await request.get('/api/test/history', {
+    headers: scopeHeaders(fixtureScopeId),
+  });
   const body = __LEGIT_CAST__<{ history: RequestHistoryEntry[] }, unknown>(
     await response.json(),
   );
@@ -53,10 +91,15 @@ async function openScenario(
   context: BrowserContext,
   scenario: 'document' | 'collection' | 'list',
   pageId: string,
+  fixtureScopeId: string,
   options?: { storeId?: string; sessionKey?: string },
 ) {
   const page = await context.newPage();
-  const searchParams = new URLSearchParams({ scenario, pageId });
+  const searchParams = new URLSearchParams({
+    scenario,
+    pageId,
+    scopeId: fixtureScopeId,
+  });
 
   if (options?.storeId) {
     searchParams.set('storeId', options.storeId);
@@ -93,28 +136,35 @@ async function setAllPagesBackgroundInOrder(
   }
 }
 
-test.beforeEach(async ({ request }) => {
-  await resetFixture(request);
-});
-
 test('document optimistic mutation updates a sibling page without sibling network work', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a');
-  const pageB = await openScenario(context, 'document', 'page-b');
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-mutate-optimistic').click();
 
   await expect(pageA.getByTestId('document-value')).toHaveText('1');
   await expect(pageB.getByTestId('document-value')).toHaveText('1');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, { pageId: 'page-a', path: '/api/document/mutate' }),
   ).toBe(1);
@@ -131,11 +181,22 @@ test('document optimistic mutation updates a sibling page without sibling networ
 
 test('document realtime updates stay in the active page and sync to the background page', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a');
-  const pageB = await openScenario(context, 'document', 'page-b');
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
@@ -143,13 +204,13 @@ test('document realtime updates stay in the active page and sync to the backgrou
   await pageA.getByTestId('document-focus-active').click();
   await pageB.getByTestId('document-focus-background').click();
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-trigger-rtu').click();
 
   await expect(pageA.getByTestId('document-value')).toHaveText('2');
   await expect(pageB.getByTestId('document-value')).toHaveText('2');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -170,15 +231,24 @@ test('document realtime updates stay in the active page and sync to the backgrou
 
 test('document realtime updates do not sync across different store ids', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a', {
-    storeId: 'document-store-a',
-  });
-  const pageB = await openScenario(context, 'document', 'page-b', {
-    storeId: 'document-store-b',
-  });
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+    { storeId: 'document-store-a' },
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+    { storeId: 'document-store-b' },
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
@@ -186,13 +256,13 @@ test('document realtime updates do not sync across different store ids', async (
   await pageA.getByTestId('document-focus-active').click();
   await pageB.getByTestId('document-focus-background').click();
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-trigger-rtu').click();
 
   await expect(pageA.getByTestId('document-value')).toHaveText('2');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -213,28 +283,35 @@ test('document realtime updates do not sync across different store ids', async (
 
 test('document browser-tabs sync stays isolated across different session keys', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a', {
-    storeId: 'document-store-shared',
-    sessionKey: 'account-a',
-  });
-  const pageB = await openScenario(context, 'document', 'page-b', {
-    storeId: 'document-store-shared',
-    sessionKey: 'account-b',
-  });
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+    { storeId: 'document-store-shared', sessionKey: 'account-a' },
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+    { storeId: 'document-store-shared', sessionKey: 'account-b' },
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-mutate-optimistic').click();
 
   await expect(pageA.getByTestId('document-value')).toHaveText('1');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, { pageId: 'page-a', path: '/api/document/mutate' }),
   ).toBe(1);
@@ -251,18 +328,29 @@ test('document browser-tabs sync stays isolated across different session keys', 
 
 test('collection optimistic mutations propagate without sibling refetches', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'collection', 'page-a');
-  const pageB = await openScenario(context, 'collection', 'page-b');
+  const pageA = await openScenario(
+    context,
+    'collection',
+    'page-a',
+    fixtureScopeId,
+  );
+  const pageB = await openScenario(
+    context,
+    'collection',
+    'page-b',
+    fixtureScopeId,
+  );
 
   await expect(pageA.getByTestId('collection-item1-name')).toHaveText('Item 1');
   await expect(pageB.getByTestId('collection-item1-name')).toHaveText('Item 1');
   await waitForPageSettle(pageA);
   await waitForPageSettle(pageB);
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('collection-item1-mutate').click();
 
   await expect(pageA.getByTestId('collection-item1-name')).toHaveText(
@@ -272,7 +360,7 @@ test('collection optimistic mutations propagate without sibling refetches', asyn
     'Updated',
   );
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -292,11 +380,22 @@ test('collection optimistic mutations propagate without sibling refetches', asyn
 
 test('document realtime updates are deduplicated when every page is backgrounded and the last active page leads', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a');
-  const pageB = await openScenario(context, 'document', 'page-b');
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
@@ -306,13 +405,13 @@ test('document realtime updates are deduplicated when every page is backgrounded
     { page: pageA, prefix: 'document' },
   ]);
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-trigger-rtu').click();
 
   await expect(pageA.getByTestId('document-value')).toHaveText('2');
   await expect(pageB.getByTestId('document-value')).toHaveText('2');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -333,15 +432,24 @@ test('document realtime updates are deduplicated when every page is backgrounded
 
 test('document realtime updates remain isolated across different store ids while every page is backgrounded', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a', {
-    storeId: 'document-store-a',
-  });
-  const pageB = await openScenario(context, 'document', 'page-b', {
-    storeId: 'document-store-b',
-  });
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+    { storeId: 'document-store-a' },
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+    { storeId: 'document-store-b' },
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
@@ -351,13 +459,13 @@ test('document realtime updates remain isolated across different store ids while
     { page: pageA, prefix: 'document' },
   ]);
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-trigger-rtu').click();
 
   await expect(pageA.getByTestId('document-value')).toHaveText('2');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -378,11 +486,22 @@ test('document realtime updates remain isolated across different store ids while
 
 test('collection realtime updates are deduplicated when every page is backgrounded', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'collection', 'page-a');
-  const pageB = await openScenario(context, 'collection', 'page-b');
+  const pageA = await openScenario(
+    context,
+    'collection',
+    'page-a',
+    fixtureScopeId,
+  );
+  const pageB = await openScenario(
+    context,
+    'collection',
+    'page-b',
+    fixtureScopeId,
+  );
 
   await expect(pageA.getByTestId('collection-item1-name')).toHaveText('Item 1');
   await expect(pageB.getByTestId('collection-item1-name')).toHaveText('Item 1');
@@ -392,7 +511,7 @@ test('collection realtime updates are deduplicated when every page is background
     { page: pageA, prefix: 'collection' },
   ]);
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('collection-trigger-rtu').click();
 
   await expect(pageA.getByTestId('collection-item1-name')).toHaveText(
@@ -402,7 +521,7 @@ test('collection realtime updates are deduplicated when every page is background
     'Updated',
   );
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -423,11 +542,12 @@ test('collection realtime updates are deduplicated when every page is background
 
 test('list query realtime updates are deduplicated when every page is backgrounded', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'list', 'page-a');
-  const pageB = await openScenario(context, 'list', 'page-b');
+  const pageA = await openScenario(context, 'list', 'page-a', fixtureScopeId);
+  const pageB = await openScenario(context, 'list', 'page-b', fixtureScopeId);
 
   await expect(pageA.getByTestId('list-query-order')).toHaveText(
     'users||1,users||2',
@@ -441,13 +561,13 @@ test('list query realtime updates are deduplicated when every page is background
     { page: pageA, prefix: 'list' },
   ]);
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('list-trigger-rtu').click();
 
   await expect(pageA.getByTestId('list-item1-name')).toHaveText('Zoe');
   await expect(pageB.getByTestId('list-item1-name')).toHaveText('Zoe');
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-a',
@@ -468,20 +588,31 @@ test('list query realtime updates are deduplicated when every page is background
 
 test('document scheduler timing sync suppresses redundant low-priority requests in sibling pages', async ({
   browser,
+  fixtureScopeId,
   request,
 }) => {
   const context = await browser.newContext();
-  const pageA = await openScenario(context, 'document', 'page-a');
-  const pageB = await openScenario(context, 'document', 'page-b');
+  const pageA = await openScenario(
+    context,
+    'document',
+    'page-a',
+    fixtureScopeId,
+  );
+  const pageB = await openScenario(
+    context,
+    'document',
+    'page-b',
+    fixtureScopeId,
+  );
 
   await expect(pageA.getByTestId('document-value')).toHaveText('0');
   await expect(pageB.getByTestId('document-value')).toHaveText('0');
 
-  await resetHistory(request);
+  await resetHistory(request, fixtureScopeId);
   await pageA.getByTestId('document-fetch-high').click();
   await expect
     .poll(async () => {
-      const history = await getHistory(request);
+      const history = await getHistory(request, fixtureScopeId);
       return countRequests(history, {
         pageId: 'page-a',
         path: '/api/document',
@@ -495,7 +626,7 @@ test('document scheduler timing sync suppresses redundant low-priority requests 
     'skipped',
   );
 
-  const history = await getHistory(request);
+  const history = await getHistory(request, fixtureScopeId);
   expect(
     countRequests(history, {
       pageId: 'page-b',

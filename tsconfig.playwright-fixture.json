@@ -1,5 +1,12 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": true },
-  "include": ["playwright-fixture/src/**/*"]
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vite/client", "vitest/globals"]
+  },
+  "include": [
+    "playwright.config.ts",
+    "playwright.fixture.vite.config.ts",
+    "playwright-fixture/src/**/*"
+  ]
 }

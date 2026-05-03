@@ -1,11 +1,48 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import {
+  expect,
+  test as base,
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+  type TestInfo,
+} from '@playwright/test';
 
 const SAVE_DEBOUNCE_MS = 1000;
+
+const test = base.extend<{ fixtureScopeId: string }>({
+  fixtureScopeId: async ({ request }, run, testInfo) => {
+    const fixtureScopeId = createFixtureScopeId(testInfo);
+    await resetFixture(request, fixtureScopeId);
+    await run(fixtureScopeId);
+  },
+});
+
+function createFixtureScopeId(testInfo: TestInfo): string {
+  return encodeURIComponent(
+    [
+      testInfo.project.name,
+      String(testInfo.workerIndex),
+      String(testInfo.repeatEachIndex),
+      String(testInfo.retry),
+      ...testInfo.titlePath,
+    ].join('/'),
+  );
+}
+
+async function resetFixture(
+  request: APIRequestContext,
+  fixtureScopeId: string,
+): Promise<void> {
+  await request.post('/api/test/reset', {
+    headers: { 'x-scope-id': fixtureScopeId },
+  });
+}
 
 async function openScenario(
   context: BrowserContext,
   scenario: 'persist-document' | 'persist-collection' | 'persist-list',
   pageId: string,
+  fixtureScopeId: string,
   options: {
     storeId: string;
     adapterKey: AdapterCase['adapterKey'];
@@ -16,6 +53,7 @@ async function openScenario(
   const searchParams = new URLSearchParams({
     scenario,
     pageId,
+    scopeId: fixtureScopeId,
     storeId: options.storeId,
     adapter: options.adapterKey,
   });
@@ -43,18 +81,21 @@ for (const adapterCase of [
   { adapterKey: 'opfs', label: 'opfs' },
 ] as const satisfies readonly AdapterCase[]) {
   test.describe(`persistent storage — ${adapterCase.label}`, () => {
-    test.beforeEach(async ({ request }) => {
-      await request.post('/api/test/reset');
-    });
-
     test('document store persists data and restores on reload', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-document', 'page-a', {
-        storeId: `doc-${adapterCase.label}-basic`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-document',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `doc-${adapterCase.label}-basic`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-doc-status')).toHaveText(
         'success',
@@ -77,12 +118,19 @@ for (const adapterCase of [
 
     test('document store restores mutated data after reload', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-document', 'page-a', {
-        storeId: `doc-${adapterCase.label}-mutate`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-document',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `doc-${adapterCase.label}-mutate`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-doc-status')).toHaveText(
         'success',
@@ -108,12 +156,19 @@ for (const adapterCase of [
 
     test('document store does not restore data after clearing storage', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-document', 'page-a', {
-        storeId: `doc-${adapterCase.label}-clear`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-document',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `doc-${adapterCase.label}-clear`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-doc-status')).toHaveText(
         'success',
@@ -135,12 +190,19 @@ for (const adapterCase of [
 
     test('collection store persists item data and restores on reload', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-collection', 'page-a', {
-        storeId: `col-${adapterCase.label}-basic`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-collection',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `col-${adapterCase.label}-basic`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
         'success',
@@ -165,12 +227,19 @@ for (const adapterCase of [
 
     test('collection store restores mutated item data after reload', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-collection', 'page-a', {
-        storeId: `col-${adapterCase.label}-mutate`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-collection',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `col-${adapterCase.label}-mutate`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
         'success',
@@ -197,12 +266,19 @@ for (const adapterCase of [
 
     test('collection store does not restore data after clearing storage', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-collection', 'page-a', {
-        storeId: `col-${adapterCase.label}-clear`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-collection',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `col-${adapterCase.label}-clear`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
         'success',
@@ -223,12 +299,19 @@ for (const adapterCase of [
 
     test('list query store persists list data and restores on reload', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-list', 'page-a', {
-        storeId: `list-${adapterCase.label}-basic`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-list',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `list-${adapterCase.label}-basic`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-list-status')).toHaveText(
         'success',
@@ -252,12 +335,19 @@ for (const adapterCase of [
 
     test('list query store restores mutated data after reload', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-list', 'page-a', {
-        storeId: `list-${adapterCase.label}-mutate`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-list',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `list-${adapterCase.label}-mutate`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-list-status')).toHaveText(
         'success',
@@ -283,12 +373,19 @@ for (const adapterCase of [
 
     test('list query store does not restore data after clearing storage', async ({
       browser,
+      fixtureScopeId,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(context, 'persist-list', 'page-a', {
-        storeId: `list-${adapterCase.label}-clear`,
-        adapterKey: adapterCase.adapterKey,
-      });
+      const page = await openScenario(
+        context,
+        'persist-list',
+        'page-a',
+        fixtureScopeId,
+        {
+          storeId: `list-${adapterCase.label}-clear`,
+          adapterKey: adapterCase.adapterKey,
+        },
+      );
 
       await expect(page.getByTestId('persist-list-status')).toHaveText(
         'success',
