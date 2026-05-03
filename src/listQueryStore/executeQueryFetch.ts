@@ -1,7 +1,6 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
-import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   offlineConnectivityError,
@@ -11,6 +10,7 @@ import {
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
+  normalizeStoreError,
   StoreError,
   ValidPayload,
   ValidStoreState,
@@ -294,7 +294,7 @@ export async function executeQueryFetch<
           'id' in exception &&
           exception.id === 'offline'
             ? offlineConnectivityError
-            : errorNormalizer(unknownToError(exception));
+            : normalizeStoreError(exception, errorNormalizer);
         store.produceState(
           (draft) => {
             const query = draft.queries[queryKey];

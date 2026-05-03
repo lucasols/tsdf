@@ -19,8 +19,9 @@ import {
   StoreError,
   StoreFetchError,
   TimeoutStoreError,
-  ValidPayload,
-  ValidStoreState,
+  type MaybeTSDFResult,
+  type ValidPayload,
+  type ValidStoreState,
 } from '../utils/storeShared';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
@@ -63,10 +64,12 @@ export type NormalizedFetchListFn<
   offset: number,
   limit: number,
   options: { signal: AbortSignal; fields?: string[] },
-) => Promise<{
-  items: { itemPayload: ItemPayload; data: ItemState }[];
-  hasMore: boolean;
-}>;
+) => Promise<
+  MaybeTSDFResult<{
+    items: { itemPayload: ItemPayload; data: ItemState }[];
+    hasMore: boolean;
+  }>
+>;
 
 type CreateFetchApiOptions<
   ItemState extends ValidStoreState,
@@ -83,11 +86,13 @@ type CreateFetchApiOptions<
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<ItemState>;
+  ) => Promise<MaybeTSDFResult<ItemState>>;
   batchFetchItemFn?: (
     requests: { payload: ItemPayload; fields?: string[] }[],
     options: { signal: AbortSignal; batchKey: string },
-  ) => Promise<Map<ItemPayload, ItemState | Error>>;
+  ) => Promise<
+    MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
+  >;
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   errorNormalizer: (exception: Error) => StoreError;
   partialResources?: PartialResourcesConfig<ItemState>;

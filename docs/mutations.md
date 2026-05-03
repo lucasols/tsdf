@@ -42,6 +42,8 @@ The `mutation` callback receives:
 - `updateState` - An immer-based function to update state during the mutation
 - `currentState` - The current data at the time the mutation executes
 
+Mutation callbacks return promises. The resolved value may be either a plain value or a `Result`. `Result.ok(value)` is treated like resolving to `value`; `Result.err(error)` is handled like rejecting with `error`, including optimistic rollback, error normalization, and offline fallback classification.
+
 ### Collection Store
 
 ```ts

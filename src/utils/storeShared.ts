@@ -1,4 +1,10 @@
-import { unknownToError } from 't-result';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  isResult,
+  unknownToError,
+  type Result as ResultType,
+  type ResultValidErrors,
+} from 't-result';
 import type { FetchType } from '../requestScheduler';
 
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
@@ -6,6 +12,34 @@ export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
 export type ValidPayload = number | string | Record<string, unknown>;
 
 export type ValidStoreState = Record<string, unknown> | unknown[];
+
+export type UnwrapTSDFResult<T> = T extends { ok: true; value: infer Value }
+  ? Value
+  : T extends { ok: false; error: ResultValidErrors }
+    ? never
+    : T;
+
+export function unwrapTSDFResult<T>(value: T): UnwrapTSDFResult<T> {
+  if (isResult(value)) {
+    if (value.ok) {
+      // WORKAROUND: TS conditional return types don't narrow from a runtime isResult guard on generic T.
+      return __LEGIT_CAST__<UnwrapTSDFResult<T>, unknown>(value.value);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- Result.err carries the caller's domain error so existing normalization/offline classification can see it unchanged.
+    throw value.error;
+  }
+
+  // WORKAROUND: same generic conditional limitation — the non-Result branch can't narrow to T.
+  return __LEGIT_CAST__<UnwrapTSDFResult<T>, unknown>(value);
+}
+
+export type MaybeTSDFResult<T> = T | ResultType<T, ResultValidErrors>;
+
+export function unwrapMaybeTSDFResult<T>(value: MaybeTSDFResult<T>): T {
+  // WORKAROUND: unwrapTSDFResult returns UnwrapTSDFResult<T>, which doesn't reduce to T for the MaybeTSDFResult<T> input.
+  return __LEGIT_CAST__<T, unknown>(unwrapTSDFResult(value));
+}
 
 /**
  * Debounce settings for payload-driven automatic fetches in store hooks.
@@ -115,6 +149,15 @@ function getStoreErrorLike(value: unknown): StoreError | null {
   };
 }
 
+export function normalizeStoreError(
+  exception: unknown,
+  errorNormalizer: (exception: Error) => StoreError,
+): StoreError {
+  return (
+    getStoreErrorLike(exception) ?? errorNormalizer(unknownToError(exception))
+  );
+}
+
 export class StoreMutationError extends Error {
   readonly kind = 'error';
   code: number;
@@ -138,10 +181,10 @@ export function toStoreMutationError(
 ): StoreMutationError {
   if (exception instanceof StoreMutationError) return exception;
 
-  const normalizedError =
-    getStoreErrorLike(exception) ?? errorNormalizer(unknownToError(exception));
-
-  return new StoreMutationError(normalizedError, { cause: exception });
+  return new StoreMutationError(
+    normalizeStoreError(exception, errorNormalizer),
+    { cause: exception },
+  );
 }
 
 export class StoreFetchError extends Error {

@@ -103,18 +103,22 @@ import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
   AbortedStoreError,
   fetchTypePriority,
+  mutationSkipped,
   NotFoundStoreError,
+  normalizeStoreError,
   resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
   TimeoutStoreError,
   toStoreMutationError,
-  TSDFStatus,
-  ValidStoreState,
-  mutationSkipped,
+  unwrapTSDFResult,
+  type MaybeTSDFResult,
   type MutationSkipped,
   type StoreError,
   type StoreMutationErrorOptions,
+  type TSDFStatus,
+  type UnwrapTSDFResult,
+  type ValidStoreState,
 } from './utils/storeShared';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
@@ -218,7 +222,7 @@ export type DocumentStoreOptions<
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
-  fetchFn: (signal: AbortSignal) => Promise<State>;
+  fetchFn: (signal: AbortSignal) => Promise<MaybeTSDFResult<State>>;
   /** Overrides the manager's default minimum interval between low-priority fetches for this store. */
   lowPriorityThrottleMs?: number;
   /** Overrides the manager's default coalescing window for this store. */
@@ -350,7 +354,12 @@ type DocumentPerformMutation<
    */
   <T>(
     args: DocumentOnlineMutationArgs<State, T>,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs a document mutation that may fall back to durable offline queueing.
    *
@@ -360,7 +369,10 @@ type DocumentPerformMutation<
   <T>(
     args: DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   <T>(
     args:
@@ -368,7 +380,8 @@ type DocumentPerformMutation<
       | DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
@@ -990,11 +1003,7 @@ export function createDocumentStore<
 
       store.setPartialState(
         {
-          error: errorNormalizer(
-            exception instanceof Error
-              ? exception
-              : new Error(String(exception), { cause: exception }),
-          ),
+          error: normalizeStoreError(exception, errorNormalizer),
           status: 'error',
         },
         { action: 'fetch-error' },
@@ -1267,7 +1276,12 @@ export function createDocumentStore<
    */
   async function performMutation<T>(
     args: DocumentOnlineMutationArgs<State, T>,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs a document mutation that may fall back to durable offline queueing.
    *
@@ -1278,7 +1292,10 @@ export function createDocumentStore<
   async function performMutation<T>(
     args: DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   async function performMutation<T>(
     args:
@@ -1286,7 +1303,8 @@ export function createDocumentStore<
       | DocumentOfflineMutationArgs<State, T, TOfflineOperations>,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
@@ -1302,7 +1320,8 @@ export function createDocumentStore<
     | DocumentOnlineMutationArgs<State, T>
     | DocumentOfflineMutationArgs<State, T, TOfflineOperations>): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   > {
@@ -1321,8 +1340,10 @@ export function createDocumentStore<
       ? klona(store.state.data)
       : undefined;
 
-    const directMutation = () =>
-      mutation({ updateState, currentState: store.state.data });
+    const directMutation = async () =>
+      unwrapTSDFResult(
+        await mutation({ updateState, currentState: store.state.data }),
+      );
 
     const result = await performMutationWithLifecycle({
       startMutation,

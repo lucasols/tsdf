@@ -29,8 +29,11 @@ import {
   type StoreMutationErrorOptions,
   StoreMutationError,
   toStoreMutationError,
-  ValidPayload,
-  ValidStoreState,
+  unwrapTSDFResult,
+  type MaybeTSDFResult,
+  type UnwrapTSDFResult,
+  type ValidPayload,
+  type ValidStoreState,
 } from '../utils/storeShared';
 import { type FilterItemFn, type FilterQueryFn } from './createFetchApi';
 import {
@@ -79,7 +82,7 @@ type CreateMutationApiOptions<
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<ItemState>;
+  ) => Promise<MaybeTSDFResult<ItemState>>;
   partialResources?: PartialResourcesConfig<ItemState>;
   optimisticListUpdates?: OptimisticListUpdate<
     ItemState,
@@ -975,7 +978,10 @@ export function createMutationApi<
     /** Controls query/item invalidation after a successful online mutation. */
     revalidateOnSuccess?: RevalidateOnSuccessOption;
     /** Called after a successful online mutation. */
-    onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
+    onSuccess?: (
+      response: UnwrapTSDFResult<Awaited<T>>,
+      payload: MutationPayloadToUse,
+    ) => void;
     /** Called after a failed mutation with the normalized mutation error. */
     onError?: (error: StoreMutationError | MutationSkipped) => void;
     /**
@@ -1018,7 +1024,12 @@ export function createMutationApi<
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOnlineMutationArgs<T>,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs a list-query mutation that may fall back to durable offline queueing.
    *
@@ -1030,14 +1041,18 @@ export function createMutationApi<
     payload: MutationPayload,
     args: ListQueryOfflineMutationArgs<T>,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   async function performMutation<T>(
     payload: MutationPayload,
     args: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
@@ -1056,7 +1071,8 @@ export function createMutationApi<
     }: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   > {
@@ -1111,7 +1127,8 @@ export function createMutationApi<
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    const directMutation = () => mutation(payloadToUse);
+    const directMutation = async () =>
+      unwrapTSDFResult(await mutation(payloadToUse));
 
     const result = await performMutationWithLifecycle({
       startMutation: () => {

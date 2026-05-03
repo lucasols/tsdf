@@ -32,7 +32,7 @@ const userStore = createDocumentStore<User>({
 | ------------------------------ | -------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `id`                           | `string`                                                                         | Yes      | Stable logical store id used for debug labels, persistence namespaces, and [Browser Tabs Sync](./browser-tabs-sync.md) |
 | `storeManager`                 | `StoreManager`                                                                   | Yes      | Shared global config with `getSessionKey`, `errorNormalizer`, and global store controls                                |
-| `fetchFn`                      | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                                                              |
+| `fetchFn`                      | `(signal: AbortSignal) => Promise<State \| Result<State, Error>>`                | Yes      | Fetches the document data                                                                                              |
 | `lowPriorityThrottleMs`        | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)                                           |
 | `baseCoalescingWindowMs`       | `number`                                                                         | No       | Overrides the manager default. See [Fetch Scheduling](./fetch-scheduling.md)                                           |
 | `dynamicRealtimeThrottleMs`    | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                                                        |
@@ -43,6 +43,8 @@ const userStore = createDocumentStore<User>({
 | `persistentStorage`            | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)                                         |
 | `onSchedulerEvent`             | `(event) => void`                                                                | No       | Scheduler event listener                                                                                               |
 | `onMutationError`              | `(error, options: { silentErrors?: boolean }) => void`                           | No       | Global mutation error handler                                                                                          |
+
+`fetchFn` returns a promise. The resolved value may be either plain data or a `Result`. `Result.ok(data)` is stored as successful data; `Result.err(error)` is normalized into the store error state.
 
 ## State Shape
 

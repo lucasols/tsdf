@@ -1,6 +1,5 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
-import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   normalizeFetchResultError,
@@ -11,7 +10,10 @@ import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
   DEFAULT_BATCH_KEY,
+  normalizeStoreError,
+  type MaybeTSDFResult,
   StoreError,
+  unwrapMaybeTSDFResult,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -24,13 +26,18 @@ export async function executeBatchFetch<
   requests: BatchRequest<ItemPayload>[],
   fetchCtx: FetchContext,
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
-  fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>,
+  fetchFn: (
+    params: ItemPayload,
+    signal: AbortSignal,
+  ) => Promise<MaybeTSDFResult<ItemState>>,
   batchFetchFn:
     | ((
         payloads: ItemPayload[],
         signal: AbortSignal,
         batchKey: string,
-      ) => Promise<Map<ItemPayload, ItemState | Error>>)
+      ) => Promise<
+        MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
+      >)
     | undefined,
   errorNormalizer: (exception: Error) => StoreError,
   batchKey?: string,
@@ -134,17 +141,23 @@ export async function executeBatchFetch<
             const result = batchResults.get(payload);
 
             if (result instanceof Error) {
-              item.error = errorNormalizer(result);
+              item.error = normalizeStoreError(result, errorNormalizer);
               item.status = 'error';
               results.set(itemId, false);
             } else if (result !== undefined) {
-              item.data = reusePrevIfEqual({
-                current: result,
-                prev: item.data,
-              });
-              item.status = 'success';
-              item.wasLoaded = true;
-              results.set(itemId, true);
+              try {
+                item.data = reusePrevIfEqual({
+                  current: unwrapMaybeTSDFResult(result),
+                  prev: item.data,
+                });
+                item.status = 'success';
+                item.wasLoaded = true;
+                results.set(itemId, true);
+              } catch (error) {
+                item.error = normalizeStoreError(error, errorNormalizer);
+                item.status = 'error';
+                results.set(itemId, false);
+              }
             } else {
               // No result for this item - mark as error
               item.error = errorNormalizer(
@@ -168,7 +181,7 @@ export async function executeBatchFetch<
       }
 
       // All items fail with the same error
-      const error = errorNormalizer(unknownToError(exception));
+      const error = normalizeStoreError(exception, errorNormalizer);
 
       store.produceState(
         (draft) => {
@@ -250,7 +263,7 @@ export async function executeBatchFetch<
         return;
       }
 
-      const error = errorNormalizer(unknownToError(exception));
+      const error = normalizeStoreError(exception, errorNormalizer);
 
       store.produceState(
         (draft) => {

@@ -95,10 +95,12 @@ import {
   resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
-  ValidPayload,
-  ValidStoreState,
+  type MaybeTSDFResult,
   type MutationSkipped,
   type StoreMutationErrorOptions,
+  type UnwrapTSDFResult,
+  type ValidPayload,
+  type ValidStoreState,
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
@@ -510,7 +512,7 @@ type ListQueryMutationArgsBase<
   revalidateOnSuccess?: ListQueryRevalidateOnSuccessOption<QueryPayload>;
   /** Called after a successful online mutation. */
   onSuccess?: (
-    response: Awaited<T>,
+    response: UnwrapTSDFResult<Awaited<T>>,
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
   ) => void;
   /** Called after a failed or skipped mutation. */
@@ -577,7 +579,12 @@ type ListQueryPerformMutationApi<
   <T>(
     payload: ListQueryMutationPayloadToUse<ItemState, ItemPayload>,
     args: ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs a list-query mutation for existing item payloads or an item filter,
    * with durable offline queueing as a fallback.
@@ -595,7 +602,10 @@ type ListQueryPerformMutationApi<
       TOfflineOperations
     >,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   /**
    * Runs a list-query mutation with no current item target.
@@ -609,7 +619,12 @@ type ListQueryPerformMutationApi<
       ListQueryOnlineMutationArgs<T, ItemState, QueryPayload, ItemPayload>,
       'optimisticUpdate'
     >,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs an offline-capable list-query mutation with no current item target.
    *
@@ -629,7 +644,10 @@ type ListQueryPerformMutationApi<
       'optimisticUpdate'
     >,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   <T>(
     payload: ListQueryMutationPayload<ItemState, ItemPayload>,
@@ -644,7 +662,8 @@ type ListQueryPerformMutationApi<
         >,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
@@ -934,7 +953,7 @@ type FetchListFnSizeMode<
   payload: QueryPayload,
   size: number,
   options: { signal: AbortSignal; fields?: string[] },
-) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+) => Promise<MaybeTSDFResult<FetchListFnReturn<ItemState, ItemPayload>>>;
 
 type FetchListFnOffsetMode<
   ItemState extends ValidStoreState,
@@ -944,7 +963,7 @@ type FetchListFnOffsetMode<
   payload: QueryPayload,
   pagination: { offset: number; limit: number },
   options: { signal: AbortSignal; fields?: string[] },
-) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+) => Promise<MaybeTSDFResult<FetchListFnReturn<ItemState, ItemPayload>>>;
 
 type ListQuerySnapshotItemEntry<
   ItemState extends ValidStoreState,
@@ -1014,11 +1033,13 @@ type ListQueryStoreOptionsBase<
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<ItemState>;
+  ) => Promise<MaybeTSDFResult<ItemState>>;
   batchFetchItemFn?: (
     requests: { payload: ItemPayload; fields?: string[] }[],
     options: { signal: AbortSignal; batchKey: string },
-  ) => Promise<Map<ItemPayload, ItemState | Error>>;
+  ) => Promise<
+    MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
+  >;
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   defaultQuerySize?: number;
   maxItemBatchSize?: number;

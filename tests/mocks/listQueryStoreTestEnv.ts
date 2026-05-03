@@ -480,7 +480,8 @@ export function createListQueryStoreTestEnv<
           payload: ListQueryItemPayload,
           { signal, fields }: { signal: AbortSignal; fields?: string[] },
         ) => {
-          return serverTable.fetch(payload, signal, { fields });
+          const data = await serverTable.fetch(payload, signal, { fields });
+          return data;
         },
   };
 

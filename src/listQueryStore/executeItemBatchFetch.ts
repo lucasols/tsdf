@@ -1,6 +1,5 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
-import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   normalizeFetchResultError,
@@ -11,7 +10,10 @@ import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
   DEFAULT_BATCH_KEY,
+  normalizeStoreError,
+  type MaybeTSDFResult,
   StoreError,
+  unwrapMaybeTSDFResult,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -35,12 +37,14 @@ export async function executeItemBatchFetch<
   fetchItemFn: (
     params: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<ItemState>,
+  ) => Promise<MaybeTSDFResult<ItemState>>,
   batchFetchItemFn:
     | ((
         requests: { payload: ItemPayload; fields?: string[] }[],
         options: { signal: AbortSignal; batchKey: string },
-      ) => Promise<Map<ItemPayload, ItemState | Error>>)
+      ) => Promise<
+        MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
+      >)
     | undefined,
   errorNormalizer: (exception: Error) => StoreError,
   partialResources?: PartialResourcesConfig<ItemState>,
@@ -184,16 +188,32 @@ export async function executeItemBatchFetch<
             const result = batchResults.get(data.payload);
 
             if (result instanceof Error) {
-              itemQuery.error = errorNormalizer(result);
+              itemQuery.error = normalizeStoreError(result, errorNormalizer);
               itemQuery.status = 'error';
               delete draft.itemFieldInvalidationFields[itemKey];
               results.set(itemKey, false);
             } else if (result !== undefined) {
-              applyItemResult(draft, itemKey, result, data.fields);
-              itemQuery.status = 'success';
-              itemQuery.wasLoaded = true;
-              clearSatisfiedItemInvalidationFields(draft, itemKey, data.fields);
-              results.set(itemKey, true);
+              try {
+                applyItemResult(
+                  draft,
+                  itemKey,
+                  unwrapMaybeTSDFResult(result),
+                  data.fields,
+                );
+                itemQuery.status = 'success';
+                itemQuery.wasLoaded = true;
+                clearSatisfiedItemInvalidationFields(
+                  draft,
+                  itemKey,
+                  data.fields,
+                );
+                results.set(itemKey, true);
+              } catch (error) {
+                itemQuery.error = normalizeStoreError(error, errorNormalizer);
+                itemQuery.status = 'error';
+                delete draft.itemFieldInvalidationFields[itemKey];
+                results.set(itemKey, false);
+              }
             } else {
               itemQuery.error = errorNormalizer(
                 new Error(`No result for item ${itemKey}`),
@@ -216,7 +236,7 @@ export async function executeItemBatchFetch<
         return results;
       }
 
-      const error = errorNormalizer(unknownToError(exception));
+      const error = normalizeStoreError(exception, errorNormalizer);
 
       store.produceState(
         (draft) => {
@@ -311,7 +331,7 @@ export async function executeItemBatchFetch<
           return;
         }
 
-        const error = errorNormalizer(unknownToError(exception));
+        const error = normalizeStoreError(exception, errorNormalizer);
 
         store.produceState(
           (draft) => {

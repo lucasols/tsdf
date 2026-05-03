@@ -100,19 +100,22 @@ import {
   AbortedStoreError,
   DEFAULT_BATCH_KEY,
   fetchTypePriority,
+  mutationSkipped,
   NotFoundStoreError,
   resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
   TimeoutStoreError,
   toStoreMutationError,
-  TSDFStatus,
-  ValidPayload,
-  ValidStoreState,
-  mutationSkipped,
+  unwrapTSDFResult,
+  type MaybeTSDFResult,
   type MutationSkipped,
   type StoreError,
   type StoreMutationErrorOptions,
+  type TSDFStatus,
+  type UnwrapTSDFResult,
+  type ValidPayload,
+  type ValidStoreState,
 } from '../utils/storeShared';
 import { createCollectionCacheLimits } from './collectionCacheLimits';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
@@ -286,13 +289,18 @@ export type CollectionStoreOptions<
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
-  fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>;
+  fetchFn: (
+    params: ItemPayload,
+    signal: AbortSignal,
+  ) => Promise<MaybeTSDFResult<ItemState>>;
   /** Optional batch fetch function for fetching multiple items at once */
   batchFetchFn?: (
     payloads: ItemPayload[],
     signal: AbortSignal,
     batchKey: string,
-  ) => Promise<Map<ItemPayload, ItemState | Error>>;
+  ) => Promise<
+    MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
+  >;
   /** Optional function to group batch fetches by key. Return false to fall back to individual fetchFn */
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   /** Max items per batch - triggers immediate fetch when reached */
@@ -403,7 +411,7 @@ type CollectionMutationArgsBase<T, ItemPayload extends ValidPayload> = {
   ) => Promise<T>;
   /** Called after a successful online mutation. */
   onSuccess?: (
-    response: Awaited<T>,
+    response: UnwrapTSDFResult<Awaited<T>>,
     payload: CollectionMutationPayloadToUse<ItemPayload>,
   ) => void;
   /** Invalidates affected items after a successful online mutation. */
@@ -464,7 +472,12 @@ type CollectionPerformMutation<
   <T>(
     payload: CollectionMutationTarget<ItemPayload>,
     args: CollectionOnlineMutationArgs<T, ItemPayload>,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs a collection mutation for one or more existing item payloads, with
    * durable offline queueing as a fallback.
@@ -481,7 +494,10 @@ type CollectionPerformMutation<
       TOfflineOperations
     >,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   /**
    * Runs a collection mutation with no current item target.
@@ -495,7 +511,12 @@ type CollectionPerformMutation<
       CollectionOnlineMutationArgs<T, ItemPayload>,
       'optimisticUpdate'
     >,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs an offline-capable collection mutation with no current item target.
    *
@@ -514,7 +535,10 @@ type CollectionPerformMutation<
       'optimisticUpdate'
     >,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   <T>(
     payload: CollectionMutationPayload<ItemPayload>,
@@ -528,7 +552,8 @@ type CollectionPerformMutation<
         >,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
@@ -2150,7 +2175,12 @@ export function createCollectionStore<
   async function performMutation<T>(
     payload: CollectionMutationPayload<ItemPayload>,
     args: CollectionOnlineMutationArgs<T, ItemPayload>,
-  ): Promise<ResultType<Awaited<T>, StoreMutationError | MutationSkipped>>;
+  ): Promise<
+    ResultType<
+      UnwrapTSDFResult<Awaited<T>>,
+      StoreMutationError | MutationSkipped
+    >
+  >;
   /**
    * Runs a collection mutation that may fall back to durable offline queueing.
    *
@@ -2167,7 +2197,10 @@ export function createCollectionStore<
       TOfflineOperations
     >,
   ): Promise<
-    ResultType<OfflineMutationResult<T>, StoreMutationError | MutationSkipped>
+    ResultType<
+      OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
+      StoreMutationError | MutationSkipped
+    >
   >;
   async function performMutation<T>(
     payload: CollectionMutationPayload<ItemPayload>,
@@ -2181,7 +2214,8 @@ export function createCollectionStore<
         >,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   >;
@@ -2206,7 +2240,8 @@ export function createCollectionStore<
         >,
   ): Promise<
     ResultType<
-      Awaited<T> | OfflineMutationResult<T>,
+      | UnwrapTSDFResult<Awaited<T>>
+      | OfflineMutationResult<UnwrapTSDFResult<Awaited<T>>>,
       StoreMutationError | MutationSkipped
     >
   > {
@@ -2237,7 +2272,8 @@ export function createCollectionStore<
           }))
         : [];
 
-    const directMutation = () => mutation(payloadToUse);
+    const directMutation = async () =>
+      unwrapTSDFResult(await mutation(payloadToUse));
 
     const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payloadToUse),

@@ -65,6 +65,7 @@ export type {
 
 // Shared types
 export type {
+  MaybeTSDFResult,
   MutationSkipped,
   PayloadDebounce,
   StoreError,

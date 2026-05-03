@@ -1,5 +1,9 @@
-import { unknownToError } from 't-result';
 import type { StoreError } from '../../utils/storeShared';
+import {
+  normalizeStoreError,
+  unwrapMaybeTSDFResult,
+  type MaybeTSDFResult,
+} from '../../utils/storeShared';
 
 export const offlineConnectivityError = {
   code: 0,
@@ -13,7 +17,7 @@ export function normalizeFetchResultError(
 ): StoreError {
   return fetchResult.offline
     ? offlineConnectivityError
-    : errorNormalizer(unknownToError(fetchResult.error));
+    : normalizeStoreError(fetchResult.error, errorNormalizer);
 }
 
 export type OfflineAwareFetchController = {
@@ -38,7 +42,7 @@ export async function runOfflineAwareFetch<T>({
   operationName,
 }: {
   controller?: OfflineAwareFetchController | null;
-  fetcher: () => Promise<T>;
+  fetcher: () => Promise<MaybeTSDFResult<T>>;
   operationName?: string;
 }): Promise<OfflineAwareFetchResult<T>> {
   await controller?.prepareForFetch?.();
@@ -53,7 +57,7 @@ export async function runOfflineAwareFetch<T>({
   }
 
   try {
-    const data = await fetcher();
+    const data = unwrapMaybeTSDFResult(await fetcher());
     await controller?.handleFetchSuccess?.();
     return { ok: true, data };
   } catch (error) {
