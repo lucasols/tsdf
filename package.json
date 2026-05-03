@@ -50,7 +50,7 @@
     "lint": "pnpm tsc && pnpm tsc:isolated && pnpm eslint",
     "eslint": "eslint src/ tests/ --fix",
     "format": "oxfmt src/ tests/",
-    "tsc": "tsgo -p tsconfig.prod.json",
+    "tsc": "tsgo -p tsconfig.prod.json && tsgo -p tsconfig.playwright-fixture.json",
     "tsc:isolated": "tsgo -p tsconfig.isolated.json",
     "build": "pnpm lint && pnpm test:all && pnpm build:no-test",
     "build:no-test": "tsdown",
