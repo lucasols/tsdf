@@ -10,6 +10,8 @@ import {
   createStoreManager,
   type StorageAdapter,
   type StoreError,
+  type TSDFDebugLogger,
+  type TSDFDebugLogEntry,
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/opfs-storage';
 
@@ -17,14 +19,24 @@ type ListQueryPayload = { tableId: 'users' };
 
 type UserRow = { id: number; name: string };
 
+declare global {
+  interface Window {
+    __tsdfDebugLogs?: TSDFDebugLogEntry[];
+  }
+}
+
 function normalizeError(error: Error): StoreError {
   return { code: 500, id: 'fixture-error', message: error.message };
 }
 
-function createFixtureStoreManager(sessionKey: string | false) {
+function createFixtureStoreManager(
+  sessionKey: string | false,
+  debugLogger?: TSDFDebugLogger,
+) {
   return createStoreManager({
     getSessionKey: () => sessionKey,
     errorNormalizer: normalizeError,
+    debug: debugLogger,
   });
 }
 
@@ -70,6 +82,7 @@ function getQueryParams(): {
   storeId: string | null;
   sessionKey: string | null;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
+  debugEnabled: boolean;
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -82,8 +95,10 @@ function getQueryParams(): {
     | 'indexedDb'
     | 'localStorage'
     | 'opfs';
+  const debugParam = searchParams.get('debug');
+  const debugEnabled = debugParam === '1' || debugParam === 'true';
 
-  return { pageId, scenario, storeId, sessionKey, adapterKey };
+  return { pageId, scenario, storeId, sessionKey, adapterKey, debugEnabled };
 }
 
 function getPersistentStorageAdapter(
@@ -151,10 +166,12 @@ function DocumentScenario({
   pageId,
   storeId,
   sessionKey,
+  debugLogger,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
+  debugLogger?: TSDFDebugLogger;
 }) {
   const { logicalFocus, focusRef, setLogicalFocus } = useLogicalFocus();
   const [lastScheduleResult, setLastScheduleResult] = useState('idle');
@@ -162,7 +179,7 @@ function DocumentScenario({
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
-      storeManager: createFixtureStoreManager(sessionKey),
+      storeManager: createFixtureStoreManager(sessionKey, debugLogger),
       fetchFn: (signal) =>
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
       lowPriorityThrottleMs: 10_000,
@@ -258,17 +275,19 @@ function CollectionScenario({
   pageId,
   storeId,
   sessionKey,
+  debugLogger,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
+  debugLogger?: TSDFDebugLogger;
 }) {
   const { logicalFocus, focusRef, setLogicalFocus } = useLogicalFocus();
 
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
-      storeManager: createFixtureStoreManager(sessionKey),
+      storeManager: createFixtureStoreManager(sessionKey, debugLogger),
       fetchFn: (payload, signal) =>
         requestJson<CollectionItem>(pageId, `/api/collection/${payload}`, {
           signal,
@@ -339,17 +358,19 @@ function ListScenario({
   pageId,
   storeId,
   sessionKey,
+  debugLogger,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
+  debugLogger?: TSDFDebugLogger;
 }) {
   const { logicalFocus, focusRef, setLogicalFocus } = useLogicalFocus();
 
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
-      storeManager: createFixtureStoreManager(sessionKey),
+      storeManager: createFixtureStoreManager(sessionKey, debugLogger),
       fetchListFn: async (payload, size, { signal }) => {
         const searchParams = new URLSearchParams({
           tableId: payload.tableId,
@@ -464,17 +485,19 @@ function PersistDocumentScenario({
   storeId,
   sessionKey,
   adapterKey,
+  debugLogger,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
+  debugLogger?: TSDFDebugLogger;
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
-      storeManager: createFixtureStoreManager(sessionKey),
+      storeManager: createFixtureStoreManager(sessionKey, debugLogger),
       fetchFn: (signal) =>
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
       lowPriorityThrottleMs: 10_000,
@@ -539,17 +562,19 @@ function PersistCollectionScenario({
   storeId,
   sessionKey,
   adapterKey,
+  debugLogger,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
+  debugLogger?: TSDFDebugLogger;
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
-      storeManager: createFixtureStoreManager(sessionKey),
+      storeManager: createFixtureStoreManager(sessionKey, debugLogger),
       fetchFn: (payload, signal) =>
         requestJson<CollectionItem>(pageId, `/api/collection/${payload}`, {
           signal,
@@ -614,17 +639,19 @@ function PersistListScenario({
   storeId,
   sessionKey,
   adapterKey,
+  debugLogger,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
+  debugLogger?: TSDFDebugLogger;
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
-      storeManager: createFixtureStoreManager(sessionKey),
+      storeManager: createFixtureStoreManager(sessionKey, debugLogger),
       fetchListFn: async (payload, size, { signal }) => {
         const searchParams = new URLSearchParams({
           tableId: payload.tableId,
@@ -703,12 +730,22 @@ function PersistListScenario({
 }
 
 function App() {
-  const { pageId, scenario, storeId, sessionKey, adapterKey } =
+  const { pageId, scenario, storeId, sessionKey, adapterKey, debugEnabled } =
     getQueryParams();
   const resolvedStoreId =
     storeId ?? `playwright-${scenario === 'list' ? 'list' : scenario}-sync`;
   const resolvedSessionKey =
     sessionKey === 'none' ? false : (sessionKey ?? 'playwright-session');
+  const debugLogger = useCallback<TSDFDebugLogger>((entry) => {
+    const logs = window.__tsdfDebugLogs ?? [];
+    logs.push(entry);
+    window.__tsdfDebugLogs = logs;
+  }, []);
+  const activeDebugLogger = debugEnabled ? debugLogger : undefined;
+
+  if (debugEnabled && !window.__tsdfDebugLogs) {
+    window.__tsdfDebugLogs = [];
+  }
 
   return (
     <main>
@@ -723,6 +760,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
       {scenario === 'collection' ? (
@@ -730,6 +768,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
       {scenario === 'list' ? (
@@ -737,6 +776,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
       {scenario === 'persist-document' ? (
@@ -745,6 +785,7 @@ function App() {
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
           adapterKey={adapterKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
       {scenario === 'persist-collection' ? (
@@ -753,6 +794,7 @@ function App() {
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
           adapterKey={adapterKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
       {scenario === 'persist-list' ? (
@@ -761,6 +803,7 @@ function App() {
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
           adapterKey={adapterKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
     </main>
