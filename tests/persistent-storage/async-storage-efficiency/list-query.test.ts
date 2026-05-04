@@ -234,10 +234,10 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
-    const defaultMaxQueryBytes = getDefaultMaxBytesForScope({
-      adapter: 'async',
-      scopeKind: 'listQuery.query',
-    });
+    const defaultMaxQueryBytes = getDefaultMaxBytesForScope(
+      'async',
+      'listQuery.query',
+    );
     const largeTableIdSuffix = 'q'.repeat(16_384);
     const getQuery = (index: number) => ({
       tableId: `users-${String(index).padStart(4, '0')}-${largeTableIdSuffix}`,

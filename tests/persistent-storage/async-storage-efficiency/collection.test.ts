@@ -225,10 +225,10 @@ describe('async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
-    const defaultMaxBytes = getDefaultMaxBytesForScope({
-      adapter: 'async',
-      scopeKind: 'collection.item',
-    });
+    const defaultMaxBytes = getDefaultMaxBytesForScope(
+      'async',
+      'collection.item',
+    );
     const largeNameSuffix = 'x'.repeat(8_192);
     const getPayload = (index: number) =>
       `user-${String(index).padStart(4, '0')}`;

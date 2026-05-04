@@ -229,10 +229,10 @@ describe('sync storage efficiency: list-query', () => {
     const storeName = 'lq-cold-default-max-queries-sync';
     const sessionKey = 'sess1';
     const listQueryScope = persistentStore.scope(storeName, sessionKey);
-    const defaultMaxQueryBytes = getDefaultMaxBytesForScope({
-      adapter: 'local-sync',
-      scopeKind: 'listQuery.query',
-    });
+    const defaultMaxQueryBytes = getDefaultMaxBytesForScope(
+      'local-sync',
+      'listQuery.query',
+    );
     const largeTableIdSuffix = 'q'.repeat(8_192);
     const getQuery = (index: number) => ({
       tableId: `users-${String(index).padStart(4, '0')}-${largeTableIdSuffix}`,

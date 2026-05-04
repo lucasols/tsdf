@@ -12,13 +12,16 @@ afterEach(() => {
 });
 
 function createPriority(getWindowIsFocused: () => boolean) {
-  return createBrowserTabsPriority({
-    transportEnabled: true,
-    getIsEnabled: () => true,
-    tabId: 'local-tab',
+  return createBrowserTabsPriority(
+    true,
+    () => true,
+    'local-tab',
     getWindowIsFocused,
-    publishStatus() {},
-  });
+    undefined,
+    () => {},
+    undefined,
+    undefined,
+  );
 }
 
 test('browser tabs priority assigns the first delayed coalescing slot to a single background tab', () => {
@@ -31,13 +34,16 @@ test('browser tabs priority assigns the first delayed coalescing slot to a singl
 });
 
 test('browser tabs priority falls back to standalone ranking when sync is disabled', () => {
-  const priority = createBrowserTabsPriority({
-    transportEnabled: true,
-    getIsEnabled: () => false,
-    tabId: 'local-tab',
-    getWindowIsFocused: () => false,
-    publishStatus() {},
-  });
+  const priority = createBrowserTabsPriority(
+    true,
+    () => false,
+    'local-tab',
+    () => false,
+    undefined,
+    () => {},
+    undefined,
+    undefined,
+  );
 
   priority.onTabStatusMessage('remote-tab', {
     kind: 'tab-status',
@@ -103,16 +109,18 @@ test('browser tabs priority keeps last known background ranks after quiet period
 
 test('browser tabs priority immediately promotes a newly focused tab over stale background ranks', () => {
   const leaderChanges: string[] = [];
-  const priority = createBrowserTabsPriority({
-    transportEnabled: true,
-    getIsEnabled: () => true,
-    tabId: 'local-tab',
-    getWindowIsFocused: () => false,
-    publishStatus() {},
-    onLeaderChange(details) {
+  const priority = createBrowserTabsPriority(
+    true,
+    () => true,
+    'local-tab',
+    () => false,
+    undefined,
+    () => {},
+    undefined,
+    (details) => {
       leaderChanges.push(details.leaderTabId);
     },
-  });
+  );
 
   priority.onTabStatusMessage('previous-background-leader', {
     kind: 'tab-status',
@@ -165,15 +173,18 @@ test('browser tabs priority keeps the first background tab behind a focused sibl
 test('browser tabs priority publishes local status only when focus state changes', () => {
   let isFocused = true;
   const published: number[] = [];
-  const priority = createBrowserTabsPriority({
-    transportEnabled: true,
-    getIsEnabled: () => true,
-    tabId: 'local-tab',
-    getWindowIsFocused: () => isFocused,
-    publishStatus() {
+  const priority = createBrowserTabsPriority(
+    true,
+    () => true,
+    'local-tab',
+    () => isFocused,
+    undefined,
+    () => {
       published.push(Date.now());
     },
-  });
+    undefined,
+    undefined,
+  );
 
   // Initial publish happens synchronously during construction.
   expect(published).toMatchInlineSnapshot(`[0]`);

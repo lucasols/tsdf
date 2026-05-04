@@ -194,10 +194,10 @@ describe('sync storage efficiency: collection', () => {
     const storeName = 'collection-cold-default-max-items-sync';
     const sessionKey = 'sess1';
     const collectionScope = persistentStore.scope(storeName, sessionKey);
-    const defaultMaxBytes = getDefaultMaxBytesForScope({
-      adapter: 'local-sync',
-      scopeKind: 'collection.item',
-    });
+    const defaultMaxBytes = getDefaultMaxBytesForScope(
+      'local-sync',
+      'collection.item',
+    );
     const largeNameSuffix = 'x'.repeat(4_096);
     const getPayload = (index: number) =>
       `user-${String(index).padStart(4, '0')}`;
