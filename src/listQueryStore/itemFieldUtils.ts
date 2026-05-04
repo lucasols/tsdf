@@ -61,7 +61,7 @@ export function applyPartialItemMerge<ItemState extends ValidStoreState>(
 ): ItemState {
   const prev = draft.items[itemKey] ?? undefined;
   const merged = partialResources.mergeItems(prev, data);
-  draft.items[itemKey] = reusePrevIfEqual({ current: merged, prev });
+  draft.items[itemKey] = reusePrevIfEqual(prev, merged);
 
   if (fields && fields.length > 0) {
     const existingFields = draft.itemLoadedFields[itemKey] ?? [];

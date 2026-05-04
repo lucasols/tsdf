@@ -212,13 +212,13 @@ function ensureAsyncNamespaceKind(
  * targeted maintenance because it already covers the full cleanup pass.
  */
 export function scheduleLocalStorageMaintenance(
-  options: { forceManifestKeys?: Iterable<string> } = {},
+  forceManifestKeys?: Iterable<string>,
 ): void {
-  if (options.forceManifestKeys === undefined) {
+  if (forceManifestKeys === undefined) {
     localStorageGlobalMaintenanceRequested = true;
     scheduledLocalStorageMaintenanceManifestKeys.clear();
   } else if (!localStorageGlobalMaintenanceRequested) {
-    for (const manifestKey of options.forceManifestKeys) {
+    for (const manifestKey of forceManifestKeys) {
       scheduledLocalStorageMaintenanceManifestKeys.add(manifestKey);
     }
   }
@@ -229,14 +229,14 @@ export function scheduleLocalStorageMaintenance(
     cancelScheduledLocalStorageMaintenance = null;
 
     const runGlobalMaintenance = localStorageGlobalMaintenanceRequested;
-    const forceManifestKeys = runGlobalMaintenance
+    const maintenanceManifestKeys = runGlobalMaintenance
       ? undefined
       : [...scheduledLocalStorageMaintenanceManifestKeys];
 
     localStorageGlobalMaintenanceRequested = false;
     scheduledLocalStorageMaintenanceManifestKeys.clear();
 
-    void localPersistentStorage.runMaintenance(forceManifestKeys);
+    void localPersistentStorage.runMaintenance(maintenanceManifestKeys);
   });
 }
 
@@ -2126,30 +2126,30 @@ export function getStoragePrefixForStoreNamespace(
   return `${getStorageKey(sessionKey, storeName)}.${entryPrefix}.`;
 }
 
-export function createProtectedStorageKey(args: {
-  backend?: 'async' | 'localStorage';
-  sessionKey: string;
-  storeName: string;
-  kind: string;
-  key: string;
-}): string {
-  if ((args.backend ?? 'localStorage') === 'localStorage') {
-    if (args.kind === 'document' && args.key === DOCUMENT_PERSISTED_ENTRY_KEY) {
-      return getStorageKeyForStore(args.sessionKey, args.storeName);
+export function createProtectedStorageKey(
+  sessionKey: string,
+  storeName: string,
+  kind: string,
+  key: string,
+  backend: 'async' | 'localStorage' = 'localStorage',
+): string {
+  if (backend === 'localStorage') {
+    if (kind === 'document' && key === DOCUMENT_PERSISTED_ENTRY_KEY) {
+      return getStorageKeyForStore(sessionKey, storeName);
     }
 
     return `${getStoragePrefixForStoreNamespace(
-      args.sessionKey,
-      args.storeName,
-      args.kind,
-    )}${args.key}`;
+      sessionKey,
+      storeName,
+      kind,
+    )}${key}`;
   }
 
   return serializeProtectedRef({
-    sessionKey: args.sessionKey,
-    storeName: args.storeName,
-    kind: ensureAsyncNamespaceKind(args.kind),
-    key: args.key,
+    sessionKey,
+    storeName,
+    kind: ensureAsyncNamespaceKind(kind),
+    key,
   });
 }
 

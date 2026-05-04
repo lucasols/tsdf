@@ -1,4 +1,3 @@
-import type { FetchType } from '../requestScheduler';
 import type { TSDFStatus } from './storeShared';
 
 export const AUTOMATIC_RETRY_LOCKOUT_MS = 10_000;
@@ -67,27 +66,13 @@ export function createFieldsResourceSignature(
   return JSON.stringify(Array.from(new Set(fields)).sort());
 }
 
-type AutomaticFetchPolicyOptions = {
-  wasLoaded: boolean | undefined;
-  shouldFetch: boolean;
-  requiredFetch?: boolean;
-  disableRefetches: boolean;
-  disableRefetchOnMount: boolean;
-  refetchOnMount?: false | FetchType;
-  skipFreshFetch?: boolean;
-};
-
 export function shouldScheduleAutomaticFetch(
-  options: AutomaticFetchPolicyOptions,
+  wasLoaded: boolean | undefined,
+  shouldFetch: boolean,
+  disableRefetches: boolean,
+  disableRefetchOnMount: boolean,
+  skipFreshFetch = false,
 ): boolean {
-  const {
-    wasLoaded,
-    shouldFetch,
-    disableRefetches,
-    disableRefetchOnMount,
-    skipFreshFetch = false,
-  } = options;
-
   if (disableRefetches) return !wasLoaded;
 
   if (disableRefetchOnMount) return shouldFetch;

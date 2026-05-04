@@ -12,37 +12,13 @@ import {
   type BrowserTabsPriorityTimings,
 } from './browserTabsPriority';
 
+type BrowserTabsSessionKey = string | false;
 export type BrowserTabsStoreType =
   | 'presence'
   | 'document'
   | 'collection'
   | 'listQuery'
   | 'offline';
-type BrowserTabsSessionKey = string | false;
-
-export type BrowserTabsTransport = {
-  postMessage: (message: unknown) => void;
-  close: () => void;
-};
-
-export type BrowserTabsTransportFactory = (options: {
-  channelName: string;
-  onMessage: (message: unknown) => void;
-}) => BrowserTabsTransport | null;
-
-type BrowserTabsCoordinatorOptions<Message extends { kind: string }> = {
-  storeType: BrowserTabsStoreType;
-  storeKey: string;
-  getSessionKey: () => BrowserTabsSessionKey;
-  onMessage: (message: Message) => void;
-  onSessionChange?: (
-    sessionKey: BrowserTabsSessionKey,
-    previousSessionKey: BrowserTabsSessionKey,
-  ) => void;
-  transportFactory?: BrowserTabsTransportFactory;
-  debugLogger?: TSDFDebugLogger;
-  tabId?: string;
-};
 
 export type BrowserTabsMessageMeta = {
   protocolVersion: 1;
@@ -67,11 +43,6 @@ type BrowserTabsCoordinator<Message extends { kind: string }> = {
   close: () => void;
 };
 
-type BrowserTabsCoordinatorWithPriority<Message extends { kind: string }> = {
-  coordinator: BrowserTabsCoordinator<Message>;
-  priority: ReturnType<typeof createBrowserTabsPriority>;
-};
-
 const PROTOCOL_VERSION = 1 as const;
 const CHANNEL_PREFIX = 'tsdf';
 
@@ -87,6 +58,16 @@ const rawBrowserTabsMessageSchema = rc_object({
   sentAt: rc_number,
   kind: rc_string,
 });
+
+export type BrowserTabsTransport = {
+  postMessage: (message: unknown) => void;
+  close: () => void;
+};
+
+export type BrowserTabsTransportFactory = (options: {
+  channelName: string;
+  onMessage: (message: unknown) => void;
+}) => BrowserTabsTransport | null;
 
 function getDefaultTransportFactory(): BrowserTabsTransportFactory {
   return ({ channelName, onMessage }) => {
@@ -116,19 +97,24 @@ function getDefaultTransportFactory(): BrowserTabsTransportFactory {
 
 /** @internal */
 export function createBrowserTabsCoordinator<Message extends { kind: string }>(
-  options: BrowserTabsCoordinatorOptions<Message>,
+  storeType: BrowserTabsStoreType,
+  storeKey: string,
+  getSessionKey: () => BrowserTabsSessionKey,
+  onMessage: (message: Message) => void,
+  onSessionChange:
+    | ((
+        sessionKey: BrowserTabsSessionKey,
+        previousSessionKey: BrowserTabsSessionKey,
+      ) => void)
+    | undefined,
+  transportFactory: BrowserTabsTransportFactory | undefined,
+  debugLoggerInput: TSDFDebugLogger | undefined,
+  tabId = createBrowserTabsTabId(),
 ): BrowserTabsCoordinator<Message> {
-  const {
-    storeType,
-    storeKey,
-    getSessionKey,
-    onMessage,
-    onSessionChange,
-    transportFactory = getDefaultTransportFactory(),
-  } = options;
-  const debugLogger = import.meta.env.DEV ? options.debugLogger : undefined;
+  const resolvedTransportFactory =
+    transportFactory ?? getDefaultTransportFactory();
+  const debugLogger = import.meta.env.DEV ? debugLoggerInput : undefined;
   const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
-  const tabId = options.tabId ?? createBrowserTabsTabId();
   let seq = 0;
 
   const lastSeenSeqByTab = new Map<string, number>();
@@ -173,7 +159,7 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>(
     return nextSessionKey;
   }
 
-  const transport = transportFactory({
+  const transport = resolvedTransportFactory({
     channelName,
     onMessage(rawMessage) {
       const localSessionKey = refreshSessionKey();
@@ -327,43 +313,43 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>(
   };
 }
 
-type BrowserTabsCoordinatorWithPriorityOptions<
-  Message extends { kind: string },
-> = BrowserTabsCoordinatorOptions<Message> & {
-  getWindowIsFocused: () => boolean;
-  onWindowFocusChange?: (handler: () => void) => () => void;
-  priorityTimings?: BrowserTabsPriorityTimings;
+type BrowserTabsCoordinatorWithPriority<Message extends { kind: string }> = {
+  coordinator: BrowserTabsCoordinator<Message>;
+  priority: ReturnType<typeof createBrowserTabsPriority>;
 };
 
 /** @internal */
 export function createBrowserTabsCoordinatorWithPriority<
   Message extends { kind: string },
 >(
-  options: BrowserTabsCoordinatorWithPriorityOptions<Message>,
+  storeType: BrowserTabsStoreType,
+  storeKey: string,
+  getSessionKey: () => BrowserTabsSessionKey,
+  onMessage: (message: Message) => void,
+  onSessionChange:
+    | ((
+        sessionKey: BrowserTabsSessionKey,
+        previousSessionKey: BrowserTabsSessionKey,
+      ) => void)
+    | undefined,
+  transportFactory: BrowserTabsTransportFactory | undefined,
+  debugLoggerInput: TSDFDebugLogger | undefined,
+  getWindowIsFocused: () => boolean,
+  onWindowFocusChange: ((handler: () => void) => () => void) | undefined,
+  priorityTimings: BrowserTabsPriorityTimings | undefined,
+  tabId?: string,
 ): BrowserTabsCoordinatorWithPriority<Message> {
-  const {
-    storeType,
-    storeKey,
-    getSessionKey,
-    onMessage,
-    onSessionChange,
-    transportFactory,
-    tabId,
-    getWindowIsFocused,
-    onWindowFocusChange,
-    priorityTimings,
-  } = options;
-  const debugLogger = import.meta.env.DEV ? options.debugLogger : undefined;
+  const debugLogger = import.meta.env.DEV ? debugLoggerInput : undefined;
   const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
   const priorityRef: {
     current: ReturnType<typeof createBrowserTabsPriority> | null;
   } = { current: null };
-  const coordinator = createBrowserTabsCoordinator({
+  const coordinator = createBrowserTabsCoordinator(
     storeType,
     storeKey,
     getSessionKey,
     onMessage,
-    onSessionChange(sessionKey, previousSessionKey) {
+    (sessionKey, previousSessionKey) => {
       priorityRef.current?.reset();
       if (sessionKey !== false && coordinator.enabled) {
         priorityRef.current?.publishLocalStatus();
@@ -371,17 +357,17 @@ export function createBrowserTabsCoordinatorWithPriority<
       onSessionChange?.(sessionKey, previousSessionKey);
     },
     transportFactory,
+    debugLoggerInput,
     tabId,
-    ...(import.meta.env.DEV ? { debugLogger: options.debugLogger } : undefined),
-  });
+  );
 
-  const priority = createBrowserTabsPriority({
-    transportEnabled: coordinator.enabled,
-    getIsEnabled: () => coordinator.isSessionActive(),
-    tabId: coordinator.tabId,
+  const priority = createBrowserTabsPriority(
+    coordinator.enabled,
+    () => coordinator.isSessionActive(),
+    coordinator.tabId,
     getWindowIsFocused,
     onWindowFocusChange,
-    publishStatus: (status) => {
+    (status) => {
       coordinator.publish(
         // WORKAROUND: Priority status messages are only published by stores whose Message union includes this status shape.
         __LEGIT_CAST__<
@@ -390,29 +376,27 @@ export function createBrowserTabsCoordinatorWithPriority<
         >(status),
       );
     },
-    timings: priorityTimings,
-    ...(import.meta.env.DEV
-      ? {
-          onLeaderChange(details: BrowserTabsLeaderChangeDetails) {
-            if (!debugLogger) return;
+    priorityTimings,
+    import.meta.env.DEV
+      ? (details: BrowserTabsLeaderChangeDetails) => {
+          if (!debugLogger) return;
 
-            emitTSDFDebugLog(debugLogger, {
-              area: 'browser-tabs',
-              level: 'log',
-              message: 'browser-tab sync leader changed',
-              operation: 'leader-change',
-              details: {
-                channelName,
-                storeKey,
-                storeType,
-                tabId: details.localTabId,
-                ...details,
-              },
-            });
-          },
+          emitTSDFDebugLog(debugLogger, {
+            area: 'browser-tabs',
+            level: 'log',
+            message: 'browser-tab sync leader changed',
+            operation: 'leader-change',
+            details: {
+              channelName,
+              storeKey,
+              storeType,
+              tabId: details.localTabId,
+              ...details,
+            },
+          });
         }
-      : undefined),
-  });
+      : undefined,
+  );
   priorityRef.current = priority;
 
   return { coordinator, priority };
@@ -438,19 +422,20 @@ export function createBrowserTabsPresencePriority(options: {
   } = { current: null };
   const { coordinator, priority } = createBrowserTabsCoordinatorWithPriority<
     BrowserTabsMessageMeta & BrowserTabsTabStatusMessage
-  >({
-    storeType: 'presence',
-    storeKey: 'manager',
-    getSessionKey: options.getSessionKey,
-    onMessage(message) {
+  >(
+    'presence',
+    'manager',
+    options.getSessionKey,
+    (message) => {
       priorityRef.current?.onTabStatusMessage(message.tabId, message);
     },
-    transportFactory: options.transportFactory,
-    ...(import.meta.env.DEV ? { debugLogger: options.debugLogger } : undefined),
-    getWindowIsFocused: options.getWindowIsFocused,
-    onWindowFocusChange: options.onWindowFocusChange,
-    priorityTimings: options.priorityTimings,
-  });
+    undefined,
+    options.transportFactory,
+    import.meta.env.DEV ? options.debugLogger : undefined,
+    options.getWindowIsFocused,
+    options.onWindowFocusChange,
+    options.priorityTimings,
+  );
   priorityRef.current = priority;
 
   return {

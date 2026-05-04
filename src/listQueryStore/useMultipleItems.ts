@@ -805,15 +805,13 @@ export function useMultipleItems<
         ignoreItemsInRefetchOnMount.add(itemKey);
 
         if (
-          shouldScheduleAutomaticFetch({
-            wasLoaded: itemState?.wasLoaded,
+          shouldScheduleAutomaticFetch(
+            itemState?.wasLoaded,
             shouldFetch,
-            requiredFetch,
             disableRefetches,
             disableRefetchOnMount,
-            refetchOnMount: itemState?.refetchOnMount ?? false,
-            skipFreshFetch: !!partialResources,
-          }) &&
+            !!partialResources,
+          ) &&
           tryClaimAutomaticFetchSlot(
             automaticRetryState,
             retrySignature,

@@ -63,10 +63,10 @@ export async function executeItemBatchFetch<
     if (partialResources) {
       applyPartialItemMerge(draft, itemKey, data, fields, partialResources);
     } else {
-      draft.items[itemKey] = reusePrevIfEqual({
-        current: data,
-        prev: draft.items[itemKey] ?? undefined,
-      });
+      draft.items[itemKey] = reusePrevIfEqual(
+        draft.items[itemKey] ?? undefined,
+        data,
+      );
     }
   }
 
@@ -133,14 +133,12 @@ export async function executeItemBatchFetch<
         payload: r.payload.payload,
         fields: r.payload.fields,
       }));
-      const fetchResult = await runOfflineAwareFetch({
-        controller: offlineController,
-        fetcher: () =>
-          batchFetchItemFn(batchRequests, {
-            signal: fetchCtx.signal,
-            batchKey: batchKey ?? DEFAULT_BATCH_KEY,
-          }),
-      });
+      const fetchResult = await runOfflineAwareFetch(offlineController, () =>
+        batchFetchItemFn(batchRequests, {
+          signal: fetchCtx.signal,
+          batchKey: batchKey ?? DEFAULT_BATCH_KEY,
+        }),
+      );
       if (!fetchResult.ok) {
         const error = normalizeFetchResultError(fetchResult, errorNormalizer);
 
@@ -260,14 +258,12 @@ export async function executeItemBatchFetch<
   const fetchPromises = requests.map(
     async ({ requestId: itemKey, payload: requestData }) => {
       try {
-        const fetchResult = await runOfflineAwareFetch({
-          controller: offlineController,
-          fetcher: () =>
-            fetchItemFn(klona(requestData.payload), {
-              signal: fetchCtx.signal,
-              fields: requestData.fields,
-            }),
-        });
+        const fetchResult = await runOfflineAwareFetch(offlineController, () =>
+          fetchItemFn(klona(requestData.payload), {
+            signal: fetchCtx.signal,
+            fields: requestData.fields,
+          }),
+        );
         if (!fetchResult.ok) {
           if (fetchCtx.shouldAbort()) {
             results.set(itemKey, false);

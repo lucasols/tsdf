@@ -717,12 +717,12 @@ function estimateEntrySizeBytes(args: {
 }): number {
   const compactValue = compactEntryValue(args.scope, args.value);
 
-  return estimateManagedAsyncStorageEntrySizeBytes({
-    customMetadata: args.customMetadata,
-    lastAccessAt: args.lastAccessAt,
-    serializedValue: serializeJsonForStorage(compactValue.d).rawValue,
-    version: args.version,
-  });
+  return estimateManagedAsyncStorageEntrySizeBytes(
+    serializeJsonForStorage(compactValue.d).rawValue,
+    args.lastAccessAt,
+    args.version,
+    args.customMetadata,
+  );
 }
 
 function openRequestAsPromise<T>(request: IDBRequest): Promise<T> {

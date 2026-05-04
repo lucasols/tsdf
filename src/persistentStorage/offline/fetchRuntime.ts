@@ -36,15 +36,11 @@ type OfflineAwareFetchResult<T> =
   | { ok: false; offline: true }
   | { ok: false; offline: false; error: unknown };
 
-export async function runOfflineAwareFetch<T>({
-  controller,
-  fetcher,
-  operationName,
-}: {
-  controller?: OfflineAwareFetchController | null;
-  fetcher: () => Promise<MaybeTSDFResult<T>>;
-  operationName?: string;
-}): Promise<OfflineAwareFetchResult<T>> {
+export async function runOfflineAwareFetch<T>(
+  controller: OfflineAwareFetchController | null | undefined,
+  fetcher: () => Promise<MaybeTSDFResult<T>>,
+  operationName?: string,
+): Promise<OfflineAwareFetchResult<T>> {
   await controller?.prepareForFetch?.();
 
   const shouldTreatFetchAsOffline = () =>

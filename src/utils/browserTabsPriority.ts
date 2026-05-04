@@ -32,18 +32,6 @@ export type BrowserTabsLeaderChangeDetails = {
   reason: 'local-focus' | 'local-status' | 'priority-read' | 'remote-status';
 };
 
-type BrowserTabsPriorityOptions = {
-  transportEnabled: boolean;
-  getIsEnabled: () => boolean;
-  tabId: string;
-  getWindowIsFocused: () => boolean;
-  /** Subscribes to window focus/blur state changes. Defaults to listening on window focus/blur events. */
-  onWindowFocusChange?: (handler: () => void) => () => void;
-  publishStatus: (status: BrowserTabsTabStatusMessage) => void;
-  timings?: BrowserTabsPriorityTimings;
-  onLeaderChange?: (details: BrowserTabsLeaderChangeDetails) => void;
-};
-
 type BrowserTabsRemoteLeaseState = {
   ownerTabId: string;
   startedAt: number;
@@ -83,16 +71,18 @@ const DEFAULT_FETCH_LEASE_MS = 10_000;
 const COALESCING_WINDOW_STEP_MS = 1_000;
 
 /** @internal */
-export function createBrowserTabsPriority({
-  transportEnabled,
-  getIsEnabled,
-  tabId,
-  getWindowIsFocused,
-  onWindowFocusChange,
-  publishStatus,
-  timings,
-  onLeaderChange,
-}: BrowserTabsPriorityOptions): BrowserTabsPriority {
+export function createBrowserTabsPriority(
+  transportEnabled: boolean,
+  getIsEnabled: () => boolean,
+  tabId: string,
+  getWindowIsFocused: () => boolean,
+  onWindowFocusChange: ((handler: () => void) => () => void) | undefined,
+  publishStatus: (status: BrowserTabsTabStatusMessage) => void,
+  timings: BrowserTabsPriorityTimings | undefined,
+  onLeaderChange:
+    | ((details: BrowserTabsLeaderChangeDetails) => void)
+    | undefined,
+): BrowserTabsPriority {
   const knownTabs = new Map<string, PresenceState>();
   const remoteFetchLeases = new Map<string, BrowserTabsRemoteLeaseState>();
   let lastLeaderTabId: string | undefined;

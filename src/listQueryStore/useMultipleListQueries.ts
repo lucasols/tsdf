@@ -1258,15 +1258,13 @@ export function useMultipleListQueries<
         ignoreQueriesInRefetchOnMount.add(queryId);
 
         if (
-          shouldScheduleAutomaticFetch({
-            wasLoaded: effectiveQueryState?.wasLoaded,
+          shouldScheduleAutomaticFetch(
+            effectiveQueryState?.wasLoaded,
             shouldFetch,
-            requiredFetch,
             disableRefetches,
             disableRefetchOnMount,
-            refetchOnMount: queryState?.refetchOnMount ?? false,
-            skipFreshFetch: !!partialResources,
-          }) &&
+            !!partialResources,
+          ) &&
           tryClaimAutomaticFetchSlot(
             automaticRetryState,
             retrySignature,

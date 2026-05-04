@@ -39,22 +39,22 @@ function getDefaultMaxBytesKindForScope(
   }
 }
 
-function getDefaultMaxBytesForAdapter(args: {
-  adapter: StorageAdapter | DefaultMaxBytesProfile;
-  kind: DefaultMaxBytesKind;
-}): number {
-  return defaultMaxBytes[getDefaultMaxBytesProfile(args.adapter)][args.kind];
+function getDefaultMaxBytesForAdapter(
+  adapter: StorageAdapter | DefaultMaxBytesProfile,
+  kind: DefaultMaxBytesKind,
+): number {
+  return defaultMaxBytes[getDefaultMaxBytesProfile(adapter)][kind];
 }
 
-export function getDefaultMaxBytesForScope(args: {
-  adapter: StorageAdapter | DefaultMaxBytesProfile;
+export function getDefaultMaxBytesForScope(
+  adapter: StorageAdapter | DefaultMaxBytesProfile,
   scopeKind: Extract<
     AsyncStorageNamespaceKind,
     'collection.item' | 'listQuery.item' | 'listQuery.query'
-  >;
-}): number {
-  return getDefaultMaxBytesForAdapter({
-    adapter: args.adapter,
-    kind: getDefaultMaxBytesKindForScope(args.scopeKind),
-  });
+  >,
+): number {
+  return getDefaultMaxBytesForAdapter(
+    adapter,
+    getDefaultMaxBytesKindForScope(scopeKind),
+  );
 }

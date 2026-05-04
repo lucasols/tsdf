@@ -163,37 +163,94 @@ export function createFetchApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
->({
-  store,
-  normalizedFetchListFn,
-  offsetPagination,
-  fetchItemFn,
-  batchFetchItemFn,
-  getItemsBatchKey,
-  errorNormalizer,
-  partialResources,
-  lowPriorityThrottleMs,
-  getCoalescingWindowMs,
-  mediumPriorityDelayMs,
-  dynamicRealtimeThrottleMs,
-  onSchedulerEvent,
-  usesRealTimeUpdates,
-  defaultQuerySize,
-  maxItemBatchSize,
-  getQueryKey,
-  getItemKey,
-  normalizeFieldsOption,
-  syncHydrationEnabled = false,
-  preloadQueries: preloadQueries_,
-  preloadItems: preloadItems_,
-  persistence,
-  testInitialLastFetchStartTime,
-  onQueryFetchStart,
-  onQueryFetchSettled,
-  onItemFetchStart,
-  onItemFetchSettled,
-  offlineController,
-}: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>) {
+>(
+  store: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>['store'],
+  normalizedFetchListFn: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['normalizedFetchListFn'],
+  offsetPagination: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['offsetPagination'],
+  fetchItemFn: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['fetchItemFn'],
+  batchFetchItemFn: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['batchFetchItemFn'],
+  getItemsBatchKey: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['getItemsBatchKey'],
+  errorNormalizer: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['errorNormalizer'],
+  partialResources: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['partialResources'],
+  lowPriorityThrottleMs: number,
+  getCoalescingWindowMs: () => number,
+  mediumPriorityDelayMs: number | undefined,
+  dynamicRealtimeThrottleMs:
+    | ((lastFetchDuration: number) => number)
+    | undefined,
+  onSchedulerEvent:
+    | ((
+        event: RequestSchedulerEvents,
+        data?: RequestSchedulerEventData,
+      ) => void)
+    | undefined,
+  usesRealTimeUpdates: boolean,
+  defaultQuerySize: number,
+  maxItemBatchSize: number | undefined,
+  getQueryKey: (params: QueryPayload) => string,
+  getItemKey: (params: ItemPayload) => string,
+  normalizeFieldsOption: (
+    fields: FieldsInput | undefined,
+  ) => string[] | undefined,
+  syncHydrationEnabled: boolean,
+  preloadQueries_: ((queryKeys: string[]) => Promise<boolean[]>) | undefined,
+  preloadItems_: ((itemKeys: string[]) => Promise<boolean[]>) | undefined,
+  persistence: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['persistence'],
+  testInitialLastFetchStartTime: number | undefined,
+  onQueryFetchStart: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['onQueryFetchStart'],
+  onQueryFetchSettled: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['onQueryFetchSettled'],
+  onItemFetchStart: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['onItemFetchStart'],
+  onItemFetchSettled: CreateFetchApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['onItemFetchSettled'],
+  offlineController: OfflineAwareFetchController | null | undefined,
+) {
   type Query = TSFDListQuery<QueryPayload>;
 
   const noFetchItemFnError = 'No fetchItemFn was provided';

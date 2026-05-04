@@ -14,43 +14,30 @@ export function createListQueryCacheLimits<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
->({
-  store,
-  maxItems,
-  maxQueries,
-  itemCacheRuntime,
-  queryCacheRuntime,
-  isQueryProtectedFromEviction,
-  isStandaloneItemProtectedFromEviction,
-  cleanupItemStateMetadata,
-  cleanupQueryStateMetadata,
-  deleteQueryFetchResources,
-  deleteItemFetchResources,
-  onStateCleanup,
-}: {
-  store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
-  maxItems: number | undefined;
-  maxQueries: number | undefined;
-  itemCacheRuntime: Pick<LruCacheRuntime, 'getLastUsed'>;
-  queryCacheRuntime: Pick<LruCacheRuntime, 'getLastUsed'>;
+>(
+  store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
+  maxItems: number | undefined,
+  maxQueries: number | undefined,
+  itemCacheRuntime: Pick<LruCacheRuntime, 'getLastUsed'>,
+  queryCacheRuntime: Pick<LruCacheRuntime, 'getLastUsed'>,
   isQueryProtectedFromEviction: (
     queryKey: string,
     query: TSFDListQuery<QueryPayload>,
-  ) => boolean;
+  ) => boolean,
   isStandaloneItemProtectedFromEviction: (
     itemKey: string,
     itemQuery: TSDFItemQuery<ItemPayload>,
-  ) => boolean;
-  cleanupItemStateMetadata: (itemKey: string) => void;
-  cleanupQueryStateMetadata: (queryKey: string) => void;
-  deleteQueryFetchResources: (queryKeys: string[]) => void;
+  ) => boolean,
+  cleanupItemStateMetadata: (itemKey: string) => void,
+  cleanupQueryStateMetadata: (queryKey: string) => void,
+  deleteQueryFetchResources: (queryKeys: string[]) => void,
   deleteItemFetchResources: (
     itemsToCleanup: { itemKey: string; payload: ItemPayload }[],
-  ) => void;
+  ) => void,
   onStateCleanup:
     | ((cleanup: ListQueryStateCleanup<QueryPayload, ItemPayload>) => void)
-    | undefined;
-}) {
+    | undefined,
+) {
   let isEnforcingCacheLimits = false;
 
   function getReferencedItemKeysFromQueries(

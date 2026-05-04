@@ -251,14 +251,14 @@ export function setupListQueryPersistence<
   assertValidPersistentStoreName(config.storeName);
 
   const version = config.version;
-  const defaultMaxItemBytes = getDefaultMaxBytesForScope({
-    adapter: config.adapter,
-    scopeKind: 'listQuery.item',
-  });
-  const defaultMaxQueryBytes = getDefaultMaxBytesForScope({
-    adapter: config.adapter,
-    scopeKind: 'listQuery.query',
-  });
+  const defaultMaxItemBytes = getDefaultMaxBytesForScope(
+    config.adapter,
+    'listQuery.item',
+  );
+  const defaultMaxQueryBytes = getDefaultMaxBytesForScope(
+    config.adapter,
+    'listQuery.query',
+  );
   const maxItemBytes = config.maxItemBytes ?? defaultMaxItemBytes;
   const maxQueryBytes = config.maxQueryBytes ?? defaultMaxQueryBytes;
   const maxQuerySize = config.maxQuerySize ?? DEFAULT_MAX_QUERY_SIZE;
@@ -442,20 +442,20 @@ export function setupListQueryPersistence<
     }
 
     const serializedValue = serializeJsonForStorage(args.value.data);
-    const customMetadata = mergeManagedAsyncStorageCustomMetadata({
-      currentCustomMetadata: args.currentCustomMetadata,
-      key: args.itemKey,
-      nextCustomMetadata: args.nextCustomMetadata,
-      protectedKeysSnapshotSet: args.protectedKeysSnapshotSet,
-      scope: asyncItemNamespaceScope,
-    });
+    const customMetadata = mergeManagedAsyncStorageCustomMetadata(
+      args.currentCustomMetadata,
+      args.nextCustomMetadata,
+      args.protectedKeysSnapshotSet,
+      asyncItemNamespaceScope,
+      args.itemKey,
+    );
 
-    return estimateManagedAsyncStorageEntrySizeBytes({
+    return estimateManagedAsyncStorageEntrySizeBytes(
+      serializedValue.rawValue,
+      args.lastAccessAt,
+      version ?? 1,
       customMetadata,
-      lastAccessAt: args.lastAccessAt,
-      serializedValue: serializedValue.rawValue,
-      version: version ?? 1,
-    });
+    );
   }
 
   function estimateAsyncQueryEntrySizeBytes(args: {
@@ -471,23 +471,23 @@ export function setupListQueryPersistence<
     }
 
     const serializedValue = serializeJsonForStorage(args.value.items);
-    const customMetadata = mergeManagedAsyncStorageCustomMetadata({
-      currentCustomMetadata: args.currentCustomMetadata,
-      key: args.queryKey,
-      nextCustomMetadata: {
+    const customMetadata = mergeManagedAsyncStorageCustomMetadata(
+      args.currentCustomMetadata,
+      {
         ...(args.value.hasMore ? { h: true as const } : {}),
         p: args.value.payload,
       },
-      protectedKeysSnapshotSet: args.protectedKeysSnapshotSet,
-      scope: asyncQueryNamespaceScope,
-    });
+      args.protectedKeysSnapshotSet,
+      asyncQueryNamespaceScope,
+      args.queryKey,
+    );
 
-    return estimateManagedAsyncStorageEntrySizeBytes({
+    return estimateManagedAsyncStorageEntrySizeBytes(
+      serializedValue.rawValue,
+      args.lastAccessAt,
+      version ?? 1,
       customMetadata,
-      lastAccessAt: args.lastAccessAt,
-      serializedValue: serializedValue.rawValue,
-      version: version ?? 1,
-    });
+    );
   }
 
   let storeRef: Store<State> | null = null;
@@ -1851,15 +1851,15 @@ export function setupListQueryPersistence<
         );
       }
 
-      const keptQueryKeys = keepEntriesWithinByteBudget({
-        entries: filteredEntries,
-        getKey: (entry) => entry.queryKey,
-        getLastAccessAt: (entry) => entry.lastAccessAt,
-        getSizeBytes: (entry) => entry.sizeBytes,
-        isPinned: (entry) => pinnedQueryKeys.has(entry.queryKey),
-        isProtected: (entry) => entry.offlineProtected,
-        maxBytes: maxQueryBytes,
-      });
+      const keptQueryKeys = keepEntriesWithinByteBudget(
+        filteredEntries,
+        (entry) => entry.queryKey,
+        (entry) => entry.lastAccessAt,
+        (entry) => entry.sizeBytes,
+        (entry) => pinnedQueryKeys.has(entry.queryKey),
+        (entry) => entry.offlineProtected,
+        maxQueryBytes,
+      );
 
       await Promise.all(
         filteredEntries
@@ -1916,15 +1916,15 @@ export function setupListQueryPersistence<
       );
     }
 
-    const keptQueryKeys = keepEntriesWithinByteBudget({
-      entries: validEntries,
-      getKey: (entry) => entry.queryKey,
-      getLastAccessAt: (entry) => entry.lastAccessAt,
-      getSizeBytes: (entry) => entry.sizeBytes,
-      isPinned: (entry) => pinnedQueryKeys.has(entry.queryKey),
-      isProtected: (entry) => protectedQueryKeys.has(entry.queryKey),
-      maxBytes: maxQueryBytes,
-    });
+    const keptQueryKeys = keepEntriesWithinByteBudget(
+      validEntries,
+      (entry) => entry.queryKey,
+      (entry) => entry.lastAccessAt,
+      (entry) => entry.sizeBytes,
+      (entry) => pinnedQueryKeys.has(entry.queryKey),
+      (entry) => protectedQueryKeys.has(entry.queryKey),
+      maxQueryBytes,
+    );
 
     await Promise.all(
       validEntries
@@ -2019,15 +2019,15 @@ export function setupListQueryPersistence<
         ({ payload }) => !shouldIgnoreItem(payload),
       );
 
-      const keptItemKeys = keepEntriesWithinByteBudget({
-        entries: persistedItemEntries,
-        getKey: (entry) => entry.itemKey,
-        getLastAccessAt: (entry) => entry.lastAccessAt,
-        getSizeBytes: (entry) => entry.sizeBytes,
-        isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-        isProtected: (entry) => protectedItemKeys.has(entry.itemKey),
-        maxBytes: maxItemBytes,
-      });
+      const keptItemKeys = keepEntriesWithinByteBudget(
+        persistedItemEntries,
+        (entry) => entry.itemKey,
+        (entry) => entry.lastAccessAt,
+        (entry) => entry.sizeBytes,
+        (entry) => pinnedItemKeys.has(entry.itemKey),
+        (entry) => protectedItemKeys.has(entry.itemKey),
+        maxItemBytes,
+      );
       const evictedItemKeys = new Set<string>();
 
       await Promise.all(
@@ -2146,15 +2146,15 @@ export function setupListQueryPersistence<
       ({ payload }) => !shouldIgnoreItem(payload),
     );
 
-    const keptItemKeys = keepEntriesWithinByteBudget({
-      entries: persistedItemEntries,
-      getKey: (entry) => entry.itemKey,
-      getLastAccessAt: (entry) => entry.lastAccessAt,
-      getSizeBytes: (entry) => entry.sizeBytes,
-      isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-      isProtected: (entry) => protectedItemKeys.has(entry.itemKey),
-      maxBytes: maxItemBytes,
-    });
+    const keptItemKeys = keepEntriesWithinByteBudget(
+      persistedItemEntries,
+      (entry) => entry.itemKey,
+      (entry) => entry.lastAccessAt,
+      (entry) => entry.sizeBytes,
+      (entry) => pinnedItemKeys.has(entry.itemKey),
+      (entry) => protectedItemKeys.has(entry.itemKey),
+      maxItemBytes,
+    );
 
     await Promise.all(
       persistedItemEntries
@@ -2483,9 +2483,7 @@ export function setupListQueryPersistence<
             nextKnownPersistedItemBytes > maxItemBytes ||
             nextKnownPersistedQueryBytes > maxQueryBytes)
         ) {
-          scheduleLocalStorageMaintenance({
-            forceManifestKeys: [maintenanceCallbackKey],
-          });
+          scheduleLocalStorageMaintenance([maintenanceCallbackKey]);
         }
         return;
       }
@@ -2651,15 +2649,15 @@ export function setupListQueryPersistence<
       });
     }
 
-    const keptQueryKeys = keepEntriesWithinByteBudget({
-      entries: candidateEntries,
-      getKey: (entry) => entry.queryKey,
-      getLastAccessAt: (entry) => entry.lastAccessAt,
-      getSizeBytes: (entry) => entry.sizeBytes,
-      isPinned: (entry) => pinnedQueryKeys.has(entry.queryKey),
-      isProtected: (entry) => entry.offlineProtected,
-      maxBytes: maxQueryBytes,
-    });
+    const keptQueryKeys = keepEntriesWithinByteBudget(
+      candidateEntries,
+      (entry) => entry.queryKey,
+      (entry) => entry.lastAccessAt,
+      (entry) => entry.sizeBytes,
+      (entry) => pinnedQueryKeys.has(entry.queryKey),
+      (entry) => entry.offlineProtected,
+      maxQueryBytes,
+    );
 
     finalPersistedQueryKeys.clear();
     for (const queryKey of keptQueryKeys) {
@@ -2821,15 +2819,15 @@ export function setupListQueryPersistence<
       });
     }
 
-    const keptItemKeys = keepEntriesWithinByteBudget({
-      entries: itemCandidateEntries,
-      getKey: (entry) => entry.itemKey,
-      getLastAccessAt: (entry) => entry.lastAccessAt,
-      getSizeBytes: (entry) => entry.sizeBytes,
-      isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-      isProtected: (entry) => entry.offlineProtected,
-      maxBytes: maxItemBytes,
-    });
+    const keptItemKeys = keepEntriesWithinByteBudget(
+      itemCandidateEntries,
+      (entry) => entry.itemKey,
+      (entry) => entry.lastAccessAt,
+      (entry) => entry.sizeBytes,
+      (entry) => pinnedItemKeys.has(entry.itemKey),
+      (entry) => entry.offlineProtected,
+      maxItemBytes,
+    );
 
     finalPersistedItemKeys.clear();
     for (const itemKey of keptItemKeys) {

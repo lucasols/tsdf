@@ -501,13 +501,12 @@ function estimateIndexedDbManagedEntrySizeBytes(args: {
   value: unknown;
   version: number;
 }): number {
-  return estimateManagedAsyncStorageEntrySizeBytes({
-    customMetadata: args.customMetadata,
-    lastAccessAt: args.lastAccessAt,
-    serializedValue:
-      args.serializedValue ?? serializeJsonForStorage(args.value).rawValue,
-    version: args.version,
-  });
+  return estimateManagedAsyncStorageEntrySizeBytes(
+    args.serializedValue ?? serializeJsonForStorage(args.value).rawValue,
+    args.lastAccessAt,
+    args.version,
+    args.customMetadata,
+  );
 }
 
 function expandEntryValue(

@@ -887,11 +887,11 @@ export function createCollectionStore<
   let initialStatus: CollectionItemStatus = 'success';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
-  const resolvedOfflineSession = resolveStoreManagerOfflineSession({
+  const resolvedOfflineSession = resolveStoreManagerOfflineSession(
     storeManager,
-    storeName: id,
-    usesOfflineStorage: persistentStorageConfig?.offline !== undefined,
-  });
+    id,
+    persistentStorageConfig?.offline !== undefined,
+  );
   const getSessionKeyBase =
     import.meta.env.TEST && testOptions
       ? wrapGetSessionKeyForTest(
@@ -903,12 +903,11 @@ export function createCollectionStore<
     resolvedOfflineSession === null
       ? getSessionKeyBase
       : () =>
-          validateStoreManagerSessionConsistency({
-            storeManager,
-            storeName: id,
-            offlineSession: resolvedOfflineSession,
-            getSessionKey: getSessionKeyBase,
-          });
+          validateStoreManagerSessionConsistency(
+            id,
+            resolvedOfflineSession,
+            getSessionKeyBase,
+          );
   const errorNormalizer = storeManager.errorNormalizer;
   const resolvedOfflineSessionForPersistentStorage =
     persistentStorageConfig?.offline === undefined
@@ -1029,29 +1028,25 @@ export function createCollectionStore<
       nextItemKey: string;
     }[],
   ): void {
-    rebindOfflineOverlayEntries({
+    rebindOfflineOverlayEntries(
+      offlineOverlayStore,
       itemKeyRewrites,
-      overlayStore: offlineOverlayStore,
-      createReboundOverlay: ({ existingOverlay, nextItemKey }) => ({
+      ({ existingOverlay, nextItemKey }) => ({
         data: existingOverlay.data ?? null,
         payload: store.state[nextItemKey]?.payload ?? existingOverlay.payload,
         keepVisibleWhileResolutionRequired: true,
       }),
-    });
+    );
   }
 
   function captureOfflineOverlays(itemKeys: readonly string[]): void {
-    captureOfflineOverlayEntries({
-      itemKeys,
-      overlayStore: offlineOverlayStore,
-      createOverlay: (itemKey) => {
-        const item = store.state[itemKey];
+    captureOfflineOverlayEntries(offlineOverlayStore, itemKeys, (itemKey) => {
+      const item = store.state[itemKey];
 
-        return {
-          data: item ? klona(item.data) : null,
-          payload: item ? klona(item.payload) : undefined,
-        };
-      },
+      return {
+        data: item ? klona(item.data) : null,
+        payload: item ? klona(item.payload) : undefined,
+      };
     });
   }
   const resolvedOfflineConfig = resolvedPersistentStorageConfig?.offline;
@@ -1073,22 +1068,14 @@ export function createCollectionStore<
 
   const offlineController =
     resolvedPersistentStorageConfig && resolvedOfflineConfig
-      ? createOfflineStoreController<ResolvedOfflineOperations>({
-          storeName: id,
-          storeType: 'collection',
-          getSessionKey: getSessionKeyForRuntime,
-          onPersistentStorageError:
-            resolvedPersistentStorageConfig.onPersistentStorageError,
-          ...(import.meta.env.DEV
-            ? { debugLogger: storeManager.debugLogger }
-            : undefined),
-          adapter: resolvedPersistentStorageConfig.adapter,
-          offlineSession: resolvedOfflineConfig.session,
-          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
-          operations: __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
-            offlineOperationsForRuntime,
-          ),
-          storeAdapter: {
+      ? createOfflineStoreController<ResolvedOfflineOperations>(
+          id,
+          'collection',
+          getSessionKeyForRuntime,
+          resolvedPersistentStorageConfig.onPersistentStorageError,
+          import.meta.env.DEV ? storeManager.debugLogger : undefined,
+          resolvedPersistentStorageConfig.adapter,
+          {
             normalizeEntityRefs: (entityRefs) =>
               entityRefs.map((ref) => {
                 // Temp entities are queued internally as normalized refs.
@@ -1109,16 +1096,15 @@ export function createCollectionStore<
               const sessionKey = getSessionKeyForRuntime();
               if (sessionKey === false) return [];
               return entityRefs.map((ref) =>
-                createProtectedStorageKey({
-                  backend:
-                    resolvedPersistentStorageConfig.adapter !== 'local-sync'
-                      ? 'async'
-                      : 'localStorage',
+                createProtectedStorageKey(
                   sessionKey,
-                  storeName: id,
-                  kind: 'collection.item',
-                  key: ref.entityKey,
-                }),
+                  id,
+                  'collection.item',
+                  ref.entityKey,
+                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                    ? 'async'
+                    : 'localStorage',
+                ),
               );
             },
             applyPendingEntity: ({ tempId, pendingEntity }) => {
@@ -1192,7 +1178,12 @@ export function createCollectionStore<
               });
             },
           },
-        })
+          resolvedOfflineConfig.session,
+          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
+          __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
+            offlineOperationsForRuntime,
+          ),
+        )
       : null;
 
   function touchItems(itemKeys: string[]): void {
@@ -1665,21 +1656,19 @@ export function createCollectionStore<
     });
   const browserTabsSync = createBrowserTabsCoordinator<
     CollectionBrowserTabsMessage<ItemState, ItemPayload>
-  >({
-    storeType: 'collection',
-    storeKey: id,
-    getSessionKey: getSessionKeyForRuntime,
-    onMessage: handleRemoteMessage,
-    onSessionChange() {
+  >(
+    'collection',
+    id,
+    getSessionKeyForRuntime,
+    handleRemoteMessage,
+    () => {
       lastCollectionSyncVersions.clear();
       clearOfflineOverlays();
     },
-    transportFactory: testOptions?.browserTabsTransportFactory,
-    ...(import.meta.env.DEV
-      ? { debugLogger: storeManager.debugLogger }
-      : undefined),
-    tabId: browserTabsTabId,
-  });
+    testOptions?.browserTabsTransportFactory,
+    import.meta.env.DEV ? storeManager.debugLogger : undefined,
+    browserTabsTabId,
+  );
 
   async function executeBatchFetch(
     requests: BatchRequest<ItemPayload>[],
@@ -2373,21 +2362,13 @@ export function createCollectionStore<
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
 
-    const result = await performMutationWithLifecycle({
-      startMutation: () => startMutation(payloadToUse),
-      optimisticUpdate: optimisticUpdate
+    const result = await performMutationWithLifecycle(
+      () => startMutation(payloadToUse),
+      offline
         ? () =>
-            runWithBroadcastConsistency('optimistic', () =>
-              optimisticUpdate(payloadToUse),
-            )
-        : undefined,
-      debounce: _debounce,
-      blockWindowClose: blockWindowClose ?? undefined,
-      mutation: offline
-        ? () =>
-            runHybridOfflineMutation({
+            runHybridOfflineMutation(
               // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
-              controller: __LEGIT_CAST__<
+              __LEGIT_CAST__<
                 OfflineAwareMutationController<
                   Exclude<TOfflineOperations, null>
                 > | null,
@@ -2396,21 +2377,12 @@ export function createCollectionStore<
               offline,
               upload,
               directMutation,
-            })
+            )
         : async () => ({
             kind: 'online' as const,
             data: await directMutation(),
           }),
-      onSuccess: (result) => {
-        if (revalidateOnSuccess && affectedItems.length > 0) {
-          invalidateItem(payloadToUse);
-        }
-
-        if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, payloadToUse);
-        }
-      },
-      onError: (exception) => {
+      (exception) => {
         const error = toStoreMutationError(exception, errorNormalizer);
 
         if (optimisticRollbackSnapshots.length > 0) {
@@ -2453,7 +2425,24 @@ export function createCollectionStore<
 
         return error;
       },
-    });
+      optimisticUpdate
+        ? () =>
+            runWithBroadcastConsistency('optimistic', () =>
+              optimisticUpdate(payloadToUse),
+            )
+        : undefined,
+      (result) => {
+        if (revalidateOnSuccess && affectedItems.length > 0) {
+          invalidateItem(payloadToUse);
+        }
+
+        if (onSuccess && result.kind === 'online') {
+          onSuccess(result.data, payloadToUse);
+        }
+      },
+      _debounce,
+      blockWindowClose ?? undefined,
+    );
 
     storeEvents.emit('mutationEnd', {
       mutationId,
@@ -2484,34 +2473,34 @@ export function createCollectionStore<
     return result;
   }
 
-  const focusLifecycle = createStoreFocusLifecycle({
-    revalidateOnWindowFocus: resolvedRevalidateOnWindowFocus,
+  const focusLifecycle = createStoreFocusLifecycle(
+    resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
     getWindowIsFocused,
-    onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
-    onWindowFocusRevalidate: () => {
+    testOptions?.onWindowFocus ?? onWindowFocusDefault,
+    () => {
       invalidateItem(() => true, 'lowPriority');
     },
-    onTransportReconnectRevalidate: () => {
+    () => {
       invalidateItem(() => true, 'realtimeUpdate');
     },
-  });
+  );
 
   // Attach persistent storage after store creation
-  const { enforceCacheLimits } = createCollectionCacheLimits({
+  const { enforceCacheLimits } = createCollectionCacheLimits(
     store,
     maxItems,
     itemCacheRuntime,
     isProtectedFromEviction,
     cleanupItemResources,
     onStateCleanup,
-  });
+  );
 
-  const cacheLimitEnforcementScheduler = createIdleThrottledScheduler({
-    throttleMs: CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
-    run: enforceCacheLimits,
-  });
+  const cacheLimitEnforcementScheduler = createIdleThrottledScheduler(
+    CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
+    enforceCacheLimits,
+  );
 
   function scheduleCacheLimitEnforcement(): void {
     cacheLimitEnforcementScheduler.schedule();

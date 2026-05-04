@@ -120,35 +120,35 @@ function setOfflineProtectionMetadata(
     : undefined;
 }
 
-export function mergeManagedAsyncStorageCustomMetadata(args: {
-  currentCustomMetadata?: Record<string, unknown>;
-  key: string;
-  nextCustomMetadata?: Record<string, unknown>;
-  protectedKeysSnapshotSet?: Set<string> | null;
-  scope: AsyncStorageNamespaceScope;
-}): Record<string, unknown> | undefined {
+export function mergeManagedAsyncStorageCustomMetadata(
+  currentCustomMetadata: Record<string, unknown> | undefined,
+  nextCustomMetadata: Record<string, unknown> | undefined,
+  protectedKeysSnapshotSet: Set<string> | null | undefined,
+  scope: AsyncStorageNamespaceScope,
+  key: string,
+): Record<string, unknown> | undefined {
   const merged = {
-    ...(args.currentCustomMetadata ?? {}),
-    ...(args.nextCustomMetadata ?? {}),
+    ...(currentCustomMetadata ?? {}),
+    ...(nextCustomMetadata ?? {}),
   };
   const mergedCustomMetadata =
     Object.keys(merged).length > 0 ? merged : undefined;
 
-  if (args.protectedKeysSnapshotSet !== null) {
+  if (protectedKeysSnapshotSet !== null) {
     return setOfflineProtectionMetadata(
       mergedCustomMetadata,
-      args.protectedKeysSnapshotSet?.has(
-        serializeProtectedRef({ ...args.scope, key: args.key }),
+      protectedKeysSnapshotSet?.has(
+        serializeProtectedRef({ ...scope, key }),
       ) === true ||
-        isOfflineProtectedMetadata(args.nextCustomMetadata) ||
-        isOfflineProtectedMetadata(args.currentCustomMetadata),
+        isOfflineProtectedMetadata(nextCustomMetadata) ||
+        isOfflineProtectedMetadata(currentCustomMetadata),
     );
   }
 
   return setOfflineProtectionMetadata(
     mergedCustomMetadata,
-    isOfflineProtectedMetadata(args.nextCustomMetadata) ||
-      isOfflineProtectedMetadata(args.currentCustomMetadata),
+    isOfflineProtectedMetadata(nextCustomMetadata) ||
+      isOfflineProtectedMetadata(currentCustomMetadata),
   );
 }
 const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
@@ -232,23 +232,21 @@ function serializeInternalManagedMetadataRecord(
   return { ...serialized, ...customMetadata };
 }
 
-export function estimateManagedAsyncStorageEntrySizeBytes(args: {
-  customMetadata?: Record<string, unknown>;
-  lastAccessAt: number;
-  serializedValue: string;
-  version: number;
-}): number {
+export function estimateManagedAsyncStorageEntrySizeBytes(
+  serializedValue: string,
+  lastAccessAt: number,
+  version: number,
+  customMetadata?: Record<string, unknown>,
+): number {
   return (
-    getSerializedStringSize(args.serializedValue) +
+    getSerializedStringSize(serializedValue) +
     getSerializedStringSize(
       JSON.stringify(
         serializeInternalManagedMetadataRecord({
-          lastAccessAt: args.lastAccessAt,
+          lastAccessAt,
           sizeBytes: undefined,
-          version: args.version,
-          ...(args.customMetadata
-            ? { customMetadata: args.customMetadata }
-            : {}),
+          version,
+          ...(customMetadata ? { customMetadata } : {}),
         }),
       ),
     )
@@ -350,24 +348,15 @@ function getDefaultStaticPolicyForScope(
   switch (scope.kind) {
     case 'collection.item':
       return {
-        maxBytes: getDefaultMaxBytesForScope({
-          adapter: 'async',
-          scopeKind: 'collection.item',
-        }),
+        maxBytes: getDefaultMaxBytesForScope('async', 'collection.item'),
       };
     case 'listQuery.item':
       return {
-        maxBytes: getDefaultMaxBytesForScope({
-          adapter: 'async',
-          scopeKind: 'listQuery.item',
-        }),
+        maxBytes: getDefaultMaxBytesForScope('async', 'listQuery.item'),
       };
     case 'listQuery.query':
       return {
-        maxBytes: getDefaultMaxBytesForScope({
-          adapter: 'async',
-          scopeKind: 'listQuery.query',
-        }),
+        maxBytes: getDefaultMaxBytesForScope('async', 'listQuery.query'),
       };
     default:
       return null;
@@ -1873,15 +1862,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           nextCustomMetadata,
           currentCustomMetadata,
         ) =>
-          mergeManagedAsyncStorageCustomMetadata({
+          mergeManagedAsyncStorageCustomMetadata(
             currentCustomMetadata,
-            key,
             nextCustomMetadata,
-            protectedKeysSnapshotSet: getSessionProtectedKeysSnapshot(
-              scope.sessionKey,
-            ),
+            getSessionProtectedKeysSnapshot(scope.sessionKey),
             scope,
-          }),
+            key,
+          ),
       });
       this.#advanceNamespaceReadCacheGeneration(scope);
       this.#invalidateCachedNamespaceIndexState(scope);
@@ -1938,13 +1925,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     for (const upsert of upserts) {
       const existingMetadata = indexEntries.get(upsert.key);
-      const customMetadata = mergeManagedAsyncStorageCustomMetadata({
-        currentCustomMetadata: existingMetadata?.customMetadata,
-        key: upsert.key,
-        nextCustomMetadata: upsert.metadata,
+      const customMetadata = mergeManagedAsyncStorageCustomMetadata(
+        existingMetadata?.customMetadata,
+        upsert.metadata,
         protectedKeysSnapshotSet,
         scope,
-      });
+        upsert.key,
+      );
       const nextLastAccessAt =
         touchesByKey.get(upsert.key) ?? existingMetadata?.lastAccessAt ?? now;
       const serializedValue =
@@ -1953,12 +1940,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           : serializeJsonForStorage(upsert.value);
       const nextSizeBytes =
         scope.kind !== 'document'
-          ? estimateManagedAsyncStorageEntrySizeBytes({
+          ? estimateManagedAsyncStorageEntrySizeBytes(
+              serializedValue.rawValue,
+              nextLastAccessAt,
+              upsert.version,
               customMetadata,
-              lastAccessAt: nextLastAccessAt,
-              serializedValue: serializedValue.rawValue,
-              version: upsert.version,
-            })
+            )
           : undefined;
       const nextMetadata: InternalManagedMetadataRecord = {
         lastAccessAt: nextLastAccessAt,
@@ -3015,15 +3002,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     if (effectiveStaticPolicy?.maxBytes !== undefined) {
       const pinnedKeys = new Set(effectiveStaticPolicy.pinnedKeys ?? []);
-      const keptKeys = keepEntriesWithinByteBudget({
-        entries: candidateEntries,
-        getKey: (entry) => entry.itemKey,
-        getLastAccessAt: (entry) => entry.lastAccessAt,
-        getSizeBytes: (entry) => entry.sizeBytes,
-        isPinned: (entry) => pinnedKeys.has(entry.itemKey),
-        isProtected: (entry) => entry.protected,
-        maxBytes: effectiveStaticPolicy.maxBytes,
-      });
+      const keptKeys = keepEntriesWithinByteBudget(
+        candidateEntries,
+        (entry) => entry.itemKey,
+        (entry) => entry.lastAccessAt,
+        (entry) => entry.sizeBytes,
+        (entry) => pinnedKeys.has(entry.itemKey),
+        (entry) => entry.protected,
+        effectiveStaticPolicy.maxBytes,
+      );
 
       for (const { itemKey } of candidateEntries) {
         if (keptKeys.has(itemKey)) continue;

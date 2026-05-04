@@ -7,23 +7,15 @@ type StoreFocusLifecycle = {
 };
 
 /** @internal */
-export function createStoreFocusLifecycle({
-  revalidateOnWindowFocus,
-  usesRealTimeUpdates,
-  transportReconnectCooldownMs,
-  getWindowIsFocused,
-  onWindowFocus,
-  onWindowFocusRevalidate,
-  onTransportReconnectRevalidate,
-}: {
-  revalidateOnWindowFocus: boolean | (() => boolean) | undefined;
-  usesRealTimeUpdates: boolean | undefined;
-  transportReconnectCooldownMs: number;
-  getWindowIsFocused: () => boolean;
-  onWindowFocus: (handler: () => void) => () => void;
-  onWindowFocusRevalidate: () => void;
-  onTransportReconnectRevalidate: () => void;
-}): StoreFocusLifecycle {
+export function createStoreFocusLifecycle(
+  revalidateOnWindowFocus: boolean | (() => boolean) | undefined,
+  usesRealTimeUpdates: boolean | undefined,
+  transportReconnectCooldownMs: number,
+  getWindowIsFocused: () => boolean,
+  onWindowFocus: (handler: () => void) => () => void,
+  onWindowFocusRevalidate: () => void,
+  onTransportReconnectRevalidate: () => void,
+): StoreFocusLifecycle {
   let cleanupFocusListener: (() => void) | null = null;
   let cleanupReconnectFocusListener: (() => void) | null = null;
   let reconnectCooldownTimeoutId: TimeoutId | null = null;

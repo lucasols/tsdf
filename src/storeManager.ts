@@ -466,41 +466,40 @@ export function getOrCreateStoreManagerBrowserTabsPresence(
 
 export function resolveStoreManagerOfflineSession<
   TUploadRef extends ValidPayload = ValidPayload,
->(args: {
-  storeManager: StoreManager<TUploadRef>;
-  storeName: string;
-  usesOfflineStorage: boolean;
-}): OfflineSession<TUploadRef> | null {
+>(
+  storeManager: StoreManager<TUploadRef>,
+  storeName: string,
+  usesOfflineStorage: boolean,
+): OfflineSession<TUploadRef> | null {
   // WORKAROUND: The manager registry stores sessions behind a shared
   // non-generic weak map, and this rebind restores the caller's known upload-ref
   // type when reading its own session back out.
   const offlineSession = __LEGIT_CAST__<
     OfflineSession<TUploadRef> | undefined,
     OfflineSession | undefined
-  >(storeManagerOfflineSessionRegistry.get(args.storeManager));
-  if (!args.usesOfflineStorage) return null;
+  >(storeManagerOfflineSessionRegistry.get(storeManager));
+  if (!usesOfflineStorage) return null;
 
   if (!offlineSession) {
     throw new Error(
-      `[tsdf] Store "${args.storeName}" has persistentStorage.offline configured but storeManager was created without offlineSession`,
+      `[tsdf] Store "${storeName}" has persistentStorage.offline configured but storeManager was created without offlineSession`,
     );
   }
 
   return offlineSession;
 }
 
-export function validateStoreManagerSessionConsistency(args: {
-  storeManager: StoreManager;
-  storeName: string;
-  offlineSession: OfflineSession;
-  getSessionKey: () => string | false;
-}): string | false {
-  const sessionKey = args.getSessionKey();
-  const offlineSessionKey = args.offlineSession.getSessionKey();
+export function validateStoreManagerSessionConsistency(
+  storeName: string,
+  offlineSession: OfflineSession,
+  getSessionKey: () => string | false,
+): string | false {
+  const sessionKey = getSessionKey();
+  const offlineSessionKey = offlineSession.getSessionKey();
 
   if (sessionKey !== offlineSessionKey) {
     throw new Error(
-      `[tsdf] Store "${args.storeName}" is attached to offline session "${offlineSessionKey}" but storeManager.getSessionKey() returned "${sessionKey}"`,
+      `[tsdf] Store "${storeName}" is attached to offline session "${offlineSessionKey}" but storeManager.getSessionKey() returned "${sessionKey}"`,
     );
   }
 

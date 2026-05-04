@@ -83,15 +83,9 @@ export async function executeBatchFetch<
   if (batchFetchFn && requests.length > 1) {
     try {
       const payloads = requests.map((r) => r.payload);
-      const fetchResult = await runOfflineAwareFetch({
-        controller: offlineController,
-        fetcher: () =>
-          batchFetchFn(
-            payloads,
-            fetchCtx.signal,
-            batchKey ?? DEFAULT_BATCH_KEY,
-          ),
-      });
+      const fetchResult = await runOfflineAwareFetch(offlineController, () =>
+        batchFetchFn(payloads, fetchCtx.signal, batchKey ?? DEFAULT_BATCH_KEY),
+      );
 
       if (!fetchResult.ok) {
         const error = normalizeFetchResultError(fetchResult, errorNormalizer);
@@ -146,10 +140,10 @@ export async function executeBatchFetch<
               results.set(itemId, false);
             } else if (result !== undefined) {
               try {
-                item.data = reusePrevIfEqual({
-                  current: unwrapMaybeTSDFResult(result),
-                  prev: item.data,
-                });
+                item.data = reusePrevIfEqual(
+                  item.data,
+                  unwrapMaybeTSDFResult(result),
+                );
                 item.status = 'success';
                 item.wasLoaded = true;
                 results.set(itemId, true);
@@ -204,10 +198,9 @@ export async function executeBatchFetch<
   // Fall back to individual fetches (either single item or no batchFetchFn)
   const fetchPromises = requests.map(async ({ requestId: itemId, payload }) => {
     try {
-      const fetchResult = await runOfflineAwareFetch({
-        controller: offlineController,
-        fetcher: () => fetchFn(klona(payload), fetchCtx.signal),
-      });
+      const fetchResult = await runOfflineAwareFetch(offlineController, () =>
+        fetchFn(klona(payload), fetchCtx.signal),
+      );
       if (!fetchResult.ok) {
         if (fetchCtx.shouldAbort()) {
           results.set(itemId, false);
@@ -249,7 +242,7 @@ export async function executeBatchFetch<
           const item = draft[itemId];
           if (!item) return;
 
-          item.data = reusePrevIfEqual({ current: data, prev: item.data });
+          item.data = reusePrevIfEqual(item.data, data);
           item.status = 'success';
           item.wasLoaded = true;
         },

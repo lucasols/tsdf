@@ -43,17 +43,12 @@ export async function runHybridOfflineMutation<
   T,
   TOperations extends Record<string, OfflineOperationSchemaShape>,
   TName extends keyof TOperations & string,
->({
-  controller,
-  offline,
-  upload,
-  directMutation,
-}: {
-  controller?: OfflineAwareMutationController<TOperations> | null;
-  offline?: OfflineMutationInput<TOperations, TName> | undefined;
-  upload?: OfflineMutationUploadsInput | undefined;
-  directMutation: () => Promise<T>;
-}): Promise<OfflineMutationResult<T>> {
+>(
+  controller: OfflineAwareMutationController<TOperations> | null | undefined,
+  offline: OfflineMutationInput<TOperations, TName> | undefined,
+  upload: OfflineMutationUploadsInput | undefined,
+  directMutation: () => Promise<T>,
+): Promise<OfflineMutationResult<T>> {
   if (!offline || !controller) {
     throw new Error(
       'runHybridOfflineMutation requires an offline mutation and controller',

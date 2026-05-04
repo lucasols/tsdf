@@ -102,23 +102,6 @@ type OfflineStoreAdapter = {
   }) => void;
 };
 
-type CreateOfflineStoreControllerOptions<
-  TOperations extends Record<
-    string,
-    AnyOfflineOperationDefinition<__LEGIT_ANY__>
-  >,
-> = {
-  storeName: string;
-  storeType: OfflineStoreType;
-  getSessionKey: () => string | false;
-  onPersistentStorageError?: (error: unknown) => void;
-  debugLogger?: TSDFDebugLogger;
-  adapter: StorageAdapter;
-  storeAdapter: OfflineStoreAdapter;
-  offlineSession: OfflineSession;
-  operations: TOperations;
-};
-
 type ActiveSessionState = {
   sessionKey: string;
   session: ReturnType<typeof getOrCreateSessionOfflineCoordinator>;
@@ -494,22 +477,18 @@ export function createOfflineStoreController<
     AnyOfflineOperationDefinition<__LEGIT_ANY__>
   >,
 >(
-  options: CreateOfflineStoreControllerOptions<TOperations>,
+  storeName: string,
+  storeType: OfflineStoreType,
+  getSessionKey: () => string | false,
+  onPersistentStorageError: ((error: unknown) => void) | undefined,
+  debugLogger: TSDFDebugLogger | undefined,
+  adapter: StorageAdapter,
+  storeAdapter: OfflineStoreAdapter,
+  offlineSession: OfflineSession,
+  operations: TOperations,
 ): OfflineStoreController<TOperations> {
-  const {
-    storeName,
-    storeType,
-    getSessionKey,
-    onPersistentStorageError,
-    adapter,
-    storeAdapter,
-    offlineSession,
-    operations,
-  } = options;
   const sessionConfig = offlineSession.getConfig();
-  const activeDebugLogger = import.meta.env.DEV
-    ? options.debugLogger
-    : undefined;
+  const activeDebugLogger = import.meta.env.DEV ? debugLogger : undefined;
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
   let isDisposed = false;
   let activeSession: ActiveSessionState | null = null;

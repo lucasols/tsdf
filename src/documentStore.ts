@@ -616,11 +616,11 @@ export function createDocumentStore<
   let initialStatus: DocumentStatus = 'idle';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
-  const resolvedOfflineSession = resolveStoreManagerOfflineSession({
+  const resolvedOfflineSession = resolveStoreManagerOfflineSession(
     storeManager,
-    storeName: id,
-    usesOfflineStorage: persistentStorageConfig?.offline !== undefined,
-  });
+    id,
+    persistentStorageConfig?.offline !== undefined,
+  );
   const getSessionKeyBase =
     import.meta.env.TEST && testOptions
       ? wrapGetSessionKeyForTest(
@@ -632,12 +632,11 @@ export function createDocumentStore<
     resolvedOfflineSession === null
       ? getSessionKeyBase
       : () =>
-          validateStoreManagerSessionConsistency({
-            storeManager,
-            storeName: id,
-            offlineSession: resolvedOfflineSession,
-            getSessionKey: getSessionKeyBase,
-          });
+          validateStoreManagerSessionConsistency(
+            id,
+            resolvedOfflineSession,
+            getSessionKeyBase,
+          );
   const errorNormalizer = storeManager.errorNormalizer;
   const resolvedOfflineSessionForPersistentStorage =
     persistentStorageConfig?.offline === undefined
@@ -740,22 +739,14 @@ export function createDocumentStore<
 
   const offlineController =
     resolvedPersistentStorageConfig && resolvedOfflineConfig
-      ? createOfflineStoreController<ResolvedOfflineOperations>({
-          storeName: id,
-          storeType: 'document',
-          getSessionKey: getSessionKeyForRuntime,
-          onPersistentStorageError:
-            resolvedPersistentStorageConfig.onPersistentStorageError,
-          ...(import.meta.env.DEV
-            ? { debugLogger: storeManager.debugLogger }
-            : undefined),
-          adapter: resolvedPersistentStorageConfig.adapter,
-          offlineSession: resolvedOfflineConfig.session,
-          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
-          operations: __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
-            offlineOperationsForRuntime,
-          ),
-          storeAdapter: {
+      ? createOfflineStoreController<ResolvedOfflineOperations>(
+          id,
+          'document',
+          getSessionKeyForRuntime,
+          resolvedPersistentStorageConfig.onPersistentStorageError,
+          import.meta.env.DEV ? storeManager.debugLogger : undefined,
+          resolvedPersistentStorageConfig.adapter,
+          {
             getEntityRefs: () => [
               { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
             ],
@@ -766,16 +757,15 @@ export function createDocumentStore<
               const sessionKey = getSessionKeyForRuntime();
               if (sessionKey === false) return [];
               return [
-                createProtectedStorageKey({
-                  backend:
-                    resolvedPersistentStorageConfig.adapter !== 'local-sync'
-                      ? 'async'
-                      : 'localStorage',
+                createProtectedStorageKey(
                   sessionKey,
-                  storeName: id,
-                  kind: 'document',
-                  key: DOCUMENT_PERSISTED_ENTRY_KEY,
-                }),
+                  id,
+                  'document',
+                  DOCUMENT_PERSISTED_ENTRY_KEY,
+                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
+                    ? 'async'
+                    : 'localStorage',
+                ),
               ];
             },
             applyPendingEntity: ({ pendingEntity }) => {
@@ -815,7 +805,12 @@ export function createDocumentStore<
               }
             },
           },
-        })
+          resolvedOfflineConfig.session,
+          // WORKAROUND: Test-only timeline instrumentation wraps execute handlers at runtime, so the controller input has to be re-narrowed back to the store's resolved operation registry after that transformation.
+          __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
+            offlineOperationsForRuntime,
+          ),
+        )
       : null;
 
   const store = new Store<DocumentStoreState<State>>({
@@ -905,10 +900,7 @@ export function createDocumentStore<
     runWithoutBroadcast(() => {
       store.setPartialState(
         {
-          data: reusePrevIfEqual({
-            prev: store.state.data,
-            current: message.data,
-          }),
+          data: reusePrevIfEqual(store.state.data, message.data),
           error: null,
           status: 'success',
           refetchOnMount: false,
@@ -987,21 +979,19 @@ export function createDocumentStore<
     });
   const browserTabsSync = createBrowserTabsCoordinator<
     DocumentBrowserTabsMessage<State>
-  >({
-    storeType: 'document',
-    storeKey: id,
-    getSessionKey: getSessionKeyForRuntime,
-    onMessage: handleRemoteMessage,
-    onSessionChange() {
+  >(
+    'document',
+    id,
+    getSessionKeyForRuntime,
+    handleRemoteMessage,
+    () => {
       lastDocumentSyncVersion = undefined;
       clearOfflineOverlay();
     },
-    transportFactory: testOptions?.browserTabsTransportFactory,
-    ...(import.meta.env.DEV
-      ? { debugLogger: storeManager.debugLogger }
-      : undefined),
-    tabId: browserTabsTabId,
-  });
+    testOptions?.browserTabsTransportFactory,
+    import.meta.env.DEV ? storeManager.debugLogger : undefined,
+    browserTabsTabId,
+  );
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
@@ -1022,10 +1012,9 @@ export function createDocumentStore<
     );
 
     try {
-      const result = await runOfflineAwareFetch({
-        controller: offlineController,
-        fetcher: () => fetchFn(fetchCtx.signal),
-      });
+      const result = await runOfflineAwareFetch(offlineController, () =>
+        fetchFn(fetchCtx.signal),
+      );
 
       if (!result.ok) {
         if (result.offline) {
@@ -1045,10 +1034,7 @@ export function createDocumentStore<
       if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
-        {
-          data: reusePrevIfEqual({ prev: store.state.data, current: data }),
-          status: 'success',
-        },
+        { data: reusePrevIfEqual(store.state.data, data), status: 'success' },
         { action: 'fetch-success' },
       );
 
@@ -1130,19 +1116,19 @@ export function createDocumentStore<
     );
   }
 
-  const focusLifecycle = createStoreFocusLifecycle({
-    revalidateOnWindowFocus: resolvedRevalidateOnWindowFocus,
+  const focusLifecycle = createStoreFocusLifecycle(
+    resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
     getWindowIsFocused,
-    onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
-    onWindowFocusRevalidate: () => {
+    testOptions?.onWindowFocus ?? onWindowFocusDefault,
+    () => {
       invalidateData('lowPriority');
     },
-    onTransportReconnectRevalidate: () => {
+    () => {
       invalidateData('realtimeUpdate');
     },
-  });
+  );
 
   // Attach persistent storage after store creation
   persistence?.attach(store);
@@ -1396,21 +1382,13 @@ export function createDocumentStore<
         await mutation({ updateState, currentState: store.state.data }),
       );
 
-    const result = await performMutationWithLifecycle({
+    const result = await performMutationWithLifecycle(
       startMutation,
-      optimisticUpdate: optimisticUpdate
+      offline
         ? () =>
-            runWithBroadcastConsistency('optimistic', () =>
-              optimisticUpdate(store.state.data),
-            )
-        : undefined,
-      debounce,
-      blockWindowClose: blockWindowClose ?? undefined,
-      mutation: offline
-        ? () =>
-            runHybridOfflineMutation({
+            runHybridOfflineMutation(
               // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
-              controller: __LEGIT_CAST__<
+              __LEGIT_CAST__<
                 OfflineAwareMutationController<
                   Exclude<TOfflineOperations, null>
                 > | null,
@@ -1419,17 +1397,12 @@ export function createDocumentStore<
               offline,
               upload,
               directMutation,
-            })
+            )
         : async () => ({
             kind: 'online' as const,
             data: await directMutation(),
           }),
-      onSuccess: (result) => {
-        if (revalidateOnSuccess && result.kind === 'online') {
-          invalidateData();
-        }
-      },
-      onError: (exception) => {
+      (exception) => {
         if (optimisticUpdate) {
           runWithBroadcastConsistency('confirmed', () => {
             store.setKey('data', optimisticRollbackSnapshot ?? null, {
@@ -1445,7 +1418,20 @@ export function createDocumentStore<
 
         return toStoreMutationError(exception, errorNormalizer);
       },
-    });
+      optimisticUpdate
+        ? () =>
+            runWithBroadcastConsistency('optimistic', () =>
+              optimisticUpdate(store.state.data),
+            )
+        : undefined,
+      (result) => {
+        if (revalidateOnSuccess && result.kind === 'online') {
+          invalidateData();
+        }
+      },
+      debounce,
+      blockWindowClose ?? undefined,
+    );
 
     storeEvents.emit('mutationEnd', {
       mutationId,
@@ -1626,14 +1612,12 @@ export function createDocumentStore<
         const shouldFetch = requiredFetch || !!store.state.refetchOnMount;
 
         if (
-          shouldScheduleAutomaticFetch({
+          shouldScheduleAutomaticFetch(
             wasLoaded,
             shouldFetch,
-            requiredFetch,
-            disableRefetches: !!disableRefetches,
-            disableRefetchOnMount: !!disableRefetchOnMount,
-            refetchOnMount: store.state.refetchOnMount,
-          }) &&
+            !!disableRefetches,
+            !!disableRefetchOnMount,
+          ) &&
           tryClaimAutomaticFetchSlot(
             automaticRetryState,
             DOC_TARGET_KEY,

@@ -6,13 +6,10 @@ export const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS: number = 60 * 60 * 1000;
 type IdleThrottledScheduler = { schedule(): void; cancel(): void };
 
 /** @internal */
-export function createIdleThrottledScheduler({
-  throttleMs,
-  run,
-}: {
-  throttleMs: number;
-  run: () => void;
-}): IdleThrottledScheduler {
+export function createIdleThrottledScheduler(
+  throttleMs: number,
+  run: () => void,
+): IdleThrottledScheduler {
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let cancelIdleRun: (() => void) | null = null;
   let isScheduled = false;

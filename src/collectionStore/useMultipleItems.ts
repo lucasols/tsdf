@@ -462,14 +462,12 @@ export function useMultipleItems<
           ignoreItemsInRefetchOnMount.add(itemId);
 
           if (
-            shouldScheduleAutomaticFetch({
-              wasLoaded: itemState?.wasLoaded,
+            shouldScheduleAutomaticFetch(
+              itemState?.wasLoaded,
               shouldFetch,
-              requiredFetch,
               disableRefetches,
               disableRefetchOnMount,
-              refetchOnMount: itemState?.refetchOnMount ?? false,
-            }) &&
+            ) &&
             tryClaimAutomaticFetchSlot(
               automaticRetryState,
               itemId,

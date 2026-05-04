@@ -75,10 +75,10 @@ function applyFetchedItems<
         }
       }
     } else {
-      draft.items[itemKey] = reusePrevIfEqual({
-        current: data,
-        prev: draft.items[itemKey] ?? undefined,
-      });
+      draft.items[itemKey] = reusePrevIfEqual(
+        draft.items[itemKey] ?? undefined,
+        data,
+      );
     }
 
     // Deduplicate: skip items already in the list (handles both append
@@ -203,14 +203,12 @@ export async function executeQueryFetch<
 
           const chunkResultPromises = chunks.map((chunk) =>
             queue.resultifyAdd(() =>
-              runOfflineAwareFetch({
-                controller: offlineController,
-                fetcher: () =>
-                  normalizedFetchListFn(payload, chunk.offset, chunk.limit, {
-                    signal: fetchCtx.signal,
-                    fields,
-                  }),
-              }).then((result) => {
+              runOfflineAwareFetch(offlineController, () =>
+                normalizedFetchListFn(payload, chunk.offset, chunk.limit, {
+                  signal: fetchCtx.signal,
+                  fields,
+                }),
+              ).then((result) => {
                 if (!result.ok) {
                   throw result.offline
                     ? offlineConnectivityError
@@ -228,14 +226,14 @@ export async function executeQueryFetch<
           const lastChunk = successResults[successResults.length - 1];
           hasMore = lastChunk ? lastChunk.hasMore : false;
         } else {
-          const fetchResult = await runOfflineAwareFetch({
-            controller: offlineController,
-            fetcher: () =>
+          const fetchResult = await runOfflineAwareFetch(
+            offlineController,
+            () =>
               normalizedFetchListFn(payload, offset, limit, {
                 signal: fetchCtx.signal,
                 fields,
               }),
-          });
+          );
           if (!fetchResult.ok) {
             throw fetchResult.offline
               ? offlineConnectivityError

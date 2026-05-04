@@ -152,10 +152,10 @@ export function setupCollectionPersistence<
   assertValidPersistentStoreName(config.storeName);
 
   const version = config.version;
-  const defaultMaxBytes = getDefaultMaxBytesForScope({
-    adapter: config.adapter,
-    scopeKind: 'collection.item',
-  });
+  const defaultMaxBytes = getDefaultMaxBytesForScope(
+    config.adapter,
+    'collection.item',
+  );
   const maxBytes = config.maxBytes ?? defaultMaxBytes;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
@@ -244,20 +244,20 @@ export function setupCollectionPersistence<
     }
 
     const serializedValue = serializeJsonForStorage(args.value.data);
-    const customMetadata = mergeManagedAsyncStorageCustomMetadata({
-      currentCustomMetadata: args.currentCustomMetadata,
-      key: args.itemKey,
-      nextCustomMetadata: { p: args.value.payload },
-      protectedKeysSnapshotSet: args.protectedKeysSnapshotSet,
-      scope: asyncNamespaceScope,
-    });
+    const customMetadata = mergeManagedAsyncStorageCustomMetadata(
+      args.currentCustomMetadata,
+      { p: args.value.payload },
+      args.protectedKeysSnapshotSet,
+      asyncNamespaceScope,
+      args.itemKey,
+    );
 
-    return estimateManagedAsyncStorageEntrySizeBytes({
+    return estimateManagedAsyncStorageEntrySizeBytes(
+      serializedValue.rawValue,
+      args.lastAccessAt,
+      version ?? 1,
       customMetadata,
-      lastAccessAt: args.lastAccessAt,
-      serializedValue: serializedValue.rawValue,
-      version: version ?? 1,
-    });
+    );
   }
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
@@ -383,15 +383,15 @@ export function setupCollectionPersistence<
           sizeBytes: rememberPersistedMetadataSize(itemKey, metadata.sizeBytes),
         }),
       );
-      const keptKeys = keepEntriesWithinByteBudget({
-        entries: candidateEntries,
-        getKey: (entry) => entry.itemKey,
-        getLastAccessAt: (entry) => entry.lastAccessAt,
-        getSizeBytes: (entry) => entry.sizeBytes,
-        isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-        isProtected: (entry) => entry.protected,
-        maxBytes: effectiveStaticPolicy.maxBytes,
-      });
+      const keptKeys = keepEntriesWithinByteBudget(
+        candidateEntries,
+        (entry) => entry.itemKey,
+        (entry) => entry.lastAccessAt,
+        (entry) => entry.sizeBytes,
+        (entry) => pinnedItemKeys.has(entry.itemKey),
+        (entry) => entry.protected,
+        effectiveStaticPolicy.maxBytes,
+      );
 
       for (const { itemKey } of candidateEntries) {
         if (keptKeys.has(itemKey)) continue;
@@ -869,15 +869,15 @@ export function setupCollectionPersistence<
         }
       }
 
-      const keptKeys = keepEntriesWithinByteBudget({
-        entries: filteredEntries,
-        getKey: (entry) => entry.itemKey,
-        getLastAccessAt: (entry) => entry.lastAccessAt,
-        getSizeBytes: (entry) => entry.sizeBytes,
-        isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-        isProtected: (entry) => protectedItemKeys.has(entry.itemKey),
+      const keptKeys = keepEntriesWithinByteBudget(
+        filteredEntries,
+        (entry) => entry.itemKey,
+        (entry) => entry.lastAccessAt,
+        (entry) => entry.sizeBytes,
+        (entry) => pinnedItemKeys.has(entry.itemKey),
+        (entry) => protectedItemKeys.has(entry.itemKey),
         maxBytes,
-      });
+      );
 
       await Promise.all(
         filteredEntries
@@ -954,15 +954,15 @@ export function setupCollectionPersistence<
       ({ payload }) => !shouldIgnoreItem(payload),
     );
 
-    const keptKeys = keepEntriesWithinByteBudget({
-      entries: filteredEntries,
-      getKey: (entry) => entry.itemKey,
-      getLastAccessAt: (entry) => entry.lastAccessAt,
-      getSizeBytes: (entry) => entry.sizeBytes,
-      isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-      isProtected: (entry) => protectedItemKeys.has(entry.itemKey),
+    const keptKeys = keepEntriesWithinByteBudget(
+      filteredEntries,
+      (entry) => entry.itemKey,
+      (entry) => entry.lastAccessAt,
+      (entry) => entry.sizeBytes,
+      (entry) => pinnedItemKeys.has(entry.itemKey),
+      (entry) => protectedItemKeys.has(entry.itemKey),
       maxBytes,
-    });
+    );
 
     await Promise.all(
       filteredEntries
@@ -1210,15 +1210,15 @@ export function setupCollectionPersistence<
             ({ itemKey }) => !pendingRemoves.has(itemKey),
           );
 
-          const keptKeys = keepEntriesWithinByteBudget({
-            entries: remainingCandidates,
-            getKey: (entry) => entry.itemKey,
-            getLastAccessAt: (entry) => entry.lastAccessAt,
-            getSizeBytes: (entry) => entry.sizeBytes,
-            isPinned: (entry) => pinnedItemKeys.has(entry.itemKey),
-            isProtected: (entry) => entry.protected,
+          const keptKeys = keepEntriesWithinByteBudget(
+            remainingCandidates,
+            (entry) => entry.itemKey,
+            (entry) => entry.lastAccessAt,
+            (entry) => entry.sizeBytes,
+            (entry) => pinnedItemKeys.has(entry.itemKey),
+            (entry) => entry.protected,
             maxBytes,
-          });
+          );
           if (keptKeys.size !== remainingCandidates.length) {
             for (const { itemKey } of remainingCandidates) {
               if (keptKeys.has(itemKey)) continue;
@@ -1272,9 +1272,7 @@ export function setupCollectionPersistence<
           nextKnownPersistedBytes === null ||
           nextKnownPersistedBytes > maxBytes
         ) {
-          scheduleLocalStorageMaintenance({
-            forceManifestKeys: [maintenanceManifestKey],
-          });
+          scheduleLocalStorageMaintenance([maintenanceManifestKey]);
         }
         return;
       }

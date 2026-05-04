@@ -677,12 +677,11 @@ class SessionOfflineCoordinator {
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
 
     this.#browserTabs =
-      createBrowserTabsCoordinatorWithPriority<OfflineSessionMessage>({
-        storeType: 'offline',
-        storeKey: `session:${sessionKey}`,
-        getSessionKey: () => this.sessionKey,
-        getWindowIsFocused: () => !isWindowAvailable() || !document.hidden,
-        onMessage: (message) => {
+      createBrowserTabsCoordinatorWithPriority<OfflineSessionMessage>(
+        'offline',
+        `session:${sessionKey}`,
+        () => this.sessionKey,
+        (message) => {
           if (message.kind === 'tab-status') {
             this.#browserTabs.priority.onTabStatusMessage(
               message.tabId,
@@ -693,8 +692,13 @@ class SessionOfflineCoordinator {
           }
           this.#applyRemoteSnapshot(message);
         },
-        ...(import.meta.env.DEV ? { debugLogger } : undefined),
-      });
+        undefined,
+        undefined,
+        import.meta.env.DEV ? debugLogger : undefined,
+        () => !isWindowAvailable() || !document.hidden,
+        undefined,
+        undefined,
+      );
 
     this.#refreshLeadership();
     if (shouldBootstrapFromStorage) {
@@ -994,15 +998,18 @@ class SessionOfflineCoordinator {
     }
 
     const existing = this.#uploads.get(args.id);
-    const nextRecord = createStoredUploadRecord({
-      id: args.id,
-      sessionKey: this.sessionKey,
-      file: args.file,
-      source: args.source ?? 'manual',
-      createdAt: existing?.createdAt,
-      lastOnlineSessionStartedAt:
-        this.#getCurrentUploadOnlineSessionStartedAt(),
-    });
+    const nextRecord = createStoredUploadRecord(
+      args.id,
+      this.sessionKey,
+      args.file,
+      args.source ?? 'manual',
+      undefined,
+      existing?.createdAt,
+      undefined,
+      undefined,
+      undefined,
+      this.#getCurrentUploadOnlineSessionStartedAt(),
+    );
 
     await this.#saveUploadRecord(nextRecord);
   }

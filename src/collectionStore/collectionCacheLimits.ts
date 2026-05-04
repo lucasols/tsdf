@@ -11,26 +11,19 @@ import type {
 export function createCollectionCacheLimits<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
->({
-  store,
-  maxItems,
-  itemCacheRuntime,
-  isProtectedFromEviction,
-  cleanupItemResources,
-  onStateCleanup,
-}: {
-  store: Store<TSFDCollectionState<ItemState, ItemPayload>>;
-  maxItems: number | undefined;
-  itemCacheRuntime: Pick<LruCacheRuntime, 'getLastUsed'>;
+>(
+  store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
+  maxItems: number | undefined,
+  itemCacheRuntime: Pick<LruCacheRuntime, 'getLastUsed'>,
   isProtectedFromEviction: (
     itemKey: string,
     item: TSFDCollectionItem<ItemState, ItemPayload>,
-  ) => boolean;
-  cleanupItemResources: (itemKey: string, payload: ItemPayload) => void;
+  ) => boolean,
+  cleanupItemResources: (itemKey: string, payload: ItemPayload) => void,
   onStateCleanup:
     | ((cleanup: CollectionStateCleanup<ItemPayload>) => void)
-    | undefined;
-}) {
+    | undefined,
+) {
   let isEnforcingCacheLimits = false;
 
   function enforceCacheLimits(): void {

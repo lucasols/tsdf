@@ -63,61 +63,61 @@ export function serializeJsonForStorage(value: unknown): {
   return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
 }
 
-export function keepEntriesWithinByteBudget<T>(args: {
-  entries: T[];
-  getKey: (entry: T) => string;
-  getLastAccessAt: (entry: T) => number;
-  getSizeBytes: (entry: T) => number;
-  isPinned: (entry: T) => boolean;
-  isProtected: (entry: T) => boolean;
-  maxBytes: number;
-}): Set<string> {
+export function keepEntriesWithinByteBudget<T>(
+  entries: T[],
+  getKey: (entry: T) => string,
+  getLastAccessAt: (entry: T) => number,
+  getSizeBytes: (entry: T) => number,
+  isPinned: (entry: T) => boolean,
+  isProtected: (entry: T) => boolean,
+  maxBytes: number,
+): Set<string> {
   const keptKeys = new Set<string>();
   let unprotectedBytes = 0;
 
-  for (const entry of args.entries) {
-    if (args.isProtected(entry)) continue;
-    unprotectedBytes += args.getSizeBytes(entry);
+  for (const entry of entries) {
+    if (isProtected(entry)) continue;
+    unprotectedBytes += getSizeBytes(entry);
   }
 
-  if (unprotectedBytes <= args.maxBytes) {
-    for (const entry of args.entries) {
-      keptKeys.add(args.getKey(entry));
+  if (unprotectedBytes <= maxBytes) {
+    for (const entry of entries) {
+      keptKeys.add(getKey(entry));
     }
     return keptKeys;
   }
 
   // Sort entries for eviction: protected first, then pinned, then by lastAccessAt (MRU first)
-  const sortedEntries = [...args.entries].sort((a, b) => {
-    const aProtected = args.isProtected(a);
-    const bProtected = args.isProtected(b);
+  const sortedEntries = [...entries].sort((a, b) => {
+    const aProtected = isProtected(a);
+    const bProtected = isProtected(b);
     if (aProtected && !bProtected) return -1;
     if (!aProtected && bProtected) return 1;
 
-    const aPinned = args.isPinned(a);
-    const bPinned = args.isPinned(b);
+    const aPinned = isPinned(a);
+    const bPinned = isPinned(b);
     if (aPinned && !bPinned) return -1;
     if (!aPinned && bPinned) return 1;
 
-    return args.getLastAccessAt(b) - args.getLastAccessAt(a);
+    return getLastAccessAt(b) - getLastAccessAt(a);
   });
   let keptUnprotectedBytes = 0;
 
   for (const entry of sortedEntries) {
-    const key = args.getKey(entry);
-    if (args.isProtected(entry)) {
+    const key = getKey(entry);
+    if (isProtected(entry)) {
       keptKeys.add(key);
       continue;
     }
 
-    const sizeBytes = args.getSizeBytes(entry);
-    if (args.isPinned(entry)) {
+    const sizeBytes = getSizeBytes(entry);
+    if (isPinned(entry)) {
       keptKeys.add(key);
       keptUnprotectedBytes += sizeBytes;
       continue;
     }
 
-    if (keptUnprotectedBytes + sizeBytes <= args.maxBytes) {
+    if (keptUnprotectedBytes + sizeBytes <= maxBytes) {
       keptKeys.add(key);
       keptUnprotectedBytes += sizeBytes;
     }

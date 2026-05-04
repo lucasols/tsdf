@@ -23,40 +23,38 @@ export function stripStoredUploadFile<
 
 export function createStoredUploadRecord<
   TResolvedRef extends ValidPayload = ValidPayload,
->(args: {
-  id: string;
-  sessionKey: string;
-  file: Blob | File;
-  source: OfflineUploadSource;
-  state?: OfflineUploadState;
-  createdAt?: number;
-  progress?: OfflineUploadProgress;
-  resolvedRef?: TResolvedRef;
-  lastError?: OfflineStoredUploadRecord<TResolvedRef>['lastError'];
-  lastOnlineSessionStartedAt?: number;
-}): OfflineStoredUploadRecord<TResolvedRef> {
-  const file = normalizeUploadFile(args.file, args.id);
+>(
+  id: string,
+  sessionKey: string,
+  fileInput: Blob | File,
+  source: OfflineUploadSource,
+  state?: OfflineUploadState,
+  createdAtInput?: number,
+  progress?: OfflineUploadProgress,
+  resolvedRef?: TResolvedRef,
+  lastError?: OfflineStoredUploadRecord<TResolvedRef>['lastError'],
+  lastOnlineSessionStartedAt?: number,
+): OfflineStoredUploadRecord<TResolvedRef> {
+  const file = normalizeUploadFile(fileInput, id);
   const now = Date.now();
-  const createdAt = args.createdAt ?? now;
+  const createdAt = createdAtInput ?? now;
   const updatedAt = now;
 
   return {
-    id: args.id,
-    sessionKey: args.sessionKey,
-    source: args.source,
-    state: args.state ?? 'pending',
+    id,
+    sessionKey,
+    source,
+    state: state ?? 'pending',
     fileName: file.name,
     mimeType: file.type,
     sizeBytes: file.size,
     createdAt,
     updatedAt,
-    ...(args.resolvedRef !== undefined
-      ? { resolvedRef: args.resolvedRef }
-      : {}),
-    ...(args.progress !== undefined ? { progress: args.progress } : {}),
-    ...(args.lastError !== undefined ? { lastError: args.lastError } : {}),
-    ...(args.lastOnlineSessionStartedAt !== undefined
-      ? { lastOnlineSessionStartedAt: args.lastOnlineSessionStartedAt }
+    ...(resolvedRef !== undefined ? { resolvedRef } : {}),
+    ...(progress !== undefined ? { progress } : {}),
+    ...(lastError !== undefined ? { lastError } : {}),
+    ...(lastOnlineSessionStartedAt !== undefined
+      ? { lastOnlineSessionStartedAt }
       : {}),
     file,
     lastModified: file.lastModified,

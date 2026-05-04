@@ -46,19 +46,6 @@ import {
   type TSFDListQueryState,
 } from './types';
 
-type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
-  /** Emitted when a mutation begins executing */
-  mutationStart: { mutationId: number; items: ItemPayload[] };
-  /** Emitted when a mutation completes, fails, or is skipped */
-  mutationEnd: {
-    mutationId: number;
-    items: ItemPayload[];
-    status: 'success' | 'error' | 'skipped';
-  };
-  /** Emitted when an offline temp item is reconciled to its final payload. */
-  tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
-};
-
 type InvalidateQueryEvent = { priority: FetchType; queryKey: string };
 type InvalidateItemEvent = {
   priority: FetchType;
@@ -138,6 +125,19 @@ type CreateMutationApiOptions<
   onOfflineTimelineEvent?: (event: TestOfflineTimelineEvent) => void;
 };
 
+type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
+  /** Emitted when a mutation begins executing */
+  mutationStart: { mutationId: number; items: ItemPayload[] };
+  /** Emitted when a mutation completes, fails, or is skipped */
+  mutationEnd: {
+    mutationId: number;
+    items: ItemPayload[];
+    status: 'success' | 'error' | 'skipped';
+  };
+  /** Emitted when an offline temp item is reconciled to its final payload. */
+  tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
+};
+
 /** @internal */
 export function createMutationApi<
   ItemState extends ValidStoreState,
@@ -148,36 +148,112 @@ export function createMutationApi<
     QueryPayload,
     ItemPayload
   > = null,
->({
-  store,
-  fetchItemFn,
-  partialResources,
-  optimisticListUpdates,
-  onInvalidateQuery,
-  onInvalidateItem,
-  onMutationError,
-  errorNormalizer,
-  getItemKey,
-  getQueriesKeyArray,
-  getQueriesRelatedToItem,
-  getItemsKeyArray,
-  getOrCreateItemScheduler,
-  getOrCreateQueryScheduler,
-  deleteItemFetchResources,
-  emitInvalidateQuery,
-  emitInvalidateItem,
-  blockWindowClose,
-  offlineController,
-  runWithBroadcastConsistency,
-  publishQuerySnapshot,
-  publishItemSnapshot,
-  onOfflineTimelineEvent,
-}: CreateMutationApiOptions<
-  ItemState,
-  QueryPayload,
-  ItemPayload,
-  TOfflineOperations
->) {
+>(
+  store: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['store'],
+  fetchItemFn: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['fetchItemFn'],
+  partialResources: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['partialResources'],
+  optimisticListUpdates: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['optimisticListUpdates'],
+  onInvalidateQuery: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['onInvalidateQuery'],
+  onInvalidateItem: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['onInvalidateItem'],
+  onMutationError: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['onMutationError'],
+  errorNormalizer: (exception: Error) => StoreError,
+  getItemKey: (params: ItemPayload) => string,
+  getQueriesKeyArray: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['getQueriesKeyArray'],
+  getQueriesRelatedToItem: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['getQueriesRelatedToItem'],
+  getItemsKeyArray: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['getItemsKeyArray'],
+  getOrCreateItemScheduler: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['getOrCreateItemScheduler'],
+  getOrCreateQueryScheduler: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['getOrCreateQueryScheduler'],
+  deleteItemFetchResources: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['deleteItemFetchResources'],
+  emitInvalidateQuery: (event: InvalidateQueryEvent) => void,
+  emitInvalidateItem: (event: InvalidateItemEvent) => void,
+  blockWindowClose: BlockWindowCloseHandler | null,
+  offlineController: CreateMutationApiOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >['offlineController'],
+  runWithBroadcastConsistency: <T>(
+    consistency: SnapshotConsistency,
+    callback: () => T,
+  ) => T,
+  publishQuerySnapshot: (
+    queryKey: string,
+    consistency?: SnapshotConsistency,
+  ) => void,
+  publishItemSnapshot: (
+    itemKey: string,
+    consistency?: SnapshotConsistency,
+  ) => void,
+  onOfflineTimelineEvent:
+    | ((event: TestOfflineTimelineEvent) => void)
+    | undefined,
+) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
   type MutationPayload = ItemPayload | ItemPayload[] | FilterItem | null;
@@ -1130,8 +1206,8 @@ export function createMutationApi<
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
 
-    const result = await performMutationWithLifecycle({
-      startMutation: () => {
+    const result = await performMutationWithLifecycle(
+      () => {
         const endBaseMutations = startItemMutation(payloadToUse);
 
         return () => {
@@ -1142,7 +1218,42 @@ export function createMutationApi<
           }
         };
       },
-      optimisticUpdate: optimisticUpdate
+      offline
+        ? () =>
+            runHybridOfflineMutation(
+              offlineController,
+              offline,
+              upload,
+              directMutation,
+            )
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
+      (exception) => {
+        const error = toStoreMutationError(exception, errorNormalizer);
+        const queryRollbackSnapshots = [
+          ...optimisticMutationQueryContext.queryRollbackSnapshots.values(),
+        ];
+
+        if (itemRollbackSnapshots.length > 0 || queryRollbackSnapshots.length) {
+          restoreMutationRollbackState({
+            itemSnapshots: itemRollbackSnapshots,
+            querySnapshots: queryRollbackSnapshots,
+          });
+        }
+
+        if (onMutationError) {
+          onMutationError(exception, { silentErrors });
+        }
+
+        if (onError) {
+          onError(error);
+        }
+
+        return error;
+      },
+      optimisticUpdate
         ? () => {
             deferredOptimisticQueryInvalidationsStack.push(
               deferredOptimisticQueryInvalidations,
@@ -1161,21 +1272,7 @@ export function createMutationApi<
             }
           }
         : undefined,
-      debounce,
-      blockWindowClose: blockWindowClose ?? undefined,
-      mutation: offline
-        ? () =>
-            runHybridOfflineMutation({
-              controller: offlineController,
-              offline,
-              upload,
-              directMutation,
-            })
-        : async () => ({
-            kind: 'online' as const,
-            data: await directMutation(),
-          }),
-      onSuccess: (result) => {
+      (result) => {
         const successInvalidationQueryPayloads =
           result.kind === 'online'
             ? getSuccessInvalidationQueryPayloads(
@@ -1207,30 +1304,9 @@ export function createMutationApi<
           onSuccess(result.data, payloadToUse);
         }
       },
-      onError: (exception) => {
-        const error = toStoreMutationError(exception, errorNormalizer);
-        const queryRollbackSnapshots = [
-          ...optimisticMutationQueryContext.queryRollbackSnapshots.values(),
-        ];
-
-        if (itemRollbackSnapshots.length > 0 || queryRollbackSnapshots.length) {
-          restoreMutationRollbackState({
-            itemSnapshots: itemRollbackSnapshots,
-            querySnapshots: queryRollbackSnapshots,
-          });
-        }
-
-        if (onMutationError) {
-          onMutationError(exception, { silentErrors });
-        }
-
-        if (onError) {
-          onError(error);
-        }
-
-        return error;
-      },
-    });
+      debounce,
+      blockWindowClose ?? undefined,
+    );
 
     storeEvents.emit('mutationEnd', {
       mutationId,
