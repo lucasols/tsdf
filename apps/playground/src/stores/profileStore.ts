@@ -8,7 +8,10 @@ import {
 import { createDocumentStore } from 'tsdf';
 import { apiClient } from '../apiClient';
 import type { ProfileDocument } from '../apiTypes';
-import { PLAYGROUND_STORAGE_ADAPTER, storeManager } from './storeManager';
+import {
+  PLAYGROUND_DOCUMENT_STORAGE_ADAPTER,
+  storeManager,
+} from './storeManager';
 
 const profileTagSchema = rc_object({ id: rc_string, label: rc_string });
 
@@ -26,7 +29,7 @@ export const profileStore = createDocumentStore<ProfileDocument>({
   fetchFn: (signal) => apiClient.fetchProfile(signal),
   usesRealTimeUpdates: true,
   persistentStorage: {
-    adapter: PLAYGROUND_STORAGE_ADAPTER,
+    adapter: PLAYGROUND_DOCUMENT_STORAGE_ADAPTER,
     schema: profileSchema,
   },
 });

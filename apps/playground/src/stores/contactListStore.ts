@@ -6,7 +6,10 @@ import {
   type Contact,
   type ContactFilter,
 } from '../apiTypes';
-import { PLAYGROUND_STORAGE_ADAPTER, storeManager } from './storeManager';
+import {
+  PLAYGROUND_LIST_QUERY_STORAGE_ADAPTER,
+  storeManager,
+} from './storeManager';
 
 const contactSchema = rc_object({
   id: rc_string,
@@ -83,7 +86,7 @@ export const contactListStore = createListQueryStore<
     },
   },
   persistentStorage: {
-    adapter: PLAYGROUND_STORAGE_ADAPTER,
+    adapter: PLAYGROUND_LIST_QUERY_STORAGE_ADAPTER,
     schema: contactSchema,
     itemPayloadSchema: rc_string,
     queryPayloadSchema: contactFilterSchema,

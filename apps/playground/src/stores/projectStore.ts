@@ -8,7 +8,10 @@ import {
 import { createCollectionStore } from 'tsdf';
 import { apiClient } from '../apiClient';
 import type { Project, ProjectPayload } from '../apiTypes';
-import { PLAYGROUND_STORAGE_ADAPTER, storeManager } from './storeManager';
+import {
+  PLAYGROUND_COLLECTION_STORAGE_ADAPTER,
+  storeManager,
+} from './storeManager';
 
 const projectPayloadSchema = rc_object({
   workspaceId: rc_string,
@@ -39,7 +42,7 @@ export const projectStore = createCollectionStore<Project, ProjectPayload>({
   maxBatchSize: 3,
   usesRealTimeUpdates: true,
   persistentStorage: {
-    adapter: PLAYGROUND_STORAGE_ADAPTER,
+    adapter: PLAYGROUND_COLLECTION_STORAGE_ADAPTER,
     schema: projectSchema,
     payloadSchema: projectPayloadSchema,
   },
