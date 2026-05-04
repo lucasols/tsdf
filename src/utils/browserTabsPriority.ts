@@ -38,7 +38,7 @@ type BrowserTabsRemoteLeaseState = {
   expiresAt: number;
 };
 
-type BrowserTabsPriority = {
+export type BrowserTabsPriority = {
   publishLocalStatus: () => void;
   noteLocalFocusState: () => void;
   getPriorityRank: () => number;

@@ -8,6 +8,7 @@ import {
 import {
   createBrowserTabsPriority,
   type BrowserTabsLeaderChangeDetails,
+  type BrowserTabsPriority,
   type BrowserTabsTabStatusMessage,
   type BrowserTabsPriorityTimings,
 } from './browserTabsPriority';
@@ -315,7 +316,7 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>(
 
 type BrowserTabsCoordinatorWithPriority<Message extends { kind: string }> = {
   coordinator: BrowserTabsCoordinator<Message>;
-  priority: ReturnType<typeof createBrowserTabsPriority>;
+  priority: BrowserTabsPriority;
 };
 
 /** @internal */
@@ -341,9 +342,9 @@ export function createBrowserTabsCoordinatorWithPriority<
 ): BrowserTabsCoordinatorWithPriority<Message> {
   const debugLogger = import.meta.env.DEV ? debugLoggerInput : undefined;
   const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
-  const priorityRef: {
-    current: ReturnType<typeof createBrowserTabsPriority> | null;
-  } = { current: null };
+  const priorityRef: { current: BrowserTabsPriority | null } = {
+    current: null,
+  };
   const coordinator = createBrowserTabsCoordinator(
     storeType,
     storeKey,
@@ -403,7 +404,7 @@ export function createBrowserTabsCoordinatorWithPriority<
 }
 
 export type BrowserTabsPresencePriority = {
-  priority: ReturnType<typeof createBrowserTabsPriority>;
+  priority: BrowserTabsPriority;
   tabId: string;
   close: () => void;
 };
@@ -417,9 +418,9 @@ export function createBrowserTabsPresencePriority(options: {
   debugLogger?: TSDFDebugLogger;
   priorityTimings?: BrowserTabsPriorityTimings;
 }): BrowserTabsPresencePriority {
-  const priorityRef: {
-    current: ReturnType<typeof createBrowserTabsPriority> | null;
-  } = { current: null };
+  const priorityRef: { current: BrowserTabsPriority | null } = {
+    current: null,
+  };
   const { coordinator, priority } = createBrowserTabsCoordinatorWithPriority<
     BrowserTabsMessageMeta & BrowserTabsTabStatusMessage
   >(
