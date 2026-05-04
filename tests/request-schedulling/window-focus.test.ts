@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { TSDFDebugLogEntry } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -162,6 +163,71 @@ test('document store: focus with dynamic disable function', async () => {
   expect(env.serverMock.numOfStartedFetches).toBeGreaterThan(
     fetchesBeforeDisabled,
   );
+});
+
+test('document store: debug logger records dynamic focus revalidation decisions', async () => {
+  const debugEntries: TSDFDebugLogEntry[] = [];
+  let enabled = false;
+  const tabs = createFocusChangeCoordinator(['a'], null);
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'test-session',
+    errorNormalizer: normalizeError,
+    debug: (entry) => {
+      debugEntries.push(entry);
+    },
+  });
+
+  const env = createDocumentStoreTestEnv(0, {
+    id: 'debug-focus-document',
+    testScenario: 'loaded',
+    storeManager,
+    revalidateOnWindowFocus: () => enabled,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useDocument().data?.value);
+
+  await flushAllTimers();
+
+  // A dynamic policy can temporarily suppress focus refetches; the debug log
+  // should make that decision visible without requiring request tracing.
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  enabled = true;
+
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(
+    debugEntries
+      .filter((entry) => entry.area === 'focus')
+      .map((entry) => ({
+        area: entry.area,
+        details: entry.details,
+        message: entry.message,
+        operation: entry.operation,
+      })),
+  ).toMatchInlineSnapshot(`
+    - area: 'focus'
+      details:
+        policy: 'dynamic'
+        reason: 'dynamic-disabled'
+        status: 'skipped'
+        storeId: 'debug-focus-document'
+        storeType: 'document'
+      message: 'window focus revalidation skipped'
+      operation: 'window-focus-revalidate'
+    - area: 'focus'
+      details:
+        policy: 'dynamic'
+        status: 'triggered'
+        storeId: 'debug-focus-document'
+        storeType: 'document'
+      message: 'window focus revalidation triggered'
+      operation: 'window-focus-revalidate'
+  `);
 });
 
 test('document store: realtime store does NOT trigger on focus even when option is set', async () => {

@@ -16,8 +16,8 @@ const storeManager = createStoreManager({
     id: 'unknown-error',
     message: error.message,
   }),
-  lowPriorityThrottleMs: 5,
-  baseCoalescingWindowMs: 10,
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
+  baseCoalescingWindowMs: 16,
   dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) =>
     windowIsNotFocused ? lastFetchDuration * 10 : lastFetchDuration * 2,
   blockWindowClose: null,
@@ -38,14 +38,14 @@ Options:
 | --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `getSessionKey`             | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.                                                                           |
 | `errorNormalizer`           | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                                                                                      |
-| `lowPriorityThrottleMs`     | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to `5`.                                                                |
-| `baseCoalescingWindowMs`    | No       | Default window to group fetch requests for attached stores. Defaults to `10`.                                                                              |
+| `lowPriorityThrottleMs`     | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to 40 minutes (`2_400_000ms`).                                         |
+| `baseCoalescingWindowMs`    | No       | Default window to group fetch requests for attached stores. Defaults to `16ms`.                                                                            |
 | `dynamicRealtimeThrottleMs` | No       | Default adaptive throttle for real-time updates in attached stores. Defaults to `100ms` focused and `1000ms` in the background. Store options override it. |
 | `blockWindowClose`          | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.                                                                          |
 | `revalidateOnWindowFocus`   | No       | Default focus revalidation policy for attached stores. Store options override it.                                                                          |
 | `onMutationError`           | No       | Global fallback for mutation failures when a store does not provide its own handler.                                                                       |
 | `onPersistentStorageError`  | No       | Global fallback for persistent storage failures when a store does not provide its own handler.                                                             |
-| `debug`                     | No       | Enables browser-tab sync and persistent-storage debug logs. Pass `true` or a logger function.                                                              |
+| `debug`                     | No       | Enables browser-tab sync, focus revalidation, and persistent-storage debug logs. Pass `true` or a logger function.                                         |
 | `offlineSession`            | No       | Shared offline config used by stores with `persistentStorage.offline`.                                                                                     |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
@@ -56,7 +56,7 @@ Store-level options can explicitly disable inherited defaults when the option su
 
 ## Debug Logging
 
-Pass `debug: true` to log browser-tab sync operations and persistent-storage operations through `console.log`, `console.warn`, and `console.error`. Browser-tab sync logs include lifecycle, leader changes, publish/receive events, and skipped messages. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Async persistent storage logs include `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
+Pass `debug: true` to log browser-tab sync operations, focus revalidation decisions, and persistent-storage operations through `console.log`, `console.warn`, and `console.error`. Browser-tab sync logs include lifecycle, leader changes, publish/receive events, and skipped messages. Focus revalidation logs report when `revalidateOnWindowFocus` triggers, is dynamically disabled, or is skipped because real-time updates own freshness. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Async persistent storage logs include `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
 
 ```ts
 const storeManager = createStoreManager({

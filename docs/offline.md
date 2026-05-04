@@ -34,8 +34,8 @@ type UserOfflineOperations = DefineListQueryOfflineOperations<
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
   errorNormalizer: normalizeError,
-  lowPriorityThrottleMs: 5,
-  baseCoalescingWindowMs: 10,
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
+  baseCoalescingWindowMs: 16,
   blockWindowClose: null,
   offlineSession: {
     network: { enabled: true },

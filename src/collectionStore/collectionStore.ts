@@ -2485,6 +2485,13 @@ export function createCollectionStore<
     () => {
       invalidateItem(() => true, 'realtimeUpdate');
     },
+    import.meta.env.DEV
+      ? {
+          debugLogger: storeManager.debugLogger,
+          storeId: id,
+          storeType: 'collection',
+        }
+      : undefined,
   );
 
   // Attach persistent storage after store creation

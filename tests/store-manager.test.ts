@@ -72,10 +72,10 @@ test('store defaults use built-in timing values and disabled window-close blocki
     }),
   }).toMatchInlineSnapshot(`
     backgroundRealtimeThrottleMs: 1000
-    baseCoalescingWindowMs: 10
+    baseCoalescingWindowMs: 16
     blockWindowClose: null
     focusedRealtimeThrottleMs: 100
-    lowPriorityThrottleMs: 5
+    lowPriorityThrottleMs: 2400000
   `);
 });
 

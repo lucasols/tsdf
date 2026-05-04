@@ -18,7 +18,7 @@ Every fetch request has a priority that determines its behavior:
 Low-priority fetches are throttled to avoid redundant requests:
 
 ```
-lowPriorityThrottleMs: 5
+lowPriorityThrottleMs: 40 * 60 * 1_000
 ```
 
 If a hook mounts within the configured throttle window after the last fetch completed, the low-priority fetch is **skipped** because the data is still fresh enough.
@@ -28,7 +28,7 @@ If a hook mounts within the configured throttle window after the last fetch comp
 When multiple fetch requests arrive in a short window, they are coalesced into a single batch:
 
 ```
-baseCoalescingWindowMs: 10
+baseCoalescingWindowMs: 16
 ```
 
 If three `useItem` hooks mount within the configured coalescing window, their fetches are grouped and executed as one request (when using batch fetching) or sequentially but without duplicate requests for the same item.
@@ -71,8 +71,8 @@ This is useful for background refetches that should yield to user-initiated acti
 
 | Option                              | Required | Description                                                                                                                                                                                  |
 | ----------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lowPriorityThrottleMs`             | No       | Manager default minimum interval between low-priority fetches, or a store-level override. Defaults to `5`                                                                                    |
-| `baseCoalescingWindowMs`            | No       | Manager default time window to group multiple requests into a single batch, or a store-level override. Defaults to `10`                                                                      |
+| `lowPriorityThrottleMs`             | No       | Manager default minimum interval between low-priority fetches, or a store-level override. Defaults to 40 minutes (`2_400_000ms`)                                                             |
+| `baseCoalescingWindowMs`            | No       | Manager default time window to group multiple requests into a single batch, or a store-level override. Defaults to `16ms`                                                                    |
 | `mediumPriorityDelayMs`             | No       | Delay before medium-priority fetches execute                                                                                                                                                 |
 | `dynamicRealtimeThrottleMs`         | No       | Manager default or store override returning throttle duration for real-time updates. Built-in default: `100ms` focused, `1000ms` background. See [Real-Time Updates](./real-time-updates.md) |
 | `maxBatchSize` / `maxItemBatchSize` | No       | Collection/ListQuery batch cap. List Query `maxItemBatchSize` defaults to `50`. Triggers immediate fetch when reached                                                                        |
@@ -81,11 +81,11 @@ This is useful for background refetches that should yield to user-initiated acti
 
 ```ts
 {
-  // Skip refetch if one happened in the last 5ms
-  lowPriorityThrottleMs: 5,
+  // Skip refetch if one happened in the last 40 minutes
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
 
-  // Group fetches within 10ms
-  baseCoalescingWindowMs: 10,
+  // Group fetches within 16ms
+  baseCoalescingWindowMs: 16,
 
   // Wait 300ms before executing medium-priority fetches
   mediumPriorityDelayMs: 300,

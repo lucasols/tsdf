@@ -39,8 +39,8 @@ import type {
   ValidPayload,
 } from './utils/storeShared';
 
-const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 5;
-const DEFAULT_BASE_COALESCING_WINDOW_MS = 10;
+const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 40 * 60 * 1_000;
+const DEFAULT_BASE_COALESCING_WINDOW_MS = 16;
 
 export type DynamicRealtimeThrottleMs = (params: {
   readonly lastFetchDuration: number;
@@ -124,7 +124,7 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
 export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active shared session / tenant key. */
   getSessionKey: () => string | false;
-  /** Shared debug logger for browser-tab sync and persistent storage internals. */
+  /** Shared debug logger for browser-tab sync, focus lifecycle, and persistent storage internals. */
   debugLogger?: TSDFDebugLogger;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
@@ -246,9 +246,9 @@ export type CreateStoreManagerOptions<
   getSessionKey: () => string | false;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
-  /** Default minimum interval between low-priority fetches for attached stores. Defaults to 5ms. */
+  /** Default minimum interval between low-priority fetches for attached stores. Defaults to 40 minutes. */
   lowPriorityThrottleMs?: number;
-  /** Default coalescing window for attached stores. Defaults to 10ms. */
+  /** Default coalescing window for attached stores. Defaults to 16ms. */
   baseCoalescingWindowMs?: number;
   /** Default adaptive throttle for real-time updates in attached stores. Store-level values override it. */
   dynamicRealtimeThrottleMs?: DynamicRealtimeThrottleMs;
@@ -261,7 +261,7 @@ export type CreateStoreManagerOptions<
   /** Default focus revalidation policy for attached stores. Store-level values override it. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /**
-   * Enables debug logs for browser-tab sync and persistent storage operations.
+   * Enables debug logs for browser-tab sync, focus revalidation, and persistent storage operations.
    * Pass `true` to use console logging, or pass a logger function.
    */
   debug?: TSDFDebugOptions;

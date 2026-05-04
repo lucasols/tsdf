@@ -14,8 +14,8 @@ const storeManager = createStoreManager({
   getSessionKey: () =>
     authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
-  lowPriorityThrottleMs: 5,
-  baseCoalescingWindowMs: 10,
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
+  baseCoalescingWindowMs: 16,
   blockWindowClose: null,
 });
 
@@ -116,8 +116,8 @@ const storeManager = createStoreManager({
   getSessionKey: () =>
     authState.userId ? `tenant:${authState.tenantId}` : false,
   errorNormalizer: normalizeError,
-  lowPriorityThrottleMs: 5,
-  baseCoalescingWindowMs: 10,
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
+  baseCoalescingWindowMs: 16,
   blockWindowClose: null,
 });
 

@@ -2,7 +2,10 @@
 export type TSDFDebugLogLevel = 'log' | 'warn' | 'error';
 
 /** Internal subsystem that emitted a debug log entry. */
-export type TSDFDebugLogArea = 'browser-tabs' | 'persistent-storage';
+export type TSDFDebugLogArea = 'browser-tabs' | 'focus' | 'persistent-storage';
+
+/** Operations emitted by focus lifecycle handling. */
+export type TSDFFocusDebugOperation = 'window-focus-revalidate';
 
 /** Operations emitted by the persistent storage subsystem. */
 export type TSDFPersistentStorageDebugOperation =
@@ -44,6 +47,7 @@ export type TSDFDebugLogEntry = {
   message: string;
   /** Stable operation id, such as `publish`, `load`, or `write`. */
   operation:
+    | TSDFFocusDebugOperation
     | TSDFPersistentStorageDebugOperation
     | TSDFBrowserTabsDebugOperation;
   /** Structured operation metadata for filtering and diagnostics. */

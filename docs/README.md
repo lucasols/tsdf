@@ -50,8 +50,8 @@ const storeManager = createStoreManager({
     id: 'fetch-error',
     message: err.message,
   }),
-  lowPriorityThrottleMs: 5,
-  baseCoalescingWindowMs: 10,
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
+  baseCoalescingWindowMs: 16,
   blockWindowClose: null,
   revalidateOnWindowFocus: true,
   onMutationError: (error) => {

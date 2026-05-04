@@ -19,6 +19,7 @@ export {
   type StoreManager,
 } from './storeManager';
 export type {
+  TSDFFocusDebugOperation,
   TSDFDebugLogArea,
   TSDFDebugLogger,
   TSDFDebugLogEntry,

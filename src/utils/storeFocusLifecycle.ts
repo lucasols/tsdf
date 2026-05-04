@@ -1,9 +1,19 @@
+import { emitTSDFDebugLog, type TSDFDebugLogger } from '../debug';
+
 type TimeoutId = ReturnType<typeof setTimeout>;
 
 type StoreFocusLifecycle = {
   onTransportReconnect: () => void;
   reset: () => void;
   dispose: () => void;
+};
+
+type FocusLifecycleStoreType = 'collection' | 'document' | 'listQuery';
+
+type FocusLifecycleDebugOptions = {
+  debugLogger: TSDFDebugLogger | undefined;
+  storeId: string;
+  storeType: FocusLifecycleStoreType;
 };
 
 /** @internal */
@@ -15,6 +25,7 @@ export function createStoreFocusLifecycle(
   onWindowFocus: (handler: () => void) => () => void,
   onWindowFocusRevalidate: () => void,
   onTransportReconnectRevalidate: () => void,
+  debug: FocusLifecycleDebugOptions | undefined,
 ): StoreFocusLifecycle {
   let cleanupFocusListener: (() => void) | null = null;
   let cleanupReconnectFocusListener: (() => void) | null = null;
@@ -41,6 +52,23 @@ export function createStoreFocusLifecycle(
 
     return !!revalidateOnWindowFocus;
   }
+
+  const logWindowFocusRevalidate =
+    import.meta.env.DEV && debug?.debugLogger
+      ? (message: string, details: Readonly<Record<string, unknown>>): void => {
+          emitTSDFDebugLog(debug.debugLogger, {
+            area: 'focus',
+            level: 'log',
+            message,
+            operation: 'window-focus-revalidate',
+            details: {
+              storeId: debug.storeId,
+              storeType: debug.storeType,
+              ...details,
+            },
+          });
+        }
+      : undefined;
 
   function runTransportReconnectRevalidate(): void {
     lastTransportReconnectRevalidateAt = Date.now();
@@ -91,12 +119,34 @@ export function createStoreFocusLifecycle(
     hasPendingReconnectRevalidateOnFocus = false;
     lastTransportReconnectRevalidateAt = Number.NEGATIVE_INFINITY;
 
-    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
+    if (!revalidateOnWindowFocus) return;
+
+    if (usesRealTimeUpdates) {
+      logWindowFocusRevalidate?.('window focus revalidation skipped', {
+        reason: 'real-time-updates',
+        status: 'skipped',
+      });
+      return;
+    }
 
     cleanupFocusListener = onWindowFocus(() => {
-      if (isFocusRevalidationEnabled()) {
-        onWindowFocusRevalidate();
+      const enabled = isFocusRevalidationEnabled();
+
+      if (!enabled) {
+        logWindowFocusRevalidate?.('window focus revalidation skipped', {
+          policy: 'dynamic',
+          reason: 'dynamic-disabled',
+          status: 'skipped',
+        });
+        return;
       }
+
+      logWindowFocusRevalidate?.('window focus revalidation triggered', {
+        policy:
+          typeof revalidateOnWindowFocus === 'function' ? 'dynamic' : 'enabled',
+        status: 'triggered',
+      });
+      onWindowFocusRevalidate();
     });
   }
 

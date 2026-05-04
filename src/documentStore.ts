@@ -1128,6 +1128,13 @@ export function createDocumentStore<
     () => {
       invalidateData('realtimeUpdate');
     },
+    import.meta.env.DEV
+      ? {
+          debugLogger: storeManager.debugLogger,
+          storeId: id,
+          storeType: 'document',
+        }
+      : undefined,
   );
 
   // Attach persistent storage after store creation

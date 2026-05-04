@@ -202,8 +202,8 @@ const getSessionKey = () => (userId ? `tenant:${userId}` : false);
 const storeManager = createStoreManager({
   getSessionKey,
   errorNormalizer: normalizeError,
-  lowPriorityThrottleMs: 5,
-  baseCoalescingWindowMs: 10,
+  lowPriorityThrottleMs: 40 * 60 * 1_000,
+  baseCoalescingWindowMs: 16,
   blockWindowClose: null,
   onPersistentStorageError: (error) => {
     console.error('TSDF persistence failed', error);

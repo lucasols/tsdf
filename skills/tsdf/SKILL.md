@@ -35,8 +35,8 @@ const storeManager = createStoreManager({
     id: 'fetch-error',
     message: err.message,
   }),
-  lowPriorityThrottleMs: 5, // optional; defaults to 5
-  baseCoalescingWindowMs: 10, // optional; defaults to 10
+  lowPriorityThrottleMs: 40 * 60 * 1_000, // optional; defaults to 40 minutes
+  baseCoalescingWindowMs: 16, // optional; defaults to 16ms
   blockWindowClose: null, // optional manager-wide mutation close blocker
   revalidateOnWindowFocus: true, // optional default for attached stores
   onMutationError: (err) => log(err), // optional global mutation fallback

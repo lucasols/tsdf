@@ -3024,6 +3024,13 @@ export function createListQueryStore<
     () => {
       invalidateQueryAndItems({ all: true, type: 'realtimeUpdate' });
     },
+    import.meta.env.DEV
+      ? {
+          debugLogger: storeManager.debugLogger,
+          storeId: id,
+          storeType: 'listQuery',
+        }
+      : undefined,
   );
 
   // Attach persistent storage after store creation
