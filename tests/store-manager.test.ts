@@ -108,7 +108,7 @@ test('store defaults can be configured on the store manager', () => {
   `);
 });
 
-test('mixed stores share one manager-level browser-tab presence heartbeat', () => {
+test('mixed stores share one manager-level browser-tab presence channel', () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const tabs = createFocusChangeCoordinator(['app'], 'app');
   const bindFocusController = tabs.bind('app');
@@ -122,7 +122,6 @@ test('mixed stores share one manager-level browser-tab presence heartbeat', () =
     id: `${idPrefix}-document`,
     storeManager,
     browserTabsTransportFactory: transport.transportFactory,
-    browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
     bindFocusController,
   });
   const collectionEnv = createCollectionStoreTestEnv(
@@ -131,7 +130,6 @@ test('mixed stores share one manager-level browser-tab presence heartbeat', () =
       id: `${idPrefix}-collection`,
       storeManager,
       browserTabsTransportFactory: transport.transportFactory,
-      browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
       bindFocusController,
     },
   );
@@ -141,7 +139,6 @@ test('mixed stores share one manager-level browser-tab presence heartbeat', () =
       id: `${idPrefix}-list`,
       storeManager,
       browserTabsTransportFactory: transport.transportFactory,
-      browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
       bindFocusController,
     },
   );
@@ -159,17 +156,17 @@ test('mixed stores share one manager-level browser-tab presence heartbeat', () =
 
   vi.advanceTimersByTime(2_500);
 
-  const statusMessagesAfterHeartbeats = transport
+  const statusMessagesAfterQuietPeriod = transport
     .getMessages()
     .filter((entry) => {
       return getMessageKinds([entry])[0] === 'tab-status';
     });
 
-  expect(statusMessagesAfterHeartbeats).toHaveLength(3);
+  expect(statusMessagesAfterQuietPeriod).toHaveLength(1);
   expect(
     Array.from(
       new Set(
-        statusMessagesAfterHeartbeats.map(({ channelName }) => channelName),
+        statusMessagesAfterQuietPeriod.map(({ channelName }) => channelName),
       ),
     ),
   ).toMatchInlineSnapshot(`['tsdf:presence:manager']`);
@@ -179,7 +176,7 @@ test('mixed stores share one manager-level browser-tab presence heartbeat', () =
   listQueryEnv.apiStore.dispose();
 });
 
-test('browser-tab presence heartbeat stays alive until the last store is disposed', () => {
+test('browser-tab presence stays alive until the last store is disposed', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const tabs = createFocusChangeCoordinator(['app'], 'app');
   const bindFocusController = tabs.bind('app');
@@ -193,7 +190,6 @@ test('browser-tab presence heartbeat stays alive until the last store is dispose
     id: `${idPrefix}-document`,
     storeManager,
     browserTabsTransportFactory: transport.transportFactory,
-    browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
     bindFocusController,
   });
   const collectionEnv = createCollectionStoreTestEnv(
@@ -202,13 +198,12 @@ test('browser-tab presence heartbeat stays alive until the last store is dispose
       id: `${idPrefix}-collection`,
       storeManager,
       browserTabsTransportFactory: transport.transportFactory,
-      browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
       bindFocusController,
     },
   );
 
   documentEnv.apiStore.dispose();
-  vi.advanceTimersByTime(1_500);
+  await tabs.blur();
 
   expect(
     transport.getMessages().filter((entry) => {
@@ -217,13 +212,71 @@ test('browser-tab presence heartbeat stays alive until the last store is dispose
   ).toHaveLength(2);
 
   collectionEnv.apiStore.dispose();
-  vi.advanceTimersByTime(2_500);
+  await tabs.focusTab('app');
 
   expect(
     transport.getMessages().filter((entry) => {
       return getMessageKinds([entry])[0] === 'tab-status';
     }),
   ).toHaveLength(2);
+});
+
+test('manager-level browser-tab presence does not poll while focused or backgrounded', async () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const tabs = createFocusChangeCoordinator(['app'], 'app');
+  const bindFocusController = tabs.bind('app');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+  });
+
+  const documentEnv = createDocumentStoreTestEnv(1, {
+    id: getNextStoreId('background-presence-doc'),
+    storeManager,
+    browserTabsTransportFactory: transport.transportFactory,
+    bindFocusController,
+  });
+  const collectionEnv = createCollectionStoreTestEnv(
+    { '1': { title: 'Todo', completed: false } },
+    {
+      id: getNextStoreId('background-presence-collection'),
+      storeManager,
+      browserTabsTransportFactory: transport.transportFactory,
+      bindFocusController,
+    },
+  );
+
+  const initialStatusMessages = transport.getMessages().filter((entry) => {
+    return getMessageKinds([entry])[0] === 'tab-status';
+  });
+
+  expect(initialStatusMessages).toHaveLength(1);
+
+  vi.advanceTimersByTime(2_500);
+
+  expect(
+    transport.getMessages().filter((entry) => {
+      return getMessageKinds([entry])[0] === 'tab-status';
+    }),
+  ).toHaveLength(initialStatusMessages.length);
+
+  await tabs.blur();
+  const statusMessagesAfterBlur = transport.getMessages().filter((entry) => {
+    return getMessageKinds([entry])[0] === 'tab-status';
+  });
+
+  expect(statusMessagesAfterBlur).toHaveLength(2);
+
+  vi.advanceTimersByTime(2_500);
+
+  expect(
+    transport.getMessages().filter((entry) => {
+      return getMessageKinds([entry])[0] === 'tab-status';
+    }),
+  ).toHaveLength(statusMessagesAfterBlur.length);
+
+  documentEnv.apiStore.dispose();
+  collectionEnv.apiStore.dispose();
 });
 
 test('stores inherit manager dynamic realtime throttling unless they override it', async () => {

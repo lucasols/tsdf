@@ -22,7 +22,7 @@ Tabs use a versioned message model so later snapshots do not overwrite fresher r
 
 ## Behavior details
 
-- Tab status messages include focus and heartbeat data.
+- Tab status messages include focus and presence timestamp data.
 - Focused tabs keep the base `baseCoalescingWindowMs`.
 - Background tabs are ranked and may receive an extended coalescing window (`base` + rank \* `1000ms`), which helps avoid duplicate background refetch work.
 - `fetch-start` messages let sibling tabs drop duplicate scheduled work when another tab is already fetching the same request IDs.

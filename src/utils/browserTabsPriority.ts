@@ -1,5 +1,4 @@
 export type BrowserTabsPriorityTimings = {
-  heartbeatMs?: number;
   fetchLeaseMs?: number | ((lastFetchDuration: number) => number);
 };
 
@@ -80,7 +79,6 @@ type BrowserTabsPriority = {
   close: () => void;
 };
 
-const DEFAULT_HEARTBEAT_MS = 5_000;
 const DEFAULT_FETCH_LEASE_MS = 10_000;
 const COALESCING_WINDOW_STEP_MS = 1_000;
 
@@ -105,8 +103,6 @@ export function createBrowserTabsPriority({
     lastFocusedAt: getWindowIsFocused() ? Date.now() : 0,
     lastPresenceAt: Date.now(),
   };
-
-  const heartbeatMs = timings?.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
 
   function resolveFetchLeaseMs(lastFetchDuration: number): number {
     const configuredLeaseMs = timings?.fetchLeaseMs;
@@ -340,24 +336,9 @@ export function createBrowserTabsPriority({
   }
 
   let cleanupFocusListeners: (() => void) | undefined;
-  let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
-
-  const shouldRunHeartbeat =
-    transportEnabled &&
-    heartbeatMs > 0 &&
-    (!import.meta.env.TEST || timings?.heartbeatMs !== undefined);
 
   if (transportEnabled) {
     publishLocalStatus();
-
-    if (shouldRunHeartbeat) {
-      heartbeatInterval = setInterval(() => {
-        noteLocalFocusState();
-        if (localPresence.isFocused) {
-          publishLocalStatus();
-        }
-      }, heartbeatMs);
-    }
 
     if (onWindowFocusChange) {
       cleanupFocusListeners = onWindowFocusChange(() => {
@@ -390,9 +371,6 @@ export function createBrowserTabsPriority({
     reset,
     close(): void {
       cleanupFocusListeners?.();
-      if (heartbeatInterval) {
-        clearInterval(heartbeatInterval);
-      }
       reset();
       knownTabs.clear();
     },
