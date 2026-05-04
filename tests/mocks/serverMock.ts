@@ -248,5 +248,8 @@ export function createServerMock<Data>(
       return numOfFinishedFetches;
     },
     fetchHistory,
+    clearFetchHistory() {
+      fetchHistory.length = 0;
+    },
   };
 }

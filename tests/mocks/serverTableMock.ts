@@ -894,6 +894,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       return numOfFinishedFetches;
     },
     fetchHistory,
+    clearFetchHistory() {
+      fetchHistory.length = 0;
+    },
     getRequestHistory(
       fetchType: 'item' | 'list' | 'all' = 'all',
       options?: { includeTime?: boolean },
