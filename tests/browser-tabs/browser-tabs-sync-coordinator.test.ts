@@ -59,15 +59,17 @@ test('browser tabs coordinator ignores messages from a different session key', (
   const transport = createControlledTransportFactory();
   const receivedMessageIds: string[] = [];
 
-  createBrowserTabsCoordinator<SyncTestMessage>({
-    storeType: 'document',
-    storeKey: 'coordinator-session-mismatch',
-    getSessionKey: () => 'account-a',
-    transportFactory: transport.transportFactory,
-    onMessage(message) {
+  createBrowserTabsCoordinator<SyncTestMessage>(
+    'document',
+    'coordinator-session-mismatch',
+    () => 'account-a',
+    (message) => {
       receivedMessageIds.push(message.messageId);
     },
-  });
+    undefined,
+    transport.transportFactory,
+    undefined,
+  );
 
   transport.deliver(createRemoteStatusMessage(1, 'account-b'));
 
@@ -78,15 +80,17 @@ test('browser tabs coordinator disables publish and receive when session key is 
   const transport = createControlledTransportFactory();
   const receivedMessageIds: string[] = [];
 
-  const coordinator = createBrowserTabsCoordinator<SyncTestMessage>({
-    storeType: 'document',
-    storeKey: 'coordinator-no-session',
-    getSessionKey: () => false,
-    transportFactory: transport.transportFactory,
-    onMessage(message) {
+  const coordinator = createBrowserTabsCoordinator<SyncTestMessage>(
+    'document',
+    'coordinator-no-session',
+    () => false,
+    (message) => {
       receivedMessageIds.push(message.messageId);
     },
-  });
+    undefined,
+    transport.transportFactory,
+    undefined,
+  );
 
   const published = coordinator.publish({
     kind: 'tab-status',
@@ -107,15 +111,17 @@ test('browser tabs coordinator clears duplicate suppression when the session key
   const receivedMessageIds: string[] = [];
   let sessionKey: string | false = 'account-a';
 
-  createBrowserTabsCoordinator<SyncTestMessage>({
-    storeType: 'document',
-    storeKey: 'coordinator-session-switch',
-    getSessionKey: () => sessionKey,
-    transportFactory: transport.transportFactory,
-    onMessage(message) {
+  createBrowserTabsCoordinator<SyncTestMessage>(
+    'document',
+    'coordinator-session-switch',
+    () => sessionKey,
+    (message) => {
       receivedMessageIds.push(message.messageId);
     },
-  });
+    undefined,
+    transport.transportFactory,
+    undefined,
+  );
 
   transport.deliver(createRemoteStatusMessage(1, 'account-a'));
   sessionKey = 'account-b';
@@ -175,15 +181,17 @@ test('browser tabs coordinator keeps duplicate suppression bounded during long-l
     globalThis.Set = TrackingSetCtor;
     globalThis.Map = TrackingMapCtor;
 
-    const coordinator = createBrowserTabsCoordinator<SyncTestMessage>({
-      storeType: 'document',
-      storeKey: 'coordinator-dedupe',
-      getSessionKey: () => 'test-session',
-      transportFactory: transport.transportFactory,
-      onMessage(message) {
+    const coordinator = createBrowserTabsCoordinator<SyncTestMessage>(
+      'document',
+      'coordinator-dedupe',
+      () => 'test-session',
+      (message) => {
         receivedMessageIds.push(message.messageId);
       },
-    });
+      undefined,
+      transport.transportFactory,
+      undefined,
+    );
 
     for (let seq = 1; seq <= 1_000; seq++) {
       transport.deliver(createRemoteStatusMessage(seq));

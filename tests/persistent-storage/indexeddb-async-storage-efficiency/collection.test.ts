@@ -591,20 +591,20 @@ describe('indexeddb async storage efficiency: collection', () => {
     }
 
     expect(firstEntry.sizeBytes).toBe(
-      estimateManagedAsyncStorageEntrySizeBytes({
-        customMetadata: { p: 'a' },
-        lastAccessAt: firstEntry.lastAccessAt,
-        serializedValue: JSON.stringify(firstValue),
-        version: 1,
-      }),
+      estimateManagedAsyncStorageEntrySizeBytes(
+        JSON.stringify(firstValue),
+        firstEntry.lastAccessAt,
+        1,
+        { p: 'a' },
+      ),
     );
     expect(secondEntry.sizeBytes).toBe(
-      estimateManagedAsyncStorageEntrySizeBytes({
-        customMetadata: { tag: 'second' },
-        lastAccessAt: secondEntry.lastAccessAt,
-        serializedValue: JSON.stringify(secondValue),
-        version: 1,
-      }),
+      estimateManagedAsyncStorageEntrySizeBytes(
+        JSON.stringify(secondValue),
+        secondEntry.lastAccessAt,
+        1,
+        { tag: 'second' },
+      ),
     );
   });
 
