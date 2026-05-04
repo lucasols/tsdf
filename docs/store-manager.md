@@ -56,7 +56,7 @@ Store-level options can explicitly disable inherited defaults when the option su
 
 ## Debug Logging
 
-Pass `debug: true` to log browser-tab sync operations and persistent-storage operations through `console.log`, `console.warn`, and `console.error`. Async persistent storage logs include `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
+Pass `debug: true` to log browser-tab sync operations and persistent-storage operations through `console.log`, `console.warn`, and `console.error`. Browser-tab sync logs include lifecycle, leader changes, publish/receive events, and skipped messages. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Async persistent storage logs include `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
 
 ```ts
 const storeManager = createStoreManager({

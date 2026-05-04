@@ -79,6 +79,7 @@ import {
   ScheduleFetchResults,
 } from './requestScheduler';
 import {
+  getOrCreateStoreManagerBrowserTabsPresence,
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
   validateStoreManagerSessionConsistency,
@@ -90,12 +91,9 @@ import {
   tryClaimAutomaticFetchSlot,
   type AutomaticFetchRetryState,
 } from './utils/automaticFetchPolicy';
+import { type BrowserTabsPriorityTimings } from './utils/browserTabsPriority';
 import {
-  type BrowserTabsPriorityTimings,
-  type BrowserTabsTabStatusMessage,
-} from './utils/browserTabsPriority';
-import {
-  createBrowserTabsCoordinatorWithPriority,
+  createBrowserTabsCoordinator,
   isBrowserTabsSyncVersionNewer,
   SnapshotConsistency,
   toBrowserTabsSyncVersion,
@@ -174,7 +172,6 @@ export type DocumentStoreStoreEvents = {
 
 /** @internal */
 export type DocumentBrowserTabsMessage<State extends ValidStoreState> =
-  | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
   | (BrowserTabsMessageMeta & {
       kind: 'document-snapshot';
       consistency: SnapshotConsistency;
@@ -939,11 +936,6 @@ export function createDocumentStore<
   function handleRemoteMessage(
     message: DocumentBrowserTabsMessage<State>,
   ): void {
-    if (message.kind === 'tab-status') {
-      browserTabsPriority.onTabStatusMessage(message.tabId, message);
-      return;
-    }
-
     if (message.kind === 'fetch-start') {
       if (!hasLocalDocumentState()) return;
       scheduler.syncExternalFetchStart(message.requestIds, message.startedAt);
@@ -984,28 +976,32 @@ export function createDocumentStore<
     applyRemoteDocumentSnapshot(message, candidateVersion);
   }
 
-  const { coordinator: browserTabsSync, priority: browserTabsPriority } =
-    createBrowserTabsCoordinatorWithPriority<DocumentBrowserTabsMessage<State>>(
-      {
-        storeType: 'document',
-        storeKey: id,
-        getSessionKey: getSessionKeyForRuntime,
-        onMessage: handleRemoteMessage,
-        onSessionChange() {
-          lastDocumentSyncVersion = undefined;
-          clearOfflineOverlay();
-        },
-        transportFactory: testOptions?.browserTabsTransportFactory,
-        ...(import.meta.env.DEV
-          ? { debugLogger: storeManager.debugLogger }
-          : undefined),
-        getWindowIsFocused,
-        onWindowFocusChange: testOptions?.onWindowFocusChange,
-        priorityTimings:
-          testOptions?.browserTabsPriorityTimings ??
-          testOptions?.browserTabsLeadershipTimings,
-      },
-    );
+  const { priority: browserTabsPriority, tabId: browserTabsTabId } =
+    getOrCreateStoreManagerBrowserTabsPresence(storeManager, {
+      getWindowIsFocused,
+      onWindowFocusChange: testOptions?.onWindowFocusChange,
+      transportFactory: testOptions?.browserTabsTransportFactory,
+      priorityTimings:
+        testOptions?.browserTabsPriorityTimings ??
+        testOptions?.browserTabsLeadershipTimings,
+    });
+  const browserTabsSync = createBrowserTabsCoordinator<
+    DocumentBrowserTabsMessage<State>
+  >({
+    storeType: 'document',
+    storeKey: id,
+    getSessionKey: getSessionKeyForRuntime,
+    onMessage: handleRemoteMessage,
+    onSessionChange() {
+      lastDocumentSyncVersion = undefined;
+      clearOfflineOverlay();
+    },
+    transportFactory: testOptions?.browserTabsTransportFactory,
+    ...(import.meta.env.DEV
+      ? { debugLogger: storeManager.debugLogger }
+      : undefined),
+    tabId: browserTabsTabId,
+  });
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
@@ -1290,7 +1286,6 @@ export function createDocumentStore<
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
     clearOfflineOverlay();
-    browserTabsPriority.reset();
 
     persistence?.dispose();
     void persistence?.clear();
@@ -1315,7 +1310,6 @@ export function createDocumentStore<
     lastDocumentSyncVersion = undefined;
     clearOfflineOverlay();
     browserTabsSync.close();
-    browserTabsPriority.close();
     focusLifecycle.dispose();
     persistence?.dispose();
     offlineController?.dispose();

@@ -69,19 +69,15 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  getOrCreateStoreManagerBrowserTabsPresence,
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
   validateStoreManagerSessionConsistency,
   type StoreManager,
 } from '../storeManager';
-import {
-  createBrowserTabsPriority,
-  type BrowserTabsPriorityTimings,
-  type BrowserTabsTabStatusMessage,
-} from '../utils/browserTabsPriority';
+import { type BrowserTabsPriorityTimings } from '../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinator,
-  createBrowserTabsCoordinatorWithPriority,
   isBrowserTabsSyncVersionNewer,
   toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
@@ -1054,7 +1050,6 @@ export type ListQueryBrowserTabsMessage<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > =
-  | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
   | (BrowserTabsMessageMeta & {
       kind: 'list-query-snapshot';
       queryKey: string;
@@ -1688,20 +1683,38 @@ export function createListQueryStore<
       windowIsNotFocused: !getWindowIsFocused(),
     });
 
+  const { priority: browserTabsPriority, tabId: browserTabsTabId } =
+    getOrCreateStoreManagerBrowserTabsPresence(storeManager, {
+      getWindowIsFocused,
+      onWindowFocusChange: testOptions?.onWindowFocusChange,
+      transportFactory: testOptions?.browserTabsTransportFactory,
+      priorityTimings:
+        testOptions?.browserTabsPriorityTimings ??
+        testOptions?.browserTabsLeadershipTimings,
+    });
+
   function getCoalescingWindowMs(): number {
-    return (
-      browserTabsPriority?.getCoalescingWindowMs(baseCoalescingWindowMs) ??
-      baseCoalescingWindowMs
-    );
+    return browserTabsPriority.getCoalescingWindowMs(baseCoalescingWindowMs);
   }
-  type BrowserTabsSyncCoordinator = ReturnType<
-    typeof createBrowserTabsCoordinator<
-      ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>
-    >
-  >;
-  let browserTabsSync: BrowserTabsSyncCoordinator | null = null;
-  let browserTabsPriority: ReturnType<typeof createBrowserTabsPriority> | null =
-    null;
+
+  const browserTabsSync = createBrowserTabsCoordinator<
+    ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>
+  >({
+    storeType: 'listQuery',
+    storeKey: id,
+    getSessionKey: getSessionKeyForRuntime,
+    onMessage: handleRemoteBrowserTabsMessage,
+    onSessionChange() {
+      lastQuerySyncVersions.clear();
+      lastItemSyncVersions.clear();
+      clearOfflineOverlays();
+    },
+    transportFactory: testOptions?.browserTabsTransportFactory,
+    ...(import.meta.env.DEV
+      ? { debugLogger: storeManager.debugLogger }
+      : undefined),
+    tabId: browserTabsTabId,
+  });
 
   function getQueryTargetKey(queryKey: string): string {
     return `query:${queryKey}`;
@@ -1764,7 +1777,7 @@ export function createListQueryStore<
     if (!query) return;
     const items = getQuerySnapshotItems(query);
 
-    const message = browserTabsSync?.publish({
+    const message = browserTabsSync.publish({
       kind: 'list-query-snapshot',
       queryKey,
       consistency,
@@ -1785,7 +1798,7 @@ export function createListQueryStore<
   ): void {
     if (remoteApplyDepth > 0) return;
 
-    const message = browserTabsSync?.publish({
+    const message = browserTabsSync.publish({
       kind: 'list-item-snapshot',
       itemKey,
       consistency,
@@ -1930,7 +1943,7 @@ export function createListQueryStore<
       const queryKey = requests[0]?.requestId;
       if (!queryKey) return;
 
-      browserTabsSync?.publish({
+      browserTabsSync.publish({
         kind: 'fetch-start',
         targetKey: getQueryTargetKey(queryKey),
         requestIds: requests.map(({ requestId }) => requestId),
@@ -1948,7 +1961,7 @@ export function createListQueryStore<
           ? getItemTargetKey(firstRequest.requestId)
           : getItemBatchTargetKey(batchKey);
 
-      browserTabsSync?.publish({
+      browserTabsSync.publish({
         kind: 'fetch-start',
         targetKey,
         requestIds: requests.map(({ requestId }) => requestId),
@@ -1974,7 +1987,7 @@ export function createListQueryStore<
       const firstQueryKey = successfulQueryKeys[0];
 
       if (firstQueryKey) {
-        browserTabsSync?.publish({
+        browserTabsSync.publish({
           kind: 'fetch-success',
           targetKey: getQueryTargetKey(firstQueryKey),
           requestIds: successfulQueryKeys,
@@ -2008,7 +2021,7 @@ export function createListQueryStore<
             ? getItemTargetKey(firstSuccessfulItem.itemKey)
             : getItemBatchTargetKey(batchKey);
 
-        browserTabsSync?.publish({
+        browserTabsSync.publish({
           kind: 'fetch-success',
           targetKey,
           requestIds: successfulItems.map(({ itemKey }) => itemKey),
@@ -2654,11 +2667,6 @@ export function createListQueryStore<
   function handleRemoteBrowserTabsMessage(
     message: ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>,
   ): void {
-    if (message.kind === 'tab-status') {
-      browserTabsPriority?.onTabStatusMessage(message.tabId, message);
-      return;
-    }
-
     if (message.kind === 'fetch-start') {
       syncRemoteFetchStart(
         message.targetKey,
@@ -2749,30 +2757,6 @@ export function createListQueryStore<
 
     applyRemoteQuerySnapshot(message);
   }
-
-  ({ coordinator: browserTabsSync, priority: browserTabsPriority } =
-    createBrowserTabsCoordinatorWithPriority<
-      ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>
-    >({
-      storeType: 'listQuery',
-      storeKey: id,
-      getSessionKey: getSessionKeyForRuntime,
-      onMessage: handleRemoteBrowserTabsMessage,
-      onSessionChange() {
-        lastQuerySyncVersions.clear();
-        lastItemSyncVersions.clear();
-        clearOfflineOverlays();
-      },
-      transportFactory: testOptions?.browserTabsTransportFactory,
-      ...(import.meta.env.DEV
-        ? { debugLogger: storeManager.debugLogger }
-        : undefined),
-      getWindowIsFocused,
-      onWindowFocusChange: testOptions?.onWindowFocusChange,
-      priorityTimings:
-        testOptions?.browserTabsPriorityTimings ??
-        testOptions?.browserTabsLeadershipTimings,
-    }));
 
   const useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
     ItemState,
@@ -3122,7 +3106,6 @@ export function createListQueryStore<
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
-    browserTabsPriority?.reset();
 
     persistence?.dispose();
     void persistence?.clear();
@@ -3160,8 +3143,7 @@ export function createListQueryStore<
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
-    browserTabsSync?.close();
-    browserTabsPriority?.close();
+    browserTabsSync.close();
     focusLifecycle.dispose();
     persistence?.dispose();
     offlineController?.dispose();

@@ -13,6 +13,7 @@ import {
 } from './browserTabsPriority';
 
 export type BrowserTabsStoreType =
+  | 'presence'
   | 'document'
   | 'collection'
   | 'listQuery'
@@ -40,6 +41,7 @@ type BrowserTabsCoordinatorOptions<Message extends { kind: string }> = {
   ) => void;
   transportFactory?: BrowserTabsTransportFactory;
   debugLogger?: TSDFDebugLogger;
+  tabId?: string;
 };
 
 export type BrowserTabsMessageMeta = {
@@ -126,7 +128,7 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>(
   } = options;
   const debugLogger = import.meta.env.DEV ? options.debugLogger : undefined;
   const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
-  const tabId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const tabId = options.tabId ?? createBrowserTabsTabId();
   let seq = 0;
 
   const lastSeenSeqByTab = new Map<string, number>();
@@ -346,6 +348,7 @@ export function createBrowserTabsCoordinatorWithPriority<
     onMessage,
     onSessionChange,
     transportFactory,
+    tabId,
     getWindowIsFocused,
     onWindowFocusChange,
     priorityTimings,
@@ -368,6 +371,7 @@ export function createBrowserTabsCoordinatorWithPriority<
       onSessionChange?.(sessionKey, previousSessionKey);
     },
     transportFactory,
+    tabId,
     ...(import.meta.env.DEV ? { debugLogger: options.debugLogger } : undefined),
   });
 
@@ -412,6 +416,55 @@ export function createBrowserTabsCoordinatorWithPriority<
   priorityRef.current = priority;
 
   return { coordinator, priority };
+}
+
+export type BrowserTabsPresencePriority = {
+  priority: ReturnType<typeof createBrowserTabsPriority>;
+  tabId: string;
+  close: () => void;
+};
+
+/** @internal */
+export function createBrowserTabsPresencePriority(options: {
+  getSessionKey: () => BrowserTabsSessionKey;
+  getWindowIsFocused: () => boolean;
+  onWindowFocusChange?: (handler: () => void) => () => void;
+  transportFactory?: BrowserTabsTransportFactory;
+  debugLogger?: TSDFDebugLogger;
+  priorityTimings?: BrowserTabsPriorityTimings;
+}): BrowserTabsPresencePriority {
+  const priorityRef: {
+    current: ReturnType<typeof createBrowserTabsPriority> | null;
+  } = { current: null };
+  const { coordinator, priority } = createBrowserTabsCoordinatorWithPriority<
+    BrowserTabsMessageMeta & BrowserTabsTabStatusMessage
+  >({
+    storeType: 'presence',
+    storeKey: 'manager',
+    getSessionKey: options.getSessionKey,
+    onMessage(message) {
+      priorityRef.current?.onTabStatusMessage(message.tabId, message);
+    },
+    transportFactory: options.transportFactory,
+    ...(import.meta.env.DEV ? { debugLogger: options.debugLogger } : undefined),
+    getWindowIsFocused: options.getWindowIsFocused,
+    onWindowFocusChange: options.onWindowFocusChange,
+    priorityTimings: options.priorityTimings,
+  });
+  priorityRef.current = priority;
+
+  return {
+    priority,
+    tabId: coordinator.tabId,
+    close() {
+      coordinator.close();
+      priority.close();
+    },
+  };
+}
+
+function createBrowserTabsTabId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export type SnapshotConsistency = 'optimistic' | 'confirmed';

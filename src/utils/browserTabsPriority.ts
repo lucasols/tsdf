@@ -1,6 +1,5 @@
 export type BrowserTabsPriorityTimings = {
   heartbeatMs?: number;
-  presenceTtlMs?: number;
   fetchLeaseMs?: number | ((lastFetchDuration: number) => number);
 };
 
@@ -82,7 +81,6 @@ type BrowserTabsPriority = {
 };
 
 const DEFAULT_HEARTBEAT_MS = 5_000;
-const DEFAULT_PRESENCE_TTL_MS = 15_000;
 const DEFAULT_FETCH_LEASE_MS = 10_000;
 const COALESCING_WINDOW_STEP_MS = 1_000;
 
@@ -109,7 +107,6 @@ export function createBrowserTabsPriority({
   };
 
   const heartbeatMs = timings?.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
-  const presenceTtlMs = timings?.presenceTtlMs ?? DEFAULT_PRESENCE_TTL_MS;
 
   function resolveFetchLeaseMs(lastFetchDuration: number): number {
     const configuredLeaseMs = timings?.fetchLeaseMs;
@@ -123,16 +120,6 @@ export function createBrowserTabsPriority({
     }
 
     return Math.max(lastFetchDuration * 3, DEFAULT_FETCH_LEASE_MS);
-  }
-
-  function pruneStaleTabs(): void {
-    const now = Date.now();
-
-    for (const [remoteTabId, presence] of knownTabs) {
-      if (now - presence.lastPresenceAt > presenceTtlMs) {
-        knownTabs.delete(remoteTabId);
-      }
-    }
   }
 
   function pruneExpiredRemoteLeases(): void {
@@ -149,8 +136,6 @@ export function createBrowserTabsPriority({
     if (!getIsEnabled()) {
       return [localPresence];
     }
-
-    pruneStaleTabs();
 
     return [localPresence, ...knownTabs.values()].sort((a, b) => {
       if (a.isFocused !== b.isFocused) {
@@ -367,7 +352,10 @@ export function createBrowserTabsPriority({
 
     if (shouldRunHeartbeat) {
       heartbeatInterval = setInterval(() => {
-        publishLocalStatus();
+        noteLocalFocusState();
+        if (localPresence.isFocused) {
+          publishLocalStatus();
+        }
       }, heartbeatMs);
     }
 

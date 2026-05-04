@@ -26,6 +26,12 @@ import type {
 import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 import type { OfflineUpload } from './persistentStorage/offlineUploadTypes';
 import type { PersistentStorageErrorHandler } from './persistentStorage/types';
+import type { BrowserTabsPriorityTimings } from './utils/browserTabsPriority';
+import {
+  createBrowserTabsPresencePriority,
+  type BrowserTabsPresencePriority,
+  type BrowserTabsTransportFactory,
+} from './utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from './utils/performMutation';
 import type {
   StoreError,
@@ -143,6 +149,7 @@ type RegisteredStore = {
 };
 
 type StoreManagerRegistry = {
+  browserTabsPresence: BrowserTabsPresencePriority | undefined;
   nextStoreRegistrationId: number;
   stores: Map<number, RegisteredStore>;
 };
@@ -339,6 +346,7 @@ export function createStoreManager<
     : createDisabledStoreManagerOfflineApi<TUploadRef>(options.getSessionKey);
 
   const registry: StoreManagerRegistry = {
+    browserTabsPresence: undefined,
     nextStoreRegistrationId: 0,
     stores: new Map(),
   };
@@ -384,16 +392,21 @@ export function createStoreManager<
   return storeManager;
 }
 
-export function registerStoreWithManager(
-  storeManager: StoreManager,
-  store: RegisteredStore,
-): () => void {
+function getRegistryOrThrow(storeManager: StoreManager): StoreManagerRegistry {
   const registry = storeManagerRegistry.get(storeManager);
   if (!registry) {
     throw new Error(
       '[tsdf] storeManager must be created with createStoreManager(...)',
     );
   }
+  return registry;
+}
+
+export function registerStoreWithManager(
+  storeManager: StoreManager,
+  store: RegisteredStore,
+): () => void {
+  const registry = getRegistryOrThrow(storeManager);
 
   let hasDuplicateId = false;
   for (const registeredStore of registry.stores.values()) {
@@ -415,7 +428,40 @@ export function registerStoreWithManager(
 
   return () => {
     registry.stores.delete(registrationId);
+    if (registry.stores.size === 0) {
+      registry.browserTabsPresence?.close();
+      registry.browserTabsPresence = undefined;
+    }
   };
+}
+
+export function getOrCreateStoreManagerBrowserTabsPresence(
+  storeManager: StoreManager,
+  options: {
+    getWindowIsFocused: () => boolean;
+    onWindowFocusChange?: (handler: () => void) => () => void;
+    transportFactory?: BrowserTabsTransportFactory;
+    priorityTimings?: BrowserTabsPriorityTimings;
+  },
+): {
+  priority: { getCoalescingWindowMs: (baseMs: number) => number };
+  tabId: string;
+} {
+  const registry = getRegistryOrThrow(storeManager);
+
+  const presence = (registry.browserTabsPresence ??=
+    createBrowserTabsPresencePriority({
+      getSessionKey: storeManager.getSessionKey,
+      getWindowIsFocused: options.getWindowIsFocused,
+      onWindowFocusChange: options.onWindowFocusChange,
+      transportFactory: options.transportFactory,
+      ...(import.meta.env.DEV
+        ? { debugLogger: storeManager.debugLogger }
+        : undefined),
+      priorityTimings: options.priorityTimings,
+    }));
+
+  return { priority: presence.priority, tabId: presence.tabId };
 }
 
 export function resolveStoreManagerOfflineSession<

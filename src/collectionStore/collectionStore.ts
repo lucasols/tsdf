@@ -76,17 +76,15 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  getOrCreateStoreManagerBrowserTabsPresence,
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
   validateStoreManagerSessionConsistency,
   type StoreManager,
 } from '../storeManager';
+import { type BrowserTabsPriorityTimings } from '../utils/browserTabsPriority';
 import {
-  type BrowserTabsPriorityTimings,
-  type BrowserTabsTabStatusMessage,
-} from '../utils/browserTabsPriority';
-import {
-  createBrowserTabsCoordinatorWithPriority,
+  createBrowserTabsCoordinator,
   isBrowserTabsSyncVersionNewer,
   toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
@@ -251,7 +249,6 @@ export type CollectionBrowserTabsMessage<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > =
-  | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
   | (BrowserTabsMessageMeta & {
       kind: 'collection-item-snapshot';
       itemKey: string;
@@ -1619,11 +1616,6 @@ export function createCollectionStore<
   function handleRemoteMessage(
     message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
   ): void {
-    if (message.kind === 'tab-status') {
-      browserTabsPriority.onTabStatusMessage(message.tabId, message);
-      return;
-    }
-
     if (message.kind === 'fetch-start') {
       const scheduler = getSchedulerForTargetKey(message.targetKey);
       scheduler?.syncExternalFetchStart(message.requestIds, message.startedAt);
@@ -1662,28 +1654,32 @@ export function createCollectionStore<
     applyRemoteItemSnapshot(message, candidateVersion);
   }
 
-  const { coordinator: browserTabsSync, priority: browserTabsPriority } =
-    createBrowserTabsCoordinatorWithPriority<
-      CollectionBrowserTabsMessage<ItemState, ItemPayload>
-    >({
-      storeType: 'collection',
-      storeKey: id,
-      getSessionKey: getSessionKeyForRuntime,
-      onMessage: handleRemoteMessage,
-      onSessionChange() {
-        lastCollectionSyncVersions.clear();
-        clearOfflineOverlays();
-      },
-      transportFactory: testOptions?.browserTabsTransportFactory,
-      ...(import.meta.env.DEV
-        ? { debugLogger: storeManager.debugLogger }
-        : undefined),
+  const { priority: browserTabsPriority, tabId: browserTabsTabId } =
+    getOrCreateStoreManagerBrowserTabsPresence(storeManager, {
       getWindowIsFocused,
       onWindowFocusChange: testOptions?.onWindowFocusChange,
+      transportFactory: testOptions?.browserTabsTransportFactory,
       priorityTimings:
         testOptions?.browserTabsPriorityTimings ??
         testOptions?.browserTabsLeadershipTimings,
     });
+  const browserTabsSync = createBrowserTabsCoordinator<
+    CollectionBrowserTabsMessage<ItemState, ItemPayload>
+  >({
+    storeType: 'collection',
+    storeKey: id,
+    getSessionKey: getSessionKeyForRuntime,
+    onMessage: handleRemoteMessage,
+    onSessionChange() {
+      lastCollectionSyncVersions.clear();
+      clearOfflineOverlays();
+    },
+    transportFactory: testOptions?.browserTabsTransportFactory,
+    ...(import.meta.env.DEV
+      ? { debugLogger: storeManager.debugLogger }
+      : undefined),
+    tabId: browserTabsTabId,
+  });
 
   async function executeBatchFetch(
     requests: BatchRequest<ItemPayload>[],
@@ -2563,7 +2559,6 @@ export function createCollectionStore<
     clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
-    browserTabsPriority.reset();
 
     persistence?.dispose();
     void persistence?.clear();
@@ -2597,7 +2592,6 @@ export function createCollectionStore<
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
     browserTabsSync.close();
-    browserTabsPriority.close();
     focusLifecycle.dispose();
     persistence?.dispose();
     offlineController?.dispose();

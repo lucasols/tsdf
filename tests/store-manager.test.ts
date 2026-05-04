@@ -2,7 +2,14 @@ import { act, renderHook } from '@testing-library/react';
 import { rc_number, rc_object } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createStoreManager } from '../src/storeManager';
-import { createFocusChangeCoordinator } from './browser-tabs/browser-tabs-test-helpers';
+import {
+  createFocusChangeCoordinator,
+  getMessageKinds,
+} from './browser-tabs/browser-tabs-test-helpers';
+import {
+  createInspectableInMemoryBrowserTabsTransportFactory,
+  getNextStoreId,
+} from './mocks/browserTabsTestUtils';
 import { createCollectionStoreTestEnv } from './mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from './mocks/listQueryStoreTestEnv';
@@ -99,6 +106,124 @@ test('store defaults can be configured on the store manager', () => {
     lowPriorityThrottleMs: 25
     revalidateOnWindowFocus: '✅'
   `);
+});
+
+test('mixed stores share one manager-level browser-tab presence heartbeat', () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const tabs = createFocusChangeCoordinator(['app'], 'app');
+  const bindFocusController = tabs.bind('app');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+  });
+  const idPrefix = getNextStoreId('manager-presence');
+
+  const documentEnv = createDocumentStoreTestEnv(1, {
+    id: `${idPrefix}-document`,
+    storeManager,
+    browserTabsTransportFactory: transport.transportFactory,
+    browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
+    bindFocusController,
+  });
+  const collectionEnv = createCollectionStoreTestEnv(
+    { '1': { title: 'Todo', completed: false } },
+    {
+      id: `${idPrefix}-collection`,
+      storeManager,
+      browserTabsTransportFactory: transport.transportFactory,
+      browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
+      bindFocusController,
+    },
+  );
+  const listQueryEnv = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: `${idPrefix}-list`,
+      storeManager,
+      browserTabsTransportFactory: transport.transportFactory,
+      browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
+      bindFocusController,
+    },
+  );
+
+  const initialStatusMessages = transport.getMessages().filter((entry) => {
+    return getMessageKinds([entry])[0] === 'tab-status';
+  });
+
+  expect(initialStatusMessages).toHaveLength(1);
+  expect(
+    Array.from(
+      new Set(initialStatusMessages.map(({ channelName }) => channelName)),
+    ),
+  ).toMatchInlineSnapshot(`['tsdf:presence:manager']`);
+
+  vi.advanceTimersByTime(2_500);
+
+  const statusMessagesAfterHeartbeats = transport
+    .getMessages()
+    .filter((entry) => {
+      return getMessageKinds([entry])[0] === 'tab-status';
+    });
+
+  expect(statusMessagesAfterHeartbeats).toHaveLength(3);
+  expect(
+    Array.from(
+      new Set(
+        statusMessagesAfterHeartbeats.map(({ channelName }) => channelName),
+      ),
+    ),
+  ).toMatchInlineSnapshot(`['tsdf:presence:manager']`);
+
+  documentEnv.apiStore.dispose();
+  collectionEnv.apiStore.dispose();
+  listQueryEnv.apiStore.dispose();
+});
+
+test('browser-tab presence heartbeat stays alive until the last store is disposed', () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const tabs = createFocusChangeCoordinator(['app'], 'app');
+  const bindFocusController = tabs.bind('app');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+  });
+  const idPrefix = getNextStoreId('manager-presence-lifetime');
+
+  const documentEnv = createDocumentStoreTestEnv(1, {
+    id: `${idPrefix}-document`,
+    storeManager,
+    browserTabsTransportFactory: transport.transportFactory,
+    browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
+    bindFocusController,
+  });
+  const collectionEnv = createCollectionStoreTestEnv(
+    { '1': { title: 'Todo', completed: false } },
+    {
+      id: `${idPrefix}-collection`,
+      storeManager,
+      browserTabsTransportFactory: transport.transportFactory,
+      browserTabsLeadershipTimings: { heartbeatMs: 1_000 },
+      bindFocusController,
+    },
+  );
+
+  documentEnv.apiStore.dispose();
+  vi.advanceTimersByTime(1_500);
+
+  expect(
+    transport.getMessages().filter((entry) => {
+      return getMessageKinds([entry])[0] === 'tab-status';
+    }),
+  ).toHaveLength(2);
+
+  collectionEnv.apiStore.dispose();
+  vi.advanceTimersByTime(2_500);
+
+  expect(
+    transport.getMessages().filter((entry) => {
+      return getMessageKinds([entry])[0] === 'tab-status';
+    }),
+  ).toHaveLength(2);
 });
 
 test('stores inherit manager dynamic realtime throttling unless they override it', async () => {

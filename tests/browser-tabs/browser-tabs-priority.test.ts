@@ -77,6 +77,30 @@ test('browser tabs priority preserves background fallback ordering when every ta
   priority.close();
 });
 
+test('browser tabs priority keeps last known background ranks after quiet periods', () => {
+  const priority = createPriority(() => false);
+
+  priority.onTabStatusMessage('older-background-tab', {
+    kind: 'tab-status',
+    isFocused: false,
+    lastFocusedAt: 0,
+    lastPresenceAt: 1_000,
+  });
+  priority.onTabStatusMessage('newer-background-tab', {
+    kind: 'tab-status',
+    isFocused: false,
+    lastFocusedAt: 0,
+    lastPresenceAt: 2_000,
+  });
+
+  vi.advanceTimersByTime(60_000);
+
+  expect(priority.getPriorityRank()).toBe(3);
+  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
+
+  priority.close();
+});
+
 test('browser tabs priority keeps the first background tab behind a focused sibling on the 1 second slot', () => {
   const priority = createPriority(() => false);
 
@@ -119,6 +143,28 @@ test('browser tabs priority republishes local status on each heartbeat until clo
   priority.close();
   vi.advanceTimersByTime(5_000);
   expect(published).toMatchInlineSnapshot(`[0, 1000, 2000]`);
+});
+
+test('browser tabs priority does not heartbeat while the local tab is backgrounded', () => {
+  const published: number[] = [];
+  const priority = createBrowserTabsPriority({
+    transportEnabled: true,
+    getIsEnabled: () => true,
+    tabId: 'local-tab',
+    getWindowIsFocused: () => false,
+    publishStatus() {
+      published.push(Date.now());
+    },
+    timings: { heartbeatMs: 1_000 },
+  });
+
+  // Background tabs announce their initial state, then stay quiet until focus changes.
+  expect(published).toMatchInlineSnapshot(`[0]`);
+
+  vi.advanceTimersByTime(2_500);
+  expect(published).toMatchInlineSnapshot(`[0]`);
+
+  priority.close();
 });
 
 test('browser tabs priority ignores stale remote tab status messages', () => {
