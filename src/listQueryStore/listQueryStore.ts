@@ -2644,14 +2644,8 @@ export function createListQueryStore<
       const localItemQuery = store.state.itemQueries[item.itemKey];
       if (!localItemQuery) continue;
 
-      if (
-        getOrCreateItemScheduler(
-          item.itemKey,
-          localItemQuery.payload,
-        ).isMutationInProgress(item.itemKey)
-      ) {
-        return true;
-      }
+      const itemScheduler = getKnownItemScheduler(item.itemKey);
+      if (itemScheduler?.isMutationInProgress(item.itemKey)) return true;
     }
 
     return false;
@@ -2695,15 +2689,8 @@ export function createListQueryStore<
       }
 
       const localItemQuery = store.state.itemQueries[message.itemKey];
-      let itemScheduler: ReturnType<typeof getKnownItemScheduler> = null;
-      if (localItemQuery === undefined) {
-        itemScheduler = getKnownItemScheduler(message.itemKey);
-      } else if (localItemQuery !== null) {
-        itemScheduler = getOrCreateItemScheduler(
-          message.itemKey,
-          localItemQuery.payload,
-        );
-      }
+      const itemScheduler =
+        localItemQuery === null ? null : getKnownItemScheduler(message.itemKey);
       if (localItemQuery === undefined && !itemScheduler?.hasPendingFetch) {
         lastItemSyncVersions.set(message.itemKey, candidateVersion);
         return;

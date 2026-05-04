@@ -532,3 +532,45 @@ test('list-only query confirmed snapshots satisfy queued first fetches', async (
   expect(envA.serverTable.numOfStartedFetches).toBe(1);
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
 });
+
+test('list-only query confirmed snapshots apply to tabs with loaded items', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-list-only-loaded-snapshot');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    disableFetchItemFn: true,
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    disableFetchItemFn: true,
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  envA.serverTable.setItem('users||1', { id: 1, name: 'Alicia' });
+
+  // Tab B already has list-backed item query metadata, but no item fetcher.
+  // A confirmed list snapshot should update it without trying to create an
+  // item scheduler.
+  envA.scheduleFetch('highPriority', { tableId: 'users' });
+  await flushAllTimers();
+
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+  expect(envB.store.state.items[itemKey]).toMatchInlineSnapshot(
+    `
+      id: 1
+      name: 'Alicia'
+    `,
+  );
+  expect(envB.serverTable.fetchHistory).toHaveLength(0);
+});
