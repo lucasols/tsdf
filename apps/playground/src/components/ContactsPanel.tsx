@@ -61,10 +61,9 @@ export function ContactsPanel() {
           <select
             value={filter.team}
             onChange={(event) => {
-              setFilter((current) => ({
-                ...current,
-                team: event.currentTarget.value as ContactTeam | 'all',
-              }));
+              const team = event.currentTarget.value as ContactTeam | 'all';
+
+              setFilter((current) => ({ ...current, team }));
             }}
           >
             <option value="all">All</option>
@@ -78,10 +77,9 @@ export function ContactsPanel() {
           <select
             value={filter.status}
             onChange={(event) => {
-              setFilter((current) => ({
-                ...current,
-                status: event.currentTarget.value as ContactStatus | 'all',
-              }));
+              const status = event.currentTarget.value as ContactStatus | 'all';
+
+              setFilter((current) => ({ ...current, status }));
             }}
           >
             <option value="all">All</option>
