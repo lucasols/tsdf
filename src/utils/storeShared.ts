@@ -7,10 +7,13 @@ import {
 } from 't-result';
 import type { FetchType } from '../requestScheduler';
 
+/** Shared fetch lifecycle status used by TSDF stores and hooks. */
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
 
+/** Payload shapes supported by store keying and fetch APIs. */
 export type ValidPayload = number | string | Record<string, unknown>;
 
+/** State shapes supported by TSDF caches. */
 export type ValidStoreState = Record<string, unknown> | unknown[];
 
 export type UnwrapTSDFResult<T> = T extends { ok: true; value: infer Value }
@@ -65,11 +68,17 @@ export type PayloadDebounce = {
 
 export const DEFAULT_BATCH_KEY = '__default__';
 
+/** Normalized error shape used by fetch and mutation APIs. */
 export type StoreError = {
+  /** Numeric application or transport error code. */
   code: number;
+  /** Stable machine-readable error id. */
   id: string;
+  /** Human-readable error message. */
   message: string;
+  /** Optional request path associated with the failure. */
   path?: string;
+  /** Optional HTTP method associated with the failure. */
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 };
 
@@ -86,7 +95,11 @@ export const fetchTypePriority: Record<FetchType, number> = {
   highPriority: 3,
 };
 
-export type MutationSkipped = { kind: 'skipped' };
+/** Result error returned when a debounced or canceled mutation never runs. */
+export type MutationSkipped = {
+  /** Stable discriminator for skipped mutations. */
+  kind: 'skipped';
+};
 
 export const mutationSkipped: MutationSkipped = { kind: 'skipped' };
 
@@ -158,11 +171,17 @@ export function normalizeStoreError(
   );
 }
 
+/** Error wrapper returned by mutation APIs after normalization. */
 export class StoreMutationError extends Error {
+  /** Stable discriminator matching result-style mutation errors. */
   readonly kind = 'error';
+  /** Numeric application or transport error code. */
   code: number;
+  /** Stable machine-readable error id. */
   id: string;
+  /** Optional request path associated with the failure. */
   path?: string;
+  /** Optional HTTP method associated with the failure. */
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
   constructor(error: StoreError, options?: ErrorOptions) {
@@ -187,11 +206,17 @@ export function toStoreMutationError(
   );
 }
 
+/** Error wrapper returned by fetch APIs after normalization. */
 export class StoreFetchError extends Error {
+  /** Numeric application or transport error code. */
   code: number;
+  /** Stable machine-readable error id. */
   id: string;
+  /** Fetch failure category. */
   type: 'fetch' | 'aborted' | 'timeout';
+  /** Optional request path associated with the failure. */
   path?: string;
+  /** Optional HTTP method associated with the failure. */
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
   constructor(error: StoreError, type: 'fetch' | 'aborted' | 'timeout') {

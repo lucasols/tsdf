@@ -34,6 +34,7 @@ export type TSDFBrowserTabsDebugOperation =
   | 'transport-open'
   | 'transport-unavailable';
 
+/** Structured debug log entry emitted by TSDF internals. */
 export type TSDFDebugLogEntry = {
   /** Subsystem that emitted the entry. */
   area: TSDFDebugLogArea;
@@ -62,6 +63,7 @@ function defaultConsoleDebugLogger(entry: TSDFDebugLogEntry): void {
   }
 }
 
+/** Custom debug logger invoked for each emitted TSDF debug entry. */
 export type TSDFDebugLogger = (entry: TSDFDebugLogEntry) => void;
 
 /** Enables manager-wide debug logging for browser-tab sync and persistence. */

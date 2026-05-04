@@ -6,35 +6,56 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 
+/** Lifecycle status for a list query or list item query. */
 export type QueryStatus = TSDFStatus | 'loadingMore';
 
+/** Raw cached state for one list query. */
 export type TSFDListQuery<QueryPayload extends ValidPayload> = {
+  /** Last fetch error for this query, when the latest fetch failed. */
   error: StoreError | null;
+  /** Current fetch lifecycle status for this query. */
   status: QueryStatus;
+  /** Payload used to identify and fetch this query. */
   payload: QueryPayload;
+  /** Whether another page is available. */
   hasMore: boolean;
+  /** Whether this query has ever loaded successfully. */
   wasLoaded: boolean;
+  /** Pending automatic refetch priority for stale data mounted by hooks. */
   refetchOnMount: false | FetchType;
+  /** Ordered item keys included in the cached query page. */
   items: string[];
 };
 
+/** Raw cached state for one item query in a list-query store. */
 export type TSDFItemQuery<ItemPayload extends ValidPayload> = {
+  /** Last item fetch error, if any. */
   error: StoreError | null;
+  /** Current fetch lifecycle status for this item. */
   status: Exclude<QueryStatus, 'loadingMore'>;
+  /** Whether this item has ever loaded successfully. */
   wasLoaded: boolean;
+  /** Pending automatic refetch priority for stale data mounted by hooks. */
   refetchOnMount: false | FetchType;
+  /** Payload used to identify and fetch this item. */
   payload: ItemPayload;
 };
 
+/** Raw t-state shape used by a list-query store. */
 export type TSFDListQueryState<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > = {
+  /** Item data records keyed by item store key. */
   items: Record<string, ItemState | null>;
+  /** List query records keyed by query store key. */
   queries: Record<string, TSFDListQuery<QueryPayload>>;
+  /** Item query records keyed by item store key. */
   itemQueries: Record<string, TSDFItemQuery<ItemPayload> | null>;
+  /** Loaded partial-resource fields for each item key. */
   itemLoadedFields: Record<string, string[]>;
+  /** Pending field invalidations for each item key. */
   itemFieldInvalidationFields: Record<string, string[]>;
 };
 
@@ -61,64 +82,99 @@ export type ListQueryOfflineOverlay<
  */
 export type FieldsInput = string[] | '*';
 
+/** Value returned by `ListQueryStore.useListQuery(...)` and `useMultipleListQueries(...)`. */
 export type TSFDUseListQueryReturn<
   Selected,
   QueryPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
   HasPartialResources extends boolean = false,
 > = {
+  /** Selected items included in the current query result. */
   items: Selected[];
+  /** Hook-visible query status, including `idle` before a query runs. */
   status: QueryStatus | 'idle';
+  /** Query payload for this result, unless omitted or unavailable. */
   payload: QueryPayload | undefined;
+  /** Requested partial-resource fields for this query result. */
   fields: HasPartialResources extends true
     ? FieldsInput
     : FieldsInput | undefined;
   /** Requested partial-resource fields that are still pending. */
   loadingFields?: string[];
+  /** Last query fetch error, if any. */
   error: StoreError | null;
+  /** Stable store key for the current query payload. */
   queryKey: string;
+  /** Whether another page is available. */
   hasMore: boolean;
+  /** Whether this result was derived from local items instead of fetched directly. */
   isDerived: boolean;
+  /** Convenience flag for `loading` or `refetching` states. */
   isLoading: boolean;
+  /** Whether a `loadMore(...)` request is currently active. */
   isLoadingMore: boolean;
   /** Whether this result has local offline changes that still need to sync to the server. */
   pendingSync: boolean;
+  /** Caller-provided metadata copied from the query descriptor. */
   queryMetadata: QueryMetadata;
 };
 
+/** Value returned by `ListQueryStore.useItem(...)` and `useMultipleItems(...)`. */
 export type TSFDUseListItemReturn<
   Selected,
   ItemPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
+  /** Selected item data. Defaults to the full item or `null`. */
   data: Selected;
+  /** Hook-visible item status, including idle/deleted states for hook ergonomics. */
   status: QueryStatus | 'idle' | 'deleted';
+  /** Item payload for this result, or `null` when unavailable. */
   payload: ItemPayload | null;
   /** Requested partial-resource fields that are still pending. */
   loadingFields?: string[];
+  /** Last item fetch error, if any. */
   error: StoreError | null;
+  /** Convenience flag for `loading` or `refetching` states. */
   isLoading: boolean;
+  /** Stable store key for the current item payload. */
   itemStateKey: string;
   /** Whether this result has local offline changes that still need to sync to the server. */
   pendingSync: boolean;
+  /** Caller-provided metadata copied from the query descriptor. */
   queryMetadata: QueryMetadata;
 };
 
+/** Value returned by `ListQueryStore.usePendingOfflineItems(...)`. */
 export type TSFDUsePendingOfflineItemsReturn<
   Selected,
   ItemPayload extends ValidPayload,
-> = { items: Selected[]; deletedItems: ItemPayload[] };
+> = {
+  /** Locally created or updated offline items selected by the hook. */
+  items: Selected[];
+  /** Payloads for locally deleted offline items. */
+  deletedItems: ItemPayload[];
+};
 
+/** One item returned from a list query fetch function. */
 export type FetchListFnReturnItem<
   ItemPayload extends ValidPayload,
   ItemState extends ValidStoreState,
-> = { itemPayload: ItemPayload; data: ItemState };
+> = {
+  /** Item payload used to key and refetch the returned item. */
+  itemPayload: ItemPayload;
+  /** Item data returned by the server. */
+  data: ItemState;
+};
 
+/** Return shape for list query fetch functions. */
 export type FetchListFnReturn<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
+  /** Items included in the fetched page. */
   items: FetchListFnReturnItem<ItemPayload, ItemState>[];
+  /** Whether the query has another page available. */
   hasMore: boolean;
 };
 
@@ -132,6 +188,7 @@ export type ListQueryStoreInitialData<
   queries: { payload: QueryPayload; items: string[]; hasMore: boolean }[];
 };
 
+/** Item descriptor accepted by `ListQueryStore.useMultipleItems(...)`. */
 export type ListQueryUseMultipleItemsQuery<
   ItemPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -167,6 +224,7 @@ export type ListQueryUseMultipleItemsQuery<
   isOffScreen?: boolean;
 };
 
+/** Query descriptor accepted by `ListQueryStore.useMultipleListQueries(...)`. */
 export type ListQueryUseMultipleListQueriesQuery<
   QueryPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -206,38 +264,52 @@ export type ListQueryUseMultipleListQueriesQuery<
   loadSize?: number;
 };
 
+/** Callback invoked when an already-loaded list query is invalidated. */
 export type OnListQueryInvalidate<QueryPayload extends ValidPayload> = (
   query: QueryPayload,
   priority: FetchType,
 ) => void;
 
+/** Callback invoked when an already-loaded list-query item is invalidated. */
 export type OnListQueryItemInvalidate<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = (props: {
+  /** Current cached item state at invalidation time. */
   itemState: ItemState;
+  /** Payload of the invalidated item. */
   payload: ItemPayload;
+  /** Fetch priority requested for the invalidation. */
   priority: FetchType;
 }) => void;
 
+/** Rule for keeping cached list query membership in sync after item updates. */
 export type OptimisticListUpdate<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > = {
+  /** Query payloads, or a predicate over query payloads, affected by this rule. */
   queries: QueryPayload | ((query: QueryPayload) => boolean) | QueryPayload[];
+  /** Restricts this rule to items that should belong in the affected query set. */
   filterItem?: (item: ItemState) => boolean | null;
+  /** Where newly matching items should be inserted in affected query pages. */
   appendNewTo?: 'start' | 'end';
+  /** Whether affected queries should still refetch after the optimistic list update. */
   invalidateQueries?: boolean;
+  /** Sort order to maintain inside affected query pages. */
   sort?: {
+    /** Selects sortable values from an item. */
     sortBy: (
       item: ItemState,
       itemPayload: ItemPayload,
     ) => string | number | (string | number)[];
+    /** Sort direction for each `sortBy` value. */
     order?: 'asc' | 'desc' | ('asc' | 'desc')[];
   };
 };
 
+/** Payload passed to list fetch functions. */
 export type QueryFetchPayload<QueryPayload extends ValidPayload> = {
   /** Whether this request loads the first page or a later page. */
   type: 'load' | 'loadMore';
@@ -251,14 +323,19 @@ export type QueryFetchPayload<QueryPayload extends ValidPayload> = {
   fields?: string[];
 };
 
+/** Options for offset-based list pagination. */
 export type OffsetPaginationConfig = {
+  /** Largest item count requested when refetching invalidated offset queries. */
   maxInvalidationLimit: number;
   /** Max parallel chunk requests during chunked invalidation (default: 3) */
   maxParallel?: number;
 };
 
+/** Partial-resource helpers used to merge and select field subsets. */
 export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
+  /** Merges a partial fetch result into an existing item snapshot. */
   mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
+  /** Returns an item containing only the requested fields. */
   selectFields: (fields: string[], item: ItemState) => ItemState;
 };
 
@@ -290,6 +367,7 @@ export type DerivedQueryContext = {
   deriveSource: DerivedQuerySource;
 };
 
+/** Configuration for deriving query membership from locally materialized items. */
 export type DerivedQueriesConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -319,6 +397,7 @@ export type DerivedQueriesConfig<
   ) => string[] | false;
 };
 
+/** Field option shape used by APIs that are conditional on `partialResources`. */
 export type FieldsOption<HasPartialResources extends boolean> =
   HasPartialResources extends true
     ? {

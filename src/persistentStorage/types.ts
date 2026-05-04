@@ -10,6 +10,7 @@ import type {
   OfflineSession,
 } from './offline/types';
 
+/** Logical namespaces used by managed async persistent storage. */
 export type AsyncStorageNamespaceKind =
   | 'document'
   | 'collection.item'
@@ -38,9 +39,13 @@ export function parseAsyncStorageNamespaceKind(
   }
 }
 
+/** Identifies one logical persistent-storage namespace. */
 export type AsyncStorageNamespaceScope = {
+  /** Session key owning this namespace. */
   sessionKey: string;
+  /** Store id owning this namespace. */
   storeName: string;
+  /** Type of records stored in this namespace. */
   kind: AsyncStorageNamespaceKind;
 };
 
@@ -50,8 +55,13 @@ export type AsyncStorageProtectedEntryRef = AsyncStorageNamespaceScope & {
 
 export type AsyncStorageTouchMode = 'never' | 'coarse' | 'force';
 
-export type AsyncStorageReadOptions = { touch?: AsyncStorageTouchMode };
+/** Read behavior for managed async namespace operations. */
+export type AsyncStorageReadOptions = {
+  /** Whether reading should update LRU access metadata. */
+  touch?: AsyncStorageTouchMode;
+};
 
+/** Sort order for listing async storage metadata. */
 export type AsyncStorageMetadataOrder = 'key' | 'lru-asc' | 'lru-desc';
 
 export type AsyncStorageEntryMetadataBase = {
@@ -68,25 +78,41 @@ export type AsyncStorageEntryMetadata<
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
 > = AsyncStorageEntryMetadataBase & { customMetadata: TCustomMetadata };
 
+/** Value and metadata returned from a managed async namespace read. */
 export type AsyncStorageNamespaceGetResult<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
-> = { value: TValue; metadata: AsyncStorageEntryMetadata<TCustomMetadata> };
+> = {
+  /** Stored value decoded from the namespace. */
+  value: TValue;
+  /** Managed metadata associated with the stored value. */
+  metadata: AsyncStorageEntryMetadata<TCustomMetadata>;
+};
 
+/** Upsert entry committed to a managed async namespace. */
 export type AsyncStorageNamespaceCommitUpsert<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
 > = {
+  /** Raw namespace key to write. */
   key: string;
+  /** Decoded value to store. */
   value: TValue;
+  /** Pre-serialized JSON string, when the caller already has it. */
   serializedValue?: string;
+  /** Serialized JSON size used for persistence budgeting. */
   sizeBytes?: number;
+  /** Cache version associated with this value. */
   version: number;
+  /** Custom metadata stored alongside the value. */
   metadata?: TCustomMetadata;
 };
 
+/** Touch entry committed to update managed async namespace LRU metadata. */
 export type AsyncStorageNamespaceCommitTouch = {
+  /** Raw namespace key to touch. */
   key: string;
+  /** Explicit access timestamp. Defaults to the adapter's current time. */
   lastAccessAt?: number;
 };
 
@@ -95,13 +121,18 @@ export type AsyncStorageNamespaceStaticPolicy = {
   pinnedKeys?: string[];
 };
 
+/** Batched write/remove/touch operation for a managed async namespace. */
 export type AsyncStorageNamespaceCommitArgs<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
 > = {
+  /** Entries to create or replace. */
   upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
+  /** Raw namespace keys to remove. */
   removes?: string[];
+  /** Static cleanup policy applied during this commit. */
   staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
+  /** Existing entries whose access metadata should be updated. */
   touches?: AsyncStorageNamespaceCommitTouch[];
 };
 
@@ -109,16 +140,23 @@ export type AsyncStorageMaintenanceState = {
   lastSuccessfulCleanupAt: number | null;
 };
 
+/** Raw entry passed to low-level async storage driver bulk writes. */
 export type AsyncStorageDriverSetEntry = {
+  /** Raw record key to write. */
   key: string;
+  /** Raw value to store. */
   value: unknown;
+  /** Pre-serialized JSON string, when available. */
   serializedValue?: string;
+  /** Serialized value size used for budgeting. */
   sizeBytes?: number;
 };
 
+/** Scope discovered by a low-level async storage driver. */
 export type AsyncStorageDiscoveredScope = {
   /** Known raw record keys for this scope. `null` if keys were not enumerated during discovery. */
   knownRecordKeys: string[] | null;
+  /** Discovered namespace scope. */
   scope: AsyncStorageNamespaceScope;
 };
 
@@ -160,31 +198,39 @@ export type AsyncStorageDriver = {
   __resetForTests?(): void | Promise<void>;
 };
 
+/** Managed namespace handle opened by an async storage adapter. */
 export type AsyncStorageNamespaceHandle<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
 > = {
+  /** Reads one decoded value and metadata by raw namespace key. */
   get(
     key: string,
     options?: AsyncStorageReadOptions,
   ): Promise<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>;
+  /** Reads many decoded values and metadata records by raw namespace key. */
   getMany(
     keys: string[],
     options?: AsyncStorageReadOptions,
   ): Promise<
     Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   >;
+  /** Lists raw record keys in this namespace. */
   listKeys(): Promise<string[]>;
+  /** Applies batched writes, removes, touches, and cleanup policy changes. */
   commit(
     args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<void>;
+  /** Lists metadata for all records in this namespace. */
   listMetadata(args?: {
     order?: AsyncStorageMetadataOrder;
   }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
+  /** Lists metadata matching a custom metadata equality filter. */
   listMetadataByFilter?(args: {
     filter: { equals: unknown; key: string };
     order?: AsyncStorageMetadataOrder;
   }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
+  /** Removes every record in this namespace. */
   clear(): Promise<void>;
 };
 

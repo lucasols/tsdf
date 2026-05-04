@@ -1766,7 +1766,11 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   }
 }
 
-export type IndexedDbPersistentStorageOptions = { databaseName?: string };
+/** Options for creating the IndexedDB persistent storage adapter. */
+export type IndexedDbPersistentStorageOptions = {
+  /** IndexedDB database name used by the adapter. */
+  databaseName?: string;
+};
 
 export function createIndexedDbPersistentStorage(
   options: IndexedDbPersistentStorageOptions = {},

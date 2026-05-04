@@ -101,6 +101,7 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
 };
 
+/** Shared coordinator passed to every TSDF store instance in an app/session. */
 export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Returns the active shared session / tenant key. */
   getSessionKey: () => string | false;
@@ -213,6 +214,7 @@ function createDisabledStoreManagerOfflineApi<
   };
 }
 
+/** Options used to create a shared TSDF store manager. */
 export type CreateStoreManagerOptions<
   TUploadRef extends ValidPayload = ValidPayload,
 > = {

@@ -8,6 +8,7 @@ export const indexedDbPersistentStorage: AsyncStorageAdapter =
   /* @__PURE__ */
   createIndexedDbPersistentStorageInternal();
 
+/** Options for creating the IndexedDB persistent storage adapter. */
 export type IndexedDbPersistentStorageOptions =
   IndexedDbPersistentStorageOptionsInternal;
 

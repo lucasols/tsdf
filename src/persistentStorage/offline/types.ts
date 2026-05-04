@@ -644,6 +644,7 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
 /** Built-in resolution actions for retry exhaustion records. */
 export type OfflineRetryExhaustedResolutionAction =
   | {
+      /** Requeues the failed mutation for another replay attempt. */
       action: 'retry';
       /**
        * Controls whether retrying a resolution should also requeue retryable
@@ -652,7 +653,10 @@ export type OfflineRetryExhaustedResolutionAction =
        */
       scope?: 'self' | 'self-and-descendants';
     }
-  | { action: 'discard' };
+  | {
+      /** Discards the exhausted mutation and clears its resolution record. */
+      action: 'discard';
+    };
 
 /**
  * Built-in resolution actions for persisted conflict records.
@@ -668,9 +672,22 @@ export type OfflineConflictResolutionAction<
   TInput = unknown,
   TResult = unknown,
 > =
-  | { action: 'discard' }
-  | { action: 'requeue'; input: TInput }
-  | { action: 'commit'; result?: TResult };
+  | {
+      /** Discards the conflict and clears its resolution record. */
+      action: 'discard';
+    }
+  | {
+      /** Requeues the operation with replacement input. */
+      action: 'requeue';
+      /** Replacement operation input. */
+      input: TInput;
+    }
+  | {
+      /** Commits an externally resolved conflict and clears bookkeeping. */
+      action: 'commit';
+      /** Result returned by the external conflict resolution call, when needed for reconciliation. */
+      result?: TResult;
+    };
 
 /**
  * Built-in resolution actions accepted by `resolveOfflineResolution(...)`.
@@ -1677,10 +1694,16 @@ export type OfflineResolutionRecordForOperation<
   | (OfflineConflictResolutionRecord<
       OperationConflict<TOperations, TName>,
       OperationInput<TOperations, TName>
-    > & { operation: TName })
+    > & {
+      /** Operation name associated with this resolution record. */
+      operation: TName;
+    })
   | (OfflineRetryExhaustedResolutionRecord<
       OperationInput<TOperations, TName>
-    > & { operation: TName });
+    > & {
+      /** Operation name associated with this resolution record. */
+      operation: TName;
+    });
 
 /**
  * Union of operation-aware offline resolution records for an operation registry.
@@ -1709,6 +1732,7 @@ function formatSchemaValidationError(error: SchemaValidationError): string {
   return JSON.stringify(error);
 }
 
+/** Failure code returned when parsing a stored offline conflict payload. */
 export type OfflineResolutionConflictParseErrorCode =
   | 'not-conflict'
   | 'offline-not-configured'

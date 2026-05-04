@@ -11,8 +11,16 @@ import type {
  * `queued` means the mutation was durably persisted for offline replay.
  */
 export type OfflineMutationResult<T> =
-  | { kind: 'online'; data: Awaited<T> }
-  | { kind: 'queued' };
+  | {
+      /** The direct online mutation completed successfully. */
+      kind: 'online';
+      /** Server payload returned by the direct mutation. */
+      data: Awaited<T>;
+    }
+  | {
+      /** The mutation was durably queued for offline replay. */
+      kind: 'queued';
+    };
 
 export type PreparedOfflineMutation = {
   initialAction: 'run' | 'queue';

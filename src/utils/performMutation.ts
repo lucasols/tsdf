@@ -2,11 +2,19 @@ import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { Result, type Result as TResult } from 't-result';
 import { mutationSkipped, type MutationSkipped } from './storeShared';
 
-export type BlockWindowCloseHandler = () => { unblock: () => void };
+/** Starts a temporary window-close block while a mutation is in progress. */
+export type BlockWindowCloseHandler = () => {
+  /** Releases the window-close block. */
+  unblock: () => void;
+};
 
+/** Debounce settings for mutation calls sharing a logical context and payload. */
 export type MutationDebounce = {
+  /** Logical namespace for the debounced mutation group. */
   context: string;
+  /** Payload compared with the context to decide which calls supersede each other. */
   payload: unknown;
+  /** Debounce window in milliseconds. */
   ms: number;
 };
 
