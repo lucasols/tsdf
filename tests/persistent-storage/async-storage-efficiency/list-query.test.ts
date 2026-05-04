@@ -572,7 +572,7 @@ describe('async storage efficiency: list-query', () => {
       serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -586,29 +586,26 @@ describe('async storage efficiency: list-query', () => {
     env.serverTable.removeItem('users||1');
 
     // Invalidate the mounted query, then capture the persistence operations.
-    const invalidationCapture =
+    const refetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence(1700);
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(`[]`);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.852s | ✍️ #1 tsdf/sess1/lq-query-becomes-empty/lq.h~2902406637.p.json
              |    └ (query data, <{tableId:"users"}>) | 0.03 kb -> 0.00 kb
-      .      | ✍️ #2 tsdf/sess1/lq-query-becomes-empty/li.h~228010772.p.json
-             |    └ (item data, <"users||1>) | 0.06 kb -> 0.06 kb ⚠️ UNCHANGED
-      1.856s | ✍️ #3 tsdf/sess1/lq-query-becomes-empty/lq._i.r.json
+      1.856s | ✍️ #2 tsdf/sess1/lq-query-becomes-empty/lq._i.r.json
              |    └ (queries index) | 0.16 kb -> 0.16 kb
-      .      | ✍️ #4 tsdf/sess1/lq-query-becomes-empty/li._i.r.json
-             |    └ (items index) | 0.12 kb -> 0.18 kb
       1.858s | end
       "
     `);
@@ -1479,10 +1476,10 @@ describe('async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -1492,18 +1489,19 @@ describe('async storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted query, then capture fetch completion plus the debounced save.
-    const invalidationCapture =
+    // Update the server copy, invalidate for the mounted query, then capture fetch completion plus the debounced save.
+    const refetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user' }`,
@@ -1524,13 +1522,13 @@ describe('async storage efficiency: list-query', () => {
         'tsdf/sess1/lq-query-invalidation-flow/lq.<{tableId:"users"}>.p.json',
       ),
     ).toMatchInlineSnapshot(`['"users||1']`);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.852s | ✍️ #1 tsdf/sess1/lq-query-invalidation-flow/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.05 kb
       1.856s | ✍️ #2 tsdf/sess1/lq-query-invalidation-flow/li._i.r.json
-             |    └ (items index) | 0.12 kb -> 0.18 kb
+             |    └ (items index) | 0.18 kb -> 0.18 kb
       1.858s | end
       "
     `);
@@ -1552,10 +1550,10 @@ describe('async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user 1' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -1566,38 +1564,39 @@ describe('async storage efficiency: list-query', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture =
+    const firstRefetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 1' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user 1' }`,
     );
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture =
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 2' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await advanceTime(1900);
     await flushAllTimers();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user 2' }`,
@@ -1610,13 +1609,13 @@ describe('async storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user 2'
     `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.852s | ✍️ #1 tsdf/sess1/lq-coalesced-invalidations/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.06 kb
       1.856s | ✍️ #2 tsdf/sess1/lq-coalesced-invalidations/li._i.r.json
-             |    └ (items index) | 0.12 kb -> 0.18 kb
+             |    └ (items index) | 0.18 kb -> 0.18 kb
       1.858s | end
       "
     `);
@@ -1668,8 +1667,9 @@ describe('async storage efficiency: list-query', () => {
     // The refetch rewrites both namespaces, and should keep the externally-added markers.
     act(() => {
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
@@ -1687,8 +1687,12 @@ describe('async storage efficiency: list-query', () => {
           f: ['age', 'email', 'id', 'name']
           o: '✅'
           p: 'users||1'
-          z: 103
-        "users||2: { a: 1735689606986, p: 'users||2', z: 63 }
+          z: 94
+        "users||2:
+          a: 1735689604868
+          f: ['age', 'email', 'id', 'name']
+          p: 'users||2'
+          z: 95
     `);
     expect(
       getParsedOpfsFileData(
@@ -1706,7 +1710,7 @@ describe('async storage efficiency: list-query', () => {
           a: 1735689600000
           o: '✅'
           p: { tableId: 'users' }
-          z: 79
+          z: 70
     `);
     expect(
       getParsedOpfsFileData(
@@ -1811,17 +1815,16 @@ describe('async storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-empty-remount-flow (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-empty-remount-flow/lq._i.r.json
+      0    | 📂 dir-open ✅ tsdf/sess1/lq-empty-remount-flow (store directory)
+      1ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-empty-remount-flow/lq._i.r.json
            |    └ (queries index)
-      3ms  | 📖 #1 tsdf/sess1/lq-empty-remount-flow/lq._i.r.json
+      2ms  | 📖 #1 tsdf/sess1/lq-empty-remount-flow/lq._i.r.json
            |    └ (queries index) | 0.16 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-empty-remount-flow/lq.h~2902406637.p.json
+      5ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-empty-remount-flow/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>)
-      7ms  | 📖 #2 tsdf/sess1/lq-empty-remount-flow/lq.h~2902406637.p.json
+      6ms  | 📖 #2 tsdf/sess1/lq-empty-remount-flow/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>) | 0.00 kb
-      10ms | end
+      9ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1867,30 +1870,29 @@ describe('async storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-remount-stale-touch (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-remount-stale-touch/lq._i.r.json
+      0    | 📂 dir-open ✅ tsdf/sess1/lq-remount-stale-touch (store directory)
+      1ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-remount-stale-touch/lq._i.r.json
            |    └ (queries index)
-      3ms  | 📖 #1 tsdf/sess1/lq-remount-stale-touch/lq._i.r.json
+      2ms  | 📖 #1 tsdf/sess1/lq-remount-stale-touch/lq._i.r.json
            |    └ (queries index) | 0.16 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-remount-stale-touch/lq.h~2902406637.p.json
+      5ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-remount-stale-touch/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>)
-      7ms  | 📖 #2 tsdf/sess1/lq-remount-stale-touch/lq.h~2902406637.p.json
+      6ms  | 📖 #2 tsdf/sess1/lq-remount-stale-touch/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>) | 0.03 kb
-      10ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-remount-stale-touch/li._i.r.json
+      9ms  | 👁️ #3 file-open ✅ tsdf/sess1/lq-remount-stale-touch/li._i.r.json
            |    └ (items index)
-      11ms | 📖 #3 tsdf/sess1/lq-remount-stale-touch/li._i.r.json
+      10ms | 📖 #3 tsdf/sess1/lq-remount-stale-touch/li._i.r.json
            |    └ (items index) | 0.12 kb
-      14ms | 👁️ #4 file-open ✅ tsdf/sess1/lq-remount-stale-touch/li.h~228010772.p.json
+      13ms | 👁️ #4 file-open ✅ tsdf/sess1/lq-remount-stale-touch/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
-      15ms | 📖 #4 tsdf/sess1/lq-remount-stale-touch/li.h~228010772.p.json
+      14ms | 📖 #4 tsdf/sess1/lq-remount-stale-touch/li.h~228010772.p.json
            |    └ (item data, <"users||1>) | 0.06 kb
            ·
-      52ms | ✍️ #1 tsdf/sess1/lq-remount-stale-touch/lq._i.r.json
+      51ms | ✍️ #1 tsdf/sess1/lq-remount-stale-touch/lq._i.r.json
            |    └ (queries index) | 0.16 kb -> 0.16 kb
-      60ms | ✍️ #3 tsdf/sess1/lq-remount-stale-touch/li._i.r.json
+      59ms | ✍️ #3 tsdf/sess1/lq-remount-stale-touch/li._i.r.json
            |    └ (items index) | 0.12 kb -> 0.12 kb
-      62ms | end
+      61ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1911,10 +1913,10 @@ describe('async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useItem(itemPayload, {
@@ -1924,15 +1926,15 @@ describe('async storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted item hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture =
+    // Update the server copy, invalidate for the mounted item hook, then capture fetch completion plus the debounced save.
+    const refetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
-      env.apiStore.invalidateItem(itemPayload);
+      env.apiStore.invalidateItem(itemPayload, 'highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       id: 1
@@ -1946,7 +1948,7 @@ describe('async storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user'
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.81s  | 👁️ #1 file-open ❌ tsdf/sess1/lq-item-invalidation-flow/lq._i.r.json
@@ -1955,7 +1957,7 @@ describe('async storage efficiency: list-query', () => {
       1.853s | ✍️ #2 tsdf/sess1/lq-item-invalidation-flow/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.05 kb
       1.857s | ✍️ #3 tsdf/sess1/lq-item-invalidation-flow/li._i.r.json
-             |    └ (items index) | 0.12 kb -> 0.18 kb
+             |    └ (items index) | 0.18 kb -> 0.18 kb
       1.859s | end
       "
     `);
@@ -2059,22 +2061,21 @@ describe('async storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-multi-item-remount-flow
+      0    | 📂 dir-open ✅ tsdf/sess1/lq-multi-item-remount-flow
            |    └ (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
+      1ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
            |    └ (items index)
-      3ms  | 📖 #1 tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
+      2ms  | 📖 #1 tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
            |    └ (items index) | 0.23 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.h~228010772.p.json
+      5ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.h~1937155452.p.json
            |    └ (item data, <"users||2>)
-      7ms  | 📖 #2 tsdf/sess1/lq-multi-item-remount-flow/li.h~228010772.p.json
+      6ms  | 📖 #2 tsdf/sess1/lq-multi-item-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>) | 0.06 kb
       .    | 📖 #3 tsdf/sess1/lq-multi-item-remount-flow/li.h~1937155452.p.json
            |    └ (item data, <"users||2>) | 0.06 kb
-      10ms | end
+      9ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -2129,34 +2130,33 @@ describe('async storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow
+      0    | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow
            |    └ (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
+      1ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
            |    └ (queries index)
-      3ms  | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
+      2ms  | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq._i.r.json
            |    └ (queries index) | 0.31 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2902406637.p.json
+      5ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.h~2044383828.p.json
            |    └ (query data, <{tableId:"projects"}>)
-      7ms  | 📖 #2 tsdf/sess1/lq-multi-query-remount-flow/lq.h~2902406637.p.json
+      6ms  | 📖 #2 tsdf/sess1/lq-multi-query-remount-flow/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>) | 0.03 kb
       .    | 📖 #3 tsdf/sess1/lq-multi-query-remount-flow/lq.h~2044383828.p.json
            |    └ (query data, <{tableId:"projects"}>) | 0.03 kb
-      10ms | 👁️ #4 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
+      9ms  | 👁️ #4 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
            |    └ (items index)
-      11ms | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
+      10ms | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/li._i.r.json
            |    └ (items index) | 0.24 kb
-      14ms | 👁️ #5 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~228010772.p.json
+      13ms | 👁️ #5 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
       .    | 👁️ #6 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.h~2924752681.p.json
            |    └ (item data, <"projects||1>)
-      15ms | 📖 #5 tsdf/sess1/lq-multi-query-remount-flow/li.h~228010772.p.json
+      14ms | 📖 #5 tsdf/sess1/lq-multi-query-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>) | 0.06 kb
       .    | 📖 #6 tsdf/sess1/lq-multi-query-remount-flow/li.h~2924752681.p.json
            |    └ (item data, <"projects||1>) | 0.06 kb
-      18ms | end
+      17ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -2218,9 +2218,7 @@ describe('async storage efficiency: list-query', () => {
       time   |
       1.042s | ✍️ #1 tsdf/sess1/lq-mutation-flow/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.06 kb
-      1.046s | ✍️ #2 tsdf/sess1/lq-mutation-flow/li._i.r.json
-             |    └ (items index) | 0.12 kb -> 0.18 kb
-      1.048s | end
+      1.044s | end
       "
     `);
   });

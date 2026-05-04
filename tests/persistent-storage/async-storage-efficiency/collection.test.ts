@@ -917,10 +917,10 @@ describe('async storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user' } },
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useItem('1', {
@@ -930,15 +930,15 @@ describe('async storage efficiency: collection', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture =
+    // Update the server copy, invalidate for the mounted hook, then capture fetch completion plus the debounced save.
+    const refetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
@@ -946,7 +946,7 @@ describe('async storage efficiency: collection', () => {
     expect(
       getParsedOpfsFileData('tsdf/sess1/col-invalidation-flow/ci.%221.p.json'),
     ).toMatchInlineSnapshot(`value: { id: '1', name: 'Fresh user' }`);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.852s | ✍️ #1 tsdf/sess1/col-invalidation-flow/ci.h~3574006234.p.json
@@ -972,7 +972,7 @@ describe('async storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user' } },
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
@@ -991,7 +991,7 @@ describe('async storage efficiency: collection', () => {
     // A normal invalidation save should keep the externally-added offline marker.
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await flushInvalidationPersistence();
 
@@ -1024,10 +1024,10 @@ describe('async storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user 1' } },
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useItem('1', {
@@ -1038,32 +1038,31 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture =
+    const firstRefetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 1' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user 1' }`,
     );
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture =
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 2' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(1900);
     await flushAllTimers();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user 2' }`,
@@ -1073,7 +1072,7 @@ describe('async storage efficiency: collection', () => {
         'tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json',
       ),
     ).toMatchInlineSnapshot(`value: { id: '1', name: 'Fresh user 2' }`);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.852s | ✍️ #1 tsdf/sess1/col-coalesced-invalidations/ci.h~3574006234.p.json
@@ -1174,20 +1173,19 @@ describe('async storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-stale-touch (store directory)
-      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci._i.r.json
+      0    | 📂 dir-open ✅ tsdf/sess1/col-remount-stale-touch (store directory)
+      1ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index)
-      3ms  | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
+      2ms  | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index) | 0.09 kb
-      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
+      5ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
-      7ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
+      6ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.08 kb
            ·
-      52ms | ✍️ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
+      51ms | ✍️ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index) | 0.09 kb -> 0.09 kb
-      54ms | end
+      53ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1226,23 +1224,22 @@ describe('async storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time   |
-      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      0      | 📂 dir-open ❌ tsdf/sess1/col-remount-no-cache (store directory)
              ·
-      1.811s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.811s | 📂 dir-open ❌ tsdf/sess1/col-remount-no-cache (store directory)
              ·
-      1.852s | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.854s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
+      1.852s | 📂 dir-open ❌ tsdf/sess1/col-remount-no-cache (store directory)
+      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)
-      1.855s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
+      1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
              |    └ (entry data)
-      1.858s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
+      1.857s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
              |    └ (entry data) | 0.00 kb -> 0.08 kb
-      1.86s  | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
+      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index)
-      1.863s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
+      1.862s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index) | 0.00 kb -> 0.09 kb
-      1.865s | end
+      1.864s | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

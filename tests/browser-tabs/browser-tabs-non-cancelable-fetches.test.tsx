@@ -1,3 +1,4 @@
+import { act } from 'react';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
@@ -113,7 +114,45 @@ test('document awaitFetch stays local even when a sibling background fetch start
   expect(envB.serverMock.numOfStartedFetches).toBe(1);
 });
 
-test('document background tabs add one second per rank to the coalescing window', async () => {
+test('document awaitFetch resolves from a confirmed sibling snapshot when its queued fetch is satisfied', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-await-fetch-snapshot');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerState = createSharedServerMockState(7);
+
+  const envA = createDocumentStoreTestEnv(7, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    baseCoalescingWindowMs: 20,
+  });
+  const envB = createDocumentStoreTestEnv(7, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    baseCoalescingWindowMs: 1_500,
+  });
+
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
+
+  const promiseB = envB.apiStore.awaitFetch();
+  envA.scheduleFetch('highPriority');
+
+  await advanceTime(2_100);
+
+  expect(envA.serverMock.numOfStartedFetches).toBe(1);
+  expect(envB.serverMock.numOfStartedFetches).toBe(0);
+  await expect(promiseB).resolves.toMatchInlineSnapshot(`
+    data: { value: 7 }
+    error: null
+  `);
+});
+
+test('document confirmed snapshots satisfy lower-ranked pending background fetches', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-background-ranks');
   const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
@@ -146,12 +185,14 @@ test('document background tabs add one second per rank to the coalescing window'
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
   expect(envC.serverMock.numOfStartedFetches).toBe(0);
 
+  // Tab A's confirmed snapshot should satisfy the lower-ranked queued fetches.
   await advanceTime(1_000);
-  expect(envB.serverMock.numOfStartedFetches).toBe(1);
+  expect(envB.serverMock.numOfStartedFetches).toBe(0);
   expect(envC.serverMock.numOfStartedFetches).toBe(0);
 
   await advanceTime(1_000);
-  expect(envC.serverMock.numOfStartedFetches).toBe(1);
+  expect(envB.serverMock.numOfStartedFetches).toBe(0);
+  expect(envC.serverMock.numOfStartedFetches).toBe(0);
 });
 
 test('collection first fetches are not canceled by an earlier sibling background fetch', async () => {
@@ -241,7 +282,7 @@ test('collection awaitFetch stays local even when a sibling background fetch sta
   expect(envB.serverTable.numOfStartedFetches).toBe(1);
 });
 
-test('collection background tabs add one second per rank to the coalescing window', async () => {
+test('collection confirmed snapshots satisfy lower-ranked pending background fetches', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-background-ranks');
   const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
@@ -276,12 +317,54 @@ test('collection background tabs add one second per rank to the coalescing windo
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
   expect(envC.serverTable.numOfStartedFetches).toBe(0);
 
+  // Tab A's confirmed snapshot should satisfy the lower-ranked queued fetches.
   await advanceTime(1_000);
-  expect(envB.serverTable.numOfStartedFetches).toBe(1);
+  expect(envB.serverTable.numOfStartedFetches).toBe(0);
   expect(envC.serverTable.numOfStartedFetches).toBe(0);
 
   await advanceTime(1_000);
-  expect(envC.serverTable.numOfStartedFetches).toBe(1);
+  expect(envB.serverTable.numOfStartedFetches).toBe(0);
+  expect(envC.serverTable.numOfStartedFetches).toBe(0);
+});
+
+test('collection confirmed null snapshots satisfy queued first fetches', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('collection-null-snapshot');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
+
+  const envA = createCollectionStoreTestEnv(createCollectionItems(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+    useBatchFetch: true,
+    baseCoalescingWindowMs: 20,
+  });
+  const envB = createCollectionStoreTestEnv(createCollectionItems(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    useBatchFetch: true,
+    baseCoalescingWindowMs: 1_500,
+  });
+
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
+
+  expect(envB.scheduleFetch('highPriority', 'item1')).toBe('triggered');
+  act(() => {
+    envA.apiStore.deleteItemState('item1');
+  });
+
+  await advanceTime(3_000);
+
+  expect(envB.serverTable.numOfStartedFetches).toBe(0);
 });
 
 test('list query first fetches are not canceled by an earlier sibling background fetch', async () => {
@@ -369,7 +452,7 @@ test('list query awaitListQueryFetch stays local even when a sibling background 
   expect(envB.serverTable.numOfStartedFetches).toBe(1);
 });
 
-test('list query background tabs add one second per rank to the coalescing window', async () => {
+test('list query confirmed snapshots satisfy lower-ranked pending background fetches', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-background-ranks');
   const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
@@ -403,10 +486,49 @@ test('list query background tabs add one second per rank to the coalescing windo
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
   expect(envC.serverTable.numOfStartedFetches).toBe(0);
 
+  // Tab A's confirmed snapshot should satisfy the lower-ranked queued fetches.
   await advanceTime(1_000);
-  expect(envB.serverTable.numOfStartedFetches).toBe(1);
+  expect(envB.serverTable.numOfStartedFetches).toBe(0);
   expect(envC.serverTable.numOfStartedFetches).toBe(0);
 
   await advanceTime(1_000);
-  expect(envC.serverTable.numOfStartedFetches).toBe(1);
+  expect(envB.serverTable.numOfStartedFetches).toBe(0);
+  expect(envC.serverTable.numOfStartedFetches).toBe(0);
+});
+
+test('list-only query confirmed snapshots satisfy queued first fetches', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-list-only-snapshot');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    disableFetchItemFn: true,
+    baseCoalescingWindowMs: 20,
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    disableFetchItemFn: true,
+    baseCoalescingWindowMs: 1_500,
+  });
+
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
+
+  envA.scheduleFetch('highPriority', { tableId: 'users' });
+  envB.scheduleFetch('highPriority', { tableId: 'users' });
+
+  await advanceTime(2_000);
+
+  expect(envA.serverTable.numOfStartedFetches).toBe(1);
+  expect(envB.serverTable.numOfStartedFetches).toBe(0);
 });

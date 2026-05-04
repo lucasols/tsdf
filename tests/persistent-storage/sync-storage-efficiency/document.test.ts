@@ -33,7 +33,11 @@ describe('sync storage efficiency: document', () => {
 
     // Store creation should only queue the startup maintenance pass.
     const startupCapture = startPersistentStorageOperationCapture();
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 7 },
+    });
     const startupOperations = startupCapture.finish().timelineString;
 
     expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
@@ -43,11 +47,13 @@ describe('sync storage efficiency: document', () => {
 
     // Document local-sync hydration happens during store initialization, so mount should not hit storage twice.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useDocument({
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useDocument({
+            returnRefetchingStatus: true,
+            disableRefetchOnMount: true,
+          }),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
@@ -59,11 +65,6 @@ describe('sync storage efficiency: document', () => {
       0    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m
            |    └ (namespace index) | 0.06 kb
       .    | 📖 #2 ✅ tsdf.sess1.doc-remount-flow (entry data) | 0.10 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (namespace index) | 0.06 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (namespace index) | 0.06 kb -> 0.06 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -85,7 +86,7 @@ describe('sync storage efficiency: document', () => {
     expect(getParsedLocalStorageValue('tsdf._m.r.s:sess1.doc-remount-flow.m'))
       .toMatchInlineSnapshot(`
         e:
-          d: { a: 1735689604100 }
+          d: { a: 1735689600000 }
       `);
   });
 
@@ -101,11 +102,13 @@ describe('sync storage efficiency: document', () => {
     // With no persisted document, the first mount should miss storage, fetch the
     // document, and write it once. The remount should then stay fully in memory.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useDocument({
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useDocument({
+            returnRefetchingStatus: true,
+            disableRefetchOnMount: true,
+          }),
+        { remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
@@ -135,7 +138,11 @@ describe('sync storage efficiency: document', () => {
       value: 8,
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
     // Hydrate once through the public hook, then measure repeated direct reads only.
     await settleStartupBackgroundScan();
@@ -147,17 +154,17 @@ describe('sync storage efficiency: document', () => {
 
     const readCapture = startPersistentStorageOperationCapture();
     // Repeated direct reads with small gaps should stay fully in memory.
-    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
-      value: { name: 'Cached document', value: 8 }
-    `);
+    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 8 }`,
+    );
     await advanceTime(100);
-    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
-      value: { name: 'Cached document', value: 8 }
-    `);
+    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 8 }`,
+    );
     await advanceTime(100);
-    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
-      value: { name: 'Cached document', value: 8 }
-    `);
+    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 8 }`,
+    );
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
@@ -173,7 +180,11 @@ describe('sync storage efficiency: document', () => {
     });
 
     // Startup hydration schedules a touch to refresh the cached timestamp.
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
     const storageKey = persistentStore
       .scope(storeName, sessionKey)
       .document.storageKey();
@@ -239,7 +250,11 @@ describe('sync storage efficiency: document', () => {
       value: 8,
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
     // Hydrate the cached document through a normal mounted hook first.
     await settleStartupBackgroundScan();
@@ -285,26 +300,30 @@ describe('sync storage efficiency: document', () => {
       value: 8,
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startPersistentStorageOperationCapture();
+    // Update the server copy, invalidate for the mounted hook, then capture fetch completion plus the debounced save.
+    const refetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.setServerData({ name: 'Fresh document', value: 42 });
       env.apiStore.invalidateData('highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       value: { name: 'Fresh document', value: 42 }
@@ -316,7 +335,7 @@ describe('sync storage efficiency: document', () => {
     ).toMatchInlineSnapshot(`
       value: { name: 'Fresh document', value: 42 }
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.doc-invalidation-flow
@@ -338,43 +357,46 @@ describe('sync storage efficiency: document', () => {
       value: 8,
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture = startPersistentStorageOperationCapture();
+    const firstRefetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.setServerData({ name: 'Fresh document 1', value: 41 });
       env.apiStore.invalidateData('highPriority');
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       value: { name: 'Fresh document 1', value: 41 }
     `);
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture = startPersistentStorageOperationCapture();
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.setServerData({ name: 'Fresh document 2', value: 42 });
       env.apiStore.invalidateData('highPriority');
     });
     await advanceTime(1900);
     await flushAllTimers();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       value: { name: 'Fresh document 2', value: 42 }
@@ -386,7 +408,7 @@ describe('sync storage efficiency: document', () => {
     ).toMatchInlineSnapshot(`
       value: { name: 'Fresh document 2', value: 42 }
     `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.doc-coalesced-invalidations
@@ -419,8 +441,8 @@ describe('sync storage efficiency: document', () => {
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await flushInvalidationPersistence(0);

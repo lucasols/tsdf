@@ -635,10 +635,10 @@ describe('sync storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user' } },
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useItem('1', {
@@ -648,14 +648,14 @@ describe('sync storage efficiency: collection', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startPersistentStorageOperationCapture();
+    // Update the server copy, invalidate for the mounted hook, then capture fetch completion plus the debounced save.
+    const refetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Fresh user' }
@@ -667,7 +667,7 @@ describe('sync storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Fresh user' }
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.col-invalidation-flow.ci."1
@@ -696,7 +696,7 @@ describe('sync storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user' } },
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
@@ -737,7 +737,7 @@ describe('sync storage efficiency: collection', () => {
     // A normal invalidation save should keep the externally-added offline marker.
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await flushInvalidationPersistence();
 
@@ -770,10 +770,10 @@ describe('sync storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user 1' } },
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useItem('1', {
@@ -784,30 +784,29 @@ describe('sync storage efficiency: collection', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture = startPersistentStorageOperationCapture();
+    const firstRefetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 1' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Fresh user 1' }
     `);
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture = startPersistentStorageOperationCapture();
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 2' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(1900);
     await flushAllTimers();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Fresh user 2' }
@@ -819,7 +818,7 @@ describe('sync storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Fresh user 2' }
     `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.col-coalesced-invalidations.ci."1
@@ -847,11 +846,13 @@ describe('sync storage efficiency: collection', () => {
 
     // The first mount must hydrate the cold cached item from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useItem('1', {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useItem('1', {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
@@ -864,11 +865,6 @@ describe('sync storage efficiency: collection', () => {
            |    └ (namespace index) | 0.09 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.09 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
-           |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -890,11 +886,13 @@ describe('sync storage efficiency: collection', () => {
     // With no persisted item, the first mount should miss storage, fetch the
     // item, and write it once. The remount should then stay fully in memory.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useItem('1', {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useItem('1', {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(`
@@ -935,11 +933,13 @@ describe('sync storage efficiency: collection', () => {
 
     // The first mount must hydrate both cold cached items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.map((item) => item.data?.value))
@@ -958,15 +958,6 @@ describe('sync storage efficiency: collection', () => {
            |    └ (namespace index) | 0.17 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #3 ✅ tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (entry data, <"2>) | 0.11 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.17 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.17 kb -> 0.17 kb
-      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.17 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.17 kb -> 0.17 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

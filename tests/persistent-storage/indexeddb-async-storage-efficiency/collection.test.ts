@@ -19,6 +19,7 @@ import {
   setProtectedKeysSnapshot,
   settleIndexedDbStorage,
   settleIndexedDbStorageCapture,
+  settleIndexedDbStorageWithoutTimers,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
   sumPersistedEntryBytes,
@@ -798,6 +799,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     env.apiStore.dispose();
     await settleIndexedDbStorage();
 
+    // The recreated row should reflect the delayed retry save, not the older
+    // hydrated timestamp from before the external delete.
     expect(
       await readCollectionEntryRow({
         mockAdapter,
@@ -867,6 +870,8 @@ describe('indexeddb async storage efficiency: collection', () => {
     env.apiStore.dispose();
     await settleIndexedDbStorage();
 
+    // The retry must recreate the row after the racing delete, with the final
+    // mutation data and the timestamp from the completed retry write.
     expect(
       await readCollectionEntryRow({
         mockAdapter,
@@ -875,7 +880,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689606144
+      a: 1735689608000
 
       d:
         value: { id: '1', name: 'Edited after delete' }
@@ -958,7 +963,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689606144
+      a: 1735689608000
 
       d:
         value: { id: '1', name: 'Edited during write' }
@@ -1023,7 +1028,9 @@ describe('indexeddb async storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user' } },
+      // Keep startup hydration aligned with the persisted value so the later
+      // Fresh user state is produced only by the explicit invalidation below.
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
     await settleStartupBackgroundScan(mockAdapter);
@@ -1039,11 +1046,13 @@ describe('indexeddb async storage efficiency: collection', () => {
     );
     await settleIndexedDbStorage();
 
-    const invalidationCapture =
+    const refetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
+      // Change the server inside the captured phase so the snapshot covers the
+      // invalidation refetch save, not an automatic hydration refetch.
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await flushInvalidationPersistence();
     await waitForIndexedDbCondition(() => {
@@ -1051,7 +1060,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       return data != null && data.value.name === 'Fresh user';
     });
     mountedHook.unmount();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
@@ -1073,7 +1082,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       p: '1'
       z: 67
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       ""
       1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] order=lru-desc -> ["\\"1"]
       1.858s | ✍️ tx(entries, namespacePolicies).commit scope=["sess-invalidation-flow","col-invalidation-flow","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
@@ -1095,7 +1104,9 @@ describe('indexeddb async storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user' } },
+      // Startup hydration should be a no-op write-wise; the Fresh user payload
+      // is introduced only during the marker-preservation invalidation.
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
     await settleStartupBackgroundScan(mockAdapter);
@@ -1114,8 +1125,10 @@ describe('indexeddb async storage efficiency: collection', () => {
     setProtectedKeysSnapshot(sessionKey, [storageKey]);
 
     act(() => {
+      // The explicit high-priority invalidation should preserve the marker that
+      // another tab wrote after this tab hydrated the item.
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(3200);
     await settleIndexedDbStorage();
@@ -1157,7 +1170,9 @@ describe('indexeddb async storage efficiency: collection', () => {
     const env = createCollectionEnv({
       storeName,
       sessionKey,
-      serverData: { '1': { id: '1', name: 'Fresh user 1' } },
+      // Start with the cached value so the first Fresh user update belongs to
+      // the first explicit invalidation, not to startup revalidation.
+      serverData: { '1': { id: '1', name: 'Cached user' } },
     });
 
     await settleStartupBackgroundScan(mockAdapter);
@@ -1173,26 +1188,29 @@ describe('indexeddb async storage efficiency: collection', () => {
     );
     await settleIndexedDbStorage();
 
-    const firstInvalidationCapture =
+    const firstRefetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
+      // This refetch updates in-memory state but stays inside the debounce
+      // window, so no persistence write should be captured yet.
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 1' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(1100);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user 1' }`,
     );
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    const secondInvalidationCapture =
+    const secondRefetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
+      // The second invalidation replaces the pending debounced save, so only
+      // the final Fresh user 2 payload should reach IndexedDB.
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 2' });
-      env.apiStore.invalidateItem('1');
+      env.apiStore.invalidateItem('1', 'highPriority');
     });
     await advanceTime(1900);
     await settleIndexedDbStorage();
@@ -1201,8 +1219,8 @@ describe('indexeddb async storage efficiency: collection', () => {
       return data != null && data.value.name === 'Fresh user 2';
     });
     mountedHook.unmount();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user 2' }`,
@@ -1224,7 +1242,7 @@ describe('indexeddb async storage efficiency: collection', () => {
       p: '1'
       z: 69
     `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       ""
       1.81s | 🔎 entries.byScopeLastAccessAt scope=["sess1","col-coalesced-invalidations","collection.item"] order=lru-desc -> ["\\"1"]
       1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-coalesced-invalidations","collection.item"] put=["\\"1"] delete=[] touch=[] static-policy
@@ -1254,7 +1272,10 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await flushInvalidationPersistence(0);
+    // Advance only through IndexedDB read latency. A broader persistence flush
+    // would also capture the later startup revalidation maintenance.
+    await advanceTime(20);
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const firstMountOperations = firstMountCapture.finish().timelineString;
     firstHook.unmount();
 
@@ -1266,7 +1287,10 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await flushInvalidationPersistence(0);
+    // The remount should reuse the already hydrated item from memory, so the
+    // same narrow settle should capture no IndexedDB operations.
+    await advanceTime(20);
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const remountOperations = remountCapture.finish().timelineString;
 
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
@@ -1305,7 +1329,10 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await flushInvalidationPersistence(0);
+    // This item is old enough to need a recency touch, but the test still stops
+    // before the later stale-while-revalidate persistence window.
+    await advanceTime(250);
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const firstMountOperations = firstMountCapture.finish().timelineString;
     firstHook.unmount();
 
@@ -1317,7 +1344,9 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await flushInvalidationPersistence(0);
+    // No timer advance is needed on remount because the item should already be
+    // materialized in store state.
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const remountOperations = remountCapture.finish().timelineString;
 
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
@@ -1326,7 +1355,7 @@ describe('indexeddb async storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","col-remount-stale-touch","collection.item"] keys=["\\"1"] -> ["\\"1"]
-      46ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-stale-touch","collection.item"] put=[] delete=[] touch=["\\"1"]
+      47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","col-remount-stale-touch","collection.item"] put=[] delete=[] touch=["\\"1"]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1431,7 +1460,10 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await flushInvalidationPersistence(0);
+    // Let the batched IndexedDB read finish without running the delayed
+    // background revalidation save.
+    await advanceTime(20);
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const firstMountOperations = firstMountCapture.finish().timelineString;
     firstHook.unmount();
 
@@ -1443,7 +1475,10 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await flushInvalidationPersistence(0);
+    // The second mount should be memory-only after the first mount hydrated both
+    // items.
+    await advanceTime(20);
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const remountOperations = remountCapture.finish().timelineString;
 
     expect(
@@ -1563,8 +1598,10 @@ describe('indexeddb async storage efficiency: collection', () => {
         returnRefetchingStatus: true,
       }),
     );
-    await advanceTime(250);
-    await settleIndexedDbStorage();
+    // The assertion is about batched preload reads only. Stop after the read
+    // latency so the snapshot does not include unrelated delayed maintenance.
+    await advanceTime(20);
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     hook.unmount();
 
     const { timelineString } = preloadCapture.finish();

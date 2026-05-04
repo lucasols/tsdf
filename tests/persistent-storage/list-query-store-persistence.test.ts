@@ -506,8 +506,55 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
-  test('disableRefetchOnMount keeps cached query data without refetching and refreshes stored timestamps', async () => {
+  test('realtime stores revalidate cached localStorage query after first hydration', async () => {
     const usersQuery = { tableId: 'users' };
+    const usersItem = storeItemKey('users', 1);
+
+    // Seed the browser cache with stale data so the hook can show persisted
+    // state immediately before doing its first server reconciliation.
+    setCachedItem('lq-rtu-first-sync', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Cached',
+    });
+    setCachedQuery('lq-rtu-first-sync', 'sess1', usersQuery, [usersItem]);
+
+    const env = createEnv({
+      storeName: 'lq-rtu-first-sync',
+      sessionKey: 'sess1',
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+      usesRealTimeUpdates: true,
+    });
+
+    const renders = createLoggerStore();
+
+    // usesRealTimeUpdates should not skip the first hydration refetch; only
+    // later freshness is expected to come from realtime invalidations.
+    renderHook(() => {
+      const { items, status } = env.apiStore.useListQuery(usersQuery, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+
+    await flushAllTimers();
+
+    // The cached row is stale-while-revalidate data: visible immediately, then
+    // replaced by the server row after the mount revalidation finishes.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: success ⋅ names: [Fresh]
+      "
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('disableRefetchOnMount still revalidates cached query data marked refetchOnMount', async () => {
+    const usersQuery = { tableId: 'users' };
+    // Make both persisted entries old enough that the touch-throttle path must
+    // refresh their timestamps when they are read back from localStorage.
     const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
     const usersItem = setCachedItem(
       'lq-hook-no-refetch',
@@ -538,6 +585,8 @@ describe('localStorage: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // disableRefetchOnMount only suppresses the hook's own mount policy. It
+    // must not ignore the persisted refetchOnMount marker restored from cache.
     renderHook(() => {
       const { items, status } = env.apiStore.useListQuery(usersQuery, {
         returnRefetchingStatus: true,
@@ -549,12 +598,16 @@ describe('localStorage: list query store persistence', () => {
 
     await flushAllTimers();
 
+    // The cached data still revalidates because the restored query explicitly
+    // asked for it, and the storage entries are touched as part of hydration.
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: success ⋅ names: [Fresh]
       "
     `);
-    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
     expect(getStoredEntryTimestamp(usersItem)).toBeGreaterThan(
       originalItemTimestamp,
     );
@@ -682,6 +735,8 @@ describe('localStorage: list query store persistence', () => {
       serverData: { users: [{ id: 1, name: 'Cached' }] },
     });
 
+    // The writer persists a partial list result, including the loaded-field
+    // metadata needed to know which item fields are actually complete.
     renderHook(() => {
       writerEnv.apiStore.useListQuery(usersQuery, { fields: ['id', 'name'] });
     });
@@ -699,11 +754,12 @@ describe('localStorage: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // Assert the synchronous hydration result before flushing the mount effect;
+    // this isolates whether localStorage restored the partial metadata.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
         fields: ['id', 'name'],
         returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
       });
 
       renders.add({ status, names: items.map((item) => item.name) });
@@ -715,6 +771,8 @@ describe('localStorage: list query store persistence', () => {
       "
     `);
     expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+    // The restored item must still know that only id/name were loaded, even
+    // though the cached object is already usable by the hook.
     expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
       .toMatchInlineSnapshot(`
         ['id', 'name']
@@ -796,10 +854,11 @@ describe('localStorage: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // The hook asks for email too. Cached email remains visible immediately,
+    // but loadedFields is narrower, so the item should revalidate.
     renderHook(() => {
       const { data, status } = env.apiStore.useItem(itemPayload, {
         fields: ['id', 'name', 'email'],
-        disableRefetches: true,
         returnRefetchingStatus: true,
       });
 
@@ -815,9 +874,19 @@ describe('localStorage: list query store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ name: Cached ⋅ email: cached@site.test
+      -> status: refetching ⋅ name: Cached ⋅ email: cached@site.test
+      -> status: success ⋅ name: Fresh ⋅ email: fresh@site.test
       "
     `);
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    // The revalidation fetches the complete field set requested by the mounted
+    // hook, not just the narrower metadata restored from storage.
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['email', 'id', 'name']
+            itemId: 'users||1'
+      `);
   });
 
   test('later partial saves keep extra fields already present in persisted item data', async () => {
@@ -825,6 +894,8 @@ describe('localStorage: list query store persistence', () => {
     const storeName = 'lq-partial-keep-extra-fields-on-save';
     const sessionKey = 'sess1';
 
+    // Seed a cached item whose data has email, while loadedFields says future
+    // partial fetches only need to keep id/name fresh.
     persistentStore
       .scope(storeName, sessionKey)
       .listQuery.seedItem(
@@ -843,11 +914,10 @@ describe('localStorage: list query store persistence', () => {
       },
     });
 
+    // Mounting with id/name triggers the normal hydration revalidation for the
+    // same partial field set.
     renderHook(() => {
-      env.apiStore.useItem(itemPayload, {
-        fields: ['id', 'name'],
-        disableRefetchOnMount: true,
-      });
+      env.apiStore.useItem(itemPayload, { fields: ['id', 'name'] });
     });
 
     await flushAllTimers();
@@ -1046,6 +1116,8 @@ describe('localStorage: list query store persistence', () => {
       offsetPagination: { maxInvalidationLimit: 100 },
     });
 
+    // Persist two pages so the reader starts from a 10-item hydrated query
+    // instead of a fresh first page.
     writerEnv.apiStore.scheduleListQueryFetch('highPriority', productsQuery, 5);
     await flushAllTimers();
 
@@ -1064,10 +1136,12 @@ describe('localStorage: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // The reader should show the restored 10 items immediately, then
+    // revalidate exactly that restored window on mount.
     renderHook(() => {
       const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
         productsQuery,
-        { disableRefetchOnMount: true, returnRefetchingStatus: true },
+        { returnRefetchingStatus: true },
       );
 
       renders.add({
@@ -1078,14 +1152,30 @@ describe('localStorage: list query store persistence', () => {
       });
     });
 
+    await flushAllTimers();
+
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
+      -> status: refetching ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
+      -> status: success ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
       "
     `);
-    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    // Hydration revalidation should reconcile the same 10-item range that was
+    // restored from localStorage.
+    expect(
+      readerEnv.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 10, offset: 0 }
+        returned_items: 10
+    `);
 
-    // Hydrated query should continue paging from the restored size.
+    // After hydration revalidation settles, loadMore should continue paging
+    // from the restored size rather than refetching the head again.
+    readerEnv.serverTable.clearFetchHistory();
     readerEnv.apiStore.loadMore(productsQuery);
     await flushAllTimers();
 
@@ -1093,23 +1183,13 @@ describe('localStorage: list query store persistence', () => {
       readerEnv.apiStore.getQueryState(productsQuery)?.items.length,
     ).toMatchInlineSnapshot(`15`);
     expect(
-      readerEnv.serverTable.fetchHistory.map((entry) => {
-        if (entry.type !== 'list') return entry.type;
-        return {
-          type: entry.type,
-          offset: entry.offset,
-          limit: entry.limit,
-          itemIds:
-            entry.results === 'aborted'
-              ? 'aborted'
-              : entry.results.map((result) => result.itemId),
-        };
-      }),
+      readerEnv.serverTable.getRequestHistory('list', { includeTime: false }),
     ).toMatchInlineSnapshot(`
-      - itemIds: ['products||11', 'products||12', 'products||13', 'products||14', 'products||15']
-        limit: 5
-        offset: 10
-        type: 'list'
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 5, offset: 10 }
+        returned_items: 5
     `);
   });
 
@@ -1215,6 +1295,8 @@ describe('localStorage: list query store persistence', () => {
       defaultQuerySize: 5,
     });
 
+    // Persist only the default first page so the reader can prove a larger
+    // hook loadSize expands the hydrated query during revalidation.
     writerEnv.apiStore.scheduleListQueryFetch('highPriority', productsQuery, 5);
     await flushAllTimers();
     await advanceTime(1100);
@@ -1229,6 +1311,8 @@ describe('localStorage: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // Hydration starts with the cached 5 items, then mount revalidation should
+    // refetch from the head using the hook's larger requested size.
     renderHook(() => {
       const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
         productsQuery,
@@ -1252,6 +1336,8 @@ describe('localStorage: list query store persistence', () => {
       -> status: success ⋅ count: 10 ⋅ lastName: Fresh Product 10 ⋅ hasMore: ✅
       "
     `);
+    // The revalidation request uses limit 10, showing the persisted query did
+    // not lock the reader to the original cached page size.
     expect(
       readerEnv.serverTable.fetchHistory.map((entry) => {
         if (entry.type !== 'list') return entry.type;
@@ -1289,6 +1375,8 @@ describe('localStorage: list query store persistence', () => {
       },
     });
 
+    // Persist local-only state changes so the reader can prove manual edits and
+    // query membership changes round-trip through localStorage.
     writerEnv.apiStore.scheduleListQueryFetch('highPriority', usersQuery);
     await flushAllTimers();
 
@@ -1317,9 +1405,10 @@ describe('localStorage: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // The hook should synchronously hydrate the locally edited query before any
+    // mount revalidation has a chance to reconcile with the server.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
@@ -1331,7 +1420,11 @@ describe('localStorage: list query store persistence', () => {
       -> status: success ⋅ names: [Edited Alice, …(2 more)]
       "
     `);
+    // No request has run yet because this assertion intentionally happens
+    // before effects are flushed.
     expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    // The local-only item must be available as an item state, not only as a
+    // query membership key.
     expect(readerEnv.apiStore.getItemState('users||20')).toMatchInlineSnapshot(`
       id: 20
       name: 'Local User'
@@ -1400,11 +1493,15 @@ describe('localStorage: list query store persistence', () => {
         getLocalListQueryEntrySizeBytes(firstQuery, []),
         getLocalListQueryEntrySizeBytes(thirdQuery, [storeItemKey('third', 1)]),
       ),
-      serverData: { third: [{ id: 1, name: 'Third' }] },
+      serverData: { first: [], third: [{ id: 1, name: 'Third' }] },
     });
 
     const renders = createLoggerStore();
 
+    // Reading the older query refreshes its recency before the later third
+    // query write forces maxQueryBytes maintenance. Assert the immediate
+    // hydrated value before timers run because this test is about persisted read
+    // recency, not server reconciliation.
     renderHook(() => {
       const { items, status, hasMore } = env.apiStore.useListQuery(firstQuery, {
         disableRefetchOnMount: true,
@@ -1414,14 +1511,14 @@ describe('localStorage: list query store persistence', () => {
       renders.add({ status, count: items.length, hasMore });
     });
 
-    await flushAllTimers();
-
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ count: 0 ⋅ hasMore: ❌
       "
     `);
 
+    // Let the read-recency touch flush before writing the third query; the
+    // second query should now be the least recently read persisted entry.
     await advanceTime(2100);
 
     env.scheduleFetch('highPriority', thirdQuery);
@@ -1476,10 +1573,15 @@ describe('localStorage: list query store persistence', () => {
           }),
         ),
       ),
+      serverData: { users: [oldestItem] },
     });
 
     const renders = createLoggerStore();
 
+    // Reading the oldest item refreshes its recency before a later standalone
+    // item write forces maxItemBytes maintenance. Assert the immediate hydrated
+    // value before timers run because this test is about persisted read recency,
+    // not server reconciliation.
     renderHook(() => {
       const { data, status } = env.apiStore.useItem(
         rawItemPayload('users', 1),
@@ -1489,14 +1591,14 @@ describe('localStorage: list query store persistence', () => {
       renders.add({ status, data: data ?? null });
     });
 
-    await flushAllTimers();
-
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ data: {id:1, name:Oldest cached}
       "
     `);
 
+    // Wait for the localStorage touch throttle so the recency update is visible
+    // to eviction maintenance.
     await advanceTime(2100);
 
     env.apiStore.addItemToState(freshPayload, freshItem);
@@ -1709,9 +1811,10 @@ describe('localStorage: list query store persistence', () => {
     });
     const renders = createLoggerStore();
 
+    // Only the truncated query is restored from localStorage; the mount
+    // revalidation should fetch the full server list again.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
@@ -1722,11 +1825,21 @@ describe('localStorage: list query store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ names: [Alice, Bob]
+      -> status: refetching ⋅ names: [Alice, Bob]
+      -> status: success ⋅ names: [Alice, …(2 more)]
       "
     `);
+    // Revalidation can include the evicted third item even though maxQuerySize
+    // kept only the first two items persisted.
     expect(
-      readerEnv.serverTable.getRequestHistory('all'),
-    ).toMatchInlineSnapshot(`[]`);
+      readerEnv.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 3
+    `);
   });
 
   test('ignoreItems excludes matching item payloads from persisted items and queries', async () => {
@@ -1769,9 +1882,10 @@ describe('localStorage: list query store persistence', () => {
     });
     const renders = createLoggerStore();
 
+    // The ignored item is absent from storage, but a normal mount revalidation
+    // should still reconcile the full server response.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
@@ -1782,9 +1896,21 @@ describe('localStorage: list query store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ names: [Alice]
+      -> status: refetching ⋅ names: [Alice]
+      -> status: success ⋅ names: [Alice, Bob]
       "
     `);
-    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    // The fetch proves ignoreItems only limits what is persisted, not what the
+    // live query can receive from the server.
+    expect(
+      readerEnv.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 2
+    `);
   });
 
   test('preload hydrates cached local queries and items without reporting an error', async () => {

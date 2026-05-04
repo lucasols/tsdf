@@ -492,6 +492,7 @@ describe('opfs: list query store persistence', () => {
       serverData: { users: [{ id: 1, name: 'Cached' }] },
     });
 
+    // The writer persists a partial query that only has the requested fields.
     renderHook(() => {
       writerEnv.apiStore.useListQuery(usersQuery, { fields: ['id', 'name'] });
     });
@@ -509,11 +510,11 @@ describe('opfs: list query store persistence', () => {
 
     const renders = createLoggerStore({ arrays: 'all' });
 
+    // The reader should show the cached partial item first, then revalidate it.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
         fields: ['id', 'name'],
         returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
       });
 
       renders.add({ status, names: items.map((item) => item.name) });
@@ -521,13 +522,16 @@ describe('opfs: list query store persistence', () => {
 
     await flushAllTimers();
 
+    // Revalidation must not lose the field metadata restored from storage.
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ names: []
       -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: success ⋅ names: [Fresh]
       "
     `);
-    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(1);
     expect(
       readerEnv.store.state.itemLoadedFields[
         listQueryScope.itemKey('users', 1)
@@ -610,6 +614,7 @@ describe('opfs: list query store persistence', () => {
       },
     });
 
+    // Preload restores the cached item before any hook subscribes to it.
     const preloadPromise = env.apiStore.preloadItemFromStorage(itemPayload);
     await expect(resolveAfterAllTimers(preloadPromise)).resolves
       .toMatchInlineSnapshot(`
@@ -618,10 +623,11 @@ describe('opfs: list query store persistence', () => {
 
     const renders = createLoggerStore();
 
+    // The hook asks for an extra field; cached data stays visible while the
+    // item revalidates with the larger field set.
     renderHook(() => {
       const { data, status } = env.apiStore.useItem(itemPayload, {
         fields: ['id', 'name', 'email'],
-        disableRefetches: true,
         returnRefetchingStatus: true,
       });
 
@@ -637,9 +643,18 @@ describe('opfs: list query store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ name: Cached ⋅ email: cached@site.test
+      -> status: refetching ⋅ name: Cached ⋅ email: cached@site.test
+      -> status: success ⋅ name: Fresh ⋅ email: fresh@site.test
       "
     `);
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    // The revalidation should be an item fetch for the complete requested fields.
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name', 'email']
+            itemId: 'users||1'
+      `);
   });
 
   test('later partial saves keep extra fields already present in persisted item data', async () => {
@@ -667,21 +682,21 @@ describe('opfs: list query store persistence', () => {
       },
     });
 
+    // Start from a cached item that has email stored but only id/name marked loaded.
     const preloadPromise = env.apiStore.preloadItemFromStorage(itemPayload);
     await expect(resolveAfterAllTimers(preloadPromise)).resolves
       .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '✅' }
     `);
 
+    // Mounting with id/name triggers the normal hydration revalidation path.
     renderHook(() => {
-      env.apiStore.useItem(itemPayload, {
-        fields: ['id', 'name'],
-        disableRefetchOnMount: true,
-      });
+      env.apiStore.useItem(itemPayload, { fields: ['id', 'name'] });
     });
 
     await flushAllTimers();
 
+    // Saving a later partial fetch must preserve the already persisted email.
     env.apiStore.scheduleItemFetch('highPriority', itemPayload, {
       fields: ['id', 'name'],
     });
@@ -883,6 +898,7 @@ describe('opfs: list query store persistence', () => {
       offsetPagination: { maxInvalidationLimit: 100 },
     });
 
+    // Persist two pages so the restored query starts with 10 loaded items.
     writerEnv.apiStore.scheduleListQueryFetch('highPriority', productsQuery, 5);
     await flushAllTimers();
 
@@ -899,16 +915,19 @@ describe('opfs: list query store persistence', () => {
       offsetPagination: { maxInvalidationLimit: 100 },
     });
 
+    // Explicit preload simulates opening the app with data already in OPFS.
     const preloadPromise =
       readerEnv.apiStore.preloadQueryFromStorage(productsQuery);
     await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore();
 
+    // The hook should render the restored page immediately and then perform
+    // the normal hydration revalidation against the same 10-item range.
     renderHook(() => {
       const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
         productsQuery,
-        { disableRefetchOnMount: true, returnRefetchingStatus: true },
+        { returnRefetchingStatus: true },
       );
 
       renders.add({
@@ -919,16 +938,30 @@ describe('opfs: list query store persistence', () => {
       });
     });
 
+    await flushAllTimers();
+
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
+      -> status: refetching ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
+      -> status: success ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
       "
     `);
+    // The hydration revalidation should reconcile the same 10-item window that
+    // was restored from storage.
     expect(
-      readerEnv.serverTable.getRequestHistory('all'),
-    ).toMatchInlineSnapshot(`[]`);
+      readerEnv.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 10, offset: 0 }
+        returned_items: 10
+    `);
 
-    // Preloaded query should continue from offset 10 rather than refetching the head.
+    // After hydration revalidation settles, loadMore should continue from
+    // offset 10 rather than refetching the head again.
+    readerEnv.serverTable.clearFetchHistory();
     readerEnv.apiStore.loadMore(productsQuery);
     await flushAllTimers();
 
@@ -1095,6 +1128,7 @@ describe('opfs: list query store persistence', () => {
     writerEnv.apiStore.scheduleListQueryFetch('highPriority', usersQuery);
     await flushAllTimers();
 
+    // Persist local-only state changes to verify storage round-trips manual edits too.
     writerEnv.apiStore.updateItemState('users||1', (draft) => {
       draft.name = 'Edited Alice';
     });
@@ -1118,6 +1152,8 @@ describe('opfs: list query store persistence', () => {
       },
     });
 
+    // Preloading should hydrate the local-only membership before a mount effect
+    // has a chance to revalidate against the server.
     const preloadPromise =
       readerEnv.apiStore.preloadQueryFromStorage(usersQuery);
     await resolveAfterAllTimers(preloadPromise);
@@ -1126,18 +1162,21 @@ describe('opfs: list query store persistence', () => {
 
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
       renders.add({ status, names: items.map((item) => item.name) });
     });
 
+    // This immediate assertion protects the persisted local edits, not the later
+    // mount revalidation path covered by the other tests in this file.
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ names: [Edited Alice, Bob, Local User]
       "
     `);
+    // No request has run yet because this test asserts the immediate hydrated
+    // state before effects are flushed.
     expect(
       readerEnv.serverTable.getRequestHistory('all'),
     ).toMatchInlineSnapshot(`[]`);
@@ -1248,6 +1287,8 @@ describe('opfs: list query store persistence', () => {
       ),
     });
 
+    // Adding a standalone item forces maxItemBytes cleanup without rewriting the
+    // cold query payload, leaving one referenced item missing from storage.
     writerEnv.apiStore.addItemToState('users||3', {
       id: 3,
       name: 'Fresh standalone',
@@ -1314,9 +1355,10 @@ describe('opfs: list query store persistence', () => {
     });
     const renders = createLoggerStore({ arrays: 'all' });
 
+    // The reader first hydrates the remaining cached item, then revalidates the
+    // list and restores the missing server items.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
@@ -1329,11 +1371,20 @@ describe('opfs: list query store persistence', () => {
       "
       -> status: loading ⋅ names: []
       -> status: success ⋅ names: [Newer cached]
+      -> status: refetching ⋅ names: [Newer cached]
+      -> status: success ⋅ names: [Older cached, Newer cached, Fresh standalone]
       "
     `);
+    // The mount revalidation should repair the incomplete hydrated query.
     expect(
-      readerEnv.serverTable.getRequestHistory('all'),
-    ).toMatchInlineSnapshot(`[]`);
+      readerEnv.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 3
+    `);
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {
@@ -1938,9 +1989,10 @@ describe('opfs: list query store persistence', () => {
     });
     const renders = createLoggerStore({ arrays: 'all' });
 
+    // Only the query is preloaded; the mounted hook hydrates its items and then
+    // revalidates the full list.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
@@ -1953,10 +2005,20 @@ describe('opfs: list query store persistence', () => {
       "
       -> status: loading ⋅ names: []
       -> status: success ⋅ names: [Alice, Bob]
+      -> status: refetching ⋅ names: [Alice, Bob]
+      -> status: success ⋅ names: [Alice, Bob, Carol]
       "
     `);
+    // Revalidation can include the evicted third item even though the OPFS
+    // maxQuerySize limit kept only two items persisted.
     expect(
-      readerEnv.serverTable.getRequestHistory('all'),
-    ).toMatchInlineSnapshot(`[]`);
+      readerEnv.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 3
+    `);
   });
 });

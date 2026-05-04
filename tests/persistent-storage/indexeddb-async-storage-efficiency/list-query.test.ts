@@ -415,15 +415,24 @@ describe('indexeddb async storage efficiency: list-query', () => {
       | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-metadata","listQuery.item"] put=["\\"third||1"] delete=[] touch=[] static-policy
       ""
     `);
+    const itemNamespaceSnapshot = await readListQueryItemNamespaceSnapshot({
+      mockAdapter,
+      sessionKey,
+      storeName,
+    });
     expect(
-      await readListQueryItemNamespaceSnapshot({
-        mockAdapter,
-        sessionKey,
-        storeName,
-      }),
+      itemNamespaceSnapshot && {
+        ...itemNamespaceSnapshot,
+        entries: Object.fromEntries(
+          Object.entries(itemNamespaceSnapshot.entries).map(([key, entry]) => [
+            key,
+            { ...entry, a: '<timestamp>' },
+          ]),
+        ),
+      },
     ).toMatchInlineSnapshot(`
       entries:
-        "third||1: { a: 1735689605004, p: 'third||1' }
+        "third||1: { a: '<timestamp>', p: 'third||1' }
     `);
     expect(
       await readListQueryItemPayloadSnapshot({
@@ -613,7 +622,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
       serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -627,24 +636,24 @@ describe('indexeddb async storage efficiency: list-query', () => {
     env.serverTable.removeItem('users||1');
 
     // Invalidate the mounted query, then capture the persistence operations.
-    const invalidationCapture =
+    const refetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence(1700);
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(`[]`);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       ""
-      1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-becomes-empty","listQuery.item"] order=lru-desc -> ["\\"users||1"]
-      1.815s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-becomes-empty","listQuery.query"] order=lru-desc -> ["{tableId:\\"users\\"}"]
+      1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-becomes-empty","listQuery.query"] order=lru-desc -> ["{tableId:\\"users\\"}"]
+      1.815s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-becomes-empty","listQuery.item"] order=lru-desc -> ["\\"users||1"]
       1.861s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-becomes-empty","listQuery.query"] put=["{tableId:\\"users\\"}"] delete=[] touch=[] static-policy
-      1.907s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-becomes-empty","listQuery.item"] put=["\\"users||1"] delete=[] touch=[] static-policy
       ""
     `);
     expect(
@@ -1504,10 +1513,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -1517,18 +1526,19 @@ describe('indexeddb async storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted query, then capture fetch completion plus the debounced save.
-    const invalidationCapture =
+    // Update the server copy, invalidate for the mounted query, then capture fetch completion plus the debounced save.
+    const refetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user' }`,
@@ -1553,10 +1563,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`['"users||1']`);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       ""
-      1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-invalidation-flow","listQuery.item"] order=lru-desc -> ["\\"users||1"]
-      1.815s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-invalidation-flow","listQuery.query"] order=lru-desc -> ["{tableId:\\"users\\"}"]
+      1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-invalidation-flow","listQuery.query"] order=lru-desc -> ["{tableId:\\"users\\"}"]
+      1.815s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-query-invalidation-flow","listQuery.item"] order=lru-desc -> ["\\"users||1"]
       1.861s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-query-invalidation-flow","listQuery.item"] put=["\\"users||1"] delete=[] touch=[] static-policy
       ""
     `);
@@ -1578,10 +1588,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user 1' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -1592,38 +1602,39 @@ describe('indexeddb async storage efficiency: list-query', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture =
+    const firstRefetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 1' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user 1' }`,
     );
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture =
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 2' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await advanceTime(1900);
     await settleIndexedDbStorage();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user 2' }`,
@@ -1640,10 +1651,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user 2'
     `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       ""
-      1.81s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-coalesced-invalidations","listQuery.item"] order=lru-desc -> ["\\"users||1"]
       1.81s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-coalesced-invalidations","listQuery.query"] order=lru-desc -> ["{tableId:\\"users\\"}"]
+      1.81s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-coalesced-invalidations","listQuery.item"] order=lru-desc -> ["\\"users||1"]
       1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-coalesced-invalidations","listQuery.item"] put=["\\"users||1"] delete=[] touch=[] static-policy
       ""
     `);
@@ -1668,12 +1679,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: {
-        users: [
-          { id: 1, name: 'Fresh user' },
-          { id: 2, name: 'Second user' },
-        ],
-      },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
@@ -1691,9 +1697,12 @@ describe('indexeddb async storage efficiency: list-query', () => {
 
     // The refetch rewrites both namespaces, and should keep the externally-added markers.
     act(() => {
+      env.serverTable.setItem('users||1', { id: 1, name: 'Fresh user' });
+      env.serverTable.setItem('users||2', { id: 2, name: 'Second user' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
@@ -1715,7 +1724,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
           f: ['age', 'email', 'id', 'name']
           o: '✅'
           p: 'users||1'
-        "users||2: { a: 1735689607006, p: 'users||2' }
+        "users||2: { a: 1735689608867, p: 'users||2' }
     `);
     expect(
       await readListQueryItemPayloadSnapshot({
@@ -1778,6 +1787,8 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
+        settleTimeMs: 20,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useListQuery(usersQuery, {
             disableRefetchOnMount: true,
@@ -1818,6 +1829,8 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
+        settleTimeMs: 20,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useListQuery(usersQuery, {
             disableRefetchOnMount: true,
@@ -1860,7 +1873,11 @@ describe('indexeddb async storage efficiency: list-query', () => {
     // reread metadata and then write the touched timestamps back.
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
+        isReady: (result) => result.items.length === 1,
         mockAdapter,
+        postReadySettleTimeMs: 100,
+        settleTimeMs: 20,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useListQuery(usersQuery, {
             disableRefetchOnMount: true,
@@ -1901,10 +1918,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useItem(itemPayload, {
@@ -1914,15 +1931,15 @@ describe('indexeddb async storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted item hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture =
+    // Update the server copy, invalidate for the mounted item hook, then capture fetch completion plus the debounced save.
+    const refetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
-      env.apiStore.invalidateItem(itemPayload);
+      env.apiStore.invalidateItem(itemPayload, 'highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       id: 1
@@ -1940,10 +1957,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user'
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       ""
-      1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-item-invalidation-flow","listQuery.item"] order=lru-desc -> ["\\"users||1"]
-      1.814s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-item-invalidation-flow","listQuery.query"] order=lru-desc -> []
+      1.811s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-item-invalidation-flow","listQuery.query"] order=lru-desc -> []
+      1.814s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-item-invalidation-flow","listQuery.item"] order=lru-desc -> ["\\"users||1"]
       1.86s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-item-invalidation-flow","listQuery.item"] put=["\\"users||1"] delete=[] touch=[] static-policy
       ""
     `);
@@ -1973,6 +1990,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useItem(rawItemPayload('users', 1), {
             disableRefetchOnMount: true,
@@ -2018,6 +2036,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useMultipleItems(
             [
@@ -2070,7 +2089,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     // The first mount must hydrate both cold cached queries and their items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
+        isReady: (result) => result.every((query) => query.items.length === 1),
         mockAdapter,
+        settleTimeMs: 20,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useMultipleListQueries(
             [{ payload: usersQuery }, { payload: projectsQuery }],

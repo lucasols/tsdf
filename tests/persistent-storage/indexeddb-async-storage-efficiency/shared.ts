@@ -224,6 +224,12 @@ export async function settleIndexedDbStorage(): Promise<void> {
   });
 }
 
+export async function settleIndexedDbStorageWithoutTimers(
+  mockAdapter: MockIndexedDbAdapter,
+): Promise<void> {
+  await settleIndexedDbAsyncPhase(mockAdapter);
+}
+
 export async function settleIndexedDbStorageCapture(
   mockAdapter: MockIndexedDbAdapter,
 ): Promise<void> {
@@ -281,12 +287,28 @@ export async function resolveAfterIndexedDbStorage<T>(
 export async function captureHookRemount<Result>(args: {
   isReady?: (result: Result) => boolean;
   mockAdapter: MockIndexedDbAdapter;
+  postReadySettleTimeMs?: number;
   render: () => Result;
+  settleStorageWithoutTimers?: boolean;
   settleTimeMs?: number;
 }) {
   const defaultIsReady = (result: Result) => result !== null;
   const waitUntilReady = async (hook: { result: { current: Result } }) => {
     const current = hook.result.current;
+
+    if (args.settleStorageWithoutTimers) {
+      const isReady = args.isReady ?? defaultIsReady;
+
+      for (let pass = 0; pass < 80; pass++) {
+        if (isReady(hook.result.current)) return;
+
+        await advanceTime(20);
+        await settleIndexedDbStorageWithoutTimers(args.mockAdapter);
+      }
+
+      throw new Error('IndexedDB hook did not settle without flushing timers.');
+    }
+
     if (args.isReady !== undefined) {
       await waitForHookValue(() => hook.result.current, args.isReady);
       return;
@@ -302,7 +324,20 @@ export async function captureHookRemount<Result>(args: {
   );
   const firstHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);
-  await settleIndexedDbStorageCapture(args.mockAdapter);
+  if (args.settleStorageWithoutTimers) {
+    await settleIndexedDbStorageWithoutTimers(args.mockAdapter);
+  } else {
+    await settleIndexedDbStorageCapture(args.mockAdapter);
+  }
+  await waitUntilReady(firstHook);
+  if (args.postReadySettleTimeMs !== undefined) {
+    await advanceTime(args.postReadySettleTimeMs);
+    if (args.settleStorageWithoutTimers) {
+      await settleIndexedDbStorageWithoutTimers(args.mockAdapter);
+    } else {
+      await settleIndexedDbStorageCapture(args.mockAdapter);
+    }
+  }
   const firstMountOperations = firstMountCapture.finish().timelineString;
 
   firstHook.unmount();
@@ -312,7 +347,11 @@ export async function captureHookRemount<Result>(args: {
   );
   const secondHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);
-  await settleIndexedDbStorageCapture(args.mockAdapter);
+  if (args.settleStorageWithoutTimers) {
+    await settleIndexedDbStorageWithoutTimers(args.mockAdapter);
+  } else {
+    await settleIndexedDbStorageCapture(args.mockAdapter);
+  }
   await waitUntilReady(secondHook);
   const remountOperations = remountCapture.finish().timelineString;
 

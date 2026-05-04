@@ -347,10 +347,12 @@ describe('localStorage: collection store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ data: {id:1, name:Cached}
+      -> status: refetching ⋅ data: {id:1, name:Cached}
+      -> status: success ⋅ data: {id:1, name:Fresh}
       "
     `);
 
-    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
     expect(getStoredCollectionItemTimestamp(key)).toBeGreaterThan(
       originalTimestamp,
     );
@@ -551,6 +553,7 @@ describe('localStorage: collection store persistence', () => {
         getLocalCollectionEntrySizeBytes('a', oldestItem),
         getLocalCollectionEntrySizeBytes('c', freshItem),
       ),
+      serverData: { a: oldestItem.value },
     });
 
     const renders = createLoggerStore();
@@ -558,7 +561,6 @@ describe('localStorage: collection store persistence', () => {
     // Mounting the hook for "a" refreshes its cached timestamp before maxBytes cleanup runs.
     renderHook(() => {
       const { data, status } = env.apiStore.useItem('a', {
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
@@ -569,6 +571,8 @@ describe('localStorage: collection store persistence', () => {
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
+      -> status: success ⋅ data: {id:a, name:Oldest cached}
+      -> status: refetching ⋅ data: {id:a, name:Oldest cached}
       -> status: success ⋅ data: {id:a, name:Oldest cached}
       "
     `);

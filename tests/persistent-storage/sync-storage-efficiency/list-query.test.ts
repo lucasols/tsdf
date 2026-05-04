@@ -543,7 +543,7 @@ describe('sync storage efficiency: list-query', () => {
       serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -557,15 +557,16 @@ describe('sync storage efficiency: list-query', () => {
     env.serverTable.removeItem('users||1');
 
     // Invalidate the mounted query, then capture the persistence operations.
-    const invalidationCapture = startPersistentStorageOperationCapture();
+    const refetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     // The query should now have no items.
     expect(hook.result.current.items).toMatchInlineSnapshot(`[]`);
@@ -587,7 +588,7 @@ describe('sync storage efficiency: list-query', () => {
       `
         e:
           "users||1:
-            a: 1735689605910
+            a: 1735689603910
             f: ['age', 'email', 'id', 'name']
             p: 'users||1'
             z: 83
@@ -611,19 +612,13 @@ describe('sync storage efficiency: list-query', () => {
       lf: ['age', 'email', 'id', 'name']
       p: 'users||1'
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | 📖 #1 ✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>) | 0.12 kb
       .     | ✍️ #1 ✅->✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.10 kb
-      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-query-becomes-empty.li."users||1
-            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
-      .     | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.12 kb
-      .     | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
-            |    └ (items index) | 0.12 kb -> 0.18 kb
       "
     `);
   });
@@ -1211,10 +1206,10 @@ describe('sync storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -1224,17 +1219,18 @@ describe('sync storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted query, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startPersistentStorageOperationCapture();
+    // Update the server copy, invalidate for the mounted query, then capture fetch completion plus the debounced save.
+    const refetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       - { id: 1, name: 'Fresh user' }
@@ -1248,15 +1244,15 @@ describe('sync storage efficiency: list-query', () => {
       i: ['"users||1']
       p: { tableId: 'users' }
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.lq-query-invalidation-flow.li."users||1
-            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+            |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb -> 0.18 kb
+            |    └ (items index) | 0.18 kb -> 0.18 kb
       "
     `);
   });
@@ -1277,10 +1273,10 @@ describe('sync storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user 1' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useListQuery(usersQuery, {
@@ -1291,36 +1287,37 @@ describe('sync storage efficiency: list-query', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture = startPersistentStorageOperationCapture();
+    const firstRefetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 1' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       - { id: 1, name: 'Fresh user 1' }
     `);
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture = startPersistentStorageOperationCapture();
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 2' });
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await advanceTime(1900);
     await flushAllTimers();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(`
       - { id: 1, name: 'Fresh user 2' }
@@ -1333,15 +1330,15 @@ describe('sync storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user 2'
     `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.lq-coalesced-invalidations.li."users||1
-            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+            |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.12 kb -> 0.18 kb
+            |    └ (items index) | 0.18 kb -> 0.18 kb
       "
     `);
   });
@@ -1426,8 +1423,9 @@ describe('sync storage efficiency: list-query', () => {
     // The refetch rewrites both namespaces, and should keep the externally-added markers.
     act(() => {
       env.apiStore.invalidateQueryAndItems({
-        queryPayload: usersQuery,
         itemPayload: false,
+        queryPayload: usersQuery,
+        type: 'highPriority',
       });
     });
     await flushInvalidationPersistence();
@@ -1449,15 +1447,19 @@ describe('sync storage efficiency: list-query', () => {
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
         "users||1:
-          a: 1735689605910
+          a: 1735689603910
           f: ['age', 'email', 'id', 'name']
           o: '✅'
           p: 'users||1'
           z: 82
-        "users||2: { a: 1735689605910, p: 'users||2', z: 50 }
+        "users||2:
+          a: 1735689605910
+          f: ['age', 'email', 'id', 'name']
+          p: 'users||2'
+          z: 83
     `);
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
-      a: 1735689605910
+      a: 1735689603910
       i: ['"users||1', '"users||2']
       o: '✅'
       p: { tableId: 'users' }
@@ -1484,11 +1486,13 @@ describe('sync storage efficiency: list-query', () => {
 
     // The first mount hydrates the cold query and its item from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useListQuery(usersQuery, {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useListQuery(usersQuery, {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.items).toMatchInlineSnapshot(
@@ -1503,15 +1507,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.12 kb
       .    | 📖 #3 ✅ tsdf.sess1.lq-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
-      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
-           |    └ (items index) | 0.12 kb
-      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
-           |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1532,11 +1527,13 @@ describe('sync storage efficiency: list-query', () => {
     await settleStartupBackgroundScan();
 
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useListQuery(usersQuery, {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useListQuery(usersQuery, {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.items).toMatchInlineSnapshot(`[]`);
@@ -1545,11 +1542,6 @@ describe('sync storage efficiency: list-query', () => {
       time |
       0    | 📖 #1 ✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.10 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.10 kb
-      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.10 kb -> 0.10 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1572,11 +1564,13 @@ describe('sync storage efficiency: list-query', () => {
     // With no persisted query, the first mount should pay the cache miss once,
     // then keep the fetched result in memory for the remount.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useListQuery(usersQuery, {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useListQuery(usersQuery, {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.items).toMatchInlineSnapshot(`
@@ -1616,10 +1610,10 @@ describe('sync storage efficiency: list-query', () => {
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      serverData: { users: [{ id: 1, name: 'Fresh user' }] },
+      serverData: { users: [{ id: 1, name: 'Cached user' }] },
     });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useItem(itemPayload, {
@@ -1629,14 +1623,14 @@ describe('sync storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted item hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startPersistentStorageOperationCapture();
+    // Update the server copy, invalidate for the mounted item hook, then capture fetch completion plus the debounced save.
+    const refetchCapture = startPersistentStorageOperationCapture();
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
-      env.apiStore.invalidateItem(itemPayload);
+      env.apiStore.invalidateItem(itemPayload, 'highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(`
       id: 1
@@ -1650,15 +1644,15 @@ describe('sync storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user'
     `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.lq-item-invalidation-flow.li."users||1
-            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+            |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb
+            |    └ (items index) | 0.18 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.12 kb -> 0.18 kb
+            |    └ (items index) | 0.18 kb -> 0.18 kb
       "
     `);
   });
@@ -1679,11 +1673,13 @@ describe('sync storage efficiency: list-query', () => {
 
     // The first mount must hydrate the cold cached item from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useItem(rawItemPayload('users', 1), {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useItem(rawItemPayload('users', 1), {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(`
@@ -1697,11 +1693,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.12 kb
       .    | 📖 #2 ✅ tsdf.sess1.lq-item-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
-           |    └ (items index) | 0.12 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
-           |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1724,11 +1715,13 @@ describe('sync storage efficiency: list-query', () => {
     // With no persisted item, the first mount should pay the cache miss once,
     // then keep the fetched result in memory for the remount.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useItem(itemPayload, {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        }),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useItem(itemPayload, {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+        { remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(`
@@ -1779,14 +1772,16 @@ describe('sync storage efficiency: list-query', () => {
 
     // The first mount must hydrate both cold cached items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useMultipleItems(
-          [
-            { payload: rawItemPayload('users', 1) },
-            { payload: rawItemPayload('users', 2) },
-          ],
-          { disableRefetchOnMount: true, returnRefetchingStatus: true },
-        ),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useMultipleItems(
+            [
+              { payload: rawItemPayload('users', 1) },
+              { payload: rawItemPayload('users', 2) },
+            ],
+            { disableRefetchOnMount: true, returnRefetchingStatus: true },
+          ),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(secondHook.result.current.map((item) => item.data))
@@ -1805,15 +1800,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.23 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #3 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.10 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
-           |    └ (items index) | 0.23 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
-           |    └ (items index) | 0.23 kb -> 0.23 kb
-      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
-           |    └ (items index) | 0.23 kb
-      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
-           |    └ (items index) | 0.23 kb -> 0.23 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1847,11 +1833,13 @@ describe('sync storage efficiency: list-query', () => {
 
     // The first mount must hydrate both cold cached queries and their items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
-      await captureHookRemount(() =>
-        env.apiStore.useMultipleListQueries(
-          [{ payload: usersQuery }, { payload: projectsQuery }],
-          { disableRefetchOnMount: true, returnRefetchingStatus: true },
-        ),
+      await captureHookRemount(
+        () =>
+          env.apiStore.useMultipleListQueries(
+            [{ payload: usersQuery }, { payload: projectsQuery }],
+            { disableRefetchOnMount: true, returnRefetchingStatus: true },
+          ),
+        { firstMountSettleMode: 'none', remountSettleMode: 'none' },
       );
 
     expect(
@@ -1877,23 +1865,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.24 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #5 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
            |    └ (item data, <"projects||1>) | 0.11 kb
-           ·
-      2s   | 📖 #1 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
-      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
-           |    └ (items index) | 0.24 kb
-      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
-           |    └ (items index) | 0.24 kb -> 0.24 kb
-      .    | 📖 #4 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
-           |    └ (query data, <{tableId:"projects"}>) | 0.13 kb
-      .    | ✍️ #4 ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
-           |    └ (query data, <{tableId:"projects"}>) | 0.13 kb -> 0.13 kb
-      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
-           |    └ (items index) | 0.24 kb
-      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
-           |    └ (items index) | 0.24 kb -> 0.24 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1944,11 +1915,11 @@ describe('sync storage efficiency: list-query', () => {
       "
       time |
       1s   | ✍️ #1 ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1
-           |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+           |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
       .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.12 kb
+           |    └ (items index) | 0.18 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.12 kb -> 0.18 kb
+           |    └ (items index) | 0.18 kb -> 0.18 kb
       "
     `);
   });

@@ -80,6 +80,7 @@ function createDocPersistenceEnv(options: {
   version?: number;
   getSessionKey?: () => string | false;
   serverData?: TestData;
+  usesRealTimeUpdates?: boolean;
   onPersistentStorageError?: ((error: unknown) => void) | null;
 }) {
   const getSessionKey =
@@ -88,6 +89,7 @@ function createDocPersistenceEnv(options: {
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
     id: options.storeName,
     getSessionKey,
+    usesRealTimeUpdates: options.usesRealTimeUpdates,
     persistentStorage: {
       adapter: 'local-sync',
       schema: wrappedSchema,
@@ -167,6 +169,41 @@ describe('localStorage: document store persistence', () => {
       -> status: success ⋅ data: {name:test, value:42}
       "
     `);
+  });
+
+  test('realtime stores revalidate cached localStorage after first hydration', async () => {
+    setCachedDocumentData('doc-rtu-first-sync', 'sess1', {
+      name: 'stale',
+      value: 0,
+    });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'doc-rtu-first-sync',
+      sessionKey: 'sess1',
+      serverData: { name: 'fresh', value: 1 },
+      usesRealTimeUpdates: true,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:stale, value:0}
+      -> status: refetching ⋅ data: {name:stale, value:0}
+      -> status: success ⋅ data: {name:fresh, value:1}
+      "
+    `);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
   test('hook hydration retries once the localStorage session key becomes available', async () => {
@@ -630,7 +667,7 @@ describe('localStorage: document store persistence', () => {
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
-  test('disableRefetchOnMount keeps cached data without refetching', async () => {
+  test('disableRefetchOnMount still revalidates cached data marked refetchOnMount', async () => {
     const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
     setCachedDocumentData(
       'doc-revalidation-no-refetch',
@@ -663,10 +700,12 @@ describe('localStorage: document store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ data: {name:stale, value:1}
+      -> status: refetching ⋅ data: {name:stale, value:1}
+      -> status: success ⋅ data: {name:fresh, value:99}
       "
     `);
 
-    expect(env.serverMock.numOfFinishedFetches).toBe(0);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
     expect(getStoredEntryTimestamp(key)).toBeGreaterThan(originalTimestamp);
   });
 });

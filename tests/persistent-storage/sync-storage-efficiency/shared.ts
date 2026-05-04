@@ -137,17 +137,33 @@ export async function flushInvalidationPersistence(
   await flushAllTimers();
 }
 
-export async function captureHookRemount<Result>(render: () => Result) {
+type HookRemountSettleMode = 'flushAllTimers' | 'none';
+
+export async function captureHookRemount<Result>(
+  render: () => Result,
+  options: {
+    firstMountSettleMode?: HookRemountSettleMode;
+    remountSettleMode?: HookRemountSettleMode;
+  } = {},
+) {
+  const settleCapturedMount = async (
+    mode: HookRemountSettleMode = 'flushAllTimers',
+  ) => {
+    if (mode === 'flushAllTimers') {
+      await flushAllTimers();
+    }
+  };
+
   const firstMountCapture = startPersistentStorageOperationCapture();
   const firstHook = renderHook(render);
-  await flushAllTimers();
+  await settleCapturedMount(options.firstMountSettleMode);
   const firstMountOperations = firstMountCapture.finish().timelineString;
 
   firstHook.unmount();
 
   const remountCapture = startPersistentStorageOperationCapture();
   const secondHook = renderHook(render);
-  await flushAllTimers();
+  await settleCapturedMount(options.remountSettleMode);
   const remountOperations = remountCapture.finish().timelineString;
 
   return { secondHook, firstMountOperations, remountOperations };

@@ -15,6 +15,7 @@ import {
   flushInvalidationPersistence,
   setProtectedKeysSnapshot,
   settleIndexedDbStorage,
+  settleIndexedDbStorageWithoutTimers,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
 } from './shared';
@@ -53,7 +54,11 @@ describe('indexeddb async storage efficiency: document', () => {
     // Store creation should only queue the startup maintenance pass.
     const startupCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 7 },
+    });
     const startupOperations = startupCapture.finish().timelineString;
 
     expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
@@ -67,10 +72,11 @@ describe('indexeddb async storage efficiency: document', () => {
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useDocument({
-            disableRefetchOnMount: true,
             returnRefetchingStatus: true,
+            disableRefetchOnMount: true,
           }),
       });
 
@@ -82,7 +88,6 @@ describe('indexeddb async storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-remount-flow","document"] keys=["d"] -> ["d"]
-      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-flow","document"] put=["d"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -150,7 +155,11 @@ describe('indexeddb async storage efficiency: document', () => {
       { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
     );
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 9 },
+    });
 
     // Drain the startup scan so this capture isolates the mounted hydration flow.
     await settleStartupBackgroundScan(mockAdapter);
@@ -160,10 +169,11 @@ describe('indexeddb async storage efficiency: document', () => {
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
+        settleStorageWithoutTimers: true,
         render: () =>
           env.apiStore.useDocument({
-            disableRefetchOnMount: true,
             returnRefetchingStatus: true,
+            disableRefetchOnMount: true,
           }),
       });
 
@@ -174,7 +184,6 @@ describe('indexeddb async storage efficiency: document', () => {
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-remount-stale-touch","document"] keys=["d"] -> ["d"]
       47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=[] delete=[] touch=["d"]
-      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-remount-stale-touch","document"] put=["d"] delete=[] touch=[]
       ""
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -198,8 +207,8 @@ describe('indexeddb async storage efficiency: document', () => {
         settleTimeMs: 4300,
         render: () =>
           env.apiStore.useDocument({
-            disableRefetchOnMount: true,
             returnRefetchingStatus: true,
+            disableRefetchOnMount: true,
           }),
       });
 
@@ -225,7 +234,11 @@ describe('indexeddb async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
     // Hydrate once through the public hook, then measure repeated direct reads only.
     await settleStartupBackgroundScan(mockAdapter);
@@ -267,7 +280,11 @@ describe('indexeddb async storage efficiency: document', () => {
       { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
     );
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
     await settleStartupBackgroundScan(mockAdapter);
 
     // Simulate another tab marking the document as offline-protected before the
@@ -294,12 +311,12 @@ describe('indexeddb async storage efficiency: document', () => {
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await advanceTime(250);
-    await settleIndexedDbStorage();
+    await settleIndexedDbStorageWithoutTimers(mockAdapter);
     const operationsBreakdown = touchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
@@ -319,7 +336,6 @@ describe('indexeddb async storage efficiency: document', () => {
       ""
       1ms | 📖 entries.getMany scope=["sess1","doc-startup-touch-offline-marker","document"] keys=["d"] -> ["d"]
       47ms | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=[] delete=[] touch=["d"]
-      1.046s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-startup-touch-offline-marker","document"] put=["d"] delete=[] touch=[]
       ""
     `);
   });
@@ -334,7 +350,11 @@ describe('indexeddb async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
     // Hydrate the cached document through a normal mounted hook first.
     await settleStartupBackgroundScan(mockAdapter);
@@ -378,27 +398,31 @@ describe('indexeddb async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
-    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    // Hydrate cached data and settle the automatic revalidation first so the explicit invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await flushInvalidationPersistence(0);
 
-    // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture =
+    // Update the server copy, invalidate for the mounted hook, then capture fetch completion plus the debounced save.
+    const refetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document', value: 42 });
       env.apiStore.invalidateData('highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish().timelineString;
+    const refetchOperations = refetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
@@ -412,7 +436,7 @@ describe('indexeddb async storage efficiency: document', () => {
 
         i: '["sess1","doc-invalidation-flow","d"]'
       `);
-    expect(invalidationOperations).toMatchInlineSnapshot(`
+    expect(refetchOperations).toMatchInlineSnapshot(`
       ""
       1.855s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-invalidation-flow","document"] put=["d"] delete=[] touch=[]
       ""
@@ -429,36 +453,39 @@ describe('indexeddb async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
-    // Hydrate cached data first so only the invalidation writes are counted below.
+    // Hydrate cached data and settle the automatic revalidation first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture =
+    const firstRefetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document 1', value: 41 });
       env.apiStore.invalidateData('highPriority');
     });
     await advanceTime(900);
-    const firstInvalidationOperations =
-      firstInvalidationCapture.finish().timelineString;
+    const firstRefetchOperations = firstRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 1', value: 41 }`,
     );
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+    expect(firstRefetchOperations).toMatchInlineSnapshot(`"empty"`);
 
-    // A second invalidation before the first debounce flush should replace the pending save.
-    const secondInvalidationCapture =
+    // A second refetch before the first debounce flush should replace the pending save.
+    const secondRefetchCapture =
       startIndexedDbPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document 2', value: 42 });
@@ -466,8 +493,8 @@ describe('indexeddb async storage efficiency: document', () => {
     });
     await advanceTime(1900);
     await settleIndexedDbStorage();
-    const secondInvalidationOperations =
-      secondInvalidationCapture.finish().timelineString;
+    const secondRefetchOperations =
+      secondRefetchCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 2', value: 42 }`,
@@ -481,7 +508,7 @@ describe('indexeddb async storage efficiency: document', () => {
 
         i: '["sess1","doc-coalesced-invalidations","d"]'
       `);
-    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+    expect(secondRefetchOperations).toMatchInlineSnapshot(`
       ""
       1.85s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","doc-coalesced-invalidations","document"] put=["d"] delete=[] touch=[]
       ""
@@ -499,14 +526,18 @@ describe('indexeddb async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({ storeName, sessionKey });
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 8 },
+    });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
     await settleStartupBackgroundScan(mockAdapter);
     const hook = renderHook(() =>
       env.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       }),
     );
     await flushInvalidationPersistence(0);

@@ -207,11 +207,7 @@ describe('persistence + browser tabs sync integration', () => {
     const nameQuery = renderHook(() => {
       const result = tabB.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          fields: ['id', 'name'],
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        },
+        { fields: ['id', 'name'], returnRefetchingStatus: true },
       );
 
       nameQueryRenders.add({ status: result.status, items: result.items });
@@ -261,11 +257,7 @@ describe('persistence + browser tabs sync integration', () => {
     const ageQuery = renderHook(() => {
       const result = tabB.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          fields: ['age'],
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        },
+        { fields: ['age'], returnRefetchingStatus: true },
       );
 
       ageQueryRenders.add({ status: result.status, items: result.items });
@@ -420,7 +412,6 @@ describe('persistence + browser tabs sync integration', () => {
     // Tab B must read the stale persisted document once so the later sync has an active subscriber.
     renderHook(() => {
       const { data, status } = tabB.apiStore.useDocument({
-        disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
