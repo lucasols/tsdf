@@ -36,11 +36,18 @@ import type {
 const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 5;
 const DEFAULT_BASE_COALESCING_WINDOW_MS = 10;
 
+export type DynamicRealtimeThrottleMs = (params: {
+  readonly lastFetchDuration: number;
+  readonly windowIsNotFocused: boolean;
+}) => number;
+
 export type StoreManagerStoreDefaults = {
   /** Default minimum interval between low-priority fetches for attached stores. */
   readonly lowPriorityThrottleMs: number;
   /** Default coalescing window used by attached stores when they do not override it. */
   readonly baseCoalescingWindowMs: number;
+  /** Default adaptive throttle for real-time updates in attached stores. */
+  readonly dynamicRealtimeThrottleMs?: DynamicRealtimeThrottleMs;
   /** Shared window-close blocker used by mutations in attached stores. */
   readonly blockWindowClose: BlockWindowCloseHandler | null;
   /** Default focus revalidation policy for attached stores. */
@@ -230,6 +237,8 @@ export type CreateStoreManagerOptions<
   lowPriorityThrottleMs?: number;
   /** Default coalescing window for attached stores. Defaults to 10ms. */
   baseCoalescingWindowMs?: number;
+  /** Default adaptive throttle for real-time updates in attached stores. Store-level values override it. */
+  dynamicRealtimeThrottleMs?: DynamicRealtimeThrottleMs;
   /** Shared window-close blocker used by mutations in attached stores. Pass `null` to disable. */
   blockWindowClose?: BlockWindowCloseHandler | null;
   /** Global fallback for persistent storage failures when a store does not provide its own handler. */
@@ -338,6 +347,9 @@ export function createStoreManager<
         options.lowPriorityThrottleMs ?? DEFAULT_LOW_PRIORITY_THROTTLE_MS,
       baseCoalescingWindowMs:
         options.baseCoalescingWindowMs ?? DEFAULT_BASE_COALESCING_WINDOW_MS,
+      ...(options.dynamicRealtimeThrottleMs
+        ? { dynamicRealtimeThrottleMs: options.dynamicRealtimeThrottleMs }
+        : {}),
       blockWindowClose: options.blockWindowClose ?? null,
       revalidateOnWindowFocus: options.revalidateOnWindowFocus,
     }),

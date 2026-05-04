@@ -18,6 +18,8 @@ const storeManager = createStoreManager({
   }),
   lowPriorityThrottleMs: 5,
   baseCoalescingWindowMs: 10,
+  dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) =>
+    windowIsNotFocused ? lastFetchDuration * 10 : lastFetchDuration * 2,
   blockWindowClose: null,
   revalidateOnWindowFocus: true,
   onMutationError: (error) => {
@@ -32,22 +34,23 @@ const storeManager = createStoreManager({
 
 Options:
 
-| Option                     | Required | Description                                                                                    |
-| -------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `getSessionKey`            | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.               |
-| `errorNormalizer`          | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                          |
-| `lowPriorityThrottleMs`    | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to `5`.    |
-| `baseCoalescingWindowMs`   | No       | Default window to group fetch requests for attached stores. Defaults to `10`.                  |
-| `blockWindowClose`         | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.              |
-| `revalidateOnWindowFocus`  | No       | Default focus revalidation policy for attached stores. Store options override it.              |
-| `onMutationError`          | No       | Global fallback for mutation failures when a store does not provide its own handler.           |
-| `onPersistentStorageError` | No       | Global fallback for persistent storage failures when a store does not provide its own handler. |
-| `debug`                    | No       | Enables browser-tab sync and persistent-storage debug logs. Pass `true` or a logger function.  |
-| `offlineSession`           | No       | Shared offline config used by stores with `persistentStorage.offline`.                         |
+| Option                      | Required | Description                                                                                    |
+| --------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `getSessionKey`             | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.               |
+| `errorNormalizer`           | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                          |
+| `lowPriorityThrottleMs`     | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to `5`.    |
+| `baseCoalescingWindowMs`    | No       | Default window to group fetch requests for attached stores. Defaults to `10`.                  |
+| `dynamicRealtimeThrottleMs` | No       | Default adaptive throttle for real-time updates in attached stores. Store options override it. |
+| `blockWindowClose`          | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.              |
+| `revalidateOnWindowFocus`   | No       | Default focus revalidation policy for attached stores. Store options override it.              |
+| `onMutationError`           | No       | Global fallback for mutation failures when a store does not provide its own handler.           |
+| `onPersistentStorageError`  | No       | Global fallback for persistent storage failures when a store does not provide its own handler. |
+| `debug`                     | No       | Enables browser-tab sync and persistent-storage debug logs. Pass `true` or a logger function.  |
+| `offlineSession`            | No       | Shared offline config used by stores with `persistentStorage.offline`.                         |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
 
-Stores inherit the manager's `lowPriorityThrottleMs` and `baseCoalescingWindowMs` unless they provide their own store-level overrides. `blockWindowClose` is manager-only so window-close mutation protection is consistent across attached stores.
+Stores inherit the manager's `lowPriorityThrottleMs`, `baseCoalescingWindowMs`, and `dynamicRealtimeThrottleMs` unless they provide their own store-level overrides. `blockWindowClose` is manager-only so window-close mutation protection is consistent across attached stores.
 
 Store-level options can explicitly disable inherited defaults when the option supports disabling: use `revalidateOnWindowFocus: false`, `onMutationError: null`, or `persistentStorage.onPersistentStorageError: null`.
 

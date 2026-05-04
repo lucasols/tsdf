@@ -59,11 +59,13 @@ test('store defaults use built-in timing values and disabled window-close blocki
 
 test('store defaults can be configured on the store manager', () => {
   const blockWindowClose = vi.fn(() => ({ unblock: vi.fn() }));
+  const dynamicRealtimeThrottleMs = vi.fn(() => 300);
   const storeManager = createStoreManager({
     getSessionKey: () => 'shared-session',
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 25,
     baseCoalescingWindowMs: 50,
+    dynamicRealtimeThrottleMs,
     blockWindowClose,
     revalidateOnWindowFocus: true,
   });
@@ -72,11 +74,64 @@ test('store defaults can be configured on the store manager', () => {
     ...storeManager.storeDefaults,
     blockWindowClose:
       storeManager.storeDefaults.blockWindowClose === blockWindowClose,
+    dynamicRealtimeThrottleMs:
+      storeManager.storeDefaults.dynamicRealtimeThrottleMs ===
+      dynamicRealtimeThrottleMs,
   }).toMatchInlineSnapshot(`
     baseCoalescingWindowMs: 50
     blockWindowClose: '✅'
+    dynamicRealtimeThrottleMs: '✅'
     lowPriorityThrottleMs: 25
     revalidateOnWindowFocus: '✅'
+  `);
+});
+
+test('stores inherit manager dynamic realtime throttling unless they override it', async () => {
+  const managerDynamicRealtimeThrottleMs = vi.fn(() => 300);
+  const storeDynamicRealtimeThrottleMs = vi.fn(() => 700);
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    errorNormalizer: normalizeError,
+    dynamicRealtimeThrottleMs: managerDynamicRealtimeThrottleMs,
+  });
+
+  const inheritedEnv = createDocumentStoreTestEnv(1, {
+    id: 'manager-rtu-throttle-doc',
+    storeManager,
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
+  const overrideEnv = createDocumentStoreTestEnv(1, {
+    id: 'store-rtu-throttle-doc',
+    storeManager,
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: storeDynamicRealtimeThrottleMs,
+  });
+
+  renderHook(() => inheritedEnv.apiStore.useDocument().data?.value);
+  renderHook(() => overrideEnv.apiStore.useDocument().data?.value);
+  await flushAllTimers();
+
+  // Seed a real-time fetch duration so the next RTU has a previous fetch cost to
+  // feed into the adaptive throttle callback.
+  inheritedEnv.emulateExternalRTU(2);
+  overrideEnv.emulateExternalRTU(2);
+  await flushAllTimers();
+
+  managerDynamicRealtimeThrottleMs.mockClear();
+  storeDynamicRealtimeThrottleMs.mockClear();
+
+  inheritedEnv.emulateExternalRTU(3);
+  overrideEnv.emulateExternalRTU(3);
+
+  expect(managerDynamicRealtimeThrottleMs).toHaveBeenCalledOnce();
+  expect(managerDynamicRealtimeThrottleMs.mock.calls).toMatchInlineSnapshot(`
+    - - { lastFetchDuration: 800, windowIsNotFocused: '❌' }
+  `);
+  expect(storeDynamicRealtimeThrottleMs).toHaveBeenCalledOnce();
+  expect(storeDynamicRealtimeThrottleMs.mock.calls).toMatchInlineSnapshot(`
+    - - { lastFetchDuration: 800, windowIsNotFocused: '❌' }
   `);
 });
 

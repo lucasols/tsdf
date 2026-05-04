@@ -8,16 +8,16 @@ TSDF has built-in support for real-time data sources like WebSockets or Server-S
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
   errorNormalizer: normalizeError,
+  dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {
+    if (windowIsNotFocused) return lastFetchDuration * 10;
+    return lastFetchDuration * 2;
+  },
 });
 
 const store = createDocumentStore<Data>({
   id: 'document-data',
   storeManager,
   usesRealTimeUpdates: true,
-  dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {
-    if (windowIsNotFocused) return lastFetchDuration * 10;
-    return lastFetchDuration * 2;
-  },
   // ...other options
 });
 ```
@@ -77,7 +77,7 @@ websocket.on('task-changed', ({ taskId }) => {
 
 ## Adaptive Throttling
 
-The `dynamicRealtimeThrottleMs` function controls how often real-time invalidations trigger actual fetches. It receives the duration of the last fetch and whether the window is focused:
+The `dynamicRealtimeThrottleMs` function controls how often real-time invalidations trigger actual fetches. Configure it once on `createStoreManager(...)` to share a default across stores, or on an individual store to override the manager default. It receives the duration of the last fetch and whether the window is focused:
 
 ```ts
 dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {

@@ -1119,7 +1119,7 @@ type ListQueryStoreOptionsBase<
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   /** Default number of items requested by list-query fetches. Defaults to 50. */
   defaultQuerySize?: number;
-  /** Max items per item batch - triggers immediate fetch when reached. */
+  /** Max items per item batch. Defaults to 50. Triggers an immediate fetch when reached. */
   maxItemBatchSize?: number;
   /** Maximum number of cached items kept in memory. Defaults to 5,000. Item pressure may evict whole inactive queries to avoid leaving cached queries partially loaded. */
   maxItems?: number;
@@ -1293,7 +1293,7 @@ export function createListQueryStore<
     batchFetchItemFn,
     getItemsBatchKey,
     defaultQuerySize = 50,
-    maxItemBatchSize,
+    maxItemBatchSize = 50,
     maxItems = 5_000,
     maxQueries = 1_000,
     onStateCleanup,
@@ -1323,6 +1323,9 @@ export function createListQueryStore<
   const baseCoalescingWindowMs =
     storeBaseCoalescingWindowMs ??
     storeManager.storeDefaults.baseCoalescingWindowMs;
+  const resolvedDynamicRealtimeThrottleMs =
+    dynamicRealtimeThrottleMs ??
+    storeManager.storeDefaults.dynamicRealtimeThrottleMs;
   const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
   const resolvedRevalidateOnWindowFocus =
     revalidateOnWindowFocus ??
@@ -1679,9 +1682,9 @@ export function createListQueryStore<
 
   const events = evtmitter<ListQueryStoreEvents>();
 
-  const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
+  const wrappedDynamicRealtimeThrottleMs = resolvedDynamicRealtimeThrottleMs
     ? (lastFetchDuration: number) =>
-        dynamicRealtimeThrottleMs({
+        resolvedDynamicRealtimeThrottleMs({
           lastFetchDuration,
           windowIsNotFocused: !getWindowIsFocused(),
         })

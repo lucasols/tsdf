@@ -15,6 +15,7 @@ export { IsOffScreenContext } from './isOffScreenContext';
 export {
   createStoreManager,
   type CreateStoreManagerOptions,
+  type DynamicRealtimeThrottleMs,
   type StoreManager,
 } from './storeManager';
 export type {

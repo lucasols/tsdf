@@ -850,6 +850,9 @@ export function createCollectionStore<
   const baseCoalescingWindowMs =
     storeBaseCoalescingWindowMs ??
     storeManager.storeDefaults.baseCoalescingWindowMs;
+  const resolvedDynamicRealtimeThrottleMs =
+    dynamicRealtimeThrottleMs ??
+    storeManager.storeDefaults.dynamicRealtimeThrottleMs;
   const blockWindowClose = storeManager.storeDefaults.blockWindowClose;
   const resolvedRevalidateOnWindowFocus =
     revalidateOnWindowFocus ??
@@ -1260,9 +1263,9 @@ export function createCollectionStore<
   }
 
   const events = evtmitter<CollectionStoreEvents>();
-  const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
+  const wrappedDynamicRealtimeThrottleMs = resolvedDynamicRealtimeThrottleMs
     ? (lastFetchDuration: number) =>
-        dynamicRealtimeThrottleMs({
+        resolvedDynamicRealtimeThrottleMs({
           lastFetchDuration,
           windowIsNotFocused: !getWindowIsFocused(),
         })

@@ -99,7 +99,7 @@ Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 
 - **Batch item fetching** — coalesce multiple item fetches in the same scheduler window into one network request returning `Map<payload, ItemState | Error>`.
 - **Collection batch fetch** — `batchFetchFn(payloads, signal, batchKey)` plus optional `getItemsBatchKey(payload)` and `maxBatchSize`.
-- **List Query batch item fetch** — `batchFetchItemFn(requests, { signal, batchKey })` plus optional `getItemsBatchKey(payload)` and `maxItemBatchSize`. Each request is `{ payload, fields? }`, so batch item fetching works with partial resources.
+- **List Query batch item fetch** — `batchFetchItemFn(requests, { signal, batchKey })` plus optional `getItemsBatchKey(payload)` and `maxItemBatchSize` (defaults to 50). Each request is `{ payload, fields? }`, so batch item fetching works with partial resources.
 - **Batch groups** — `getItemsBatchKey` groups items into separate batch schedulers; return `false` to opt out for that item and use the per-item fetch function.
 - **Bulk hooks** — `useMultipleItems` and `useMultipleListQueries` let callers subscribe to many resources through one hook while sharing the same scheduler/cache machinery.
 - **Selectors + deep equality** — hook `selector` options reduce re-renders by returning only the data the component needs.
@@ -238,6 +238,9 @@ createDocumentStore({
     windowIsNotFocused ? lastFetchDuration * 10 : lastFetchDuration * 2,
   // ...
 });
+
+// Or configure dynamicRealtimeThrottleMs once on createStoreManager(...);
+// store-level callbacks override the manager default.
 
 socket.on('user-updated', (data) =>
   store.updateState((d) => Object.assign(d, data)),

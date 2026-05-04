@@ -888,9 +888,9 @@ describe('offline fetching scenarios', () => {
 
     expect(pick(env.apiStore.getQueryState(usersQuery), ['items', 'hasMore']))
       .toMatchInlineSnapshot(`
-      hasMore: '❌'
-      items: ['"users||1', '"users||2']
-    `);
+        hasMore: '❌'
+        items: ['"users||1', '"users||2']
+      `);
 
     storage.listQuery.seedItem('users', 1, { id: 1, name: 'Ada' });
     storage.listQuery.seedItem('users', 2, { id: 2, name: 'Grace' });
@@ -913,9 +913,9 @@ describe('offline fetching scenarios', () => {
     expect(env.apiStore.loadMore(usersQuery, 1)).toBe('skipped');
     expect(pick(env.apiStore.getQueryState(usersQuery), ['items', 'hasMore']))
       .toMatchInlineSnapshot(`
-      hasMore: '❌'
-      items: ['"users||1', '"users||2']
-    `);
+        hasMore: '❌'
+        items: ['"users||1', '"users||2']
+      `);
   });
 
   test('list-query loadMore keeps fresher materialized item data while offline', async () => {

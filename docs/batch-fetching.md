@@ -104,7 +104,7 @@ getItemsBatchKey: (payload) => {
 
 ## Max Batch Size
 
-When `maxBatchSize` is set, the scheduler triggers an immediate fetch (skipping the remaining coalescing window) once the batch reaches that size:
+When `maxBatchSize` is set, the scheduler triggers an immediate fetch (skipping the remaining coalescing window) once the batch reaches that size. List Query Store uses `maxItemBatchSize` for the same behavior, and it defaults to `50`:
 
 ```ts
 {

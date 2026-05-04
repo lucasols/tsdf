@@ -11,7 +11,7 @@ import {
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { flushAllTimers, range } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -164,6 +164,35 @@ describe('batch coalescing basic behavior', () => {
 });
 
 describe('maxItemBatchSize behavior', () => {
+  test('default maxItemBatchSize triggers immediate batch fetch at 50 items', async () => {
+    const manyItemsServerData = {
+      table1: range(1, 50).map((id) => ({ id, name: `Item ${id}` })),
+    };
+    const env = createListQueryStoreTestEnv(manyItemsServerData, {
+      baseCoalescingWindowMs: 100,
+      useBatchFetch: true,
+    });
+
+    // Queue exactly the default cap. The batch should start immediately instead
+    // of waiting for the 100ms coalescing window.
+    for (const id of range(1, 50)) {
+      env.scheduleItemFetch('highPriority', `table1||${id}`);
+    }
+
+    await flushAllTimers();
+
+    expect(
+      env.serverTable
+        .getRequestHistory('list')
+        .map((request) => ({
+          time: request.time,
+          returned_items: request.returned_items,
+        })),
+    ).toMatchInlineSnapshot(`
+      - { returned_items: 50, time: '0 -> 800ms | duration: 800ms' }
+    `);
+  });
+
   test('reaching maxItemBatchSize triggers immediate batch fetch', async () => {
     const env = createListQueryStoreTestEnv(serverData, {
       baseCoalescingWindowMs: 100,

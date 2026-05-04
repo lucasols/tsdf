@@ -208,7 +208,7 @@ export function createListQueryStoreTestEnv<
     usesRealTimeUpdates?: boolean;
     /** Enable batch fetch mode - uses batchFetchItemFn instead of per-item fetchItemFn */
     useBatchFetch?: boolean;
-    /** Max items per batch (only used when useBatchFetch is true) */
+    /** Max items per batch. Defaults to 50 in the store when omitted. Only used when useBatchFetch is true. */
     maxItemBatchSize?: number;
     maxItems?: number;
     maxQueries?: number;
