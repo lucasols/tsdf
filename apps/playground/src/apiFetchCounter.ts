@@ -54,10 +54,11 @@ export function finishApiFetchCall(
   emit();
 }
 
-export function useApiFetchCalls(): ApiFetchCall[] {
-  return useSyncExternalStore(subscribe, getSnapshot);
+export function clearApiFetchCalls(): void {
+  apiFetchCalls = [];
+  emit();
 }
 
-export function useApiFetchCount(): number {
-  return useApiFetchCalls().length;
+export function useApiFetchCalls(): ApiFetchCall[] {
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

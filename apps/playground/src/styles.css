@@ -110,6 +110,22 @@ h3 {
   font-weight: 650;
 }
 
+.api-fetch-summary {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.api-fetch-summary strong {
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #17623d;
+  background: #dff6e8;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .primary-button {
   border-color: #1d6d74;
   color: #ffffff;
@@ -454,6 +470,18 @@ dd {
 
 .api-calls-section {
   grid-column: 1 / -1;
+}
+
+.api-calls-actions {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+}
+
+.api-calls-actions button:disabled {
+  color: #8a96a3;
+  background: #f3f5f7;
+  cursor: not-allowed;
 }
 
 .debug-grid h3 {

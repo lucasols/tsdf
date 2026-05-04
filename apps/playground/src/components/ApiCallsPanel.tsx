@@ -1,4 +1,4 @@
-import { useApiFetchCalls } from '../apiFetchCounter';
+import { clearApiFetchCalls, useApiFetchCalls } from '../apiFetchCounter';
 import { Metric } from './common';
 
 export function ApiCallsPanel() {
@@ -8,10 +8,19 @@ export function ApiCallsPanel() {
     <section className="api-calls-section">
       <div className="activity-header">
         <h3>API calls</h3>
-        <Metric
-          label="Total"
-          value={apiFetchCalls.length}
-        />
+        <div className="api-calls-actions">
+          <button
+            type="button"
+            disabled={apiFetchCalls.length === 0}
+            onClick={clearApiFetchCalls}
+          >
+            Clear
+          </button>
+          <Metric
+            label="Total"
+            value={apiFetchCalls.length}
+          />
+        </div>
       </div>
       <ol className="api-call-list">
         {apiFetchCalls.length === 0 ? (
