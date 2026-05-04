@@ -1682,13 +1682,11 @@ export function createListQueryStore<
 
   const events = evtmitter<ListQueryStoreEvents>();
 
-  const wrappedDynamicRealtimeThrottleMs = resolvedDynamicRealtimeThrottleMs
-    ? (lastFetchDuration: number) =>
-        resolvedDynamicRealtimeThrottleMs({
-          lastFetchDuration,
-          windowIsNotFocused: !getWindowIsFocused(),
-        })
-    : undefined;
+  const wrappedDynamicRealtimeThrottleMs = (lastFetchDuration: number) =>
+    resolvedDynamicRealtimeThrottleMs({
+      lastFetchDuration,
+      windowIsNotFocused: !getWindowIsFocused(),
+    });
 
   function getCoalescingWindowMs(): number {
     return (

@@ -69,13 +69,13 @@ This is useful for background refetches that should yield to user-initiated acti
 
 ## Configuration Reference
 
-| Option                              | Required | Description                                                                                                                          |
-| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `lowPriorityThrottleMs`             | No       | Manager default minimum interval between low-priority fetches, or a store-level override. Defaults to `5`                            |
-| `baseCoalescingWindowMs`            | No       | Manager default time window to group multiple requests into a single batch, or a store-level override. Defaults to `10`              |
-| `mediumPriorityDelayMs`             | No       | Delay before medium-priority fetches execute                                                                                         |
-| `dynamicRealtimeThrottleMs`         | No       | Manager default or store override returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md) |
-| `maxBatchSize` / `maxItemBatchSize` | No       | Collection/ListQuery batch cap. List Query `maxItemBatchSize` defaults to `50`. Triggers immediate fetch when reached                |
+| Option                              | Required | Description                                                                                                                                                                                  |
+| ----------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lowPriorityThrottleMs`             | No       | Manager default minimum interval between low-priority fetches, or a store-level override. Defaults to `5`                                                                                    |
+| `baseCoalescingWindowMs`            | No       | Manager default time window to group multiple requests into a single batch, or a store-level override. Defaults to `10`                                                                      |
+| `mediumPriorityDelayMs`             | No       | Delay before medium-priority fetches execute                                                                                                                                                 |
+| `dynamicRealtimeThrottleMs`         | No       | Manager default or store override returning throttle duration for real-time updates. Built-in default: `100ms` focused, `1000ms` background. See [Real-Time Updates](./real-time-updates.md) |
+| `maxBatchSize` / `maxItemBatchSize` | No       | Collection/ListQuery batch cap. List Query `maxItemBatchSize` defaults to `50`. Triggers immediate fetch when reached                                                                        |
 
 ## Typical Configuration
 

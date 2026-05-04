@@ -1072,13 +1072,11 @@ export function createDocumentStore<
     }
   }
 
-  const wrappedDynamicRealtimeThrottleMs = resolvedDynamicRealtimeThrottleMs
-    ? (lastFetchDuration: number) =>
-        resolvedDynamicRealtimeThrottleMs({
-          lastFetchDuration,
-          windowIsNotFocused: !getWindowIsFocused(),
-        })
-    : undefined;
+  const wrappedDynamicRealtimeThrottleMs = (lastFetchDuration: number) =>
+    resolvedDynamicRealtimeThrottleMs({
+      lastFetchDuration,
+      windowIsNotFocused: !getWindowIsFocused(),
+    });
 
   function getAutomaticCoalescingWindowMs(): number {
     return browserTabsPriority.getCoalescingWindowMs(baseCoalescingWindowMs);

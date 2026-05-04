@@ -47,12 +47,18 @@ export type StoreManagerStoreDefaults = {
   /** Default coalescing window used by attached stores when they do not override it. */
   readonly baseCoalescingWindowMs: number;
   /** Default adaptive throttle for real-time updates in attached stores. */
-  readonly dynamicRealtimeThrottleMs?: DynamicRealtimeThrottleMs;
+  readonly dynamicRealtimeThrottleMs: DynamicRealtimeThrottleMs;
   /** Shared window-close blocker used by mutations in attached stores. */
   readonly blockWindowClose: BlockWindowCloseHandler | null;
   /** Default focus revalidation policy for attached stores. */
   readonly revalidateOnWindowFocus: boolean | (() => boolean) | undefined;
 };
+
+function defaultDynamicRealtimeThrottleMs({
+  windowIsNotFocused,
+}: Parameters<DynamicRealtimeThrottleMs>[0]): number {
+  return windowIsNotFocused ? 1_000 : 100;
+}
 
 export type StoreManagerMutationErrorHandler = (
   error: unknown,
@@ -347,9 +353,8 @@ export function createStoreManager<
         options.lowPriorityThrottleMs ?? DEFAULT_LOW_PRIORITY_THROTTLE_MS,
       baseCoalescingWindowMs:
         options.baseCoalescingWindowMs ?? DEFAULT_BASE_COALESCING_WINDOW_MS,
-      ...(options.dynamicRealtimeThrottleMs
-        ? { dynamicRealtimeThrottleMs: options.dynamicRealtimeThrottleMs }
-        : {}),
+      dynamicRealtimeThrottleMs:
+        options.dynamicRealtimeThrottleMs ?? defaultDynamicRealtimeThrottleMs,
       blockWindowClose: options.blockWindowClose ?? null,
       revalidateOnWindowFocus: options.revalidateOnWindowFocus,
     }),

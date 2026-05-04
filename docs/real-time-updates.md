@@ -77,7 +77,7 @@ websocket.on('task-changed', ({ taskId }) => {
 
 ## Adaptive Throttling
 
-The `dynamicRealtimeThrottleMs` function controls how often real-time invalidations trigger actual fetches. Configure it once on `createStoreManager(...)` to share a default across stores, or on an individual store to override the manager default. It receives the duration of the last fetch and whether the window is focused:
+The `dynamicRealtimeThrottleMs` function controls how often real-time invalidations trigger actual fetches. TSDF defaults to `100ms` while focused and `1000ms` while the window is in the background. Configure it once on `createStoreManager(...)` to share a custom default across stores, or on an individual store to override the manager default. It receives the duration of the last fetch and whether the window is focused:
 
 ```ts
 dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {

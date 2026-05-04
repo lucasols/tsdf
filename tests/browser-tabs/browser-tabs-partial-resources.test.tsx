@@ -539,7 +539,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['age', 'name']`,
+    `fields: ['name', 'age']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
@@ -573,8 +573,10 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     2.62s | Alice:30      | -- timeline-cleared
     .     | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30      | [users||1] received-ws-data-change-event
-    2.63s | Alice:30      | 🟠 [users||1] >fetch-started
-    3.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    .     | Alice:30      | rt-fetch-scheduled (delay: 100ms)
+    2.63s | Alice:30      | rt-fetch-cancelled
+    .     | Alice:30      | 🟠 [users||1] >fetch-started
+    3.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
     .     | Alicia:31     | [name-age-hook] ui-changed
     5.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
     "
@@ -584,7 +586,9 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     time  | city-hook | name-age-hook |
     2.62s | London    | Alice:30      | -- timeline-cleared
     .     | London    | Alice:30      | [users||1] received-ws-data-change-event
+    .     | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
     3.43s | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .     | London    | Alice:30      | rt-fetch-cancelled
     .     | London    | Alicia:31     | [name-age-hook] ui-changed
     4.44s | London    | Alicia:31     | 🟠 [users||1] >fetch-started
     5.24s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
@@ -670,7 +674,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['age', 'name']`,
+    `fields: ['name', 'age']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
@@ -684,8 +688,10 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     2.62s | Alice:30  | -- timeline-cleared
     .     | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30  | [users||1] received-ws-data-change-event
-    2.63s | Alice:30  | 🟠 [users||1] >fetch-started
-    3.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    .     | Alice:30  | rt-fetch-scheduled (delay: 100ms)
+    2.63s | Alice:30  | rt-fetch-cancelled
+    .     | Alice:30  | 🟠 [users||1] >fetch-started
+    3.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
     .     | Alicia:31 | [name-age] ui-changed
     5.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
     "
@@ -695,7 +701,9 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     time  | name-age-city    |
     2.62s | Alice:30:London  | -- timeline-cleared
     .     | Alice:30:London  | [users||1] received-ws-data-change-event
+    .     | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
     3.43s | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .     | Alice:30:London  | rt-fetch-cancelled
     .     | Alicia:31:London | [name-age-city] ui-changed
     4.44s | Alicia:31:London | 🟠 [users||1] >fetch-started
     5.24s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
@@ -775,7 +783,9 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
     2.62s | Alice:30   | Bob:25      | -- timeline-cleared
     .     | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
-    2.63s | Alice:30   | Bob:25      | 🟠 >list-fetch-started
+    .     | Alice:30   | Bob:25      | rt-fetch-scheduled (delay: 100ms)
+    2.63s | Alice:30   | Bob:25      | rt-fetch-cancelled
+    .     | Alice:30   | Bob:25      | 🟠 >list-fetch-started
     3.43s | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
     .     | Alicia:31  | Bob:25      | [first-item] ui-changed
     5.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
@@ -786,7 +796,9 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
     time  | first-item       | second-item  |
     2.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
     .     | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
+    .     | Alice:30:London  | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
     3.43s | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Alice:30:London  | Bob:25:Paris | rt-fetch-cancelled
     .     | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
     4.44s | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
     5.24s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})

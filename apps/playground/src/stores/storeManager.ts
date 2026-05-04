@@ -20,7 +20,6 @@ export const storeManager = createStoreManager({
   errorNormalizer: normalizeError,
   revalidateOnWindowFocus: true,
   debug: true,
-  dynamicRealtimeThrottleMs: () => 500,
   onMutationError(error) {
     console.warn('[tsdf playground] mutation failed', error);
   },

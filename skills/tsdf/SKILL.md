@@ -240,7 +240,8 @@ createDocumentStore({
 });
 
 // Or configure dynamicRealtimeThrottleMs once on createStoreManager(...);
-// store-level callbacks override the manager default.
+// store-level callbacks override the manager default. The built-in manager
+// default is 100ms focused and 1000ms in the background.
 
 socket.on('user-updated', (data) =>
   store.updateState((d) => Object.assign(d, data)),

@@ -1263,13 +1263,11 @@ export function createCollectionStore<
   }
 
   const events = evtmitter<CollectionStoreEvents>();
-  const wrappedDynamicRealtimeThrottleMs = resolvedDynamicRealtimeThrottleMs
-    ? (lastFetchDuration: number) =>
-        resolvedDynamicRealtimeThrottleMs({
-          lastFetchDuration,
-          windowIsNotFocused: !getWindowIsFocused(),
-        })
-    : undefined;
+  const wrappedDynamicRealtimeThrottleMs = (lastFetchDuration: number) =>
+    resolvedDynamicRealtimeThrottleMs({
+      lastFetchDuration,
+      windowIsNotFocused: !getWindowIsFocused(),
+    });
 
   const storeEvents = evtmitter<CollectionStoreStoreEvents<ItemPayload>>();
 

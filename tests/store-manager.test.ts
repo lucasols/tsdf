@@ -50,9 +50,24 @@ test('store defaults use built-in timing values and disabled window-close blocki
     errorNormalizer: normalizeError,
   });
 
-  expect(storeManager.storeDefaults).toMatchInlineSnapshot(`
+  const { dynamicRealtimeThrottleMs, ...storeDefaults } =
+    storeManager.storeDefaults;
+
+  expect({
+    ...storeDefaults,
+    focusedRealtimeThrottleMs: dynamicRealtimeThrottleMs({
+      lastFetchDuration: 800,
+      windowIsNotFocused: false,
+    }),
+    backgroundRealtimeThrottleMs: dynamicRealtimeThrottleMs({
+      lastFetchDuration: 800,
+      windowIsNotFocused: true,
+    }),
+  }).toMatchInlineSnapshot(`
+    backgroundRealtimeThrottleMs: 1000
     baseCoalescingWindowMs: 10
     blockWindowClose: null
+    focusedRealtimeThrottleMs: 100
     lowPriorityThrottleMs: 5
   `);
 });
