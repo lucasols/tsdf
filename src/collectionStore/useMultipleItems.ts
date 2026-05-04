@@ -21,7 +21,12 @@ import {
 } from '../persistentStorage/offline/entityMetadata';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType } from '../requestScheduler';
-import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
+import {
+  observeAutomaticFetchStatus,
+  shouldScheduleAutomaticFetch,
+  tryClaimAutomaticFetchSlot,
+  type AutomaticFetchRetryState,
+} from '../utils/automaticFetchPolicy';
 import {
   getPayloadDebounceOptions,
   shouldDebouncePayload,
@@ -276,6 +281,10 @@ export function useMultipleItems<
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
+  const automaticRetryState = useConst<AutomaticFetchRetryState>(
+    () => new Map(),
+  );
+
   const visibleStoreState = useMemo(() => {
     return storeState.map(
       (
@@ -351,6 +360,22 @@ export function useMultipleItems<
     selector,
     storeState,
   ]);
+
+  useEffect(() => {
+    for (const { itemKey, isOffScreen } of queriesWithId) {
+      if (isOffScreen) {
+        automaticRetryState.delete(itemKey);
+        continue;
+      }
+
+      observeAutomaticFetchStatus(
+        automaticRetryState,
+        itemKey,
+        store.state[itemKey]?.status,
+      );
+    }
+  }, [automaticRetryState, queriesWithId, store, visibleStoreState]);
+
   useOnEvtmitterEvent(events, 'invalidateData', ({ payload: event }) => {
     for (const {
       itemKey,
@@ -444,7 +469,12 @@ export function useMultipleItems<
               disableRefetches,
               disableRefetchOnMount,
               refetchOnMount: itemState?.refetchOnMount ?? false,
-            })
+            }) &&
+            tryClaimAutomaticFetchSlot(
+              automaticRetryState,
+              itemId,
+              itemState?.status,
+            )
           ) {
             scheduleAutomaticFetch(fetchType, payload);
           }
@@ -460,8 +490,9 @@ export function useMultipleItems<
       effectState.cancelled = true;
     };
   }, [
-    getItemState,
+    automaticRetryState,
     fetchQueriesWithId,
+    getItemState,
     ignoreItemsInRefetchOnMount,
     preloadItems,
     preloadItemsBeforePaint,

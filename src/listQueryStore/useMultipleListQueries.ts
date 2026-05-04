@@ -22,7 +22,13 @@ import {
 } from '../persistentStorage/offline/entityMetadata';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
-import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
+import {
+  createFieldsResourceSignature,
+  observeAutomaticFetchStatus,
+  shouldScheduleAutomaticFetch,
+  tryClaimAutomaticFetchSlot,
+  type AutomaticFetchRetryState,
+} from '../utils/automaticFetchPolicy';
 import {
   getPayloadDebounceOptions,
   shouldDebouncePayload,
@@ -173,6 +179,7 @@ export function useMultipleListQueries<
     key: string;
     payload: QueryPayload;
     fields: FieldsInput | undefined;
+    retrySignature: string;
     disableRefetches: boolean;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
@@ -190,33 +197,40 @@ export function useMultipleListQueries<
   } | null;
 
   const queriesWithId = useMemo((): QueryWithId[] => {
-    return queries.map((queryProps) => ({
-      key: getQueryKey(queryProps.payload),
-      payload: queryProps.payload,
-      fields: queryProps.fields,
-      disableRefetches:
-        queryProps.disableRefetches ?? allItemsDisableRefetches ?? false,
-      disableRefetchOnMount:
-        queryProps.disableRefetchOnMount ??
-        allItemsDisableRefetchOnMount ??
-        globalDisableRefetchOnMount ??
-        false,
-      returnIdleStatus:
-        queryProps.returnIdleStatus ?? allItemsReturnIdleStatus ?? false,
-      returnRefetchingStatus:
-        queryProps.returnRefetchingStatus ??
-        allItemsReturnRefetchingStatus ??
-        false,
-      showPartialAsRefetching:
-        queryProps.showPartialAsRefetching ??
-        allItemsShowPartialAsRefetching ??
-        false,
-      omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
-      isOffScreen:
-        queryProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
-      loadSize: queryProps.loadSize ?? allItemsLoadSize,
-      queryMetadata: queryProps.queryMetadata,
-    }));
+    return queries.map((queryProps) => {
+      const key = getQueryKey(queryProps.payload);
+      const loadSize = queryProps.loadSize ?? allItemsLoadSize;
+      return {
+        key,
+        payload: queryProps.payload,
+        fields: queryProps.fields,
+        retrySignature: `${key}|${createFieldsResourceSignature(queryProps.fields)}|${loadSize ?? ''}`,
+        disableRefetches:
+          queryProps.disableRefetches ?? allItemsDisableRefetches ?? false,
+        disableRefetchOnMount:
+          queryProps.disableRefetchOnMount ??
+          allItemsDisableRefetchOnMount ??
+          globalDisableRefetchOnMount ??
+          false,
+        returnIdleStatus:
+          queryProps.returnIdleStatus ?? allItemsReturnIdleStatus ?? false,
+        returnRefetchingStatus:
+          queryProps.returnRefetchingStatus ??
+          allItemsReturnRefetchingStatus ??
+          false,
+        showPartialAsRefetching:
+          queryProps.showPartialAsRefetching ??
+          allItemsShowPartialAsRefetching ??
+          false,
+        omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
+        isOffScreen:
+          queryProps.isOffScreen ??
+          allItemsIsOffScreen ??
+          isOffScreenFromContext,
+        loadSize,
+        queryMetadata: queryProps.queryMetadata,
+      };
+    });
   }, [
     queries,
     getQueryKey,
@@ -989,6 +1003,30 @@ export function useMultipleListQueries<
     ),
     { equalityFn: deepEqual },
   );
+  const automaticRetryState = useConst<AutomaticFetchRetryState>(
+    () => new Map(),
+  );
+
+  useEffect(() => {
+    for (const queryConfig of queriesWithId) {
+      if (queryConfig.isOffScreen) {
+        automaticRetryState.delete(queryConfig.retrySignature);
+        continue;
+      }
+
+      observeAutomaticFetchStatus(
+        automaticRetryState,
+        queryConfig.retrySignature,
+        resolveEffectiveQuery(store.state, queryConfig)?.query.status,
+      );
+    }
+  }, [
+    automaticRetryState,
+    queriesWithId,
+    resolveEffectiveQuery,
+    store,
+    visibleStoreState,
+  ]);
 
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {
     for (const {
@@ -1089,6 +1127,7 @@ export function useMultipleListQueries<
         loadSize,
         disableRefetches,
         disableRefetchOnMount,
+        retrySignature,
       } of fetchQueriesWithId) {
         removedQueries.delete(queryId);
 
@@ -1217,7 +1256,12 @@ export function useMultipleListQueries<
             disableRefetchOnMount,
             refetchOnMount: queryState?.refetchOnMount ?? false,
             skipFreshFetch: !!partialResources,
-          })
+          }) &&
+          tryClaimAutomaticFetchSlot(
+            automaticRetryState,
+            retrySignature,
+            effectiveQueryState?.status,
+          )
         ) {
           stickyDerivedQueryKeys.delete(queryId);
           scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
@@ -1246,6 +1290,7 @@ export function useMultipleListQueries<
     scheduleAutomaticListQueryFetch,
     partialResources,
     autoFetchSignals,
+    automaticRetryState,
     itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
     getHighestPendingInvalidationPriority,

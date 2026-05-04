@@ -12,8 +12,11 @@ import {
   vi,
 } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import {
+  getDefaultLowPriorityThrottleMs,
+  TEST_INITIAL_TIME,
+} from '../mocks/testEnvUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -833,6 +836,168 @@ describe('useItem isolated tests', () => {
       -> status: error ⋅ payload: 1 ⋅ isLoading: ❌ ⋅ data: null ⋅ error: error
       "
     `);
+  });
+
+  test('fast item errors suppress immediate rerender retries', async () => {
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
+
+    env.serverTable.setNextFetchError('1', 'fast failure');
+
+    const { rerender, result } = renderHook(
+      ({ version }: { version: number }) => {
+        const [item] = env.apiStore.useMultipleItems([{ payload: '1' }], {
+          selector: (data) => (data ? `${data.value.title}-${version}` : null),
+        });
+
+        return item;
+      },
+      { initialProps: { version: 0 } },
+    );
+
+    await flushAllTimers();
+
+    expect(result.current?.status).toBe('error');
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    for (const version of [1, 2, 3]) {
+      rerender({ version });
+      await flushAllTimers();
+    }
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('off-screen item hooks re-enter like a fresh mount after a fast error', async () => {
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
+
+    env.serverTable.setNextFetchError('1', 'fast failure');
+
+    const { rerender, result } = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) => {
+        const [item] = env.apiStore.useMultipleItems([
+          { payload: '1', isOffScreen },
+        ]);
+
+        return item;
+      },
+      { initialProps: { isOffScreen: false } },
+    );
+
+    await flushAllTimers();
+
+    expect(result.current?.status).toBe('error');
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    // Moving off-screen is equivalent to unmounting this subscription, so its
+    // hook-local automatic retry lock should not survive when it becomes visible.
+    rerender({ isOffScreen: true });
+    await flushAllTimers();
+
+    // Wait only for the normal low-priority scheduler throttle. This is still
+    // inside the automatic retry lockout window, so a refetch here proves the
+    // off-screen subscription re-entered like a fresh mount.
+    await advanceTime(getDefaultLowPriorityThrottleMs() + 1);
+
+    rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(result.current?.status).toBe('success');
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
+  });
+
+  test('fast item errors lock out automatic rerender retries per item signature', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': { title: 'second item', completed: false } },
+      { transportReconnectCooldownMs: 0, usesRealTimeUpdates: true },
+    );
+
+    env.serverTable.setNextFetchError('1', 'fast failure');
+    const initialQueries = [{ payload: '1' }];
+
+    const { rerender, result } = renderHook(
+      ({
+        queries,
+        version,
+      }: {
+        queries: { payload: string }[];
+        version: number;
+      }) => {
+        const [item] = env.apiStore.useMultipleItems(queries, {
+          selector: (data) => (data ? `${data.value.title}-${version}` : null),
+        });
+
+        return item;
+      },
+      { initialProps: { queries: initialQueries, version: 0 } },
+    );
+
+    await flushAllTimers();
+
+    expect(result.current?.status).toBe('error');
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    await advanceTime(10_001);
+
+    rerender({ queries: [{ payload: '1' }], version: 1 });
+    await flushAllTimers();
+
+    // The first rerender after the fast failure can happen after 10s; the lock
+    // is based on observing the error, not on when the rerender happens.
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    for (const version of [2, 3]) {
+      rerender({ queries: [{ payload: '1' }], version });
+      await flushAllTimers();
+    }
+
+    // Unstable selector/options identities should not turn the error state into a retry loop.
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    rerender({ queries: [{ payload: '1' }], version: 4 });
+    await flushAllTimers();
+
+    // The lock remains active because the last observed response is still error.
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    env.serverTable.setNextFetchError('1', 'reconnect failure');
+
+    act(() => {
+      env.apiStore.onTransportReconnect();
+    });
+
+    await flushAllTimers();
+
+    // Lifecycle invalidation is a real refresh signal and bypasses the retry lock.
+    expect(result.current?.status).toBe('error');
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
+
+    env.serverTable.setNextFetchError('1', 'public invalidation failure');
+
+    act(() => {
+      env.apiStore.invalidateItem('1');
+    });
+
+    await flushAllTimers();
+
+    expect(result.current?.status).toBe('error');
+    expect(env.serverTable.numOfFinishedFetches).toBe(3);
+
+    act(() => {
+      env.apiStore.scheduleFetch('highPriority', '1');
+    });
+
+    await flushAllTimers();
+
+    expect(result.current?.status).toBe('success');
+    expect(env.serverTable.numOfFinishedFetches).toBe(4);
+
+    rerender({ queries: [{ payload: '2' }], version: 5 });
+    await flushAllTimers();
+
+    // A different item key is a new resource signature and gets one automatic attempt.
+    expect(result.current?.status).toBe('success');
+    expect(result.current?.data).toBe('second item-5');
+    expect(env.serverTable.numOfFinishedFetches).toBe(5);
   });
 
   test('ignore refetchingStatus by default', async () => {

@@ -13,8 +13,11 @@ import {
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import {
+  getDefaultLowPriorityThrottleMs,
+  TEST_INITIAL_TIME,
+} from '../mocks/testEnvUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -531,6 +534,127 @@ describe('isolated tests', () => {
       -> status: error ⋅ isLoading: ❌ ⋅ data: null ⋅ error: Fetch error
       "
     `);
+  });
+
+  test('automatic error retries suppress immediate rerender loops', async () => {
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
+
+    env.errorInNextFetch('automatic failure');
+
+    const { rerender, result } = renderHook(
+      ({ version }: { version: number }) =>
+        env.apiStore.useDocument({
+          selector: (data) => (data ? `${data.value.hello}-${version}` : null),
+        }),
+      { initialProps: { version: 0 } },
+    );
+
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('error');
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+    for (const version of [1, 2, 3]) {
+      rerender({ version });
+      await flushAllTimers();
+    }
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
+  test('automatic document errors do not block invalidations and manual fetches', async () => {
+    const env = createDocumentStoreTestEnv<StoreValue>(
+      { hello: 'world' },
+      { transportReconnectCooldownMs: 0, usesRealTimeUpdates: true },
+    );
+
+    env.errorInNextFetch('automatic failure');
+
+    const { result } = renderHook(() => env.apiStore.useDocument());
+
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('error');
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+    env.errorInNextFetch('reconnect failure');
+
+    act(() => {
+      env.apiStore.onTransportReconnect();
+    });
+
+    await flushAllTimers();
+
+    // Lifecycle invalidation is a real refresh signal and bypasses the retry lock.
+    expect(result.current.status).toBe('error');
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
+
+    env.errorInNextFetch('manual failure');
+
+    act(() => {
+      env.apiStore.invalidateData();
+    });
+
+    await flushAllTimers();
+
+    // Public invalidation is an intentional manual operation and bypasses the lock.
+    expect(result.current.status).toBe('error');
+    expect(env.serverMock.numOfFinishedFetches).toBe(3);
+
+    act(() => {
+      env.apiStore.scheduleFetch('highPriority');
+    });
+
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('success');
+    expect(env.serverMock.numOfFinishedFetches).toBe(4);
+
+    act(() => {
+      env.setServerData({ hello: 'after-success' });
+      env.apiStore.onTransportReconnect();
+    });
+
+    await flushAllTimers();
+
+    // A successful response clears the lock and the hook reflects later refreshes.
+    expect(result.current.data?.value).toMatchInlineSnapshot(
+      `hello: 'after-success'`,
+    );
+    expect(env.serverMock.numOfFinishedFetches).toBe(5);
+  });
+
+  test('disabled document hooks re-enable like a fresh mount after a fast error', async () => {
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
+
+    env.errorInNextFetch('automatic failure');
+
+    const { rerender, result } = renderHook(
+      ({ disabled }: { disabled: boolean }) =>
+        env.apiStore.useDocument({ disabled }),
+      { initialProps: { disabled: false } },
+    );
+
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('error');
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+    // Disabling the hook is equivalent to unmounting this subscription, so the
+    // hook-local automatic retry lock should not survive re-enable.
+    rerender({ disabled: true });
+    await flushAllTimers();
+
+    // Wait only for the normal low-priority scheduler throttle. This is still
+    // inside the automatic retry lockout window, so a refetch here proves the
+    // disabled subscription re-entered like a fresh mount.
+    await advanceTime(getDefaultLowPriorityThrottleMs() + 1);
+
+    rerender({ disabled: false });
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('success');
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {

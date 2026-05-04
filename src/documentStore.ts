@@ -3,6 +3,7 @@ import {
   isWindowFocused,
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
+import { useConst } from '@ls-stack/react-utils/useConst';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
@@ -83,7 +84,12 @@ import {
   validateStoreManagerSessionConsistency,
   type StoreManager,
 } from './storeManager';
-import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
+import {
+  observeAutomaticFetchStatus,
+  shouldScheduleAutomaticFetch,
+  tryClaimAutomaticFetchSlot,
+  type AutomaticFetchRetryState,
+} from './utils/automaticFetchPolicy';
 import {
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
@@ -122,21 +128,31 @@ import {
 } from './utils/storeShared';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
+/** Lifecycle status for a document store. */
 export type DocumentStatus = 'idle' | TSDFStatus;
 
+/** Value returned by `DocumentStore.useDocument(...)`. */
 export type TSDFUseDocumentReturn<Selected> = {
+  /** Hook-visible document status. */
   status: DocumentStatus;
+  /** Selected document data. Defaults to the full document or `null`. */
   data: Selected;
+  /** Last document fetch error, if any. */
   error: StoreError | null;
+  /** Convenience flag for `loading` or `refetching` states. */
   isLoading: boolean;
   /** Whether this result has local offline changes that still need to sync to the server. */
   pendingSync: boolean;
 };
 
 export type DocumentStoreState<State extends ValidStoreState> = {
+  /** Latest loaded document data, or `null` before the document is available. */
   data: State | null;
+  /** Last fetch error for this document, when the latest fetch failed. */
   error: StoreError | null;
+  /** Current fetch lifecycle status for the document. */
   status: DocumentStatus;
+  /** Pending automatic refetch priority for stale data mounted by hooks. */
   refetchOnMount: false | FetchType;
 };
 
@@ -148,6 +164,7 @@ type DocumentOfflineOverlay<State extends ValidStoreState> = {
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
 
+/** Events emitted by document mutation lifecycle helpers. */
 export type DocumentStoreStoreEvents = {
   /** Emitted when a mutation begins executing */
   mutationStart: { mutationId: number };
@@ -227,16 +244,20 @@ export type DocumentStoreOptions<
   lowPriorityThrottleMs?: number;
   /** Overrides the manager's default coalescing window for this store. */
   baseCoalescingWindowMs?: number;
+  /** Computes a per-fetch throttle for real-time updates using recent fetch cost and focus state. */
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
+  /** Store-level focus revalidation policy. Overrides the manager default. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
+  /** Delay applied to medium-priority requests before they enter the scheduler. */
   mediumPriorityDelayMs?: number;
+  /** Observes request scheduler lifecycle events for this store. */
   onSchedulerEvent?: (
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
@@ -250,6 +271,9 @@ export type DocumentStoreOptions<
   onMutationError?:
     | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
+  /** Indicates that fresh data arrives via a real-time channel. The store
+   * skips the mount-time stale refetch since real-time pushes already cover
+   * revalidation. */
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
@@ -391,38 +415,57 @@ export type DocumentStore<
   State extends ValidStoreState,
   TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
 > = {
+  /** Underlying t-state store containing the raw document cache state. */
   store: Store<DocumentStoreState<State>>;
+  /** Invalidation event emitter used by hooks and integrations. */
   events: Emitter<DocumentStoreEvents>;
+  /** Mutation lifecycle event emitter for observers and tests. */
   storeEvents: Emitter<DocumentStoreStoreEvents>;
+  /** Whether the document has been explicitly invalidated and is awaiting refresh. */
   readonly invalidationWasTriggered: boolean;
+  /** Schedules a document fetch with the requested priority. */
   scheduleFetch: (
     fetchType: FetchType,
     options?: ScheduleFetchOptions,
   ) => ScheduleFetchResults;
+  /** Waits for a document fetch to settle and returns data or a fetch error. */
   awaitFetch: (options?: {
     timeoutMs?: number;
   }) => Promise<
     { data: State; error: null } | { data: null; error: StoreFetchError }
   >;
+  /** Returns cached document data when usable, otherwise fetches it first. */
   getDataFromStateOrFetch: (options?: {
     ignoreStaleState?: boolean;
     timeoutMs?: number;
   }) => Promise<ResultType<State, StoreFetchError>>;
+  /** Loads cached document data from persistent storage when available. */
   preloadPersistentStorage: () => Promise<void>;
+  /** Marks the document stale and schedules a refetch for active subscriptions. */
   invalidateData: (priority?: FetchType) => void;
+  /** Applies an immutable update to the cached document data. */
   updateState: DocumentUpdateState<State>;
+  /** Clears in-memory state and cancels store-local runtime state. */
   reset: () => void;
+  /** Unregisters listeners and releases resources owned by this store. */
   dispose: () => void;
+  /** Marks the document as mutating and returns a function that ends the mutation. */
   startMutation: () => () => boolean;
+  /** Returns offline sync metadata for this store's tracked entity. */
   getOfflineEntities: () => GlobalOfflineEntity[];
+  /** React hook subscribing to this store's offline entity metadata. */
   useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** React hook subscribing to manual offline resolutions for this store. */
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** Returns manual offline resolutions for this store. */
   getOfflineResolutions: () => OfflineResolutionRecord[];
+  /** Parses a stored offline conflict into the operation-specific conflict shape. */
   parseOfflineResolutionConflict: (
     resolution: OfflineResolutionRecord,
   ) => ParsedOfflineResolutionConflictResultForStore<
     ResolvedDocumentOfflineOperations<TOfflineOperations>
   >;
+  /** Applies a retry/discard/requeue/commit action to a pending offline resolution. */
   resolveOfflineResolution: <
     TName extends keyof ResolvedDocumentOfflineOperations<TOfflineOperations> &
       string,
@@ -458,6 +501,7 @@ export type DocumentStore<
     /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   }) => TSDFUseDocumentReturn<Selected>;
+  /** React hook that tracks whether a nested list item is still loading. */
   useListItemIsLoading: (args: {
     /** Unique identifier of the item within the document. */
     itemId: string;
@@ -468,6 +512,7 @@ export type DocumentStore<
     /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
     ensureIsLoaded?: boolean;
   }) => boolean;
+  /** React hook that tracks whether a nested list item has been deleted. */
   useListItemIsDeleted: (args: {
     /** Unique identifier of the item within the document. */
     itemId: string;
@@ -478,6 +523,7 @@ export type DocumentStore<
     /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
     ensureIsLoaded?: boolean;
   }) => boolean;
+  /** React hook for selecting one nested list item plus loading/deleted flags. */
   useListItem: <Selected>(args: {
     /** Unique identifier of the item within the document. */
     itemId: string;
@@ -495,6 +541,7 @@ export type DocumentStore<
    * mutation, rollback/error handling, revalidation, and offline queue fallback.
    */
   performMutation: DocumentPerformMutation<State, TOfflineOperations>;
+  /** Notifies the store that a shared transport reconnected and should revalidate active data. */
   onTransportReconnect: () => void;
 };
 
@@ -1520,6 +1567,22 @@ export function createDocumentStore<
     const storeState = store.useSelectorRC(storeStateSelector, {
       equalityFn: deepEqual,
     });
+    const automaticRetryState = useConst<AutomaticFetchRetryState>(
+      () => new Map(),
+    );
+
+    useEffect(() => {
+      if (disabled) {
+        automaticRetryState.delete(DOC_TARGET_KEY);
+        return;
+      }
+
+      observeAutomaticFetchStatus(
+        automaticRetryState,
+        DOC_TARGET_KEY,
+        store.state.status,
+      );
+    }, [automaticRetryState, disabled, storeState]);
 
     useOnEvtmitterEvent(events, 'invalidateData', ({ payload: priority }) => {
       if (disabled) return;
@@ -1566,7 +1629,12 @@ export function createDocumentStore<
             disableRefetches: !!disableRefetches,
             disableRefetchOnMount: !!disableRefetchOnMount,
             refetchOnMount: store.state.refetchOnMount,
-          })
+          }) &&
+          tryClaimAutomaticFetchSlot(
+            automaticRetryState,
+            DOC_TARGET_KEY,
+            store.state.status,
+          )
         ) {
           scheduleFetch(fetchType);
         }
@@ -1575,7 +1643,12 @@ export function createDocumentStore<
       return () => {
         effectState.cancelled = true;
       };
-    }, [disableRefetchOnMount, disableRefetches, disabled]);
+    }, [
+      automaticRetryState,
+      disableRefetchOnMount,
+      disableRefetches,
+      disabled,
+    ]);
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
       ensureIsLoaded,
