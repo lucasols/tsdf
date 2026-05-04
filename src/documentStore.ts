@@ -251,7 +251,7 @@ export type DocumentStoreOptions<
   }) => number;
   /** Store-level focus revalidation policy. Overrides the manager default. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
+  /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
@@ -271,7 +271,7 @@ export type DocumentStoreOptions<
   onMutationError?:
     | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
-  /** Indicates that fresh data arrives via a real-time channel. The store
+  /** Indicates that fresh data arrives via a real-time channel. Defaults to `false`. The store
    * skips the mount-time stale refetch since real-time pushes already cover
    * revalidation. */
   usesRealTimeUpdates?: boolean;
@@ -436,13 +436,17 @@ export type DocumentStore<
   >;
   /** Returns cached document data when usable, otherwise fetches it first. */
   getDataFromStateOrFetch: (options?: {
+    /** When `true`, stale cached data is ignored and refetched before returning. Defaults to `false`. */
     ignoreStaleState?: boolean;
     timeoutMs?: number;
   }) => Promise<ResultType<State, StoreFetchError>>;
   /** Loads cached document data from persistent storage when available. */
   preloadPersistentStorage: () => Promise<void>;
-  /** Marks the document stale and schedules a refetch for active subscriptions. */
-  invalidateData: (priority?: FetchType) => void;
+  /** Marks the document stale and schedules refetches for active subscriptions. Defaults to `highPriority`. */
+  invalidateData: (
+    /** Fetch priority used for refetches triggered by this invalidation. Defaults to `highPriority`. */
+    priority?: FetchType,
+  ) => void;
   /** Applies an immutable update to the cached document data. */
   updateState: DocumentUpdateState<State>;
   /** Clears in-memory state and cancels store-local runtime state. */

@@ -220,10 +220,12 @@ type ListQueryScheduleListQueryFetchApi<
     payload: QueryPayload,
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
       ? [
+          /** Number of items to request. Defaults to the store's `defaultQuerySize`. */
           size: number | undefined,
           options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
         ]
       : [
+          /** Number of items to request. Defaults to the store's `defaultQuerySize`. */
           size?: number,
           options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
         ]
@@ -233,10 +235,12 @@ type ListQueryScheduleListQueryFetchApi<
     payload: QueryPayload[],
     ...args: ListQueryHasPartialResources<TPartialResources> extends true
       ? [
+          /** Number of items to request. Defaults to the store's `defaultQuerySize`. */
           size: number | undefined,
           options: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
         ]
       : [
+          /** Number of items to request. Defaults to the store's `defaultQuerySize`. */
           size?: number,
           options?: ListQueryScheduleFetchWithFieldsOption<TPartialResources>,
         ]
@@ -264,6 +268,7 @@ type ListQueryScheduleItemFetchApi<
 };
 
 type ListQueryLoadMoreWithFieldsOptions<TPartialResources extends boolean> = {
+  /** Number of additional items to request. Defaults to the store's `defaultQuerySize`. */
   size?: number;
 } & ListQueryFetchFieldsOption<TPartialResources>;
 
@@ -278,6 +283,7 @@ type ListQueryLoadMoreApi<
         | [options: ListQueryLoadMoreWithFieldsOptions<TPartialResources>]
     :
         | [
+            /** Number of additional items to request. Defaults to the store's `defaultQuerySize`. */
             size?: number,
             options?: ListQueryFetchFieldsOption<TPartialResources>,
           ]
@@ -285,6 +291,7 @@ type ListQueryLoadMoreApi<
 ) => ScheduleFetchResults;
 
 type ListQueryAwaitListQueryFetchOptions<TPartialResources extends boolean> = {
+  /** Number of items to request. Defaults to the store's `defaultQuerySize`. */
   size?: number;
   timeoutMs?: number;
 } & ListQueryFetchFieldsOption<TPartialResources>;
@@ -311,7 +318,9 @@ type ListQueryAwaitListQueryFetchApi<
 type ListQueryGetQueryFromStateOrFetchOptions<
   TPartialResources extends boolean,
 > = {
+  /** When `true`, stale cached queries are ignored and refetched before returning. Defaults to `false`. */
   ignoreStaleState?: boolean;
+  /** Number of items to request when a fetch is needed. Defaults to the store's `defaultQuerySize`. */
   size?: number;
   timeoutMs?: number;
 } & ListQueryFetchFieldsOption<TPartialResources>;
@@ -356,6 +365,7 @@ type ListQueryAwaitItemFetchApi<
 type ListQueryGetItemFromStateOrFetchOptions<
   TPartialResources extends boolean,
 > = {
+  /** When `true`, stale cached items are ignored and refetched before returning. Defaults to `false`. */
   ignoreStaleState?: boolean;
   timeoutMs?: number;
 } & ListQueryFetchFieldsOption<TPartialResources>;
@@ -731,7 +741,7 @@ type ListQueryInvalidateQueryAndItemsArgs<
   | {
       /** Invalidate every cached query and every cached item. */
       all: true;
-      /** Fetch priority used for refetches triggered by this invalidation. */
+      /** Fetch priority used for refetches triggered by this invalidation. Defaults to `highPriority`. */
       type?: FetchType;
       /**
        * Partial-resource fields to invalidate on matching items.
@@ -769,7 +779,7 @@ type ListQueryInvalidateQueryAndItemsArgs<
         | QueryPayload[]
         | ListQueryFilterQuery<QueryPayload>
         | false;
-      /** Fetch priority used for refetches triggered by this invalidation. */
+      /** Fetch priority used for refetches triggered by this invalidation. Defaults to `highPriority`. */
       type?: FetchType;
       /**
        * Partial-resource fields to invalidate on matching items.
@@ -905,7 +915,7 @@ export type ListQueryStore<
     ItemPayload,
     TPartialResources
   >;
-  /** Invalidates selected queries and items together. */
+  /** Invalidates selected queries and items together. Defaults to `highPriority`. */
   invalidateQueryAndItems: (
     args: ListQueryInvalidateQueryAndItemsArgs<
       ItemState,
@@ -913,12 +923,13 @@ export type ListQueryStore<
       ItemPayload
     >,
   ) => void;
-  /** Marks cached items stale and schedules refetches for active subscriptions. */
+  /** Marks cached items stale and schedules refetches for active subscriptions. Defaults to `highPriority`. */
   invalidateItem: (
     itemId:
       | ItemPayload
       | ItemPayload[]
       | ListQueryFilterItem<ItemState, ItemPayload>,
+    /** Fetch priority used for refetches triggered by this invalidation. Defaults to `highPriority`. */
     priority?: FetchType,
   ) => void;
   /** Marks one or more items as mutating and returns a function that ends the mutation. */
@@ -1101,9 +1112,9 @@ type ListQueryStoreOptionsBase<
   ) => Promise<
     MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
   >;
-  /** Optional function to group item batch fetches by key. Return false to fetch individually. */
+  /** Optional function to group item batch fetches by key. When omitted, all batched items share one default batch key. Return false to fetch individually. */
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
-  /** Default number of items requested by list-query fetches. */
+  /** Default number of items requested by list-query fetches. Defaults to 50. */
   defaultQuerySize?: number;
   /** Max items per item batch - triggers immediate fetch when reached. */
   maxItemBatchSize?: number;
@@ -1115,7 +1126,7 @@ type ListQueryStoreOptionsBase<
   onStateCleanup?: (
     cleanup: ListQueryStateCleanup<QueryPayload, ItemPayload>,
   ) => void;
-  /** Treats refetches as real-time driven, disabling stale mount refetches by default. */
+  /** Treats refetches as real-time driven, disabling stale mount refetches by default. Defaults to `false`. */
   usesRealTimeUpdates?: boolean;
   /** @internal */
   '~test'?: {
@@ -1155,7 +1166,7 @@ type ListQueryStoreOptionsBase<
   }) => number;
   /** Store-level focus revalidation policy. Overrides the manager default. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
+  /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;

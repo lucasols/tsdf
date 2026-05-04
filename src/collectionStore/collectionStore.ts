@@ -330,7 +330,7 @@ export type CollectionStoreOptions<
   ) => Promise<
     MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
   >;
-  /** Optional function to group batch fetches by key. Return false to fall back to individual fetchFn */
+  /** Optional function to group batch fetches by key. When omitted, all batched items share one default batch key. Return false to fall back to individual fetchFn */
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   /** Max items per batch - triggers immediate fetch when reached */
   maxBatchSize?: number;
@@ -353,7 +353,7 @@ export type CollectionStoreOptions<
   }) => number;
   /** Store-level focus revalidation policy. Overrides the manager default. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
+  /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
@@ -373,7 +373,7 @@ export type CollectionStoreOptions<
   onMutationError?:
     | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
-  /** Treats refetches as real-time driven, disabling stale mount refetches by default. */
+  /** Treats refetches as real-time driven, disabling stale mount refetches by default. Defaults to `false`. */
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
@@ -642,7 +642,11 @@ export type CollectionStore<
   /** Returns cached item data when usable, otherwise fetches it first. */
   getItemFromStateOrFetch: (
     params: ItemPayload,
-    options?: { ignoreStaleState?: boolean; timeoutMs?: number },
+    options?: {
+      /** When `true`, stale cached data is ignored and refetched before returning. Defaults to `false`. */
+      ignoreStaleState?: boolean;
+      timeoutMs?: number;
+    },
   ) => Promise<ResultType<ItemState, StoreFetchError>>;
   /** React hook for subscribing to many collection items at once. */
   useMultipleItems: <
@@ -757,12 +761,13 @@ export type CollectionStore<
       | ItemPayload[]
       | CollectionFilterItemsFn<ItemState, ItemPayload>,
   ) => () => void;
-  /** Marks cached items stale and schedules refetches for active subscriptions. */
+  /** Marks cached items stale and schedules refetches for active subscriptions. Defaults to `highPriority`. */
   invalidateItem: (
     itemPayload:
       | ItemPayload
       | ItemPayload[]
       | CollectionFilterItemsFn<ItemState, ItemPayload>,
+    /** Fetch priority used for refetches triggered by this invalidation. Defaults to `highPriority`. */
     priority?: FetchType,
   ) => void;
   /** Applies an immutable update to one or more cached collection items. */
