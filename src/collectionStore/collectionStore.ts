@@ -125,41 +125,59 @@ import {
   UseMultipleItemsOptions,
 } from './useMultipleItems';
 
+/** Lifecycle status for a cached collection item. */
 export type CollectionItemStatus = TSDFStatus;
 
+/** Raw cached state for one collection item. */
 export type TSFDCollectionItem<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
+  /** Latest loaded item data, or `null` before the item is available. */
   data: ItemState | null;
+  /** Last fetch error for this item, when the latest fetch failed. */
   error: StoreError | null;
+  /** Current fetch lifecycle status for this item. */
   status: CollectionItemStatus;
+  /** Payload used to identify and fetch this item. */
   payload: ItemPayload;
+  /** Pending automatic refetch priority for stale data mounted by hooks. */
   refetchOnMount: false | FetchType;
+  /** Whether this item has ever loaded successfully. */
   wasLoaded: boolean;
 };
 
+/** Raw t-state shape used by a collection store. */
 export type TSFDCollectionState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = Record<string, TSFDCollectionItem<ItemState, ItemPayload> | null>;
 
+/** Value returned by `CollectionStore.useItem(...)` and `useMultipleItems(...)`. */
 export type TSFDUseCollectionItemReturn<
   Selected,
   ItemPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
+  /** Selected item data. Defaults to the full item or `null`. */
   data: Selected;
+  /** Hook-visible item status, including idle/deleted states for hook ergonomics. */
   status: CollectionItemStatus | 'idle' | 'deleted';
+  /** Item payload for this result, unless omitted or unavailable. */
   payload: ItemPayload | undefined;
+  /** Last item fetch error, if any. */
   error: StoreError | null;
+  /** Stable store key for the current item payload. */
   itemStateKey: string;
+  /** Convenience flag for `loading` or `refetching` states. */
   isLoading: boolean;
   /** Whether this result has local offline changes that still need to sync to the server. */
   pendingSync: boolean;
+  /** Caller-provided metadata copied from the query descriptor. */
   queryMetadata: QueryMetadata;
 };
 
+/** Item descriptor accepted by `CollectionStore.useMultipleItems(...)`. */
 export type CollectionUseMultipleItemsQuery<
   ItemPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -185,12 +203,16 @@ export type CollectionUseMultipleItemsQuery<
   isOffScreen?: boolean;
 };
 
+/** Callback invoked when an already-loaded collection item is invalidated. */
 export type OnCollectionItemInvalidate<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = (props: {
+  /** Current cached item state at invalidation time. */
   itemState: ItemState;
+  /** Payload of the invalidated item. */
   payload: ItemPayload;
+  /** Fetch priority requested for the invalidation. */
   priority: FetchType;
 }) => void;
 
@@ -200,6 +222,7 @@ export type CollectionInitialStateItem<
   ItemState extends ValidStoreState,
 > = { payload: ItemPayload; data: ItemState };
 
+/** Events emitted by collection mutation lifecycle helpers. */
 export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
   mutationStart: { mutationId: number; items: ItemPayload[] };
@@ -213,9 +236,13 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
+/** Details passed when collection cache-limit cleanup evicts cached items. */
 export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
+  /** Cleanup trigger that removed these items. */
   reason: 'cacheLimitEviction';
+  /** Store keys removed from the collection state. */
   itemKeys: string[];
+  /** Original item payloads removed from the collection state. */
   payloads: ItemPayload[];
 };
 
@@ -273,6 +300,7 @@ type CollectionOfflineOperationsConfig<
 
 const EMPTY_COLLECTION_OFFLINE_OPERATIONS = {};
 
+/** Options used to create a collection store. */
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -289,6 +317,7 @@ export type CollectionStoreOptions<
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
+  /** Fetches one item by payload. */
   fetchFn: (
     params: ItemPayload,
     signal: AbortSignal,
@@ -309,22 +338,28 @@ export type CollectionStoreOptions<
   maxItems?: number;
   /** Called when cache-limit eviction removes items from in-memory state. */
   onStateCleanup?: (cleanup: CollectionStateCleanup<ItemPayload>) => void;
+  /** Converts an item payload to the stable cache key used by this store. */
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Overrides the manager's default minimum interval between low-priority fetches for this store. */
   lowPriorityThrottleMs?: number;
   /** Overrides the manager's default coalescing window for this store. */
   baseCoalescingWindowMs?: number;
+  /** Delay applied to medium-priority requests before they enter the scheduler. */
   mediumPriorityDelayMs?: number;
+  /** Computes a per-fetch throttle for real-time updates using recent fetch cost and focus state. */
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
+  /** Store-level focus revalidation policy. Overrides the manager default. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
+  /** Called when an already-loaded item is invalidated. */
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
+  /** Observes request scheduler lifecycle events for this store. */
   onSchedulerEvent?: (
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
@@ -338,6 +373,7 @@ export type CollectionStoreOptions<
   onMutationError?:
     | ((error: unknown, options: StoreMutationErrorOptions) => void)
     | null;
+  /** Treats refetches as real-time driven, disabling stale mount refetches by default. */
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
@@ -370,8 +406,15 @@ export type CollectionStoreOptions<
   };
 };
 
+/** Event payloads emitted by `CollectionStore.events`. */
 export type CollectionStoreEvents = {
-  invalidateData: { priority: FetchType; itemKey: string };
+  /** Emitted whenever one or more cached items are invalidated. */
+  invalidateData: {
+    /** Fetch priority requested by the invalidation. */
+    priority: FetchType;
+    /** Store key for the invalidated item. */
+    itemKey: string;
+  };
 };
 
 type CollectionFilterItemsFn<
@@ -559,6 +602,7 @@ type CollectionPerformMutation<
   >;
 };
 
+/** Public API returned by `createCollectionStore(...)`. */
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -567,10 +611,15 @@ export type CollectionStore<
     ItemPayload
   > = null,
 > = {
+  /** Underlying t-state store containing raw cached items. */
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>;
+  /** Invalidation event emitter used by hooks and integrations. */
   events: Emitter<CollectionStoreEvents>;
+  /** Mutation lifecycle event emitter for observers and tests. */
   storeEvents: Emitter<CollectionStoreStoreEvents<ItemPayload>>;
+  /** Item keys that have been explicitly invalidated and are awaiting refresh. */
   readonly invalidationWasTriggered: Set<string>;
+  /** Schedules a fetch for one item or a batch of item payloads. */
   scheduleFetch: {
     (
       fetchType: FetchType,
@@ -583,16 +632,19 @@ export type CollectionStore<
       options?: ScheduleFetchOptions,
     ): ScheduleFetchResults[];
   };
+  /** Waits for an item fetch to settle and returns data or a fetch error. */
   awaitFetch: (
     params: ItemPayload,
     options?: { timeoutMs?: number },
   ) => Promise<
     { data: ItemState; error: null } | { data: null; error: StoreFetchError }
   >;
+  /** Returns cached item data when usable, otherwise fetches it first. */
   getItemFromStateOrFetch: (
     params: ItemPayload,
     options?: { ignoreStaleState?: boolean; timeoutMs?: number },
   ) => Promise<ResultType<ItemState, StoreFetchError>>;
+  /** React hook for subscribing to many collection items at once. */
   useMultipleItems: <
     Selected = ItemState | null,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -604,10 +656,12 @@ export type CollectionStore<
     ItemPayload,
     QueryMetadata
   >[];
+  /** React hook for subscribing to one collection item. */
   useItem: <Selected = ItemState | null>(
     payload: ItemPayload | undefined | false | null,
     options?: UseItemOptions<ItemState, Selected>,
   ) => TSFDUseCollectionItemReturn<Selected, ItemPayload>;
+  /** React hook that tracks whether a nested list item is still loading. */
   useListItemIsLoading: (
     payload: ItemPayload,
     args: {
@@ -621,6 +675,7 @@ export type CollectionStore<
       ensureIsLoaded?: boolean;
     },
   ) => boolean;
+  /** React hook that tracks whether a nested list item has been deleted. */
   useListItemIsDeleted: (
     payload: ItemPayload,
     args: {
@@ -634,6 +689,7 @@ export type CollectionStore<
       ensureIsLoaded?: boolean;
     },
   ) => boolean;
+  /** React hook for selecting one nested list item plus loading/deleted flags. */
   useListItem: <Selected>(
     payload: ItemPayload,
     args: {
@@ -649,12 +705,17 @@ export type CollectionStore<
       ensureIsLoaded?: boolean;
     },
   ) => { isLoading: boolean; isDeleted: boolean; data: Selected };
+  /** Clears in-memory state and cancels store-local runtime state. */
   reset: () => void;
+  /** Unregisters listeners and releases resources owned by this store. */
   dispose: () => void;
+  /** Loads item payloads from persistent storage into memory when available. */
   preloadItemFromStorage: (
     params: ItemPayload | ItemPayload[],
   ) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>;
+  /** Returns the stable cache key for an item payload. */
   getItemKey: (params: ItemPayload) => string;
+  /** Reads one or many cached items directly from store state. */
   getItemState: {
     (
       params: ItemPayload,
@@ -663,15 +724,21 @@ export type CollectionStore<
       params: ItemPayload[] | CollectionFilterItemsFn<ItemState, ItemPayload>,
     ): TSFDCollectionItem<ItemState, ItemPayload>[];
   };
+  /** Returns offline sync metadata for this store's tracked entities. */
   getOfflineEntities: () => GlobalOfflineEntity[];
+  /** React hook subscribing to this store's offline entity metadata. */
   useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** React hook subscribing to manual offline resolutions for this store. */
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** Returns manual offline resolutions for this store. */
   getOfflineResolutions: () => OfflineResolutionRecord[];
+  /** Parses a stored offline conflict into the operation-specific conflict shape. */
   parseOfflineResolutionConflict: (
     resolution: OfflineResolutionRecord,
   ) => ParsedOfflineResolutionConflictResultForStore<
     ResolvedCollectionOfflineOperations<TOfflineOperations>
   >;
+  /** Applies a retry/discard/requeue/commit action to a pending offline resolution. */
   resolveOfflineResolution: <
     TName extends
       keyof ResolvedCollectionOfflineOperations<TOfflineOperations> & string,
@@ -683,12 +750,14 @@ export type CollectionStore<
       TName
     >,
   ) => Promise<void> | void;
+  /** Marks one or more items as mutating and returns a function that ends the mutation. */
   startMutation: (
     fetchParams:
       | ItemPayload
       | ItemPayload[]
       | CollectionFilterItemsFn<ItemState, ItemPayload>,
   ) => () => void;
+  /** Marks cached items stale and schedules refetches for active subscriptions. */
   invalidateItem: (
     itemPayload:
       | ItemPayload
@@ -696,6 +765,7 @@ export type CollectionStore<
       | CollectionFilterItemsFn<ItemState, ItemPayload>,
     priority?: FetchType,
   ) => void;
+  /** Applies an immutable update to one or more cached collection items. */
   updateItemState: (
     fetchParams:
       | ItemPayload
@@ -707,7 +777,9 @@ export type CollectionStore<
     ) => void | ItemState,
     options?: { ifNothingWasUpdated?: () => void },
   ) => boolean;
+  /** Adds or replaces one cached item directly in state. */
   addItemToState: (fetchParams: ItemPayload, data: ItemState) => void;
+  /** Deletes one or more cached items directly from state. */
   deleteItemState: (
     fetchParams:
       | ItemPayload
@@ -723,6 +795,7 @@ export type CollectionStore<
     ItemPayload,
     TOfflineOperations
   >;
+  /** Notifies the store that a shared transport reconnected and should revalidate active data. */
   onTransportReconnect: () => void;
 };
 

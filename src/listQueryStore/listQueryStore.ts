@@ -146,11 +146,22 @@ import {
   type UsePendingOfflineItemsOptions,
 } from './usePendingOfflineItems';
 
+/** Event payloads emitted by `ListQueryStore.events`. */
 export type ListQueryStoreEvents = {
-  invalidateQuery: { priority: FetchType; queryKey: string };
-  invalidateItem: {
+  /** Emitted whenever one or more list queries are invalidated. */
+  invalidateQuery: {
+    /** Fetch priority requested by the invalidation. */
     priority: FetchType;
+    /** Store key for the invalidated query. */
+    queryKey: string;
+  };
+  /** Emitted whenever one or more list-query items are invalidated. */
+  invalidateItem: {
+    /** Fetch priority requested by the invalidation. */
+    priority: FetchType;
+    /** Store key for the invalidated item. */
     itemKey: string;
+    /** Partial-resource fields invalidated on this item, when applicable. */
     invalidateFields?: string[];
   };
 };
@@ -768,6 +779,7 @@ type ListQueryInvalidateQueryAndItemsArgs<
       fields?: string[];
     };
 
+/** Public API returned by `createListQueryStore(...)`. */
 export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -779,63 +791,88 @@ export type ListQueryStore<
     ItemPayload
   > = null,
 > = {
+  /** Underlying t-state store containing raw cached queries and items. */
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
+  /** Invalidation event emitter used by hooks and integrations. */
   events: Emitter<ListQueryStoreEvents>;
+  /** Mutation lifecycle event emitter for observers and tests. */
   storeEvents: Emitter<ListQueryStoreStoreEvents<ItemPayload>>;
+  /** Query keys that have been explicitly invalidated and are awaiting refresh. */
   readonly queryInvalidationWasTriggered: Set<string>;
+  /** Item keys that have been explicitly invalidated and are awaiting refresh. */
   readonly itemInvalidationWasTriggered: Set<string>;
+  /** Clears in-memory state and cancels store-local runtime state. */
   reset: () => void;
+  /** Unregisters listeners and releases resources owned by this store. */
   dispose: () => void;
+  /** Schedules a list-query fetch with the requested priority. */
   scheduleListQueryFetch: ListQueryScheduleListQueryFetchApi<
     QueryPayload,
     TPartialResources
   >;
+  /** Reads one cached query directly from store state. */
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined;
+  /** Returns the stable cache key for a query payload. */
   getQueryKey: (params: QueryPayload) => string;
+  /** Reads many cached queries directly from store state. */
   getQueriesState: (
     params: QueryPayload[] | ListQueryFilterQuery<QueryPayload>,
   ) => { query: TSFDListQuery<QueryPayload>; key: string }[];
+  /** Finds cached queries that currently include the item payload. */
   getQueriesRelatedToItem: (
     itemPayload: ItemPayload,
   ) => { query: TSFDListQuery<QueryPayload>; key: string }[];
+  /** Waits for a list-query fetch to settle and returns query data or a fetch error. */
   awaitListQueryFetch: ListQueryAwaitListQueryFetchApi<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources
   >;
+  /** Returns a cached query when usable, otherwise fetches it first. */
   getQueryFromStateOrFetch: ListQueryGetQueryFromStateOrFetchApi<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources
   >;
+  /** Loads query payloads from persistent storage into memory when available. */
   preloadQueryFromStorage: (
     params: QueryPayload | QueryPayload[],
   ) => Promise<PersistentStoragePreloadResult<QueryPayload>[]>;
+  /** Fetches and appends the next page for a list query. */
   loadMore: ListQueryLoadMoreApi<QueryPayload, TPartialResources>;
+  /** Returns the stable cache key for an item payload. */
   getItemKey: (params: ItemPayload) => string;
+  /** Reads one or many cached items directly from store state. */
   getItemState: {
     (itemPayload: ItemPayload): ItemState | null | undefined;
     (
       itemPayload: ItemPayload[] | ListQueryFilterItem<ItemState, ItemPayload>,
     ): { payload: ItemPayload; data: ItemState }[];
   };
+  /** React hook for locally pending offline items in this store. */
   usePendingOfflineItems: ListQueryUsePendingOfflineItemsApi<
     ItemState,
     ItemPayload
   >;
+  /** Returns offline sync metadata for this store's tracked entities. */
   getOfflineEntities: () => GlobalOfflineEntity[];
+  /** React hook subscribing to this store's offline entity metadata. */
   useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /** React hook subscribing to manual offline resolutions for this store. */
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /** Returns manual offline resolutions for this store. */
   getOfflineResolutions: () => OfflineResolutionRecord[];
+  /** Parses a stored offline conflict into the operation-specific conflict shape. */
   parseOfflineResolutionConflict: (
     resolution: OfflineResolutionRecord,
   ) => ParsedOfflineResolutionConflictResultForStore<
     ResolvedListQueryOfflineOperations<TOfflineOperations>
   >;
+  /** Applies a retry/discard/requeue/commit action to a pending offline resolution. */
   resolveOfflineResolution: <
     TName extends keyof ResolvedListQueryOfflineOperations<TOfflineOperations> &
       string,
@@ -847,23 +884,28 @@ export type ListQueryStore<
       TName
     >,
   ) => Promise<void> | void;
+  /** Loads item payloads from persistent storage into memory when available. */
   preloadItemFromStorage: (
     params: ItemPayload | ItemPayload[],
   ) => Promise<PersistentStoragePreloadResult<ItemPayload>[]>;
+  /** Schedules an item fetch with the requested priority. */
   scheduleItemFetch: ListQueryScheduleItemFetchApi<
     ItemPayload,
     TPartialResources
   >;
+  /** Waits for an item fetch to settle and returns data or a fetch error. */
   awaitItemFetch: ListQueryAwaitItemFetchApi<
     ItemState,
     ItemPayload,
     TPartialResources
   >;
+  /** Returns cached item data when usable, otherwise fetches it first. */
   getItemFromStateOrFetch: ListQueryGetItemFromStateOrFetchApi<
     ItemState,
     ItemPayload,
     TPartialResources
   >;
+  /** Invalidates selected queries and items together. */
   invalidateQueryAndItems: (
     args: ListQueryInvalidateQueryAndItemsArgs<
       ItemState,
@@ -871,6 +913,7 @@ export type ListQueryStore<
       ItemPayload
     >,
   ) => void;
+  /** Marks cached items stale and schedules refetches for active subscriptions. */
   invalidateItem: (
     itemId:
       | ItemPayload
@@ -878,18 +921,22 @@ export type ListQueryStore<
       | ListQueryFilterItem<ItemState, ItemPayload>,
     priority?: FetchType,
   ) => void;
+  /** Marks one or more items as mutating and returns a function that ends the mutation. */
   startItemMutation: (
     itemId:
       | ItemPayload
       | ItemPayload[]
       | ListQueryFilterItem<ItemState, ItemPayload>,
   ) => () => void;
+  /** Applies an immutable update to one or more cached list-query items. */
   updateItemState: ListQueryUpdateItemStateApi<ItemState, ItemPayload>;
+  /** Adds or replaces one cached item directly in state. */
   addItemToState: ListQueryAddItemToStateApi<
     ItemState,
     QueryPayload,
     ItemPayload
   >;
+  /** Deletes one cached item directly from state and query membership. */
   deleteItemState: ListQueryDeleteItemStateApi<ItemState, ItemPayload>;
   /**
    * Runs the full mutation lifecycle: optional optimistic update, async
@@ -901,24 +948,29 @@ export type ListQueryStore<
     ItemPayload,
     TOfflineOperations
   >;
+  /** React hook for subscribing to many list queries at once. */
   useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources
   >;
+  /** React hook for subscribing to one list query. */
   useListQuery: ListQueryUseListQueryApi<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources
   >;
+  /** React hook for subscribing to many list-query items at once. */
   useMultipleItems: ListQueryUseMultipleItemsApi<
     ItemState,
     ItemPayload,
     TPartialResources
   >;
+  /** React hook for subscribing to one list-query item. */
   useItem: ListQueryUseItemApi<ItemState, ItemPayload, TPartialResources>;
+  /** React hook for selecting the first cached item matching a predicate. */
   useFindItem: <SelectedItem = ItemState | null>(
     findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
     options?: {
@@ -926,17 +978,24 @@ export type ListQueryStore<
       selector?: (data: ItemState, id: ItemPayload) => SelectedItem;
     },
   ) => SelectedItem | null;
+  /** Notifies the store that a shared transport reconnected and should revalidate active data. */
   onTransportReconnect: () => void;
 };
 
+/** Details passed when list-query cache-limit cleanup evicts cached items or queries. */
 export type ListQueryStateCleanup<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > = {
+  /** Cleanup trigger that removed these records. */
   reason: 'cacheLimitEviction';
+  /** Item store keys removed from state. */
   itemKeys: string[];
+  /** Original item payloads removed from state. */
   itemPayloads: ItemPayload[];
+  /** Query store keys removed from state. */
   queryKeys: string[];
+  /** Original query payloads removed from state. */
   queryPayloads: QueryPayload[];
 };
 
@@ -1030,18 +1089,23 @@ type ListQueryStoreOptionsBase<
   id: string;
   /** Shared global store manager providing session scoping and error normalization. */
   storeManager: StoreManager;
+  /** Fetches one item by payload. Required when items can be loaded outside list pages. */
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
   ) => Promise<MaybeTSDFResult<ItemState>>;
+  /** Optional batch fetch function for fetching multiple items at once. */
   batchFetchItemFn?: (
     requests: { payload: ItemPayload; fields?: string[] }[],
     options: { signal: AbortSignal; batchKey: string },
   ) => Promise<
     MaybeTSDFResult<Map<ItemPayload, MaybeTSDFResult<ItemState> | Error>>
   >;
+  /** Optional function to group item batch fetches by key. Return false to fetch individually. */
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
+  /** Default number of items requested by list-query fetches. */
   defaultQuerySize?: number;
+  /** Max items per item batch - triggers immediate fetch when reached. */
   maxItemBatchSize?: number;
   /** Maximum number of cached items kept in memory. Defaults to 5,000. Item pressure may evict whole inactive queries to avoid leaving cached queries partially loaded. */
   maxItems?: number;
@@ -1051,6 +1115,7 @@ type ListQueryStoreOptionsBase<
   onStateCleanup?: (
     cleanup: ListQueryStateCleanup<QueryPayload, ItemPayload>,
   ) => void;
+  /** Treats refetches as real-time driven, disabling stale mount refetches by default. */
   usesRealTimeUpdates?: boolean;
   /** @internal */
   '~test'?: {
@@ -1081,23 +1146,30 @@ type ListQueryStoreOptionsBase<
   lowPriorityThrottleMs?: number;
   /** Overrides the manager's default coalescing window for this store. */
   baseCoalescingWindowMs?: number;
+  /** Delay applied to medium-priority requests before they enter the scheduler. */
   mediumPriorityDelayMs?: number;
+  /** Computes a per-fetch throttle for real-time updates using recent fetch cost and focus state. */
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
+  /** Store-level focus revalidation policy. Overrides the manager default. */
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
+  /** Rules that keep cached query membership in sync after item updates. */
   optimisticListUpdates?: OptimisticListUpdate<
     ItemState,
     QueryPayload,
     ItemPayload
   >[];
+  /** Called when an already-loaded query is invalidated. */
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
+  /** Called when an already-loaded item is invalidated. */
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
+  /** Observes request scheduler lifecycle events for this store. */
   onSchedulerEvent?: (
     event: RequestSchedulerEvents,
     data?: RequestSchedulerEventData,
@@ -1113,7 +1185,9 @@ type ListQueryStoreOptionsBase<
     | null;
   /** Opt-in hook-level query derivation from locally materialized items. */
   derivedQueries?: DerivedQueriesConfig<ItemState, QueryPayload, ItemPayload>;
+  /** Converts a query payload to the stable cache key used by this store. */
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
+  /** Converts an item payload to the stable cache key used by this store. */
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Opt-in persistent storage configuration. When provided, cached items and queries
    * are loaded from storage on first read and saved back on successful fetches.
@@ -1130,6 +1204,7 @@ type ListQueryStoreOptionsBase<
   ? { partialResources: PartialResourcesConfig<ItemState> }
   : { partialResources?: undefined });
 
+/** Options used to create a list-query store. */
 export type ListQueryStoreOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -1152,15 +1227,19 @@ export type ListQueryStoreOptions<
 > &
   ([TOffsetPagination] extends [true]
     ? {
+        /** Fetches one offset-paginated list query page. */
         fetchListFn: FetchListFnOffsetMode<
           ItemState,
           QueryPayload,
           ItemPayload
         >;
+        /** Enables offset-pagination behavior and invalidation sizing. */
         offsetPagination: OffsetPaginationConfig;
       }
     : {
+        /** Fetches one size-based list query page. */
         fetchListFn: FetchListFnSizeMode<ItemState, QueryPayload, ItemPayload>;
+        /** Not allowed unless offset pagination is enabled. */
         offsetPagination?: undefined;
       });
 
