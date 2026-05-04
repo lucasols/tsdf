@@ -888,7 +888,8 @@ export function createDocumentStore<
     return (
       store.state.status !== 'idle' ||
       store.state.data !== null ||
-      store.state.error !== null
+      store.state.error !== null ||
+      scheduler.hasPendingFetch
     );
   }
 
@@ -915,6 +916,10 @@ export function createDocumentStore<
         { action: 'browser-tabs-document-snapshot' },
       );
     });
+
+    if (message.consistency === 'confirmed') {
+      scheduler.cancelPendingRequests([DOC_REQUEST_ID]);
+    }
 
     lastDocumentSyncVersion = candidateVersion;
   }

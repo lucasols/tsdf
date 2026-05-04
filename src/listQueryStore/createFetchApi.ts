@@ -483,6 +483,8 @@ export function createFetchApi<
     itemKey: string,
     payload: ItemPayload,
   ): RequestScheduler<ItemFetchData<ItemPayload>> {
+    itemKeyToPayload.set(itemKey, payload);
+
     if (useBatchSchedulers) {
       if (getItemsBatchKey) {
         const batchKey = getItemsBatchKey(payload);
@@ -595,11 +597,14 @@ export function createFetchApi<
   ): RequestScheduler<ItemFetchData<ItemPayload>> | null {
     const existingScheduler = perItemSchedulers.get(itemKey);
     if (existingScheduler) return existingScheduler;
+    if (!fetchItemFn) return null;
 
-    const itemQuery = store.state.itemQueries[itemKey];
-    if (!itemQuery) return null;
+    const payload =
+      itemKeyToPayload.get(itemKey) ??
+      store.state.itemQueries[itemKey]?.payload;
+    if (payload === undefined) return null;
 
-    return getOrCreateItemScheduler(itemKey, itemQuery.payload);
+    return getOrCreateItemScheduler(itemKey, payload);
   }
 
   function maybeDisposeBatchScheduler(payload: ItemPayload): void {
@@ -1426,6 +1431,8 @@ export function createFetchApi<
     getItemFromStateOrFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
+    getKnownQueryScheduler,
+    getKnownItemScheduler,
     syncRemoteFetchStart,
     syncRemoteFetchSuccess,
     deleteQueryFetchResources,

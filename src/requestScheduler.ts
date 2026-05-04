@@ -52,6 +52,14 @@ type PendingRequest<T> = {
 /** Request with ID for batch fetching */
 export type BatchRequest<T> = { requestId: string; payload: T };
 
+type QueuedRequest<T> = {
+  requestId: string;
+  payload: T;
+  priority: FetchType;
+  addedAt: number;
+  remoteStartCancelable: boolean;
+};
+
 /** Primary scheduler phase - exactly one is active at a time */
 type SchedulerPhase<T> =
   | { type: 'idle' }
@@ -69,15 +77,31 @@ type SchedulerPhase<T> =
         string,
         { awaitCallbacks: Array<(wasAborted: boolean) => void> }
       >;
-      rtuCallback: (() => void) | null;
+      rtuAfterFetch: QueuedRequest<T> | null;
     };
 
-type DelayedRequest<T> = {
-  timeoutId: TimeoutId;
+type PendingRequestMatcher<T> = (request: {
   requestId: string;
   payload: T;
-  remoteStartCancelable: boolean;
-};
+  priority: FetchType;
+  addedAt: number;
+}) => boolean;
+
+function matchesShouldCancel<T>(
+  shouldCancel: PendingRequestMatcher<T> | undefined,
+  requestId: string,
+  request: { payload: T; priority: FetchType; addedAt: number },
+): boolean {
+  if (!shouldCancel) return true;
+  return shouldCancel({
+    requestId,
+    payload: request.payload,
+    priority: request.priority,
+    addedAt: request.addedAt,
+  });
+}
+
+type DelayedRequest<T> = QueuedRequest<T> & { timeoutId: TimeoutId };
 
 /** Pending states that can coexist with any phase */
 type PendingStates<T> = {
@@ -424,18 +448,99 @@ export class RequestScheduler<T> {
   }
 
   cancelCoalescingRequests(requestIds: string[]): boolean {
+    return this.#cancelCoalescingRequests(requestIds, false, undefined);
+  }
+
+  cancelPendingRequests(
+    requestIds: string[],
+    shouldCancel?: PendingRequestMatcher<T>,
+  ): boolean {
+    if (requestIds.length === 0 || !this.hasPendingFetch) return false;
+
+    let wasCancelled = this.#cancelCoalescingRequests(
+      requestIds,
+      true,
+      shouldCancel,
+    );
+
+    for (const requestId of requestIds) {
+      const scheduledRequest =
+        this.#state.pending.scheduledRequests.get(requestId);
+      if (
+        !scheduledRequest ||
+        !matchesShouldCancel(shouldCancel, requestId, scheduledRequest)
+      ) {
+        continue;
+      }
+
+      this.#state.pending.scheduledRequests.delete(requestId);
+      this.#finalizePendingRequestCallbacks(scheduledRequest, false);
+      wasCancelled = true;
+    }
+
+    const rtuDelayed = this.#state.pending.rtuDelayed;
+    if (
+      rtuDelayed &&
+      requestIds.includes(rtuDelayed.requestId) &&
+      matchesShouldCancel(shouldCancel, rtuDelayed.requestId, rtuDelayed)
+    ) {
+      this.#clearRtuDelayed();
+      wasCancelled = true;
+    }
+
+    const mediumPriorityDelayed = this.#state.pending.mediumPriorityDelayed;
+    if (
+      mediumPriorityDelayed &&
+      requestIds.includes(mediumPriorityDelayed.requestId) &&
+      matchesShouldCancel(
+        shouldCancel,
+        mediumPriorityDelayed.requestId,
+        mediumPriorityDelayed,
+      )
+    ) {
+      this.#cancelMediumPriority();
+      wasCancelled = true;
+    }
+
+    if (this.#state.phase.type === 'fetching') {
+      const rtuAfterFetch = this.#state.phase.rtuAfterFetch;
+      if (
+        rtuAfterFetch &&
+        requestIds.includes(rtuAfterFetch.requestId) &&
+        matchesShouldCancel(
+          shouldCancel,
+          rtuAfterFetch.requestId,
+          rtuAfterFetch,
+        )
+      ) {
+        this.#state.phase.rtuAfterFetch = null;
+        wasCancelled = true;
+      }
+    }
+
+    return wasCancelled;
+  }
+
+  #cancelCoalescingRequests(
+    requestIds: string[],
+    isExplicitCancel: boolean,
+    shouldCancel: PendingRequestMatcher<T> | undefined,
+  ): boolean {
     if (requestIds.length === 0) return false;
+    if (this.#state.phase.type !== 'coalescing') return false;
 
     let wasCancelled = false;
 
-    if (this.#state.phase.type !== 'coalescing') return false;
-
     for (const requestId of requestIds) {
       const request = this.#state.phase.pendingRequests.get(requestId);
-      if (!request || !this.#isRemoteStartCancelable(request)) continue;
+      if (!request) continue;
+      if (!isExplicitCancel && !this.#isRemoteStartCancelable(request)) {
+        continue;
+      }
+      if (!matchesShouldCancel(shouldCancel, requestId, request)) continue;
 
       this.#state.phase.pendingRequests.delete(requestId);
-      this.#finalizePendingRequestCallbacks(request, true);
+      this.#finalizePendingRequestCallbacks(request, !isExplicitCancel);
       wasCancelled = true;
     }
 
@@ -466,6 +571,7 @@ export class RequestScheduler<T> {
       return this.#handleMediumPriority(
         requestId,
         payload,
+        startTime,
         options?.mediumPriorityDelayMs,
         remoteStartCancelable,
       );
@@ -706,7 +812,7 @@ export class RequestScheduler<T> {
       fetchId,
       startTime,
       fetchingRequests,
-      rtuCallback: null,
+      rtuAfterFetch: null,
     };
 
     this.#clearRtuDelayed();
@@ -748,7 +854,7 @@ export class RequestScheduler<T> {
       this.#state.timing.lastFetchDuration = Date.now() - startTime;
     }
 
-    const { fetchingRequests: callbacks, rtuCallback } = this.#state.phase;
+    const { fetchingRequests: callbacks, rtuAfterFetch } = this.#state.phase;
 
     this.#clearRtuDelayed();
     this.#state.phase = { type: 'idle' };
@@ -760,8 +866,13 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (rtuCallback) {
-      rtuCallback();
+    if (rtuAfterFetch) {
+      this.#scheduleDelayedRTU(
+        Date.now(),
+        rtuAfterFetch.requestId,
+        rtuAfterFetch.payload,
+        rtuAfterFetch.remoteStartCancelable,
+      );
     }
 
     this.#flushScheduledRequests();
@@ -966,13 +1077,12 @@ export class RequestScheduler<T> {
     }
 
     if (phase.type === 'fetching') {
-      phase.rtuCallback = () => {
-        this.#scheduleDelayedRTU(
-          Date.now(),
-          requestId,
-          payload,
-          remoteStartCancelable,
-        );
+      phase.rtuAfterFetch = {
+        requestId,
+        payload,
+        priority: 'realtimeUpdate',
+        addedAt: startTime,
+        remoteStartCancelable,
       };
       return true;
     }
@@ -1032,6 +1142,8 @@ export class RequestScheduler<T> {
       }, delay),
       requestId,
       payload,
+      priority: 'realtimeUpdate',
+      addedAt: startTime,
       remoteStartCancelable,
     };
 
@@ -1043,6 +1155,7 @@ export class RequestScheduler<T> {
   #handleMediumPriority(
     requestId: string,
     payload: T,
+    startTime: number,
     customDelayMs: number | undefined,
     remoteStartCancelable: boolean,
   ): ScheduleFetchResults {
@@ -1074,6 +1187,8 @@ export class RequestScheduler<T> {
       }, delayMs),
       requestId,
       payload,
+      priority: 'mediumPriority',
+      addedAt: startTime,
       remoteStartCancelable,
     };
 

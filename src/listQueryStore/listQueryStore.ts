@@ -104,7 +104,10 @@ import {
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
-import { excludeLoadedFields } from './itemFieldUtils';
+import {
+  excludeLoadedFields,
+  fallbackItemHasRequestedFields,
+} from './itemFieldUtils';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import {
   type DerivedQueriesConfig,
@@ -1871,6 +1874,8 @@ export function createListQueryStore<
     getItemFromStateOrFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
+    getKnownQueryScheduler,
+    getKnownItemScheduler,
     syncRemoteFetchStart,
     syncRemoteFetchSuccess,
     deleteQueryFetchResources,
@@ -2395,13 +2400,68 @@ export function createListQueryStore<
     return partialResources.mergeItems(currentItem ?? undefined, incomingItem);
   }
 
+  function itemSnapshotSatisfiesRequestedFields(
+    item: ItemState | null,
+    loadedFields: string[],
+    requestedFields: readonly string[] | undefined,
+  ): boolean {
+    if (!partialResources || !requestedFields || requestedFields.length === 0) {
+      return true;
+    }
+
+    if (item === null) return true;
+
+    return fallbackItemHasRequestedFields(
+      { item, loadedFields },
+      requestedFields,
+    );
+  }
+
+  function querySnapshotSatisfiesPendingQueryFetch(
+    message: Extract<
+      ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>,
+      { kind: 'list-query-snapshot' }
+    >,
+    snapshotItemsByKey: ReadonlyMap<string, (typeof message.items)[number]>,
+    request: { payload: { offset: number; limit: number; fields?: string[] } },
+  ): boolean {
+    const requestedEnd = request.payload.offset + request.payload.limit;
+    if (message.query.items.length < requestedEnd && message.query.hasMore) {
+      return false;
+    }
+
+    const requestedFields = request.payload.fields;
+    if (!partialResources || !requestedFields || requestedFields.length === 0) {
+      return true;
+    }
+
+    const coveredItemKeys = message.query.items.slice(
+      request.payload.offset,
+      requestedEnd,
+    );
+
+    return coveredItemKeys.every((itemKey) => {
+      const item = snapshotItemsByKey.get(itemKey);
+      return (
+        !!item &&
+        itemSnapshotSatisfiesRequestedFields(
+          item.item,
+          item.loadedFields,
+          requestedFields,
+        )
+      );
+    });
+  }
+
   function applyRemoteItemSnapshot(
     message: Extract<
       ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>,
       { kind: 'list-item-snapshot' }
     >,
   ): void {
-    const payloadToCleanup = store.state.itemQueries[message.itemKey]?.payload;
+    const currentItemQuery = store.state.itemQueries[message.itemKey];
+    const payloadToCleanup = currentItemQuery?.payload;
+    const itemScheduler = getKnownItemScheduler(message.itemKey);
 
     runWithoutBroadcast(() => {
       store.produceState(
@@ -2440,6 +2500,16 @@ export function createListQueryStore<
       );
     });
 
+    if (message.consistency === 'confirmed') {
+      itemScheduler?.cancelPendingRequests([message.itemKey], ({ payload }) =>
+        itemSnapshotSatisfiesRequestedFields(
+          message.item,
+          message.loadedFields,
+          payload.fields,
+        ),
+      );
+    }
+
     itemInvalidationWasTriggered.delete(message.itemKey);
     if (message.item === null && message.itemQuery === null) {
       cleanupItemStateMetadata(message.itemKey);
@@ -2465,6 +2535,34 @@ export function createListQueryStore<
       { kind: 'list-query-snapshot' }
     >,
   ): void {
+    if (message.consistency === 'confirmed') {
+      const snapshotItemsByKey = new Map(
+        message.items.map((item) => [item.itemKey, item]),
+      );
+
+      getOrCreateQueryScheduler(message.queryKey).cancelPendingRequests(
+        [message.queryKey],
+        (request) =>
+          querySnapshotSatisfiesPendingQueryFetch(
+            message,
+            snapshotItemsByKey,
+            request,
+          ),
+      );
+
+      for (const item of message.items) {
+        const itemScheduler = getKnownItemScheduler(item.itemKey);
+
+        itemScheduler?.cancelPendingRequests([item.itemKey], ({ payload }) =>
+          itemSnapshotSatisfiesRequestedFields(
+            item.item,
+            item.loadedFields,
+            payload.fields,
+          ),
+        );
+      }
+    }
+
     runWithoutBroadcast(() => {
       store.produceState(
         (draft) => {
@@ -2582,18 +2680,23 @@ export function createListQueryStore<
       }
 
       const localItemQuery = store.state.itemQueries[message.itemKey];
+      let itemScheduler: ReturnType<typeof getKnownItemScheduler> = null;
       if (localItemQuery === undefined) {
+        itemScheduler = getKnownItemScheduler(message.itemKey);
+      } else if (localItemQuery !== null) {
+        itemScheduler = getOrCreateItemScheduler(
+          message.itemKey,
+          localItemQuery.payload,
+        );
+      }
+      if (localItemQuery === undefined && !itemScheduler?.hasPendingFetch) {
         lastItemSyncVersions.set(message.itemKey, candidateVersion);
         return;
       }
 
       if (
         message.consistency === 'confirmed' &&
-        localItemQuery !== null &&
-        getOrCreateItemScheduler(
-          message.itemKey,
-          localItemQuery.payload,
-        ).isMutationInProgress(message.itemKey)
+        itemScheduler?.isMutationInProgress(message.itemKey)
       ) {
         lastItemSyncVersions.set(message.itemKey, candidateVersion);
         return;
@@ -2618,7 +2721,8 @@ export function createListQueryStore<
     }
 
     const localQuery = store.state.queries[message.queryKey];
-    if (!localQuery) {
+    const queryScheduler = getKnownQueryScheduler(message.queryKey);
+    if (!localQuery && !queryScheduler?.hasPendingFetch) {
       lastQuerySyncVersions.set(message.queryKey, candidateVersion);
       for (const item of message.items) {
         lastItemSyncVersions.set(item.itemKey, candidateVersion);

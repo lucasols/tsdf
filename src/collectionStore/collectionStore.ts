@@ -1339,6 +1339,7 @@ export function createCollectionStore<
   }
 
   const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  const itemKeyToPayload = new Map<string, ItemPayload>();
 
   function getOrCreateBatchKeyScheduler(
     batchKey: string,
@@ -1446,6 +1447,8 @@ export function createCollectionStore<
     itemKey: string,
     payload: ItemPayload,
   ): RequestScheduler<ItemPayload> {
+    itemKeyToPayload.set(itemKey, payload);
+
     if (useBatchSchedulers) {
       if (getItemsBatchKey) {
         const batchKey = getItemsBatchKey(payload);
@@ -1458,6 +1461,19 @@ export function createCollectionStore<
       }
     }
     return getOrCreateItemScheduler(itemKey);
+  }
+
+  function getKnownScheduler(
+    itemKey: string,
+  ): RequestScheduler<ItemPayload> | null {
+    const existingScheduler = perItemSchedulers.get(itemKey);
+    if (existingScheduler) return existingScheduler;
+
+    const payload =
+      itemKeyToPayload.get(itemKey) ?? store.state[itemKey]?.payload;
+    if (payload === undefined) return null;
+
+    return getScheduler(itemKey, payload);
   }
 
   function recordCollectionSyncVersion(
@@ -1507,13 +1523,7 @@ export function createCollectionStore<
     }
 
     const itemKey = targetKey.slice('item:'.length);
-    const existingScheduler = perItemSchedulers.get(itemKey);
-    if (existingScheduler) return existingScheduler;
-
-    const payload = store.state[itemKey]?.payload;
-    if (!payload) return null;
-
-    return getScheduler(itemKey, payload);
+    return getKnownScheduler(itemKey);
   }
 
   function applyRemoteItemSnapshot(
@@ -1521,8 +1531,18 @@ export function createCollectionStore<
     candidateVersion: BrowserTabsSyncVersion,
   ): void {
     const existingItem = store.state[message.itemKey];
-    const schedulerPayload = message.item?.payload ?? existingItem?.payload;
+    const schedulerPayload =
+      existingItem?.payload ?? itemKeyToPayload.get(message.itemKey);
     const snapshotItem = message.item;
+    const cancelPendingConfirmedFetch = () => {
+      if (message.consistency !== 'confirmed') return;
+      // Use the known scheduler (keyed by the previously-seen payload) so that
+      // pending fetches against the old batch partition are cancelled, even
+      // when the snapshot brings a different payload.
+      getKnownScheduler(message.itemKey)?.cancelPendingRequests([
+        message.itemKey,
+      ]);
+    };
 
     if (existingItem === undefined) {
       if (snapshotItem !== null) {
@@ -1544,6 +1564,7 @@ export function createCollectionStore<
       }
 
       lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
+      cancelPendingConfirmedFetch();
       if (snapshotItem !== null) {
         touchItemsAndMaybeEnforceLimits([message.itemKey]);
       }
@@ -1571,9 +1592,11 @@ export function createCollectionStore<
       invalidationWasTriggered.delete(message.itemKey);
     });
 
-    if (message.item === null && schedulerPayload) {
+    if (message.item === null && schedulerPayload !== undefined) {
+      cancelPendingConfirmedFetch();
       cleanupItemResources(message.itemKey, schedulerPayload);
     } else if (message.item !== null) {
+      cancelPendingConfirmedFetch();
       touchItemsAndMaybeEnforceLimits([message.itemKey]);
     }
 
@@ -1585,11 +1608,10 @@ export function createCollectionStore<
   ): boolean {
     if (message.consistency !== 'confirmed') return false;
 
-    const payload = store.state[message.itemKey]?.payload;
-    if (!payload) return false;
-
-    return getScheduler(message.itemKey, payload).isMutationInProgress(
-      message.itemKey,
+    return (
+      getKnownScheduler(message.itemKey)?.isMutationInProgress(
+        message.itemKey,
+      ) ?? false
     );
   }
 
@@ -1713,6 +1735,7 @@ export function createCollectionStore<
 
   function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
     invalidationWasTriggered.delete(itemKey);
+    itemKeyToPayload.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
 
     const itemScheduler = perItemSchedulers.get(itemKey);
@@ -2527,6 +2550,7 @@ export function createCollectionStore<
       scheduler.reset();
     }
     batchKeySchedulers.clear();
+    itemKeyToPayload.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
       scheduler.reset();
@@ -2559,6 +2583,7 @@ export function createCollectionStore<
       scheduler.reset();
     }
     batchKeySchedulers.clear();
+    itemKeyToPayload.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
       scheduler.reset();
