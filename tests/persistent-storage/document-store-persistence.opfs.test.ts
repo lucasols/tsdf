@@ -243,10 +243,7 @@ describe('opfs: document store persistence', () => {
     await flushAllTimers();
 
     const firstHook = renderHook(() =>
-      env.apiStore.useDocument({
-        disableRefetchOnMount: true,
-        returnRefetchingStatus: true,
-      }),
+      env.apiStore.useDocument({ returnRefetchingStatus: true }),
     );
     await flushAllTimers();
 
@@ -257,10 +254,7 @@ describe('opfs: document store persistence', () => {
     firstHook.unmount();
 
     renderHook(() =>
-      env.apiStore.useDocument({
-        disableRefetchOnMount: true,
-        returnRefetchingStatus: true,
-      }),
+      env.apiStore.useDocument({ returnRefetchingStatus: true }),
     );
     await flushAllTimers();
 

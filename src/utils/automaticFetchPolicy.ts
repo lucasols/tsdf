@@ -67,15 +67,7 @@ export function createFieldsResourceSignature(
   return JSON.stringify(Array.from(new Set(fields)).sort());
 }
 
-export function shouldScheduleAutomaticFetch({
-  wasLoaded,
-  shouldFetch,
-  requiredFetch = false,
-  disableRefetches,
-  disableRefetchOnMount,
-  refetchOnMount = false,
-  skipFreshFetch = false,
-}: {
+type AutomaticFetchPolicyOptions = {
   wasLoaded: boolean | undefined;
   shouldFetch: boolean;
   requiredFetch?: boolean;
@@ -83,14 +75,22 @@ export function shouldScheduleAutomaticFetch({
   disableRefetchOnMount: boolean;
   refetchOnMount?: false | FetchType;
   skipFreshFetch?: boolean;
-}): boolean {
+};
+
+export function shouldScheduleAutomaticFetch(
+  options: AutomaticFetchPolicyOptions,
+): boolean {
+  const {
+    wasLoaded,
+    shouldFetch,
+    disableRefetches,
+    disableRefetchOnMount,
+    skipFreshFetch = false,
+  } = options;
+
   if (disableRefetches) return !wasLoaded;
 
-  if (disableRefetchOnMount) {
-    if (requiredFetch) return true;
-
-    return refetchOnMount !== false && refetchOnMount !== 'lowPriority';
-  }
+  if (disableRefetchOnMount) return shouldFetch;
 
   if (skipFreshFetch && !shouldFetch) {
     return false;

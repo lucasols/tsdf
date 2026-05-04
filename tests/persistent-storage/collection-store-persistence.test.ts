@@ -122,11 +122,13 @@ function createEnv(options: {
   pinnedItems?: string[];
   ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Record<string, ItemState>;
+  usesRealTimeUpdates?: boolean;
   onPersistentStorageError?: (error: unknown) => void;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
+    usesRealTimeUpdates: options.usesRealTimeUpdates,
     persistentStorage: {
       adapter: 'local-sync',
       schema: wrappedItemSchema,
@@ -278,7 +280,41 @@ describe('localStorage: collection store persistence', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('disableRefetchOnMount keeps cached data without refetching', async () => {
+  test('realtime stores revalidate cached localStorage item after first hydration', async () => {
+    setCachedCollectionItem('col-rtu-first-sync', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+
+    const env = createEnv({
+      storeName: 'col-rtu-first-sync',
+      sessionKey: 'sess1',
+      serverData: { '1': { id: '1', name: 'Fresh' } },
+      usesRealTimeUpdates: true,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached}
+      -> status: refetching ⋅ data: {id:1, name:Cached}
+      -> status: success ⋅ data: {id:1, name:Fresh}
+      "
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
+
+  test('disableRefetchOnMount still revalidates cached data marked refetchOnMount', async () => {
     const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
     const key = setCachedCollectionItem(
       'col-hook-no-refetch',
