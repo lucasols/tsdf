@@ -7,7 +7,11 @@ import type {
   TSFDListQuery,
   TSFDListQueryState,
 } from '../listQueryStore/types';
-import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  isStrictItemKeyPrefix,
+  type ValidPayload,
+  type ValidStoreState,
+} from '../utils/storeShared';
 import {
   buildPersistedStaticPolicy,
   estimateManagedAsyncStorageEntrySizeBytes,
@@ -1245,6 +1249,63 @@ export function setupListQueryPersistence<
     return snapshot ? parseHydratedQuerySnapshot(snapshot) : undefined;
   }
 
+  function filterRetainableHydratedSuffix(
+    suffixItemKeys: readonly string[],
+  ): string[] {
+    return suffixItemKeys.filter((itemKey) => {
+      const hydratedItem = readHydratedItem(itemKey);
+      return (
+        hydratedItem?.item != null &&
+        !shouldIgnoreItem(hydratedItem.itemQuery.payload)
+      );
+    });
+  }
+
+  async function hydrateMissingAsyncItems(itemKeys: readonly string[]) {
+    if (localStorageAdapter !== null) return;
+
+    const itemKeysToLoad = itemKeys.filter(
+      (itemKey) => readHydratedItem(itemKey) === undefined,
+    );
+    if (itemKeysToLoad.length === 0) return;
+
+    const cachedItems = await itemNamespace.loadMany(itemKeysToLoad, {
+      touch: 'never',
+    });
+
+    for (const [index, itemKey] of itemKeysToLoad.entries()) {
+      const cachedItem = cachedItems[index];
+      if (cachedItem) {
+        rememberHydratedItem(itemKey, cachedItem);
+      }
+    }
+  }
+
+  async function readPreviousPersistedQueryForSuffix(
+    queryKey: string,
+    previousKnownLocalQueryKeys: Set<string>,
+  ): Promise<ParsedPersistedListQueryData<QueryPayload> | undefined> {
+    let previousPersistedQuery = readPersistedQueryData(queryKey);
+
+    if (
+      !previousPersistedQuery &&
+      localStorageAdapter === null &&
+      previousKnownLocalQueryKeys.has(queryKey)
+    ) {
+      const cached = await queryNamespace.load(queryKey, { touch: 'never' });
+      previousPersistedQuery = cached
+        ? (parsePersistedListQueryData(cached, config.queryPayloadSchema) ??
+          undefined)
+        : undefined;
+
+      if (previousPersistedQuery) {
+        rememberHydratedQuery(queryKey, previousPersistedQuery);
+      }
+    }
+
+    return previousPersistedQuery;
+  }
+
   function readHydratedLocalStorageQuery(
     queryKey: string,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
@@ -2219,8 +2280,28 @@ export function setupListQueryPersistence<
             !shouldIgnoreItem(itemQuery.payload)
           );
         });
+        let queryItemsToPersist = filteredItems;
+        if (query.hasMore) {
+          const previousPersistedQuery =
+            await readPreviousPersistedQueryForSuffix(
+              queryKey,
+              previousKnownLocalQueryKeys,
+            );
+          if (
+            previousPersistedQuery &&
+            isStrictItemKeyPrefix(filteredItems, previousPersistedQuery.items)
+          ) {
+            const suffixItemKeys = previousPersistedQuery.items.slice(
+              filteredItems.length,
+            );
+            await hydrateMissingAsyncItems(suffixItemKeys);
+            const cachedSuffix = filterRetainableHydratedSuffix(suffixItemKeys);
+            queryItemsToPersist = [...filteredItems, ...cachedSuffix];
+          }
+        }
+
         const limitedQuery = limitPersistedQueryItems(
-          filteredItems,
+          queryItemsToPersist,
           query.hasMore,
           maxQuerySize,
         );
@@ -2362,6 +2443,7 @@ export function setupListQueryPersistence<
 
       for (const itemKey of previousKnownLocalItemKeys) {
         if (nextItemKeys.has(itemKey)) continue;
+        if (persistedQueryItemKeys.has(itemKey)) continue;
         if (!hydratedPersistedItemKeys.has(itemKey)) continue;
 
         tasks.push(itemNamespace.remove(itemKey));
@@ -2460,8 +2542,29 @@ export function setupListQueryPersistence<
         return item != null && itemQuery != null;
       });
 
+      let queryItemsToPersist = filteredItems;
+      if (query.hasMore) {
+        const previousPersistedQuery =
+          await readPreviousPersistedQueryForSuffix(
+            queryKey,
+            previousKnownLocalQueryKeys,
+          );
+
+        if (
+          previousPersistedQuery &&
+          isStrictItemKeyPrefix(filteredItems, previousPersistedQuery.items)
+        ) {
+          const suffixItemKeys = previousPersistedQuery.items.slice(
+            filteredItems.length,
+          );
+          await hydrateMissingAsyncItems(suffixItemKeys);
+          const cachedSuffix = filterRetainableHydratedSuffix(suffixItemKeys);
+          queryItemsToPersist = [...filteredItems, ...cachedSuffix];
+        }
+      }
+
       const limitedQuery = limitPersistedQueryItems(
-        filteredItems,
+        queryItemsToPersist,
         query.hasMore,
         maxQuerySize,
       );
@@ -2647,6 +2750,7 @@ export function setupListQueryPersistence<
 
     for (const itemKey of previousKnownLocalItemKeys) {
       if (finalItemDataByKey.has(itemKey)) continue;
+      if (persistedQueryItemKeys.has(itemKey)) continue;
       if (!hydratedPersistedItemKeys.has(itemKey)) continue;
       finalPersistedItemKeys.delete(itemKey);
     }

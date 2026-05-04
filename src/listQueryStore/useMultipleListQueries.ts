@@ -35,6 +35,7 @@ import {
 } from '../utils/payloadDebounce';
 import {
   fetchTypePriority,
+  isStrictItemKeyPrefix,
   type PayloadDebounce,
   ValidPayload,
   ValidStoreState,
@@ -778,7 +779,14 @@ export function useMultipleListQueries<
                   itemPayload: state.itemQueries[itemKey]?.payload,
                 })),
             error: effectiveQuery.query.error,
-            hasMore: effectiveQuery.query.hasMore,
+            hasMore: isOfflineMode
+              ? !!readFallbackQueryState &&
+                effectiveQuery.query.hasMore &&
+                isStrictItemKeyPrefix(
+                  effectiveQuery.query.items,
+                  readFallbackQueryState(queryKey)?.items ?? [],
+                )
+              : effectiveQuery.query.hasMore,
             isDerived: effectiveQuery.isDerived,
             ...(loadingFields ? { loadingFields } : {}),
             isLoading: status === 'loading',
@@ -796,9 +804,11 @@ export function useMultipleListQueries<
     },
     [
       getVisibleQueryItemKeys,
+      isOfflineMode,
       offlineEntitiesByKey,
       partialResources,
       queriesWithId,
+      readFallbackQueryState,
       resolveEffectiveQuery,
       selectVisibleItems,
     ],
@@ -874,7 +884,7 @@ export function useMultipleListQueries<
               status: 'success',
               items: fallbackItems,
               error: null,
-              hasMore: fallbackQuery.hasMore,
+              hasMore: isOfflineMode ? false : fallbackQuery.hasMore,
               isDerived: false,
               payload: queryConfig.omitPayload
                 ? undefined

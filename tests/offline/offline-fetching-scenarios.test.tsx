@@ -1,3 +1,4 @@
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -621,6 +622,519 @@ describe('offline fetching scenarios', () => {
     expect(
       env.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toEqual(itemRequestHistoryBeforeOfflineFetch);
+  });
+
+  test('list-query loadMore is skipped offline when storage has no cached next page', async () => {
+    const sessionKey = 'offline-fetching-list-query-load-more';
+    const usersQuery = { tableId: 'users' } as const;
+    const env = createListQueryStoreTestEnv(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+          { id: 3, name: 'Linus' },
+        ],
+      },
+      {
+        defaultQuerySize: 2,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: { operations: {} },
+        },
+      },
+    );
+
+    const listHook = renderHook(() =>
+      env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      }),
+    );
+    await flushAllTimers();
+
+    // The first online page can load more, so this reproduces the state that
+    // would normally render a Load more control.
+    expect(pick(listHook.result.current, ['items', 'hasMore', 'status']))
+      .toMatchInlineSnapshot(`
+        hasMore: '✅'
+        items: ['Ada', 'Grace']
+        status: 'success'
+      `);
+
+    const requestHistoryBeforeOfflineLoadMore = structuredClone(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    );
+
+    act(() => {
+      network.goOffline();
+    });
+    await Promise.resolve();
+
+    // While offline, storage is the backend. Because the cached query only has
+    // the already-visible page, callers should not see another available page.
+    expect(pick(listHook.result.current, ['items', 'hasMore', 'status']))
+      .toMatchInlineSnapshot(`
+        hasMore: '❌'
+        items: ['Ada', 'Grace']
+        status: 'success'
+      `);
+    expect(env.apiStore.loadMore(usersQuery)).toBe('skipped');
+    await flushAllTimers();
+
+    expect(pick(listHook.result.current, ['items', 'hasMore', 'status']))
+      .toMatchInlineSnapshot(`
+        hasMore: '❌'
+        items: ['Ada', 'Grace']
+        status: 'success'
+      `);
+    expect(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toEqual(requestHistoryBeforeOfflineLoadMore);
+  });
+
+  test('list-query loadMore reads the next cached storage page while offline', async () => {
+    const sessionKey = 'offline-fetching-list-query-load-more-storage';
+    const storeName = 'offline-fetching-list-query-load-more-storage';
+    const usersQuery = { tableId: 'users' } as const;
+    createMockLocalStorageStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        listQuery: {
+          items: [
+            { tableId: 'users', id: 1, data: { id: 1, name: 'Ada' } },
+            { tableId: 'users', id: 2, data: { id: 2, name: 'Grace' } },
+            { tableId: 'users', id: 3, data: { id: 3, name: 'Linus' } },
+            { tableId: 'users', id: 4, data: { id: 4, name: 'Margaret' } },
+          ],
+          queries: [
+            {
+              params: usersQuery,
+              items: [
+                { tableId: 'users', id: 1 },
+                { tableId: 'users', id: 2 },
+                { tableId: 'users', id: 3 },
+                { tableId: 'users', id: 4 },
+              ],
+              hasMore: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const env = createListQueryStoreTestEnv(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+          { id: 3, name: 'Linus from server' },
+          { id: 4, name: 'Margaret from server' },
+          { id: 5, name: 'Katherine' },
+        ],
+      },
+      {
+        id: storeName,
+        defaultQuerySize: 2,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: { operations: {} },
+        },
+      },
+    );
+
+    const getStoredQuerySnapshot = () => {
+      const query = env.apiStore.getQueryState(usersQuery);
+
+      return {
+        items:
+          query?.items.map((itemKey) => env.store.state.items[itemKey]?.name) ??
+          [],
+        status: query?.status,
+      };
+    };
+
+    // Start from a real online fetch that loaded fewer items than the existing
+    // cached query. The persistence layer should preserve the cached suffix.
+    expect(env.scheduleFetch('highPriority', usersQuery, 2)).toBe('triggered');
+    await flushAllTimers();
+
+    expect(getStoredQuerySnapshot()).toMatchInlineSnapshot(`
+      items: ['Ada', 'Grace']
+      status: 'success'
+    `);
+
+    const requestHistoryBeforeOfflineLoadMore = structuredClone(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    );
+
+    act(() => {
+      network.goOffline();
+    });
+    await Promise.resolve();
+
+    expect(env.apiStore.loadMore(usersQuery, 1)).toBe('triggered');
+    expect(getStoredQuerySnapshot()).toMatchInlineSnapshot(`
+      items: ['Ada', 'Grace', 'Linus']
+      status: 'success'
+    `);
+    expect(env.apiStore.loadMore(usersQuery, 1)).toBe('triggered');
+    expect(getStoredQuerySnapshot()).toMatchInlineSnapshot(`
+      items: ['Ada', 'Grace', 'Linus', 'Margaret']
+      status: 'success'
+    `);
+    expect(env.apiStore.loadMore(usersQuery, 1)).toBe('skipped');
+
+    const listHook = renderHook(() =>
+      env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      }),
+    );
+    await flushAllTimers();
+
+    expect(pick(listHook.result.current, ['items', 'hasMore', 'status']))
+      .toMatchInlineSnapshot(`
+        hasMore: '❌'
+        items: ['Ada', 'Grace', 'Linus', 'Margaret']
+        status: 'success'
+      `);
+    expect(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toEqual(requestHistoryBeforeOfflineLoadMore);
+  });
+
+  test('list-query loadMore is skipped offline after the refreshed query has no more pages', async () => {
+    const sessionKey = 'offline-fetching-list-query-load-more-no-more';
+    const storeName = 'offline-fetching-list-query-load-more-no-more';
+    const usersQuery = { tableId: 'users' } as const;
+    const storage = createMockLocalStorageStore({ storeName, sessionKey });
+
+    const env = createListQueryStoreTestEnv(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: storeName,
+        defaultQuerySize: 2,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: { operations: {} },
+        },
+      },
+    );
+
+    const itemKey1 = env.getStoreItemKey('users', 1);
+    const itemKey2 = env.getStoreItemKey('users', 2);
+    act(() => {
+      env.store.produceState((draft) => {
+        draft.items[itemKey1] = { id: 1, name: 'Ada' };
+        draft.items[itemKey2] = { id: 2, name: 'Grace' };
+        draft.itemQueries[itemKey1] = {
+          error: null,
+          payload: 'users||1',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+        draft.itemQueries[itemKey2] = {
+          error: null,
+          payload: 'users||2',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+        draft.itemLoadedFields[itemKey1] = ['id', 'name'];
+        draft.itemLoadedFields[itemKey2] = ['id', 'name'];
+        draft.queries[env.getQueryKey(usersQuery)] = {
+          error: null,
+          hasMore: false,
+          items: [itemKey1, itemKey2],
+          payload: usersQuery,
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+      });
+    });
+
+    expect(pick(env.apiStore.getQueryState(usersQuery), ['items', 'hasMore']))
+      .toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||1', '"users||2']
+    `);
+
+    storage.listQuery.seedItem('users', 1, { id: 1, name: 'Ada' });
+    storage.listQuery.seedItem('users', 2, { id: 2, name: 'Grace' });
+    storage.listQuery.seedItem('users', 3, { id: 3, name: 'Linus' });
+    storage.listQuery.seedQuery(
+      usersQuery,
+      [
+        { tableId: 'users', id: 1 },
+        { tableId: 'users', id: 2 },
+        { tableId: 'users', id: 3 },
+      ],
+      { hasMore: true },
+    );
+
+    act(() => {
+      network.goOffline();
+    });
+    await Promise.resolve();
+
+    expect(env.apiStore.loadMore(usersQuery, 1)).toBe('skipped');
+    expect(pick(env.apiStore.getQueryState(usersQuery), ['items', 'hasMore']))
+      .toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||1', '"users||2']
+    `);
+  });
+
+  test('list-query loadMore keeps fresher materialized item data while offline', async () => {
+    const sessionKey =
+      'offline-fetching-list-query-load-more-materialized-item';
+    const storeName = 'offline-fetching-list-query-load-more-materialized-item';
+    const usersQuery = { tableId: 'users' } as const;
+    const storage = createMockLocalStorageStore({ storeName, sessionKey });
+
+    const env = createListQueryStoreTestEnv(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+          { id: 3, name: 'Linus from server' },
+          { id: 4, name: 'Margaret' },
+        ],
+      },
+      {
+        id: storeName,
+        defaultQuerySize: 2,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: { operations: {} },
+        },
+      },
+    );
+
+    const itemKey1 = env.getStoreItemKey('users', 1);
+    const itemKey2 = env.getStoreItemKey('users', 2);
+    const itemKey3 = env.getStoreItemKey('users', 3);
+    act(() => {
+      env.store.produceState((draft) => {
+        draft.items[itemKey1] = { id: 1, name: 'Ada' };
+        draft.items[itemKey2] = { id: 2, name: 'Grace' };
+        draft.items[itemKey3] = { id: 3, name: 'Linus from server' };
+        draft.itemQueries[itemKey1] = {
+          error: null,
+          payload: 'users||1',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+        draft.itemQueries[itemKey2] = {
+          error: null,
+          payload: 'users||2',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+        draft.itemQueries[itemKey3] = {
+          error: null,
+          payload: 'users||3',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+        draft.itemLoadedFields[itemKey1] = ['id', 'name'];
+        draft.itemLoadedFields[itemKey2] = ['id', 'name'];
+        draft.itemLoadedFields[itemKey3] = ['id', 'name'];
+        draft.queries[env.getQueryKey(usersQuery)] = {
+          error: null,
+          hasMore: true,
+          items: [itemKey1, itemKey2],
+          payload: usersQuery,
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        };
+      });
+    });
+
+    expect(env.apiStore.getItemState('users||3')?.name).toBe(
+      'Linus from server',
+    );
+
+    storage.listQuery.seedItem('users', 1, { id: 1, name: 'Ada' });
+    storage.listQuery.seedItem('users', 2, { id: 2, name: 'Grace' });
+    storage.listQuery.seedItem('users', 3, { id: 3, name: 'Linus cached' });
+    storage.listQuery.seedItem('users', 4, { id: 4, name: 'Margaret' });
+    storage.listQuery.seedQuery(
+      usersQuery,
+      [
+        { tableId: 'users', id: 1 },
+        { tableId: 'users', id: 2 },
+        { tableId: 'users', id: 3 },
+        { tableId: 'users', id: 4 },
+      ],
+      { hasMore: true },
+    );
+
+    act(() => {
+      network.goOffline();
+    });
+    await Promise.resolve();
+
+    expect(env.apiStore.loadMore(usersQuery, 1)).toBe('triggered');
+    expect(
+      env.apiStore
+        .getQueryState(usersQuery)
+        ?.items.map((itemKey) => env.store.state.items[itemKey]?.name),
+    ).toMatchInlineSnapshot(`['Ada', 'Grace', 'Linus from server']`);
+  });
+
+  test('list-query async persistence with ignoreItems preserves cached pages for offline loadMore', async () => {
+    const sessionKey = 'offline-fetching-list-query-load-more-async-storage';
+    const storeName = 'offline-fetching-list-query-load-more-async-storage';
+    const usersQuery = { tableId: 'users' } as const;
+    createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        listQuery: {
+          items: [
+            { tableId: 'users', id: 1, data: { id: 1, name: 'Ada' } },
+            { tableId: 'users', id: 2, data: { id: 2, name: 'Grace' } },
+            { tableId: 'users', id: 3, data: { id: 3, name: 'Linus' } },
+            { tableId: 'users', id: 4, data: { id: 4, name: 'Margaret' } },
+          ],
+          queries: [
+            {
+              params: usersQuery,
+              items: [
+                { tableId: 'users', id: 1 },
+                { tableId: 'users', id: 2 },
+                { tableId: 'users', id: 3 },
+                { tableId: 'users', id: 4 },
+              ],
+              hasMore: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const env = createListQueryStoreTestEnv(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+          { id: 3, name: 'Linus from server' },
+          { id: 4, name: 'Margaret from server' },
+          { id: 5, name: 'Katherine' },
+        ],
+      },
+      {
+        id: storeName,
+        defaultQuerySize: 2,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        persistentStorage: {
+          adapter: opfsPersistentStorage,
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          ignoreItems: ['users||5'],
+          offline: { operations: {} },
+        },
+      },
+    );
+
+    const getStoredQuerySnapshot = () => {
+      const query = env.apiStore.getQueryState(usersQuery);
+
+      return {
+        items:
+          query?.items.map((itemKey) => env.store.state.items[itemKey]?.name) ??
+          [],
+        status: query?.status,
+      };
+    };
+
+    // Refreshing a smaller online page should keep the cached suffix in async
+    // storage, otherwise offline loadMore has no backend page left to read.
+    expect(env.scheduleFetch('highPriority', usersQuery, 2)).toBe('triggered');
+    await flushAllTimers();
+
+    expect(getStoredQuerySnapshot()).toMatchInlineSnapshot(`
+      items: ['Ada', 'Grace']
+      status: 'success'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/lq.<{tableId:"users"}>.p.json`,
+      ),
+    ).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||3', '"users||4']`,
+    );
+
+    const requestHistoryBeforeOfflineLoadMore = structuredClone(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    );
+
+    act(() => {
+      network.goOffline();
+    });
+    await Promise.resolve();
+
+    expect(env.apiStore.loadMore(usersQuery, 1)).toBe('triggered');
+    expect(getStoredQuerySnapshot()).toMatchInlineSnapshot(`
+      items: ['Ada', 'Grace', 'Linus']
+      status: 'success'
+    `);
+    expect(
+      env.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toEqual(requestHistoryBeforeOfflineLoadMore);
   });
 
   test('list-query await APIs return cached persisted data when storage is warm but state memory is cold', async () => {

@@ -15,6 +15,7 @@ import {
 import {
   AbortedStoreError,
   DEFAULT_BATCH_KEY,
+  isStrictItemKeyPrefix,
   NotFoundStoreError,
   StoreError,
   StoreFetchError,
@@ -927,16 +928,25 @@ export function createFetchApi<
     )?.fields;
     const fieldsToFetch = normalizeFieldsOption(fields);
 
-    const queryState = getQueryState(params);
-
-    if (!queryState || !queryState.hasMore) return 'skipped';
-    if (queryState.status !== 'success') return 'skipped';
-
     const queryKey = getQueryKey(params);
     const loadSize =
       typeof sizeOrOptions === 'number'
         ? sizeOrOptions
         : (sizeOrOptions?.size ?? defaultQuerySize);
+
+    const queryState = getQueryStateByKey(queryKey);
+
+    if (!queryState) return 'skipped';
+    if (queryState.status !== 'success') return 'skipped';
+    if (!queryState.hasMore) return 'skipped';
+    if (offlineController?.shouldTreatFetchAsOffline?.()) {
+      return loadMoreFromHydratedQuery(
+        queryKey,
+        queryState,
+        loadSize,
+        fieldsToFetch,
+      );
+    }
 
     const fetchPayload: QueryFetchPayload<QueryPayload> = offsetPagination
       ? {
@@ -959,6 +969,79 @@ export function createFetchApi<
       'highPriority',
       fetchPayload,
     );
+  }
+
+  function loadMoreFromHydratedQuery(
+    queryKey: string,
+    queryState: Query,
+    loadSize: number,
+    fields: string[] | undefined,
+  ): ScheduleFetchResults {
+    if (!persistence) return 'skipped';
+
+    const hydratedQuery = persistence.readHydratedQuery(queryKey);
+    if (!hydratedQuery) return 'skipped';
+    if (!isStrictItemKeyPrefix(queryState.items, hydratedQuery.items)) {
+      return 'skipped';
+    }
+
+    const start = queryState.items.length;
+    const end = Math.min(start + loadSize, hydratedQuery.items.length);
+    if (start === end) return 'skipped';
+
+    const appendedItemKeys: string[] = [];
+    const appendedHydratedItems: {
+      itemKey: string;
+      state: NonNullable<ReturnType<typeof persistence.readHydratedItem>>;
+    }[] = [];
+    for (let i = start; i < end; i++) {
+      const itemKey = hydratedQuery.items[i];
+      if (itemKey === undefined) return 'skipped';
+      const materializedState = readMaterializedItemState(itemKey);
+      const hydratedState = persistence.readHydratedItem(itemKey);
+      const state = materializedState ?? hydratedState;
+      if (
+        !state ||
+        state.item == null ||
+        state.itemQuery == null ||
+        (partialResources &&
+          fields &&
+          fields.length > 0 &&
+          !fallbackItemHasRequestedFields(state, fields))
+      ) {
+        return 'skipped';
+      }
+      appendedItemKeys.push(itemKey);
+      if (!materializedState && hydratedState) {
+        appendedHydratedItems.push({ itemKey, state: hydratedState });
+      }
+    }
+
+    const nextItems = [...queryState.items, ...appendedItemKeys];
+    const nextHasMore =
+      end < hydratedQuery.items.length || hydratedQuery.hasMore;
+
+    store.produceState(
+      (draft) => {
+        const currentQuery = draft.queries[queryKey];
+        if (!currentQuery) return;
+
+        currentQuery.error = null;
+        currentQuery.status = 'success';
+        currentQuery.refetchOnMount = false;
+        currentQuery.items = nextItems;
+        currentQuery.hasMore = nextHasMore;
+
+        for (const { itemKey, state } of appendedHydratedItems) {
+          draft.items[itemKey] = state.item;
+          draft.itemQueries[itemKey] = state.itemQuery;
+          draft.itemLoadedFields[itemKey] = state.loadedFields;
+        }
+      },
+      { action: 'persistent-storage-load-more' },
+    );
+
+    return 'triggered';
   }
 
   function getQueryItems<T>(

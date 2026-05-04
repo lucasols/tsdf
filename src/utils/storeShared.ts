@@ -45,6 +45,22 @@ export function unwrapMaybeTSDFResult<T>(value: MaybeTSDFResult<T>): T {
 }
 
 /**
+ * Returns `true` when `prefix` is a strict prefix of `full` (`prefix` is shorter
+ * and every entry matches `full` at the same index). Used by list-query offline
+ * paths to detect that a cached query has additional items beyond the in-memory
+ * query state.
+ */
+export function isStrictItemKeyPrefix(
+  prefix: readonly string[],
+  full: readonly string[],
+): boolean {
+  return (
+    prefix.length < full.length &&
+    prefix.every((key, index) => full[index] === key)
+  );
+}
+
+/**
  * Debounce settings for payload-driven automatic fetches in store hooks.
  *
  * The hook still reads data from state using the latest payload immediately.

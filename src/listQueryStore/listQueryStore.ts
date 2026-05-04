@@ -1545,10 +1545,24 @@ export function createListQueryStore<
 
   let offlineController: OfflineStoreController<ResolvedOfflineOperations> | null =
     null;
+  function isOfflineFetchModeActive(): boolean {
+    return (
+      (offlineController?.shouldTreatFetchAsOffline() ?? false) ||
+      resolvedOfflineConfig?.session.getOfflineStatus().isOfflineMode ===
+        true ||
+      isOfflineNetworkModeActiveSync(
+        resolvedOfflineConfig?.session.getConfig().network,
+      )
+    );
+  }
+
   const offlineFetchController = {
     prepareForFetch: () =>
       offlineController?.prepareForFetch() ?? Promise.resolve(),
     getSessionStatus: () => offlineController?.getSessionStatus() ?? null,
+    shouldTreatFetchAsOffline: isOfflineFetchModeActive,
+    handleFetchSuccess: () =>
+      offlineController?.handleFetchSuccess() ?? Promise.resolve(),
     evaluateOfflineFetchError: (error: unknown, operationName?: string) =>
       offlineController
         ? offlineController.evaluateOfflineFetchError(error, operationName)
