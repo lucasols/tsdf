@@ -30,9 +30,6 @@ const taskStore = createListQueryStore<Task, TaskFilter, string>({
 
       // Where to add new items
       appendNewTo: 'start',
-
-      // Trigger background revalidation when items are moved
-      invalidateQueries: true,
     },
     {
       // Sort a specific query by priority
@@ -112,7 +109,9 @@ Sorting is applied only to queries that contain the updated item.
 
 ### invalidateQueries
 
-When `true`, queries affected by the optimistic update are invalidated in the background. This ensures the server's actual ordering/filtering is fetched eventually.
+Schedules a background refetch of queries this rule mutated.
+
+**Leave off by default.** Only enable when the optimistic update can't represent the final server state — e.g. sort depends on a server-assigned field (`updatedAt`, computed score), membership depends on server-only data (permissions, full-text match), or cursor pagination shifts the page window. If `filterItem` and `sort` already match the server, the extra refetch is just noise.
 
 ```ts
 invalidateQueries: true;
@@ -149,31 +148,28 @@ const taskStore = createListQueryStore<Task, { status: string }, string>({
   fetchItemFn: (id, { signal }) => api.getTask(id, signal),
 
   optimisticListUpdates: [
-    {
-      // Move tasks between status columns
-      queries: (q) => true,
-      filterItem: (item) => item.status === 'todo',
-      // Only applies to queries where status matches
-    },
+    // Membership follows status — the optimistic change is final.
     {
       queries: { status: 'todo' },
       filterItem: (item) => item.status === 'todo',
       appendNewTo: 'start',
-      invalidateQueries: true,
     },
     {
       queries: { status: 'done' },
       filterItem: (item) => item.status === 'done',
       appendNewTo: 'end',
+    },
+    // Server sorts by `updatedAt`, which it assigns — refetch to settle order.
+    {
+      queries: (q) => true,
+      sort: { sortBy: (item) => item.updatedAt, order: 'desc' },
       invalidateQueries: true,
     },
   ],
 });
 
-// When a task is moved to "done", it's automatically:
-// 1. Removed from the "todo" query
-// 2. Added to the "done" query
-// 3. Both queries are revalidated in the background
+// Moving "task-1" to done removes it from the todo query and adds it to the
+// done query. Only the sort rule triggers a background refetch.
 taskStore.updateItemState('task-1', (draft) => {
   draft.status = 'done';
 });

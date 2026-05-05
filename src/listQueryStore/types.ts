@@ -295,7 +295,12 @@ export type OptimisticListUpdate<
   filterItem?: (item: ItemState) => boolean | null;
   /** Where newly matching items should be inserted in affected query pages. */
   appendNewTo?: 'start' | 'end';
-  /** Whether affected queries should still refetch after the optimistic list update. */
+  /**
+   * Schedules a background refetch of queries this rule mutated. Leave off
+   * unless the optimistic update can't represent the final server state —
+   * e.g. server-assigned sort fields (`updatedAt`, computed scores), server-
+   * only membership data (permissions), or cursor pagination shifts.
+   */
   invalidateQueries?: boolean;
   /** Sort order to maintain inside affected query pages. */
   sort?: {
