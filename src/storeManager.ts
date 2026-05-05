@@ -130,7 +130,7 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   /** Shared debug logger for browser-tab sync, focus lifecycle, and persistent storage internals. */
   debugLogger?: TSDFDebugLogger;
   /** Shared logger for low-volume production signals. */
-  prodLogger?: TSDFDebugLogger;
+  logger?: TSDFDebugLogger;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
   /** Global fallback for persistent storage failures in attached stores. */
@@ -269,8 +269,8 @@ export type CreateStoreManagerOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Enables verbose development-only logs. Pass `true` to use console logging, or pass a logger function. */
   debugLogger?: TSDFLoggerOptions;
-  /** Enables low-volume production-safe logs. Pass `true` to use console logging, or pass a logger function. */
-  prodLogger?: TSDFLoggerOptions;
+  /** Enables low-volume production-safe logs. Defaults to console logging; pass `false` to disable. */
+  logger?: TSDFLoggerOptions;
   /** Optional shared offline session config for every attached store. */
   offlineSession?: OfflineSessionConfig<TUploadRef>;
 };
@@ -281,7 +281,7 @@ export function createStoreManager<
   const debugLogger = import.meta.env.DEV
     ? resolveTSDFLogger(options.debugLogger)
     : undefined;
-  const prodLogger = resolveTSDFLogger(options.prodLogger);
+  const logger = resolveTSDFLogger(options.logger ?? true);
   let resolvedOfflineSession: OfflineSession<TUploadRef> | undefined;
   if (options.offlineSession) {
     const createOfflineSessionOptions: Parameters<
@@ -393,7 +393,7 @@ export function createStoreManager<
     ...offlineApi,
   };
   storeManager.debugLogger = debugLogger;
-  storeManager.prodLogger = prodLogger;
+  storeManager.logger = logger;
 
   storeManagerRegistry.set(storeManager, registry);
   storeManagerOfflineSessionRegistry.set(storeManager, resolvedOfflineSession);

@@ -952,7 +952,7 @@ export function createCollectionStore<
             }
           : undefined,
         debugLogger: storeManager.debugLogger,
-        prodLogger: storeManager.prodLogger,
+        logger: storeManager.logger,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })

@@ -42,7 +42,7 @@ const storeManager = createStoreManager({
   onMutationError: (err) => log(err), // optional global mutation fallback
   onPersistentStorageError: (err) => log(err), // optional global persistence fallback
   debugLogger: false, // true/function: verbose dev-only tab sync + persistence logs
-  prodLogger: false, // true/function: low-volume production-safe logs
+  logger: true, // optional; true/function/false for low-volume production-safe logs
   offlineSession: undefined, // optional; required for offline queueing
 });
 

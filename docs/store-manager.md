@@ -30,27 +30,26 @@ const storeManager = createStoreManager({
     console.error('TSDF persistence failed', error);
   },
   debugLogger: true,
-  prodLogger: true,
 });
 ```
 
 Options:
 
-| Option                        | Required | Description                                                                                                                                                |
-| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `getSessionKey`               | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.                                                                           |
-| `errorNormalizer`             | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                                                                                      |
-| `lowPriorityThrottleMs`       | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to 40 minutes (`2_400_000ms`).                                         |
-| `baseCoalescingWindowMs`      | No       | Default window to group fetch requests for attached stores. Defaults to `16ms`.                                                                            |
-| `backgroundCoalescingDelayMs` | No       | Extra browser-tab coalescing delay applied only while a tab is in the background. Defaults to `3000ms`.                                                    |
-| `dynamicRealtimeThrottleMs`   | No       | Default adaptive throttle for real-time updates in attached stores. Defaults to `100ms` focused and `1000ms` in the background. Store options override it. |
-| `blockWindowClose`            | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.                                                                          |
-| `revalidateOnWindowFocus`     | No       | Default focus revalidation policy for attached stores. Store options override it.                                                                          |
-| `onMutationError`             | No       | Global fallback for mutation failures when a store does not provide its own handler.                                                                       |
-| `onPersistentStorageError`    | No       | Global fallback for persistent storage failures when a store does not provide its own handler.                                                             |
-| `debugLogger`                 | No       | Enables verbose development-only browser-tab sync, focus revalidation, and persistent-storage debug logs. Pass `true` or a logger function.                |
-| `prodLogger`                  | No       | Enables low-volume production-safe logs such as persistent-storage quota cleanup. Pass `true` or a logger function.                                        |
-| `offlineSession`              | No       | Shared offline config used by stores with `persistentStorage.offline`.                                                                                     |
+| Option                        | Required | Description                                                                                                                                                        |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `getSessionKey`               | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.                                                                                   |
+| `errorNormalizer`             | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                                                                                              |
+| `lowPriorityThrottleMs`       | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to 40 minutes (`2_400_000ms`).                                                 |
+| `baseCoalescingWindowMs`      | No       | Default window to group fetch requests for attached stores. Defaults to `16ms`.                                                                                    |
+| `backgroundCoalescingDelayMs` | No       | Extra browser-tab coalescing delay applied only while a tab is in the background. Defaults to `3000ms`.                                                            |
+| `dynamicRealtimeThrottleMs`   | No       | Default adaptive throttle for real-time updates in attached stores. Defaults to `100ms` focused and `1000ms` in the background. Store options override it.         |
+| `blockWindowClose`            | No       | Shared window-close blocker for mutations in attached stores. Defaults to `null`.                                                                                  |
+| `revalidateOnWindowFocus`     | No       | Default focus revalidation policy for attached stores. Store options override it.                                                                                  |
+| `onMutationError`             | No       | Global fallback for mutation failures when a store does not provide its own handler.                                                                               |
+| `onPersistentStorageError`    | No       | Global fallback for persistent storage failures when a store does not provide its own handler.                                                                     |
+| `debugLogger`                 | No       | Enables verbose development-only browser-tab sync, focus revalidation, and persistent-storage debug logs. Pass `true` or a logger function.                        |
+| `logger`                      | No       | Enables low-volume production-safe logs such as persistent-storage quota cleanup. Defaults to console logging; pass `false` to disable or a function to customize. |
+| `offlineSession`              | No       | Shared offline config used by stores with `persistentStorage.offline`.                                                                                             |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
 
@@ -62,7 +61,7 @@ Store-level options can explicitly disable inherited defaults when the option su
 
 Pass `debugLogger: true` to log browser-tab sync operations, focus revalidation decisions, and persistent-storage operations through `console.log`, `console.warn`, and `console.error` in development. Browser-tab sync logs include lifecycle, leader changes, publish/receive events, and skipped messages. Focus revalidation logs report when `revalidateOnWindowFocus` triggers, is dynamically disabled, or is skipped because real-time updates own freshness. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Async persistent storage adapters emit timed `adapter-operation` entries with `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
 
-Pass `prodLogger: true` to log low-volume production-safe signals. Today this includes persistent-storage `quota-cleanup` entries.
+Low-volume production-safe signals are logged by default through `console.log`, `console.warn`, and `console.error`. Today this includes persistent-storage `quota-cleanup` entries. Pass `logger: false` to disable them, or pass a function to route them to your own tooling.
 
 ```ts
 const storeManager = createStoreManager({
@@ -71,7 +70,7 @@ const storeManager = createStoreManager({
   debugLogger: ({ level, message, details }) => {
     observability[level](message, details);
   },
-  prodLogger: ({ level, message, details }) => {
+  logger: ({ level, message, details }) => {
     observability[level](message, details);
   },
 });

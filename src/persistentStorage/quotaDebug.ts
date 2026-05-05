@@ -9,7 +9,7 @@ export type QuotaCleanupPhase = 'startup-cleanup' | 'maintenance' | 'flush';
 
 export function logPersistentStorageQuotaCleanup(args: {
   adapter: 'async' | 'local-sync';
-  prodLogger: TSDFDebugLogger;
+  logger: TSDFDebugLogger;
   evictedEntries: number;
   keptEntries: number;
   maxBytes: number;
@@ -20,7 +20,7 @@ export function logPersistentStorageQuotaCleanup(args: {
   totalEntries: number;
   unprotectedBytes: number;
 }): void {
-  emitTSDFDebugLog(args.prodLogger, {
+  emitTSDFDebugLog(args.logger, {
     area: 'persistent-storage',
     details: {
       adapter: args.adapter,

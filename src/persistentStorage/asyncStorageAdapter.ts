@@ -1045,7 +1045,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   readonly #driver: AsyncStorageDriver;
   #debugLogger: AsyncStorageAdapter['debugLogger'];
-  #prodLogger: AsyncStorageAdapter['prodLogger'];
+  #logger: AsyncStorageAdapter['logger'];
 
   #cachedNamespaceIndexReads: Cache<AsyncStorageNamespaceIndexReadState> =
     createCache({ maxCacheSize: ASYNC_STORAGE_NAMESPACE_INDEX_CACHE_MAX_SIZE });
@@ -1073,13 +1073,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     this.#driver.debugLogger = debugLogger;
   }
 
-  get prodLogger(): AsyncStorageAdapter['prodLogger'] {
-    return this.#prodLogger;
+  get logger(): AsyncStorageAdapter['logger'] {
+    return this.#logger;
   }
 
-  set prodLogger(prodLogger: AsyncStorageAdapter['prodLogger']) {
-    this.#prodLogger = prodLogger;
-    this.#driver.prodLogger = prodLogger;
+  set logger(logger: AsyncStorageAdapter['logger']) {
+    this.#logger = logger;
+    this.#driver.logger = logger;
   }
 
   async #runWithSessionWriterLock<T>(
@@ -3032,13 +3032,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         (entry) => entry.protected,
         effectiveStaticPolicy.maxBytes,
       );
-      const prodLogger = args.driver.prodLogger;
+      const logger = args.driver.logger;
       const evictedEntries = candidateEntries.length - keptKeys.size;
-      if (prodLogger && evictedEntries > 0) {
+      if (logger && evictedEntries > 0) {
         const scopeKind = args.scope.kind;
         logPersistentStorageQuotaCleanup({
           adapter: 'async',
-          prodLogger,
+          logger,
           evictedEntries,
           keptEntries: keptKeys.size,
           maxBytes: effectiveStaticPolicy.maxBytes,

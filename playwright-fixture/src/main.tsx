@@ -37,7 +37,7 @@ function createFixtureStoreManager(
     getSessionKey: () => sessionKey,
     errorNormalizer: normalizeError,
     debugLogger,
-    prodLogger: debugLogger,
+    logger: debugLogger,
   });
 }
 

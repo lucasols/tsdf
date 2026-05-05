@@ -679,7 +679,7 @@ export function createDocumentStore<
             }
           : undefined,
         debugLogger: storeManager.debugLogger,
-        prodLogger: storeManager.prodLogger,
+        logger: storeManager.logger,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })

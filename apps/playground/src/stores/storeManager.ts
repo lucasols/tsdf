@@ -63,7 +63,7 @@ export const storeManager = createStoreManager({
   errorNormalizer: normalizeError,
   revalidateOnWindowFocus: true,
   debugLogger: logPlaygroundDebugEntry,
-  prodLogger: logPlaygroundDebugEntry,
+  logger: logPlaygroundDebugEntry,
   onMutationError(error) {
     console.warn('[tsdf playground] mutation failed', error);
   },

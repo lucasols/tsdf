@@ -236,7 +236,7 @@ export function createListQueryEnv(options: {
           getSessionKey: () => options.sessionKey ?? 'session1',
           errorNormalizer: normalizeError,
           blockWindowClose: null,
-          prodLogger: (entry) => {
+          logger: (entry) => {
             options.debugEntries?.push(entry);
           },
         });

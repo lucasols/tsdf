@@ -235,14 +235,14 @@ export function setupCollectionPersistence<
     keptKeys: Set<string>,
     unprotectedBytes: number,
   ): void {
-    const prodLogger = config.prodLogger;
-    if (!prodLogger) return;
+    const logger = config.logger;
+    if (!logger) return;
     const evictedEntries = totalEntries - keptKeys.size;
     if (evictedEntries === 0) return;
 
     logPersistentStorageQuotaCleanup({
       adapter: quotaCleanupAdapter,
-      prodLogger,
+      logger,
       evictedEntries,
       keptEntries: keptKeys.size,
       maxBytes,
