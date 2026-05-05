@@ -1043,6 +1043,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
   readonly #driver: AsyncStorageDriver;
+  #debugLogger: AsyncStorageAdapter['debugLogger'];
 
   #cachedNamespaceIndexReads: Cache<AsyncStorageNamespaceIndexReadState> =
     createCache({ maxCacheSize: ASYNC_STORAGE_NAMESPACE_INDEX_CACHE_MAX_SIZE });
@@ -1059,6 +1060,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   constructor(driver: AsyncStorageDriver) {
     this.#driver = driver;
     registerAsyncStorageReadCacheParticipant(this);
+  }
+
+  get debugLogger(): AsyncStorageAdapter['debugLogger'] {
+    return this.#debugLogger;
+  }
+
+  set debugLogger(debugLogger: AsyncStorageAdapter['debugLogger']) {
+    this.#debugLogger = debugLogger;
+    this.#driver.debugLogger = debugLogger;
   }
 
   async #runWithSessionWriterLock<T>(

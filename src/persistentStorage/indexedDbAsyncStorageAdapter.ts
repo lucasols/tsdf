@@ -1,6 +1,11 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
+  emitTSDFDebugLog,
+  getTSDFDebugTimingMs,
+  type TSDFDebugLogger,
+} from '../debug';
+import {
   type AsyncStorageManagedDriverCapabilities,
   createAsyncStorageAdapter,
   estimateManagedAsyncStorageEntrySizeBytes,
@@ -638,6 +643,8 @@ async function setMaintenanceState(
 }
 
 class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
+  debugLogger?: TSDFDebugLogger;
+
   readonly __tsdfManagedStorage: Required<
     Pick<
       AsyncStorageManagedDriverCapabilities,
@@ -764,6 +771,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     scope: AsyncStorageNamespaceScope,
     keys: string[],
   ): Promise<void> {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const database = await this.#getDatabase();
     const transaction = database.transaction(
       [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
@@ -800,6 +809,15 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     }
 
     await transactionDone(transaction);
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(scope, 'delete-records', startTime, {
+        keyCount: keys.length,
+        objectStores: [
+          INDEXED_DB_ENTRY_STORE,
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        ],
+      });
+    }
     this.#instrumentation?.onRemoveMany?.(scope, keys);
     this.#instrumentation?.record({
       keys: [...keys].sort((left, right) => left.localeCompare(right)),
@@ -833,6 +851,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   async listScopesWithKnownRecordKeys(
     sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]> {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const database = await this.#getDatabase();
     const transaction = database.transaction(
       [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
@@ -872,6 +892,16 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     });
 
     await transactionDone(transaction);
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(undefined, 'list-scopes', startTime, {
+        count: discoveredScopes.length,
+        objectStores: [
+          INDEXED_DB_ENTRY_STORE,
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        ],
+        ...(sessionKey !== undefined ? { sessionKey } : {}),
+      });
+    }
 
     discoveredScopes.sort((left, right) =>
       getNamespaceId(left.scope).localeCompare(getNamespaceId(right.scope)),
@@ -896,6 +926,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
     >
   > {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const database = await this.#getDatabase();
     const transaction = database.transaction(
       INDEXED_DB_ENTRY_STORE,
@@ -930,6 +962,13 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       }),
     );
     await transactionDone(transaction);
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(scope, 'read-records', startTime, {
+        hitCount: [...result.values()].filter((value) => value !== null).length,
+        keyCount: uniqueKeys.length,
+        objectStores: [INDEXED_DB_ENTRY_STORE],
+      });
+    }
 
     this.#instrumentation?.record({
       keys: uniqueKeys,
@@ -951,6 +990,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       order?: AsyncStorageMetadataOrder;
     } = {},
   ): Promise<AsyncStorageEntryMetadata<Record<string, unknown>>[]> {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const order = args.order ?? 'key';
     const database = await this.#getDatabase();
     const transaction = database.transaction(
@@ -1021,6 +1062,14 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         compareMetadata(left, right, order),
       );
     }
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(scope, 'list-record-metadata', startTime, {
+        count: filteredEntries.length,
+        objectStores: [INDEXED_DB_ENTRY_STORE],
+        order,
+        usedIndex,
+      });
+    }
 
     this.#instrumentation?.record({
       order,
@@ -1042,6 +1091,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   async clearManagedNamespace(
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const database = await this.#getDatabase();
     const transaction = database.transaction(
       [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
@@ -1059,6 +1110,14 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     policyStore.delete(createScopePolicyKey(scope));
     await transactionDone(transaction);
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(scope, 'clear-records', startTime, {
+        objectStores: [
+          INDEXED_DB_ENTRY_STORE,
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        ],
+      });
+    }
 
     this.#instrumentation?.onClearManagedNamespace?.(scope);
     this.#instrumentation?.record({
@@ -1079,6 +1138,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       ) => Record<string, unknown> | undefined;
     },
   ): Promise<void> {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const database = await this.#getDatabase();
     const transaction = database.transaction(
       [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
@@ -1214,6 +1275,17 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     }
 
     await transactionDone(transaction);
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(scope, 'write-records', startTime, {
+        objectStores: [
+          INDEXED_DB_ENTRY_STORE,
+          INDEXED_DB_NAMESPACE_POLICY_STORE,
+        ],
+        removes: removes.length,
+        touches: touches.length,
+        upserts: upserts.length,
+      });
+    }
 
     this.#instrumentation?.onApplyManagedCommit?.(scope, args);
     this.#instrumentation?.record({
@@ -1762,6 +1834,43 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     });
 
     return this.#databasePromise;
+  }
+
+  #logAdapterOperation(
+    scope: AsyncStorageNamespaceScope | undefined,
+    adapterOperation: string,
+    startTime: number | null,
+    details: Readonly<Record<string, unknown>> = {},
+  ): void {
+    if (!import.meta.env.DEV) return;
+    if (startTime === null) return;
+    if (!this.debugLogger) return;
+
+    const status =
+      typeof details.status === 'string' ? details.status : 'success';
+
+    emitTSDFDebugLog(this.debugLogger, {
+      area: 'persistent-storage',
+      level: 'log',
+      message: `persistent storage adapter ${adapterOperation} ${status}`,
+      operation: 'adapter-operation',
+      details: {
+        adapter: 'async',
+        adapterName: 'indexeddb',
+        adapterOperation,
+        databaseName: this.databaseName,
+        durationMs: getTSDFDebugTimingMs() - startTime,
+        status,
+        ...(scope !== undefined
+          ? {
+              namespaceKind: scope.kind,
+              sessionKey: scope.sessionKey,
+              storeName: scope.storeName,
+            }
+          : {}),
+        ...details,
+      },
+    });
   }
 }
 

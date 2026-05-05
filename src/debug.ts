@@ -16,6 +16,7 @@ export type TSDFPersistentStorageDebugOperation =
   | 'list-metadata-by-filter'
   | 'load'
   | 'load-many'
+  | 'adapter-operation'
   | 'read-entry'
   | 'read-protected-keys'
   | 'remove'

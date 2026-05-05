@@ -73,6 +73,8 @@ async function openScenario(
 
 type PersistentStorageDebugLogSummary = {
   adapter: unknown;
+  adapterName: unknown;
+  adapterOperation: unknown;
   area: string;
   durationType: string;
   operation: string;
@@ -88,6 +90,8 @@ async function readPersistentStorageDebugLogSummaries(
 
     return logs.map((entry) => ({
       adapter: entry.details?.adapter,
+      adapterName: entry.details?.adapterName,
+      adapterOperation: entry.details?.adapterOperation,
       area: entry.area,
       durationType: typeof entry.details?.durationMs,
       operation: entry.operation,
@@ -173,25 +177,27 @@ test.describe('persistent storage debug logging', () => {
     await expect
       .poll(async () => {
         const logs = await readPersistentStorageDebugLogSummaries(page);
-        const loadWithTiming = logs.some(
+        const loadBreadcrumbWithoutTiming = logs.some(
           (entry) =>
             entry.adapter === 'async' &&
             entry.area === 'persistent-storage' &&
-            entry.durationType === 'number' &&
+            entry.durationType === 'undefined' &&
             entry.operation === 'load' &&
             entry.storeName === storeId,
         );
-        const writeWithTiming = logs.some(
+        const writeFileTiming = logs.some(
           (entry) =>
             entry.adapter === 'async' &&
+            entry.adapterName === 'opfs' &&
+            entry.adapterOperation === 'write-file' &&
             entry.area === 'persistent-storage' &&
             entry.durationType === 'number' &&
-            entry.operation === 'write' &&
+            entry.operation === 'adapter-operation' &&
             entry.status === 'success' &&
             entry.storeName === storeId,
         );
 
-        return `${loadWithTiming}:${writeWithTiming}`;
+        return `${loadBreadcrumbWithoutTiming}:${writeFileTiming}`;
       })
       .toBe('true:true');
 

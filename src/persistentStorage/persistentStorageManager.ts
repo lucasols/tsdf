@@ -2,7 +2,6 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
   emitTSDFDebugLog,
-  getTSDFDebugTimingMs,
   type TSDFDebugLogger,
   type TSDFPersistentStorageDebugOperation,
 } from '../debug';
@@ -97,9 +96,8 @@ export function createPersistentStorageDebugContext(
 function startPersistentStorageDebugTiming(
   context: PersistentStorageDebugContext | undefined,
 ): number | null {
-  if (!import.meta.env.DEV) return null;
-  if (!context?.debugLogger) return null;
-  return context.adapterKind === 'async' ? getTSDFDebugTimingMs() : null;
+  void context;
+  return null;
 }
 
 type PersistentStorageDebugStatus = 'success' | 'miss' | 'skipped' | 'error';
@@ -115,8 +113,7 @@ function logPersistentStorageOperation(
   if (!import.meta.env.DEV) return;
   if (!context?.debugLogger) return;
 
-  const durationMs =
-    startTime === null ? undefined : getTSDFDebugTimingMs() - startTime;
+  const durationMs = startTime === null ? undefined : Date.now() - startTime;
 
   const logDetails: Record<string, unknown> = {
     adapter: context.adapterKind,
@@ -480,6 +477,10 @@ export function createPersistentStorageHandle<T>(
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
+
+    if (import.meta.env.DEV) {
+      asyncAdapter.debugLogger = config.debugLogger;
+    }
 
     return asyncAdapter.openNamespace<unknown, Record<string, unknown>>({
       sessionKey,
@@ -1003,6 +1004,10 @@ export function createPersistentStorageNamespaceHandle<
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
+
+    if (import.meta.env.DEV) {
+      asyncAdapter.debugLogger = config.debugLogger;
+    }
 
     return asyncAdapter.openNamespace<unknown, TMetadata>({
       sessionKey,

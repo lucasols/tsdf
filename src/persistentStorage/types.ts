@@ -162,6 +162,8 @@ export type AsyncStorageDiscoveredScope = {
 
 /** Low-level async backend contract implemented by custom storage drivers. */
 export type AsyncStorageDriver = {
+  /** Mutable debug logger used by concrete adapters to emit operation timings. */
+  debugLogger?: TSDFDebugLogger;
   /** Read a single raw record from a logical namespace. */
   get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown>;
   /** Write a single raw record to a logical namespace. */
@@ -238,6 +240,8 @@ export type AsyncStorageNamespaceHandle<
 export type AsyncStorageAdapter = {
   /** Adapter mode marker used by persistence internals to pick async behavior. */
   kind: 'async';
+  /** Mutable debug logger used by concrete adapters to emit operation timings. */
+  debugLogger?: TSDFDebugLogger;
   /** Open a logical namespace with managed batching and touch guarantees. */
   openNamespace<
     TValue,

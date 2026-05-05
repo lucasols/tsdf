@@ -2,6 +2,11 @@ import { createCache, type Cache } from '@ls-stack/utils/cache';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
+  emitTSDFDebugLog,
+  getTSDFDebugTimingMs,
+  type TSDFDebugLogger,
+} from '../debug';
+import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getNamespaceId,
   getPayloadRecordKey,
@@ -61,6 +66,8 @@ type ParsedScopedFileInfo = {
 };
 
 export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
+  debugLogger?: TSDFDebugLogger;
+
   #rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
   readonly #mainCacheContext: OpfsCacheContext = {
     cleanupKnowledge: null,
@@ -301,10 +308,19 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
           storeDir,
         });
         if (fileHandle === null) return null;
-        return this.#readJsonFile(
-          this.#getFilePath(scope, key),
-          fileHandle,
-          cacheContext,
+        const filePath = this.#getFilePath(scope, key);
+        if (!import.meta.env.DEV || !this.debugLogger) {
+          return this.#readJsonFile(filePath, fileHandle, cacheContext);
+        }
+
+        const startTime = getTSDFDebugTimingMs();
+        return this.#readJsonFile(filePath, fileHandle, cacheContext).finally(
+          () => {
+            this.#logAdapterOperation(scope, 'read-file', startTime, {
+              filePath,
+              key,
+            });
+          },
         );
       }),
     );
@@ -351,10 +367,27 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const removeResults = await Promise.all(
       uniqueKeys.map(async (key) => {
         const fileName = buildFileName(scope, key);
+        const startTime =
+          import.meta.env.DEV && this.debugLogger
+            ? getTSDFDebugTimingMs()
+            : null;
         try {
           await storeDir.removeEntry(fileName);
+          if (import.meta.env.DEV && this.debugLogger) {
+            this.#logAdapterOperation(scope, 'delete-file', startTime, {
+              fileName,
+              key,
+            });
+          }
           return true;
         } catch {
+          if (import.meta.env.DEV && this.debugLogger) {
+            this.#logAdapterOperation(scope, 'delete-file', startTime, {
+              fileName,
+              key,
+              status: 'miss',
+            });
+          }
           // Ignore missing records.
           return false;
         } finally {
@@ -379,13 +412,22 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     scope: AsyncStorageNamespaceScope,
     cacheContext: OpfsCacheContext,
   ): Promise<string[]> {
+    const startTime =
+      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const { resolvedEntries } = await this.#listScopedFiles(
       scope,
       cacheContext,
     );
-    return resolvedEntries
+    const keys = resolvedEntries
       .map((entry) => entry.key)
       .sort((left, right) => left.localeCompare(right));
+    if (import.meta.env.DEV && this.debugLogger) {
+      this.#logAdapterOperation(scope, 'list-directory', startTime, {
+        count: keys.length,
+        storeDirPath: this.#getStoreDirPath(scope),
+      });
+    }
+    return keys;
   }
 
   async #clearWithContext(
@@ -1062,11 +1104,22 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
 
         const writable = await fileHandle.createWritable();
         const rawValue = entry.serializedValue ?? JSON.stringify(entry.value);
+        const startTime =
+          import.meta.env.DEV && this.debugLogger
+            ? getTSDFDebugTimingMs()
+            : null;
 
         try {
           await writable.write(rawValue);
         } finally {
           await writable.close();
+        }
+        if (import.meta.env.DEV && this.debugLogger) {
+          this.#logAdapterOperation(scope, 'write-file', startTime, {
+            filePath: this.#getFilePath(scope, entry.key),
+            key: entry.key,
+            sizeBytes: rawValue.length,
+          });
         }
         cacheContext.readValueCache?.set(
           this.#getFilePath(scope, entry.key),
@@ -1089,6 +1142,37 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     }
   }
 
+  #logAdapterOperation(
+    scope: AsyncStorageNamespaceScope,
+    adapterOperation: string,
+    startTime: number | null,
+    details: Readonly<Record<string, unknown>> = {},
+  ): void {
+    if (!import.meta.env.DEV) return;
+    if (startTime === null) return;
+    if (!this.debugLogger) return;
+
+    const status =
+      typeof details.status === 'string' ? details.status : 'success';
+
+    emitTSDFDebugLog(this.debugLogger, {
+      area: 'persistent-storage',
+      level: 'log',
+      message: `persistent storage adapter ${adapterOperation} ${status}`,
+      operation: 'adapter-operation',
+      details: {
+        adapter: 'async',
+        adapterName: 'opfs',
+        adapterOperation,
+        durationMs: getTSDFDebugTimingMs() - startTime,
+        namespaceKind: scope.kind,
+        sessionKey: scope.sessionKey,
+        status,
+        storeName: scope.storeName,
+        ...details,
+      },
+    });
+  }
   async #cleanupRemoveKnownRecordsWithContext(
     scope: AsyncStorageNamespaceScope,
     keys: string[],
