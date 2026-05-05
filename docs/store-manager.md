@@ -29,7 +29,8 @@ const storeManager = createStoreManager({
   onPersistentStorageError: (error) => {
     console.error('TSDF persistence failed', error);
   },
-  debug: true,
+  debugLogger: true,
+  prodLogger: true,
 });
 ```
 
@@ -47,7 +48,8 @@ Options:
 | `revalidateOnWindowFocus`     | No       | Default focus revalidation policy for attached stores. Store options override it.                                                                          |
 | `onMutationError`             | No       | Global fallback for mutation failures when a store does not provide its own handler.                                                                       |
 | `onPersistentStorageError`    | No       | Global fallback for persistent storage failures when a store does not provide its own handler.                                                             |
-| `debug`                       | No       | Enables browser-tab sync, focus revalidation, and persistent-storage debug logs. Pass `true` or a logger function.                                         |
+| `debugLogger`                 | No       | Enables verbose development-only browser-tab sync, focus revalidation, and persistent-storage debug logs. Pass `true` or a logger function.                |
+| `prodLogger`                  | No       | Enables low-volume production-safe logs such as persistent-storage quota cleanup. Pass `true` or a logger function.                                        |
 | `offlineSession`              | No       | Shared offline config used by stores with `persistentStorage.offline`.                                                                                     |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
@@ -58,13 +60,18 @@ Store-level options can explicitly disable inherited defaults when the option su
 
 ## Debug Logging
 
-Pass `debug: true` to log browser-tab sync operations, focus revalidation decisions, and persistent-storage operations through `console.log`, `console.warn`, and `console.error`. Browser-tab sync logs include lifecycle, leader changes, publish/receive events, and skipped messages. Focus revalidation logs report when `revalidateOnWindowFocus` triggers, is dynamically disabled, or is skipped because real-time updates own freshness. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Async persistent storage adapters emit timed `adapter-operation` entries with `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
+Pass `debugLogger: true` to log browser-tab sync operations, focus revalidation decisions, and persistent-storage operations through `console.log`, `console.warn`, and `console.error` in development. Browser-tab sync logs include lifecycle, leader changes, publish/receive events, and skipped messages. Focus revalidation logs report when `revalidateOnWindowFocus` triggers, is dynamically disabled, or is skipped because real-time updates own freshness. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Async persistent storage adapters emit timed `adapter-operation` entries with `durationMs` so slow OPFS, IndexedDB, or custom driver paths can be inspected.
+
+Pass `prodLogger: true` to log low-volume production-safe signals. Today this includes persistent-storage `quota-cleanup` entries.
 
 ```ts
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
   errorNormalizer: normalizeError,
-  debug: ({ level, message, details }) => {
+  debugLogger: ({ level, message, details }) => {
+    observability[level](message, details);
+  },
+  prodLogger: ({ level, message, details }) => {
     observability[level](message, details);
   },
 });

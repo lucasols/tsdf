@@ -64,7 +64,7 @@ Store-specific options:
 
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
-Enable `createStoreManager({ debug: true, ... })` to inspect load, save/write, commit, clear, metadata, and offline protection persistence operations. Async adapters also emit timed `adapter-operation` entries with `durationMs` for concrete OPFS, IndexedDB, or custom driver work.
+Enable `createStoreManager({ debugLogger: true, ... })` to inspect load, save/write, commit, clear, metadata, and offline protection persistence operations in development. Enable `createStoreManager({ prodLogger: true, ... })` to receive production-safe quota cleanup logs; they include the affected quota, configured byte budget, total unprotected bytes, and kept/evicted entry counts. Async adapters also emit timed `adapter-operation` entries with `durationMs` for concrete OPFS, IndexedDB, or custom driver work in development.
 
 ## Converted Data Schemas
 

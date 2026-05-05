@@ -217,3 +217,19 @@ After completing any task that adds, modifies, or removes test code:
 
 - Avoid as much as possible using `__LEGIT_CAST__`, it should be the ultimate last resort when properly typing the code is not possible.
   - As alternative consider using `runcheck` schemas when dealing with unsafe data parsing.
+
+## Optimize for bundle size and tree-shaking:
+
+- For dev/test-only code, use tree-shakable guards: `import.meta.env.DEV` (debug logs, dev warnings) and `import.meta.env.TEST` (test-only branches).
+- Place guards at call sites, not inside helpers — a guard inside the function body still leaves the arguments to be constructed at every call site:
+
+  ```ts
+  // ❌ `expensiveSerialize(state)` still ships and runs in prod
+  debugLog(`state: ${expensiveSerialize(state)}`);
+
+  // ✅ entire call is eliminated
+  if (import.meta.env.DEV) console.log(`state: ${expensiveSerialize(state)}`);
+  ```
+
+- Prefer many small guards at call sites over one wrapping guard.
+- Don't use runtime flags (e.g. `options.debug`) for code that should never ship.

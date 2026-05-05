@@ -35,7 +35,7 @@ Tabs use a versioned message model so later snapshots do not overwrite fresher r
 - When `sessionKey` changes (for example, login/logout), sync state is refreshed for the new session.
 - If transport is unavailable, sync becomes inactive silently.
 
-Enable `createStoreManager({ debug: true, ... })` to inspect transport open/close, publish, receive, skipped-message events, and leader changes. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Leader-change entries include the elected `leaderTabId`, whether the local tab is the leader, the local tab rank, and the ranked live-tab snapshot. Pass a logger function as `debug` to route those entries to your own observability tool.
+Enable `createStoreManager({ debugLogger: true, ... })` to inspect transport open/close, publish, receive, skipped-message events, and leader changes in development. Store data sync uses store-specific channels, while tab-presence status uses one shared `presence` channel per manager/session. Presence prioritizes the focused tab; background tabs announce open/focus/blur changes and keep their last known fallback rank during quiet periods. Leader-change entries include the elected `leaderTabId`, whether the local tab is the leader, the local tab rank, and the ranked live-tab snapshot. Pass a logger function as `debugLogger` to route those entries to your own tooling.
 
 ## Required options
 

@@ -41,7 +41,8 @@ const storeManager = createStoreManager({
   revalidateOnWindowFocus: true, // optional default for attached stores
   onMutationError: (err) => log(err), // optional global mutation fallback
   onPersistentStorageError: (err) => log(err), // optional global persistence fallback
-  debug: false, // true/function/{logger}: logs tab sync + persistence operations
+  debugLogger: false, // true/function: verbose dev-only tab sync + persistence logs
+  prodLogger: false, // true/function: low-volume production-safe logs
   offlineSession: undefined, // optional; required for offline queueing
 });
 

@@ -172,7 +172,7 @@ test('document store: debug logger records dynamic focus revalidation decisions'
   const storeManager = createStoreManager({
     getSessionKey: () => 'test-session',
     errorNormalizer: normalizeError,
-    debug: (entry) => {
+    debugLogger: (entry) => {
       debugEntries.push(entry);
     },
   });

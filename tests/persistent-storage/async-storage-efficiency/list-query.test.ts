@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
+import type { TSDFDebugLogEntry } from '../../../src/debug';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
@@ -265,6 +266,7 @@ describe('async storage efficiency: list-query', () => {
   });
 
   test('when maxQueryBytes limit is reached the flush trims queries inline', async () => {
+    const debugEntries: TSDFDebugLogEntry[] = [];
     const firstQuery = { tableId: 'first' };
     const secondQuery = { tableId: 'second' };
     const thirdQuery = { tableId: 'third' };
@@ -278,6 +280,7 @@ describe('async storage efficiency: list-query', () => {
     listQueryScope.listQuery.seedQuery(secondQuery, []);
 
     const env = createListQueryEnv({
+      debugEntries,
       storeName,
       sessionKey,
       maxQueryBytes: sumPersistedEntryBytes(
@@ -301,6 +304,42 @@ describe('async storage efficiency: list-query', () => {
     expect(
       listQueryScope.listQuery.listStoredQueryKeys().sort(),
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
+    expect(
+      debugEntries
+        .filter((entry) => entry.operation === 'quota-cleanup')
+        .map((entry) => ({
+          details: {
+            adapter: entry.details?.adapter,
+            evictedEntries: entry.details?.evictedEntries,
+            keptEntries: entry.details?.keptEntries,
+            maxBytes: entry.details?.maxBytes,
+            namespaceKind: entry.details?.namespaceKind,
+            phase: entry.details?.phase,
+            quota: entry.details?.quota,
+            status: entry.details?.status,
+            storeName: entry.details?.storeName,
+            totalEntries: entry.details?.totalEntries,
+            unprotectedBytes: entry.details?.unprotectedBytes,
+          },
+          message: entry.message,
+          operation: entry.operation,
+        })),
+    ).toMatchInlineSnapshot(`
+      - details:
+          adapter: 'async'
+          evictedEntries: 1
+          keptEntries: 2
+          maxBytes: 103
+          namespaceKind: 'listQuery.query'
+          phase: 'flush'
+          quota: 'maxQueryBytes'
+          status: 'success'
+          storeName: 'lq-query-metadata'
+          totalEntries: 3
+          unprotectedBytes: 148
+        message: 'persistent storage quota-cleanup success'
+        operation: 'quota-cleanup'
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
