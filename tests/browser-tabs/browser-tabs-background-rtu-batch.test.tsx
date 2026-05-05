@@ -109,8 +109,8 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
     .     | Item 1  | Item 2    | [item1] received-ws-data-change-event
     .     | Item 1  | Item 2    | [item2] server-data-changed (value: {"name":"Updated 2"})
     .     | Item 1  | Item 2    | [item2] received-ws-data-change-event
-    1.03s | Item 1  | Item 2    | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-    1.83s | Item 1  | Item 2    | 🔴 <list-fetch-finished (value: {"count":2})
+    3.03s | Item 1  | Item 2    | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    3.83s | Item 1  | Item 2    | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Updated | Updated 2 | [item1, item2] ui-changed
     "
   `);
@@ -121,7 +121,7 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
     .     | Item 1  | Item 2    | 👁 window-focused
     5ms   | Item 1  | Item 2    | 🔕 window-blurred
     20ms  | Item 1  | Item 2    | [item1, item2] received-ws-data-change-event
-    1.83s | Item 1  | Item 2    | [item1] <confirmed-snapshot-received (value: {"name":"Updated"})
+    3.83s | Item 1  | Item 2    | [item1] <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | Item 2    | [item1] ui-changed
     .     | Updated | Item 2    | [item2] <confirmed-snapshot-received (value: {"name":"Updated 2"})
     .     | Updated | Updated 2 | [item2] ui-changed
@@ -238,10 +238,10 @@ test('collection background RTU batch fetch includes the union of invalidated it
     .     | Item 1    | Item 2    | [item2] received-ws-data-change-event
     .     | Item 1    | Item 2    | [item3] server-data-changed (value: {"name":"Updated 3"})
     .     | Item 1    | Item 2    | [item3] received-ws-data-change-event
-    1.03s | Item 1    | Item 2    | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-    1.83s | Item 1    | Item 2    | 🔴 <list-fetch-finished (value: {"count":2})
+    3.03s | Item 1    | Item 2    | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    3.83s | Item 1    | Item 2    | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Updated 1 | Updated 2 | [item1, item2] ui-changed
-    2.83s | Updated 1 | Updated 2 | [item3] <confirmed-snapshot-received (value: {"name":"Updated 3"})
+    4.83s | Updated 1 | Updated 2 | [item3] <confirmed-snapshot-received (value: {"name":"Updated 3"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
@@ -251,12 +251,12 @@ test('collection background RTU batch fetch includes the union of invalidated it
     .     | Item 1    | Item 2    | Item 3    | 👁 window-focused
     5ms   | Item 1    | Item 2    | Item 3    | 🔕 window-blurred
     20ms  | Item 1    | Item 2    | Item 3    | [item1, item2, item3] received-ws-data-change-event
-    1.83s | Item 1    | Item 2    | Item 3    | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
+    3.83s | Item 1    | Item 2    | Item 3    | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
     .     | Updated 1 | Item 2    | Item 3    | [item1] ui-changed
     .     | Updated 1 | Item 2    | Item 3    | [item2] <confirmed-snapshot-received (value: {"name":"Updated 2"})
     .     | Updated 1 | Updated 2 | Item 3    | [item2] ui-changed
-    2.03s | Updated 1 | Updated 2 | Item 3    | 🔴 [item3] >fetch-started
-    2.83s | Updated 1 | Updated 2 | Item 3    | 🔴 [item3] <fetch-finished (value: {"name":"Updated 3"})
+    4.03s | Updated 1 | Updated 2 | Item 3    | 🔴 [item3] >fetch-started
+    4.83s | Updated 1 | Updated 2 | Item 3    | 🔴 [item3] <fetch-finished (value: {"name":"Updated 3"})
     .     | Updated 1 | Updated 2 | Updated 3 | [item3] ui-changed
     "
   `);
@@ -328,8 +328,8 @@ test('collection background RTU invalidations dedupe to one per-item fetch when 
     15ms  | Item 1  | 🔕 window-blurred
     20ms  | Item 1  | server-data-changed (value: {"name":"Updated"})
     .     | Item 1  | received-ws-data-change-event
-    1.03s | Item 1  | 🔴 >fetch-started
-    1.83s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
+    3.03s | Item 1  | 🔴 >fetch-started
+    3.83s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -340,7 +340,7 @@ test('collection background RTU invalidations dedupe to one per-item fetch when 
     .     | Item 1  | 👁 window-focused
     5ms   | Item 1  | 🔕 window-blurred
     20ms  | Item 1  | received-ws-data-change-event
-    1.83s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    3.83s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -436,8 +436,8 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
     .     | Alice    | Bob      | [users||1] received-ws-data-change-event
     .     | Alice    | Bob      | [users||2] server-data-changed (value: {"id":2,"name":"Yara"})
     .     | Alice    | Bob      | [users||2] received-ws-data-change-event
-    1.03s | Alice    | Bob      | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
-    1.83s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
+    3.03s | Alice    | Bob      | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
+    3.83s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Zoe      | Yara     | [users||1, users||2] ui-changed
     "
   `);
@@ -448,7 +448,7 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1, users||2] received-ws-data-change-event
-    1.83s | Alice    | Bob      | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    3.83s | Alice    | Bob      | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Zoe"})
     .     | Zoe      | Bob      | [users||1] ui-changed
     .     | Zoe      | Bob      | [users||2] <confirmed-item-snapshot-received (value: {"id":2,"name":"Yara"})
     .     | Zoe      | Yara     | [users||2] ui-changed

@@ -161,6 +161,7 @@ export function createListQueryStoreTestEnv<
     revalidateOnWindowFocus,
     transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
+    backgroundCoalescingDelayMs,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
@@ -201,6 +202,7 @@ export function createListQueryStoreTestEnv<
     revalidateOnWindowFocus?: boolean | (() => boolean);
     transportReconnectCooldownMs?: number;
     baseCoalescingWindowMs?: number;
+    backgroundCoalescingDelayMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
     lowPriorityThrottleMs?: number;
@@ -270,6 +272,7 @@ export function createListQueryStoreTestEnv<
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs,
       baseCoalescingWindowMs,
+      backgroundCoalescingDelayMs,
       blockWindowClose: blockWindowClose ?? null,
     });
   if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {

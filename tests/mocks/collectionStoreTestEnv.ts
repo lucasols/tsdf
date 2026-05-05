@@ -106,6 +106,7 @@ type CollectionStoreTestEnvOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
+  backgroundCoalescingDelayMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
   /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
@@ -150,6 +151,7 @@ export function createCollectionStoreTestEnv<
     revalidateOnWindowFocus,
     transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
+    backgroundCoalescingDelayMs,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
     useBatchFetch,
@@ -193,6 +195,7 @@ export function createCollectionStoreTestEnv<
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs,
       baseCoalescingWindowMs,
+      backgroundCoalescingDelayMs,
       blockWindowClose: blockWindowClose ?? null,
     });
   if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {

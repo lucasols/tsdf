@@ -93,7 +93,7 @@ test('document background scheduling: next-ranked tab preempts the primary tab w
     25ms  | 0  | 🔕 window-blurred
     30ms  | 0  | server-data-changed (value: 9)
     .     | 0  | received-ws-data-change-event
-    2.84s | 0  | <confirmed-snapshot-received (value: 9)
+    4.84s | 0  | <confirmed-snapshot-received (value: 9)
     .     | 9  | ui-changed
     "
   `);
@@ -104,8 +104,8 @@ test('document background scheduling: next-ranked tab preempts the primary tab w
     10ms  | 0  | 👁 window-focused
     15ms  | 0  | 🔕 window-blurred
     30ms  | 0  | received-ws-data-change-event
-    2.04s | 0  | 🔴 >fetch-started
-    2.84s | 0  | 🔴 <fetch-finished (value: 9)
+    4.04s | 0  | 🔴 >fetch-started
+    4.84s | 0  | 🔴 <fetch-finished (value: 9)
     .     | 9  | ui-changed
     "
   `);
@@ -116,7 +116,7 @@ test('document background scheduling: next-ranked tab preempts the primary tab w
     .     | 0  | 👁 window-focused
     5ms   | 0  | 🔕 window-blurred
     30ms  | 0  | received-ws-data-change-event
-    2.84s | 0  | <confirmed-snapshot-received (value: 9)
+    4.84s | 0  | <confirmed-snapshot-received (value: 9)
     .     | 9  | ui-changed
     "
   `);
@@ -178,7 +178,7 @@ test('document background scheduling does not retry on sibling tabs after a remo
 
   envA.emulateExternalRTU(12);
 
-  await advanceTime(1_200);
+  await advanceTime(3_200);
 
   expect(envA.serverMock.numOfStartedFetches).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
@@ -196,8 +196,8 @@ test('document background scheduling does not retry on sibling tabs after a remo
     25ms  | 0  | 🔕 window-blurred
     30ms  | 0  | server-data-changed (value: 12)
     .     | 0  | received-ws-data-change-event
-    1.04s | 0  | 🔴 >fetch-started
-    3.54s | 0  | 🔴 <fetch-finished (value: 12)
+    3.04s | 0  | 🔴 >fetch-started
+    5.54s | 0  | 🔴 <fetch-finished (value: 12)
     .     | 12 | ui-changed
     "
   `);
@@ -208,7 +208,7 @@ test('document background scheduling does not retry on sibling tabs after a remo
     10ms  | 0  | 👁 window-focused
     15ms  | 0  | 🔕 window-blurred
     30ms  | 0  | received-ws-data-change-event
-    3.54s | 0  | <confirmed-snapshot-received (value: 12)
+    5.54s | 0  | <confirmed-snapshot-received (value: 12)
     .     | 12 | ui-changed
     "
   `);
@@ -219,7 +219,7 @@ test('document background scheduling does not retry on sibling tabs after a remo
     .     | 0  | 👁 window-focused
     5ms   | 0  | 🔕 window-blurred
     30ms  | 0  | received-ws-data-change-event
-    3.54s | 0  | <confirmed-snapshot-received (value: 12)
+    5.54s | 0  | <confirmed-snapshot-received (value: 12)
     .     | 12 | ui-changed
     "
   `);
@@ -352,7 +352,7 @@ test('collection background scheduling falls back to the next-ranked tab when th
     25ms  | Item 1  | 🔕 window-blurred
     30ms  | Item 1  | server-data-changed (value: {"name":"Updated"})
     .     | Item 1  | received-ws-data-change-event
-    2.84s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    4.84s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -363,8 +363,8 @@ test('collection background scheduling falls back to the next-ranked tab when th
     10ms  | Item 1  | 👁 window-focused
     15ms  | Item 1  | 🔕 window-blurred
     30ms  | Item 1  | received-ws-data-change-event
-    2.04s | Item 1  | 🔴 >fetch-started
-    2.84s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
+    4.04s | Item 1  | 🔴 >fetch-started
+    4.84s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -375,7 +375,7 @@ test('collection background scheduling falls back to the next-ranked tab when th
     .     | Item 1  | 👁 window-focused
     5ms   | Item 1  | 🔕 window-blurred
     30ms  | Item 1  | received-ws-data-change-event
-    2.84s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    4.84s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -429,7 +429,7 @@ test('collection background scheduling does not retry on sibling tabs after a re
     { triggerRTUEvent: true },
   );
 
-  await advanceTime(1_200);
+  await advanceTime(3_200);
 
   expect(envA.serverTable.numOfStartedFetches).toBe(1);
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
@@ -447,8 +447,8 @@ test('collection background scheduling does not retry on sibling tabs after a re
     25ms  | Item 1  | 🔕 window-blurred
     30ms  | Item 1  | server-data-changed (value: {"name":"Updated"})
     .     | Item 1  | received-ws-data-change-event
-    1.04s | Item 1  | 🔴 >fetch-started
-    3.54s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
+    3.04s | Item 1  | 🔴 >fetch-started
+    5.54s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -459,7 +459,7 @@ test('collection background scheduling does not retry on sibling tabs after a re
     10ms  | Item 1  | 👁 window-focused
     15ms  | Item 1  | 🔕 window-blurred
     30ms  | Item 1  | received-ws-data-change-event
-    3.54s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    5.54s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -470,7 +470,7 @@ test('collection background scheduling does not retry on sibling tabs after a re
     .     | Item 1  | 👁 window-focused
     5ms   | Item 1  | 🔕 window-blurred
     30ms  | Item 1  | received-ws-data-change-event
-    3.54s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    5.54s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-changed
     "
   `);
@@ -612,7 +612,7 @@ test('list query background scheduling falls back to the next-ranked tab when th
     25ms  | Alice    | 🔕 window-blurred
     30ms  | Alice    | server-data-changed (value: {"id":1,"name":"Zoe"})
     .     | Alice    | received-ws-data-change-event
-    2.84s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    4.84s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | ui-changed
     "
   `);
@@ -623,8 +623,8 @@ test('list query background scheduling falls back to the next-ranked tab when th
     10ms  | Alice    | 👁 window-focused
     15ms  | Alice    | 🔕 window-blurred
     30ms  | Alice    | received-ws-data-change-event
-    2.04s | Alice    | 🔴 >list-fetch-started
-    2.84s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
+    4.04s | Alice    | 🔴 >list-fetch-started
+    4.84s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Zoe      | ui-changed
     "
   `);
@@ -635,7 +635,7 @@ test('list query background scheduling falls back to the next-ranked tab when th
     .     | Alice    | 👁 window-focused
     5ms   | Alice    | 🔕 window-blurred
     30ms  | Alice    | received-ws-data-change-event
-    2.84s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    4.84s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | ui-changed
     "
   `);
@@ -719,8 +719,8 @@ test('list query background scheduling does not retry on sibling tabs after a re
     25ms  | Alice    | 🔕 window-blurred
     30ms  | Alice    | server-data-changed (value: {"id":1,"name":"Zoe"})
     .     | Alice    | received-ws-data-change-event
-    1.04s | Alice    | 🔴 >list-fetch-started
-    4.34s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
+    3.04s | Alice    | 🔴 >list-fetch-started
+    6.34s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Zoe      | ui-changed
     "
   `);
@@ -731,7 +731,7 @@ test('list query background scheduling does not retry on sibling tabs after a re
     10ms  | Alice    | 👁 window-focused
     15ms  | Alice    | 🔕 window-blurred
     30ms  | Alice    | received-ws-data-change-event
-    4.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    6.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | ui-changed
     "
   `);
@@ -742,7 +742,7 @@ test('list query background scheduling does not retry on sibling tabs after a re
     .     | Alice    | 👁 window-focused
     5ms   | Alice    | 🔕 window-blurred
     30ms  | Alice    | received-ws-data-change-event
-    4.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    6.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | ui-changed
     "
   `);
@@ -871,18 +871,18 @@ test('list query first item fetch stays local after a sibling batch item fetch f
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
-    1.01s | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
-    1.81s | 🔴 <list-fetch-finished (value: {"count":2})
-    3.62s | <confirmed-item-snapshot-received (value: {"id":2,"name":"Bob"})
+    3.01s | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
+    3.81s | 🔴 <list-fetch-finished (value: {"count":2})
+    7.62s | <confirmed-item-snapshot-received (value: {"id":2,"name":"Bob"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||2 |
-    1.81s | -        | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
+    3.81s | -        | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
     .     | ···      | [users||2] ui-initialized
-    2.82s | ···      | 🔴 [users||2] >fetch-started
-    3.62s | ···      | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
+    6.82s | ···      | 🔴 [users||2] >fetch-started
+    7.62s | ···      | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
     .     | Bob      | [users||2] ui-changed
     "
   `);

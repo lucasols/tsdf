@@ -284,7 +284,7 @@ test('document store: reset() cleans up and re-registers focus listener', async 
 
 // -- DocumentStore: background coalescing window -------------------------------
 
-test('document store: a single background tab increases the coalescing window by 1 second', async () => {
+test('document store: a single background tab adds the background coalescing delay', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const env = createDocumentStoreTestEnv(0, {
@@ -328,8 +328,8 @@ test('document store: a single background tab increases the coalescing window by
     20ms   | 0  | 🔴 >fetch-started
     820ms  | 0  | 🔴 <fetch-finished (value: 0)
     .      | 0  | 🔕 window-blurred
-    1.845s | 0  | 🟠 >fetch-started
-    2.645s | 0  | 🟠 <fetch-finished (value: 0)
+    3.845s | 0  | 🟠 >fetch-started
+    4.645s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });

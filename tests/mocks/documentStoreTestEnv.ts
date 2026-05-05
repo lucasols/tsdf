@@ -97,6 +97,7 @@ type DocumentStoreTestEnvOptions<
   >['onMutationError'];
   transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
+  backgroundCoalescingDelayMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
   testScenario?: DocumentStoreTestScenario<D>;
@@ -131,6 +132,7 @@ export function createDocumentStoreTestEnv<
     onMutationError,
     transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
+    backgroundCoalescingDelayMs,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
     testScenario,
@@ -169,6 +171,7 @@ export function createDocumentStoreTestEnv<
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs,
       baseCoalescingWindowMs,
+      backgroundCoalescingDelayMs,
       blockWindowClose: blockWindowClose ?? null,
     });
   if (persistentStorageWithResolvedAdapter?.offline && storeManager == null) {

@@ -71,6 +71,7 @@ test('store defaults use built-in timing values and disabled window-close blocki
       windowIsNotFocused: true,
     }),
   }).toMatchInlineSnapshot(`
+    backgroundCoalescingDelayMs: 3000
     backgroundRealtimeThrottleMs: 1000
     baseCoalescingWindowMs: 16
     blockWindowClose: null
@@ -87,6 +88,7 @@ test('store defaults can be configured on the store manager', () => {
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 25,
     baseCoalescingWindowMs: 50,
+    backgroundCoalescingDelayMs: 750,
     dynamicRealtimeThrottleMs,
     blockWindowClose,
     revalidateOnWindowFocus: true,
@@ -100,6 +102,7 @@ test('store defaults can be configured on the store manager', () => {
       storeManager.storeDefaults.dynamicRealtimeThrottleMs ===
       dynamicRealtimeThrottleMs,
   }).toMatchInlineSnapshot(`
+    backgroundCoalescingDelayMs: 750
     baseCoalescingWindowMs: 50
     blockWindowClose: '✅'
     dynamicRealtimeThrottleMs: '✅'

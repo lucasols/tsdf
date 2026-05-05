@@ -24,11 +24,29 @@ function createPriority(getWindowIsFocused: () => boolean) {
   );
 }
 
-test('browser tabs priority assigns the first delayed coalescing slot to a single background tab', () => {
+test('browser tabs priority adds the fixed background delay before the first ranked slot', () => {
   const priority = createPriority(() => false);
 
   expect(priority.getPriorityRank()).toBe(1);
-  expect(priority.getCoalescingWindowMs(20)).toBe(1_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
+
+  priority.close();
+});
+
+test('browser tabs priority uses the configured fixed background coalescing delay', () => {
+  const priority = createBrowserTabsPriority(
+    true,
+    () => true,
+    'local-tab',
+    () => false,
+    undefined,
+    () => {},
+    { backgroundCoalescingDelayMs: 500 },
+    undefined,
+  );
+
+  expect(priority.getPriorityRank()).toBe(1);
+  expect(priority.getCoalescingWindowMs(20)).toBe(520);
 
   priority.close();
 });
@@ -53,7 +71,7 @@ test('browser tabs priority falls back to standalone ranking when sync is disabl
   });
 
   expect(priority.getPriorityRank()).toBe(1);
-  expect(priority.getCoalescingWindowMs(20)).toBe(1_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
 
   priority.close();
 });
@@ -78,7 +96,7 @@ test('browser tabs priority preserves background fallback ordering when every ta
   });
 
   expect(priority.getPriorityRank()).toBe(2);
-  expect(priority.getCoalescingWindowMs(20)).toBe(2_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(4_020);
 
   priority.close();
 });
@@ -102,7 +120,7 @@ test('browser tabs priority keeps last known background ranks after quiet period
   vi.advanceTimersByTime(60_000);
 
   expect(priority.getPriorityRank()).toBe(3);
-  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(5_020);
 
   priority.close();
 });
@@ -138,7 +156,7 @@ test('browser tabs priority immediately promotes a newly focused tab over stale 
   vi.advanceTimersByTime(60_000);
 
   expect(priority.getPriorityRank()).toBe(3);
-  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(5_020);
 
   priority.onTabStatusMessage('newly-focused-tab', {
     kind: 'tab-status',
@@ -154,7 +172,7 @@ test('browser tabs priority immediately promotes a newly focused tab over stale 
   priority.close();
 });
 
-test('browser tabs priority keeps the first background tab behind a focused sibling on the 1 second slot', () => {
+test('browser tabs priority keeps the first background tab behind a focused sibling on the first ranked slot', () => {
   const priority = createPriority(() => false);
 
   priority.onTabStatusMessage('remote-focused-tab', {
@@ -165,7 +183,7 @@ test('browser tabs priority keeps the first background tab behind a focused sibl
   });
 
   expect(priority.getPriorityRank()).toBe(2);
-  expect(priority.getCoalescingWindowMs(20)).toBe(1_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
 
   priority.close();
 });
@@ -223,24 +241,30 @@ test('browser tabs priority changes leader only from focus and blur browser tab 
     };
   }> = [];
 
-  const tabA = createBrowserTabsPriority({
-    transportEnabled: true,
-    getIsEnabled: () => true,
-    tabId: 'tab-a',
-    getWindowIsFocused: () => tabAIsFocused,
-    publishStatus(status) {
+  const tabA = createBrowserTabsPriority(
+    true,
+    () => true,
+    'tab-a',
+    () => tabAIsFocused,
+    undefined,
+    (status) => {
       messages.push({ from: 'tab-a', status });
     },
-  });
-  const tabB = createBrowserTabsPriority({
-    transportEnabled: true,
-    getIsEnabled: () => true,
-    tabId: 'tab-b',
-    getWindowIsFocused: () => tabBIsFocused,
-    publishStatus(status) {
+    undefined,
+    undefined,
+  );
+  const tabB = createBrowserTabsPriority(
+    true,
+    () => true,
+    'tab-b',
+    () => tabBIsFocused,
+    undefined,
+    (status) => {
       messages.push({ from: 'tab-b', status });
     },
-  });
+    undefined,
+    undefined,
+  );
 
   function flushStatusMessages(): void {
     const nextMessages = messages.splice(0);
@@ -299,7 +323,7 @@ test('browser tabs priority ignores stale remote tab status messages', () => {
   });
 
   expect(priority.getPriorityRank()).toBe(2);
-  expect(priority.getCoalescingWindowMs(20)).toBe(1_020);
+  expect(priority.getCoalescingWindowMs(20)).toBe(3_020);
 
   priority.close();
 });

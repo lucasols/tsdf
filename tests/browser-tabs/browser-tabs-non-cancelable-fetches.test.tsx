@@ -59,7 +59,7 @@ test('document first fetches are not canceled by an earlier sibling background f
   envA.scheduleFetch('highPriority');
   envB.scheduleFetch('highPriority');
 
-  await advanceTime(2_020);
+  await advanceTime(4_020);
 
   expect(envA.serverMock.numOfStartedFetches).toBe(0);
   expect(envB.serverMock.numOfStartedFetches).toBe(1);
@@ -101,7 +101,7 @@ test('document awaitFetch stays local even when a sibling background fetch start
   const promiseA = envA.apiStore.awaitFetch();
   const promiseB = envB.apiStore.awaitFetch();
 
-  await advanceTime(2_020);
+  await advanceTime(4_020);
 
   expect(envA.serverMock.numOfStartedFetches).toBe(0);
   expect(envB.serverMock.numOfStartedFetches).toBe(1);
@@ -142,7 +142,7 @@ test('document awaitFetch resolves from a confirmed sibling snapshot when its qu
   const promiseB = envB.apiStore.awaitFetch();
   envA.scheduleFetch('highPriority');
 
-  await advanceTime(2_100);
+  await advanceTime(4_100);
 
   expect(envA.serverMock.numOfStartedFetches).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
@@ -180,7 +180,7 @@ test('document confirmed snapshots satisfy lower-ranked pending background fetch
   envB.scheduleFetch('highPriority');
   envC.scheduleFetch('highPriority');
 
-  await advanceTime(1_021);
+  await advanceTime(3_021);
   expect(envA.serverMock.numOfStartedFetches).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
   expect(envC.serverMock.numOfStartedFetches).toBe(0);
@@ -225,7 +225,7 @@ test('collection first fetches are not canceled by an earlier sibling background
   envA.scheduleFetch('highPriority', 'item1');
   envB.scheduleFetch('highPriority', 'item1');
 
-  await advanceTime(2_020);
+  await advanceTime(4_020);
 
   expect(envA.serverTable.numOfStartedFetches).toBe(0);
   expect(envB.serverTable.numOfStartedFetches).toBe(1);
@@ -269,7 +269,7 @@ test('collection awaitFetch stays local even when a sibling background fetch sta
   const promiseA = envA.apiStore.awaitFetch('item1');
   const promiseB = envB.apiStore.awaitFetch('item1');
 
-  await advanceTime(2_020);
+  await advanceTime(4_020);
 
   expect(envA.serverTable.numOfStartedFetches).toBe(0);
   expect(envB.serverTable.numOfStartedFetches).toBe(1);
@@ -312,7 +312,7 @@ test('collection confirmed snapshots satisfy lower-ranked pending background fet
   envB.scheduleFetch('highPriority', 'item1');
   envC.scheduleFetch('highPriority', 'item1');
 
-  await advanceTime(1_021);
+  await advanceTime(3_021);
   expect(envA.serverTable.numOfStartedFetches).toBe(1);
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
   expect(envC.serverTable.numOfStartedFetches).toBe(0);
@@ -362,7 +362,7 @@ test('collection confirmed null snapshots satisfy queued first fetches', async (
     envA.apiStore.deleteItemState('item1');
   });
 
-  await advanceTime(3_000);
+  await advanceTime(5_000);
 
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
 });
@@ -396,7 +396,7 @@ test('list query first fetches are not canceled by an earlier sibling background
   envA.scheduleFetch('highPriority', { tableId: 'users' });
   envB.scheduleFetch('highPriority', { tableId: 'users' });
 
-  await advanceTime(2_020);
+  await advanceTime(4_020);
 
   expect(envA.serverTable.numOfStartedFetches).toBe(0);
   expect(envB.serverTable.numOfStartedFetches).toBe(1);
@@ -439,7 +439,7 @@ test('list query awaitListQueryFetch stays local even when a sibling background 
   const promiseA = envA.apiStore.awaitListQueryFetch({ tableId: 'users' });
   const promiseB = envB.apiStore.awaitListQueryFetch({ tableId: 'users' });
 
-  await advanceTime(2_020);
+  await advanceTime(4_020);
 
   expect(envA.serverTable.numOfStartedFetches).toBe(0);
   expect(envB.serverTable.numOfStartedFetches).toBe(1);
@@ -481,7 +481,7 @@ test('list query confirmed snapshots satisfy lower-ranked pending background fet
   envB.scheduleFetch('highPriority', { tableId: 'users' });
   envC.scheduleFetch('highPriority', { tableId: 'users' });
 
-  await advanceTime(1_021);
+  await advanceTime(3_021);
   expect(envA.serverTable.numOfStartedFetches).toBe(1);
   expect(envB.serverTable.numOfStartedFetches).toBe(0);
   expect(envC.serverTable.numOfStartedFetches).toBe(0);
@@ -527,7 +527,7 @@ test('list-only query confirmed snapshots satisfy queued first fetches', async (
   envA.scheduleFetch('highPriority', { tableId: 'users' });
   envB.scheduleFetch('highPriority', { tableId: 'users' });
 
-  await advanceTime(2_000);
+  await advanceTime(4_000);
 
   expect(envA.serverTable.numOfStartedFetches).toBe(1);
   expect(envB.serverTable.numOfStartedFetches).toBe(0);

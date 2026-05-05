@@ -232,17 +232,17 @@ test('a fresh partial-resource list-query tab still performs its first fetch aft
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
-    1.01s | 🔴 >list-fetch-started
-    1.81s | 🔴 <list-fetch-finished (value: {"count":2})
-    3.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    3.01s | 🔴 >list-fetch-started
+    3.81s | 🔴 <list-fetch-finished (value: {"count":2})
+    7.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 |
-    1.81s | ···      | ui-initialized
-    2.82s | ···      | 🔴 >list-fetch-started
-    3.62s | ···      | 🔴 <list-fetch-finished (value: {"count":2})
+    3.81s | ···      | ui-initialized
+    6.82s | ···      | 🔴 >list-fetch-started
+    7.62s | ···      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Alice    | ui-changed
     "
   `);
@@ -317,10 +317,10 @@ test('list query partial-resources field metadata updates an already-loaded sibl
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | name-hook |
-    1.01s | -         | 🔴 [users||1] >fetch-started
-    1.81s | -         | 🔴 [users||1] <fetch-finished (value: {"age":30})
+    3.01s | -         | 🔴 [users||1] >fetch-started
+    3.81s | -         | 🔴 [users||1] <fetch-finished (value: {"age":30})
     .     | ···       | [name-hook] ui-initialized
-    2.62s | ···       | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
+    4.62s | ···       | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
     .     | Alicia    | [name-hook] ui-changed
     "
   `);
@@ -431,10 +431,10 @@ test('focused partial-resource item refetch updates the matching background hook
     "
     time  | age-hook | name-hook |
     810ms | ···      | ···       | [name-hook, age-hook] ui-initialized
-    1.82s | ···      | ···       | 🔴 [users||1] >fetch-started
-    2.62s | ···      | ···       | 🔴 [users||1] <fetch-finished (value: {"age":30,"name":"Alice"})
+    3.82s | ···      | ···       | 🔴 [users||1] >fetch-started
+    4.62s | ···      | ···       | 🔴 [users||1] <fetch-finished (value: {"age":30,"name":"Alice"})
     .     | 30       | Alice     | [name-hook, age-hook] ui-changed
-    3.43s | 30       | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":30})
+    5.43s | 30       | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":30})
     .     | 30       | Alicia    | [name-hook] ui-changed
     "
   `);
@@ -570,28 +570,28 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | name-age-hook |
-    2.62s | Alice:30      | -- timeline-cleared
+    4.62s | Alice:30      | -- timeline-cleared
     .     | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30      | [users||1] received-ws-data-change-event
     .     | Alice:30      | rt-fetch-scheduled (delay: 100ms)
-    2.63s | Alice:30      | rt-fetch-cancelled
+    4.63s | Alice:30      | rt-fetch-cancelled
     .     | Alice:30      | 🟠 [users||1] >fetch-started
-    3.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
+    5.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
     .     | Alicia:31     | [name-age-hook] ui-changed
-    5.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
+    9.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | city-hook | name-age-hook |
-    2.62s | London    | Alice:30      | -- timeline-cleared
+    4.62s | London    | Alice:30      | -- timeline-cleared
     .     | London    | Alice:30      | [users||1] received-ws-data-change-event
     .     | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
-    3.43s | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    5.43s | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
     .     | London    | Alice:30      | rt-fetch-cancelled
     .     | London    | Alicia:31     | [name-age-hook] ui-changed
-    4.44s | London    | Alicia:31     | 🟠 [users||1] >fetch-started
-    5.24s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    8.44s | London    | Alicia:31     | 🟠 [users||1] >fetch-started
+    9.24s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
     .     | Lisbon    | Alicia:31     | [city-hook] ui-changed
     "
   `);
@@ -685,28 +685,28 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | name-age  |
-    2.62s | Alice:30  | -- timeline-cleared
+    4.62s | Alice:30  | -- timeline-cleared
     .     | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30  | [users||1] received-ws-data-change-event
     .     | Alice:30  | rt-fetch-scheduled (delay: 100ms)
-    2.63s | Alice:30  | rt-fetch-cancelled
+    4.63s | Alice:30  | rt-fetch-cancelled
     .     | Alice:30  | 🟠 [users||1] >fetch-started
-    3.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
+    5.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
     .     | Alicia:31 | [name-age] ui-changed
-    5.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
+    9.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | name-age-city    |
-    2.62s | Alice:30:London  | -- timeline-cleared
+    4.62s | Alice:30:London  | -- timeline-cleared
     .     | Alice:30:London  | [users||1] received-ws-data-change-event
     .     | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
-    3.43s | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    5.43s | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
     .     | Alice:30:London  | rt-fetch-cancelled
     .     | Alicia:31:London | [name-age-city] ui-changed
-    4.44s | Alicia:31:London | 🟠 [users||1] >fetch-started
-    5.24s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    8.44s | Alicia:31:London | 🟠 [users||1] >fetch-started
+    9.24s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
     .     | Alicia:31:Lisbon | [name-age-city] ui-changed
     "
   `);
@@ -780,28 +780,28 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
   expect(focusedTab.timelineString).toMatchInlineSnapshot(`
     "
     time  | first-item | second-item |
-    2.62s | Alice:30   | Bob:25      | -- timeline-cleared
+    4.62s | Alice:30   | Bob:25      | -- timeline-cleared
     .     | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
     .     | Alice:30   | Bob:25      | rt-fetch-scheduled (delay: 100ms)
-    2.63s | Alice:30   | Bob:25      | rt-fetch-cancelled
+    4.63s | Alice:30   | Bob:25      | rt-fetch-cancelled
     .     | Alice:30   | Bob:25      | 🟠 >list-fetch-started
-    3.43s | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
+    5.43s | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
     .     | Alicia:31  | Bob:25      | [first-item] ui-changed
-    5.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    9.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
   expect(backgroundTab.timelineString).toMatchInlineSnapshot(`
     "
     time  | first-item       | second-item  |
-    2.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
+    4.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
     .     | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
     .     | Alice:30:London  | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
-    3.43s | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    5.43s | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Alice:30:London  | Bob:25:Paris | rt-fetch-cancelled
     .     | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
-    4.44s | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
-    5.24s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
+    8.44s | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
+    9.24s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
     .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item] ui-changed
     "
   `);
@@ -812,13 +812,13 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
           fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         returned_items: 2
-        time: '1.82s -> 2.62s | duration: 800ms'
+        time: '3.82s -> 4.62s | duration: 800ms'
       - _type: 'list'
         payload:
           fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         returned_items: 2
-        time: '4.44s -> 5.24s | duration: 800ms'
+        time: '8.44s -> 9.24s | duration: 800ms'
     `);
 });
 
@@ -930,18 +930,18 @@ test('list query partial-resources remote query snapshots satisfy affected field
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
-    1.81s | server-data-changed (value: {"id":1,"name":"Alice","age":31})
-    1.82s | 🔴 >list-fetch-started
-    2.62s | 🔴 <list-fetch-finished (value: {"count":1})
+    3.81s | server-data-changed (value: {"id":1,"name":"Alice","age":31})
+    3.82s | 🔴 >list-fetch-started
+    4.62s | 🔴 <list-fetch-finished (value: {"count":1})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | age-query | name-query |
-    1.01s | -         | -          | 🔴 >list-fetch-started
-    1.81s | -         | -          | 🔴 <list-fetch-finished (value: {"count":1})
+    3.01s | -         | -          | 🔴 >list-fetch-started
+    3.81s | -         | -          | 🔴 <list-fetch-finished (value: {"count":1})
     .     | 30        | Alice      | [name-query, age-query] ui-initialized
-    2.62s | 30        | Alice      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+    4.62s | 30        | Alice      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
     .     | 31        | Alice      | [age-query] ui-changed
     "
   `);
@@ -1043,23 +1043,23 @@ test('list query partial-resources full-resource list hooks refetch in one tab a
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 |
-    1.01s | -        | 🔴 >list-fetch-started
-    1.81s | -        | 🔴 <list-fetch-finished (value: {"count":1})
-    2.62s | -        | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+    3.01s | -        | 🔴 >list-fetch-started
+    3.81s | -        | 🔴 <list-fetch-finished (value: {"count":1})
+    4.62s | -        | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
     .     | Alice:30 | ui-initialized
-    3.43s | Alice:30 | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+    5.43s | Alice:30 | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
     .     | Alice:31 | ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 |
-    1.82s | -        | 🔴 >list-fetch-started
-    2.62s | -        | 🔴 <list-fetch-finished (value: {"count":1})
+    3.82s | -        | 🔴 >list-fetch-started
+    4.62s | -        | 🔴 <list-fetch-finished (value: {"count":1})
     .     | Alice:30 | ui-initialized
     .     | Alice:30 | server-data-changed (value: {"id":1,"name":"Alice","age":31})
-    2.63s | Alice:30 | 🟠 >list-fetch-started
-    3.43s | Alice:30 | 🟠 <list-fetch-finished (value: {"count":1})
+    4.63s | Alice:30 | 🟠 >list-fetch-started
+    5.43s | Alice:30 | 🟠 <list-fetch-finished (value: {"count":1})
     .     | Alice:31 | ui-changed
     "
   `);
@@ -1179,10 +1179,10 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | age-hook | full-hook | name-hook |
-    1.01s | -        | -         | -         | 🔴 [users||1] >fetch-started
-    1.81s | -        | -         | -         | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    3.01s | -        | -         | -         | 🔴 [users||1] >fetch-started
+    3.81s | -        | -         | -         | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
     .     | 30       | Alice:30  | Alice     | [name-hook, age-hook, full-hook] ui-initialized
-    2.62s | 30       | Alice:30  | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"age":31})
+    4.62s | 30       | Alice:30  | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"age":31})
     .     | 31       | Alice:31  | Alice     | [age-hook, full-hook] ui-changed
     "
   `);
@@ -1331,22 +1331,22 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
-    1.81s | server-data-changed (value: {"id":1,"name":"Alicia","age":31})
-    1.82s | 🔴 >fetch-started
-    2.62s | 🔴 <fetch-finished (value: {"name":"Alicia"})
-    2.63s | 🟠 >fetch-started
-    3.43s | 🟠 <fetch-finished (value: {"age":31})
+    3.81s | server-data-changed (value: {"id":1,"name":"Alicia","age":31})
+    3.82s | 🔴 >fetch-started
+    4.62s | 🔴 <fetch-finished (value: {"name":"Alicia"})
+    4.63s | 🟠 >fetch-started
+    5.43s | 🟠 <fetch-finished (value: {"age":31})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | age-hook | name-hook |
-    1.01s | -        | -         | 🔴 [users||1] >fetch-started
-    1.81s | -        | -         | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    3.01s | -        | -         | 🔴 [users||1] >fetch-started
+    3.81s | -        | -         | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
     .     | 30       | Alice     | [name-hook, age-hook] ui-initialized
-    2.62s | 30       | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
+    4.62s | 30       | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
     .     | 30       | Alicia    | [name-hook] ui-changed
-    3.43s | 30       | Alicia    | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31})
+    5.43s | 30       | Alicia    | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31})
     .     | 31       | Alicia    | [age-hook] ui-changed
     "
   `);
@@ -1501,20 +1501,20 @@ test('failed partial-resource list query fetch does not broadcast stale metadata
     time  | query    | query-error   | query-status |
     10ms  | -        | -             | -            | 🔴 >list-fetch-started
     810ms | -        | -             | -            | 🔴 <list-fetch-finished (value: {"count":1})
-    2.62s | -        | -             | -            | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+    4.62s | -        | -             | -            | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
     .     | Alice:30 | ···           | success      | [query, query-status, query-error] ui-initialized
     .     | Alice:30 | ···           | success      | [users||1] server-data-changed (value: {"id":1,"name":"Alice","age":31})
-    2.63s | Alice:30 | ···           | refetching   | [query-status] ui-changed
+    4.63s | Alice:30 | ···           | refetching   | [query-status] ui-changed
     .     | Alice:30 | ···           | refetching   | 🟠 >list-fetch-started
-    3.43s | Alice:30 | ···           | refetching   | 🟠 <list-fetch-error (value: "error")
+    5.43s | Alice:30 | ···           | refetching   | 🟠 <list-fetch-error (value: "error")
     .     | Alice:30 | Network error | error        | [query-status, query-error] ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | query    | query-error | query-status |
-    1.82s | -        | -           | -            | 🔴 >list-fetch-started
-    2.62s | -        | -           | -            | 🔴 <list-fetch-finished (value: {"count":1})
+    3.82s | -        | -           | -            | 🔴 >list-fetch-started
+    4.62s | -        | -           | -            | 🔴 <list-fetch-finished (value: {"count":1})
     .     | Alice:30 | ···         | refetching   | [query, query-status, query-error] ui-initialized
     "
   `);
@@ -1655,9 +1655,9 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
     time  | item     | item-error    | item-status |
     10ms  | -        | -             | -           | 🔴 [users||1] >fetch-started
     810ms | -        | -             | -           | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
-    2.62s | -        | -             | -           | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alice","age":30})
+    4.62s | -        | -             | -           | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alice","age":30})
     .     | Alice:30 | ···           | success     | [item, item-status, item-error] ui-initialized
-    2.63s | Alice:30 | ···           | refetching  | [item-status] ui-changed
+    4.63s | Alice:30 | ···           | refetching  | [item-status] ui-changed
     .     | Alice:30 | ···           | refetching  | 🟠 [users||1] >fetch-started
     .     | Alice:30 | ···           | refetching  | 🟠 [users||1] <fetch-error (value: "error")
     .     | Alice:30 | Network error | error       | [item-status, item-error] ui-changed
@@ -1666,8 +1666,8 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item     | item-error | item-status |
-    1.82s | -        | -          | -           | 🔴 [users||1] >fetch-started
-    2.62s | -        | -          | -           | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    3.82s | -        | -          | -           | 🔴 [users||1] >fetch-started
+    4.62s | -        | -          | -           | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
     .     | Alice:30 | ···        | success     | [item, item-status, item-error] ui-initialized
     "
   `);

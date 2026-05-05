@@ -35,7 +35,7 @@ If three `useItem` hooks mount within the configured coalescing window, their fe
 
 ### Background Tabs
 
-When synced browser tabs are open, TSDF can extend coalescing internally for background tabs based on focus ranking. Focused tabs keep `baseCoalescingWindowMs`; background tabs may wait longer so duplicate background work can be dropped when another tab is already fetching the same data.
+When synced browser tabs are open, TSDF can extend coalescing internally for background tabs based on focus ranking. Focused tabs keep `baseCoalescingWindowMs`; background tabs use `baseCoalescingWindowMs + backgroundCoalescingDelayMs + backgroundRank * 1000ms`, where the first background tab has rank `0`. This gives sibling tabs time to drop duplicate background work when another tab is already fetching the same data.
 
 See [Browser Tabs Sync](./browser-tabs-sync.md) for focus ranking and request deduplication behavior across tabs.
 
@@ -73,6 +73,7 @@ This is useful for background refetches that should yield to user-initiated acti
 | ----------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lowPriorityThrottleMs`             | No       | Manager default minimum interval between low-priority fetches, or a store-level override. Defaults to 40 minutes (`2_400_000ms`)                                                             |
 | `baseCoalescingWindowMs`            | No       | Manager default time window to group multiple requests into a single batch, or a store-level override. Defaults to `16ms`                                                                    |
+| `backgroundCoalescingDelayMs`       | No       | Manager-level delay added only for background browser tabs before the per-rank `1000ms` step. Defaults to `3000ms`                                                                           |
 | `mediumPriorityDelayMs`             | No       | Delay before medium-priority fetches execute                                                                                                                                                 |
 | `dynamicRealtimeThrottleMs`         | No       | Manager default or store override returning throttle duration for real-time updates. Built-in default: `100ms` focused, `1000ms` background. See [Real-Time Updates](./real-time-updates.md) |
 | `maxBatchSize` / `maxItemBatchSize` | No       | Collection/ListQuery batch cap. List Query `maxItemBatchSize` defaults to `50`. Triggers immediate fetch when reached                                                                        |
@@ -86,6 +87,9 @@ This is useful for background refetches that should yield to user-initiated acti
 
   // Group fetches within 16ms
   baseCoalescingWindowMs: 16,
+
+  // Add 3s before background browser-tab rank staggering
+  backgroundCoalescingDelayMs: 3_000,
 
   // Wait 300ms before executing medium-priority fetches
   mediumPriorityDelayMs: 300,

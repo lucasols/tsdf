@@ -1,4 +1,5 @@
 export type BrowserTabsPriorityTimings = {
+  backgroundCoalescingDelayMs?: number;
   fetchLeaseMs?: number | ((lastFetchDuration: number) => number);
 };
 
@@ -68,6 +69,7 @@ export type BrowserTabsPriority = {
 };
 
 const DEFAULT_FETCH_LEASE_MS = 10_000;
+const DEFAULT_BACKGROUND_COALESCING_DELAY_MS = 3_000;
 const COALESCING_WINDOW_STEP_MS = 1_000;
 
 /** @internal */
@@ -243,7 +245,15 @@ export function createBrowserTabsPriority(
     const coalescingRank = getCoalescingRank();
     if (coalescingRank <= 0) return baseCoalescingWindowMs;
 
-    return baseCoalescingWindowMs + coalescingRank * COALESCING_WINDOW_STEP_MS;
+    return (
+      baseCoalescingWindowMs +
+      Math.max(
+        0,
+        timings?.backgroundCoalescingDelayMs ??
+          DEFAULT_BACKGROUND_COALESCING_DELAY_MS,
+      ) +
+      (coalescingRank - 1) * COALESCING_WINDOW_STEP_MS
+    );
   }
   function onTabStatusMessage(
     remoteTabId: string,

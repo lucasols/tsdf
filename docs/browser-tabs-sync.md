@@ -24,7 +24,7 @@ Tabs use a versioned message model so later snapshots do not overwrite fresher r
 
 - Tab status messages include focus and presence timestamp data.
 - Focused tabs keep the base `baseCoalescingWindowMs`.
-- Background tabs are ranked and may receive an extended coalescing window (`base` + rank \* `1000ms`), which helps avoid duplicate background refetch work.
+- Background tabs are ranked and may receive an extended coalescing window (`base` + `backgroundCoalescingDelayMs` + background rank \* `1000ms`), which helps avoid duplicate background refetch work. The first background tab uses rank `0`, so the default first background window is `base + 3000ms`.
 - `fetch-start` messages let sibling tabs drop duplicate scheduled work when another tab is already fetching the same request IDs.
 - Confirmed snapshots from one tab are only applied to others when remote ordering says they are newer than the current version.
 
@@ -47,6 +47,7 @@ const storeManager = createStoreManager({
     return isLoggedIn ? `tenant:${tenantId}` : false;
   },
   errorNormalizer: normalizeError,
+  backgroundCoalescingDelayMs: 3_000,
 });
 
 const store = createDocumentStore({

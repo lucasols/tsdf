@@ -41,6 +41,7 @@ import type {
 
 const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 40 * 60 * 1_000;
 const DEFAULT_BASE_COALESCING_WINDOW_MS = 16;
+const DEFAULT_BACKGROUND_COALESCING_DELAY_MS = 3_000;
 
 export type DynamicRealtimeThrottleMs = (params: {
   readonly lastFetchDuration: number;
@@ -52,6 +53,8 @@ export type StoreManagerStoreDefaults = {
   readonly lowPriorityThrottleMs: number;
   /** Default coalescing window used by attached stores when they do not override it. */
   readonly baseCoalescingWindowMs: number;
+  /** Extra browser-tab coalescing delay applied only while a tab is in the background. */
+  readonly backgroundCoalescingDelayMs: number;
   /** Default adaptive throttle for real-time updates in attached stores. */
   readonly dynamicRealtimeThrottleMs: DynamicRealtimeThrottleMs;
   /** Shared window-close blocker used by mutations in attached stores. */
@@ -250,6 +253,8 @@ export type CreateStoreManagerOptions<
   lowPriorityThrottleMs?: number;
   /** Default coalescing window for attached stores. Defaults to 16ms. */
   baseCoalescingWindowMs?: number;
+  /** Extra browser-tab coalescing delay applied only while a tab is in the background. Defaults to 3000ms. */
+  backgroundCoalescingDelayMs?: number;
   /** Default adaptive throttle for real-time updates in attached stores. Store-level values override it. */
   dynamicRealtimeThrottleMs?: DynamicRealtimeThrottleMs;
   /** Shared window-close blocker used by mutations in attached stores. Pass `null` to disable. */
@@ -361,6 +366,9 @@ export function createStoreManager<
         options.lowPriorityThrottleMs ?? DEFAULT_LOW_PRIORITY_THROTTLE_MS,
       baseCoalescingWindowMs:
         options.baseCoalescingWindowMs ?? DEFAULT_BASE_COALESCING_WINDOW_MS,
+      backgroundCoalescingDelayMs:
+        options.backgroundCoalescingDelayMs ??
+        DEFAULT_BACKGROUND_COALESCING_DELAY_MS,
       dynamicRealtimeThrottleMs:
         options.dynamicRealtimeThrottleMs ?? defaultDynamicRealtimeThrottleMs,
       blockWindowClose: options.blockWindowClose ?? null,
@@ -458,7 +466,11 @@ export function getOrCreateStoreManagerBrowserTabsPresence(
       ...(import.meta.env.DEV
         ? { debugLogger: storeManager.debugLogger }
         : undefined),
-      priorityTimings: options.priorityTimings,
+      priorityTimings: {
+        backgroundCoalescingDelayMs:
+          storeManager.storeDefaults.backgroundCoalescingDelayMs,
+        ...options.priorityTimings,
+      },
     }));
 
   return { priority: presence.priority, tabId: presence.tabId };

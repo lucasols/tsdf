@@ -288,8 +288,8 @@ test('document RTU invalidations are deduplicated when all tabs are backgrounded
     15ms  | 0  | 🔕 window-blurred
     20ms  | 0  | server-data-changed (value: 5)
     .     | 0  | received-ws-data-change-event
-    1.03s | 0  | 🔴 >fetch-started
-    1.83s | 0  | 🔴 <fetch-finished (value: 5)
+    3.03s | 0  | 🔴 >fetch-started
+    3.83s | 0  | 🔴 <fetch-finished (value: 5)
     .     | 5  | ui-changed
     "
   `);
@@ -300,7 +300,7 @@ test('document RTU invalidations are deduplicated when all tabs are backgrounded
     .     | 0  | 👁 window-focused
     5ms   | 0  | 🔕 window-blurred
     20ms  | 0  | received-ws-data-change-event
-    1.83s | 0  | <confirmed-snapshot-received (value: 5)
+    3.83s | 0  | <confirmed-snapshot-received (value: 5)
     .     | 5  | ui-changed
     "
   `);
@@ -651,7 +651,7 @@ test('collection RTU only triggers fetch in both tabs for different loaded items
     30ms  | Item 1    | 🔴 [item1] >fetch-started
     830ms | Item 1    | 🔴 [item1] <fetch-finished (value: {"name":"Updated 1"})
     .     | Updated 1 | [item1] ui-changed
-    1.83s | Updated 1 | [item2] <confirmed-snapshot-received (value: {"name":"Item 2"})
+    3.83s | Updated 1 | [item2] <confirmed-snapshot-received (value: {"name":"Item 2"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
@@ -662,8 +662,8 @@ test('collection RTU only triggers fetch in both tabs for different loaded items
     10ms  | Item 2 | 🔕 window-blurred
     20ms  | Item 2 | received-ws-data-change-event
     830ms | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
-    1.03s | Item 2 | 🔴 [item2] >fetch-started
-    1.83s | Item 2 | 🔴 [item2] <fetch-finished (value: {"name":"Item 2"})
+    3.03s | Item 2 | 🔴 [item2] >fetch-started
+    3.83s | Item 2 | 🔴 [item2] <fetch-finished (value: {"name":"Item 2"})
     "
   `);
 });
@@ -874,8 +874,8 @@ test('list query realtime invalidations stay isolated across different store ids
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
     10ms  | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
-    1.02s | Alice    | Bob      | 🔴 >list-fetch-started
-    1.82s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
+    3.02s | Alice    | Bob      | 🔴 >list-fetch-started
+    3.82s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Zoe      | Bob      | [users||1] ui-changed
     "
   `);
@@ -955,8 +955,8 @@ test('list query background RTU invalidations dedupe to one query fetch when all
     15ms  | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
     .     | Alice    | Bob      | [users||1] received-ws-data-change-event
-    1.03s | Alice    | Bob      | 🔴 >list-fetch-started
-    1.83s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
+    3.03s | Alice    | Bob      | 🔴 >list-fetch-started
+    3.83s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Zoe      | Bob      | [users||1] ui-changed
     "
   `);
@@ -967,7 +967,7 @@ test('list query background RTU invalidations dedupe to one query fetch when all
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1] received-ws-data-change-event
-    1.83s | Alice    | Bob      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    3.83s | Alice    | Bob      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | Bob      | [users||1] ui-changed
     "
   `);
@@ -1045,8 +1045,8 @@ test('list query RTU fetch in the active tab updates the background tab that use
     time  | users||1 |
     0     | Alice    | ui-initialized
     .     | Alice    | received-ws-data-change-event
-    1.01s | Alice    | 🔴 >list-fetch-started
-    1.81s | Alice    | 🔴 <list-fetch-finished (value: {"count":1})
+    3.01s | Alice    | 🔴 >list-fetch-started
+    3.81s | Alice    | 🔴 <list-fetch-finished (value: {"count":1})
     .     | Zoe      | ui-changed
     "
   `);

@@ -48,9 +48,9 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
 
   // Tab B starts a fetch.
   expect(tabB.scheduleFetch('highPriority')).toBe('triggered');
-  // Background tabs get a delayed coalescing window (base + 1s).
+  // Background tabs get the fixed background delay plus the coalescing window.
   // Only advance enough to start the fetch, not finish it.
-  await vi.advanceTimersByTimeAsync(1_011);
+  await vi.advanceTimersByTimeAsync(3_011);
   expect(tabB.serverMock.numOfStartedFetches).toBe(1);
 
   // While tab B is fetching, schedule another fetch (this becomes a scheduled request).
@@ -76,20 +76,20 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
   expect(tabA.timelineString).toMatchInlineSnapshot(`
     "
     time   |
-    1.013s | scheduled-fetch-triggered
-    1.023s | 🔴 >fetch-started
-    1.81s  | <confirmed-snapshot-received (value: 0)
-    1.823s | 🔴 <fetch-finished (value: 0)
+    3.013s | scheduled-fetch-triggered
+    3.023s | 🔴 >fetch-started
+    3.81s  | <confirmed-snapshot-received (value: 0)
+    3.823s | 🔴 <fetch-finished (value: 0)
     "
   `);
   expect(tabB.timelineString).toMatchInlineSnapshot(`
     "
     time   |
     0      | scheduled-fetch-triggered
-    1.01s  | 🔴 >fetch-started
-    1.012s | scheduled-fetch-scheduled
-    1.81s  | 🔴 <fetch-finished (value: 0)
-    1.823s | <confirmed-snapshot-received (value: 0)
+    3.01s  | 🔴 >fetch-started
+    3.012s | scheduled-fetch-scheduled
+    3.81s  | 🔴 <fetch-finished (value: 0)
+    3.823s | <confirmed-snapshot-received (value: 0)
     "
   `);
 });
@@ -124,7 +124,7 @@ test('scheduled requests are not dropped when sibling tabs use different session
   await vi.advanceTimersByTimeAsync(0);
 
   expect(tabB.scheduleFetch('highPriority')).toBe('triggered');
-  await vi.advanceTimersByTimeAsync(1_011);
+  await vi.advanceTimersByTimeAsync(3_011);
   expect(tabB.serverMock.numOfStartedFetches).toBe(1);
 
   await vi.advanceTimersByTimeAsync(1);
