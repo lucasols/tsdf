@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   ATLAS_PROJECT_PAYLOAD,
   getProjectLabel,
@@ -25,8 +31,10 @@ import {
 } from '../stores/projectStore';
 import {
   clearPlaygroundStorage,
+  getPlaygroundDebugEntries,
   resetPlaygroundStores,
   storeManager,
+  subscribePlaygroundDebugEntries,
 } from '../stores/storeManager';
 import {
   compactJson,
@@ -41,6 +49,109 @@ import { Metric } from './common';
 const CONTACT_ROW_FIELDS = ['id', 'name', 'team', 'status'];
 const CONTACT_CARD_FIELDS = ['id', 'name', 'email', 'status'];
 const DEFAULT_FILTER = { team: 'all', status: 'all' } satisfies ContactFilter;
+
+function getDetailString(
+  details: Readonly<Record<string, unknown>> | undefined,
+  key: string,
+): string {
+  const value = details?.[key];
+  return typeof value === 'string' ? value : String(value ?? 'none');
+}
+
+function getDetailBoolean(
+  details: Readonly<Record<string, unknown>> | undefined,
+  key: string,
+): string {
+  const value = details?.[key];
+  return value === true ? 'yes' : value === false ? 'no' : 'none';
+}
+
+function getShortTabId(value: string): string {
+  if (value === 'none') return value;
+  return value.slice(-8);
+}
+
+function TabSyncProbe() {
+  const debugEntries = useSyncExternalStore(
+    subscribePlaygroundDebugEntries,
+    getPlaygroundDebugEntries,
+    getPlaygroundDebugEntries,
+  );
+  const latestLeaderChange = useMemo(
+    () => debugEntries.find((entry) => entry.operation === 'leader-change'),
+    [debugEntries],
+  );
+  const [eventCounts, setEventCounts] = useState(() => ({
+    blur: 0,
+    focus: 0,
+    hasFocus: document.hasFocus(),
+  }));
+
+  useEffect(() => {
+    function update(kind: 'blur' | 'focus') {
+      setEventCounts((current) => ({
+        blur: current.blur + (kind === 'blur' ? 1 : 0),
+        focus: current.focus + (kind === 'focus' ? 1 : 0),
+        hasFocus: document.hasFocus(),
+      }));
+    }
+
+    const onFocus = () => update('focus');
+    const onBlur = () => update('blur');
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  const details = latestLeaderChange?.details;
+  const localTabId = getShortTabId(getDetailString(details, 'localTabId'));
+  const leaderTabId = getShortTabId(getDetailString(details, 'leaderTabId'));
+
+  return (
+    <section className="tab-sync-probe">
+      <h3>Tab sync</h3>
+      <div className="debug-related">
+        <div>
+          <span>Leader</span>
+          <strong>{leaderTabId}</strong>
+        </div>
+        <div>
+          <span>Local tab</span>
+          <strong>{localTabId}</strong>
+        </div>
+        <div>
+          <span>Local leader</span>
+          <strong>{getDetailBoolean(details, 'isLocalLeader')}</strong>
+        </div>
+        <div>
+          <span>Rank</span>
+          <strong>{getDetailString(details, 'localRank')}</strong>
+        </div>
+        <div>
+          <span>Reason</span>
+          <strong>{getDetailString(details, 'reason')}</strong>
+        </div>
+        <div>
+          <span>Focus events</span>
+          <strong>{eventCounts.focus}</strong>
+        </div>
+        <div>
+          <span>Blur events</span>
+          <strong>{eventCounts.blur}</strong>
+        </div>
+        <div>
+          <span>Has focus</span>
+          <strong>{eventCounts.hasFocus ? 'yes' : 'no'}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function DebugPanel({
   entries,
@@ -166,6 +277,8 @@ export function DebugPanel({
         </div>
 
         <div className="debug-grid">
+          <TabSyncProbe />
+
           <section>
             <h3>Manager</h3>
             <pre>{compactJson(offlineStatus)}</pre>

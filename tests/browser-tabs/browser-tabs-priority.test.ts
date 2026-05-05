@@ -210,6 +210,75 @@ test('browser tabs priority publishes local status only when focus state changes
   expect(published).toMatchInlineSnapshot(`[0, 60000, 120000]`);
 });
 
+test('browser tabs priority changes leader only from focus and blur browser tab events', () => {
+  let tabAIsFocused = true;
+  let tabBIsFocused = false;
+  const messages: Array<{
+    from: 'tab-a' | 'tab-b';
+    status: {
+      kind: 'tab-status';
+      isFocused: boolean;
+      lastFocusedAt: number;
+      lastPresenceAt: number;
+    };
+  }> = [];
+
+  const tabA = createBrowserTabsPriority({
+    transportEnabled: true,
+    getIsEnabled: () => true,
+    tabId: 'tab-a',
+    getWindowIsFocused: () => tabAIsFocused,
+    publishStatus(status) {
+      messages.push({ from: 'tab-a', status });
+    },
+  });
+  const tabB = createBrowserTabsPriority({
+    transportEnabled: true,
+    getIsEnabled: () => true,
+    tabId: 'tab-b',
+    getWindowIsFocused: () => tabBIsFocused,
+    publishStatus(status) {
+      messages.push({ from: 'tab-b', status });
+    },
+  });
+
+  function flushStatusMessages(): void {
+    const nextMessages = messages.splice(0);
+    for (const message of nextMessages) {
+      if (message.from === 'tab-a') {
+        tabB.onTabStatusMessage('tab-a', message.status);
+      } else {
+        tabA.onTabStatusMessage('tab-b', message.status);
+      }
+    }
+  }
+
+  // Seed each tab with the other's initial status: tab A starts as leader.
+  flushStatusMessages();
+  expect(tabA.getPriorityRank()).toBe(1);
+  expect(tabB.getPriorityRank()).toBe(2);
+
+  vi.setSystemTime(1_000);
+  tabAIsFocused = false;
+  tabBIsFocused = true;
+  document.dispatchEvent(new Event('visibilitychange'));
+  flushStatusMessages();
+
+  // Visibility changes alone should not drive leadership. Tab switches are
+  // handled through focus/blur because they represent the active window state.
+  expect(tabA.getPriorityRank()).toBe(1);
+  expect(tabB.getPriorityRank()).toBe(2);
+
+  window.dispatchEvent(new Event('focus'));
+  flushStatusMessages();
+
+  expect(tabA.getPriorityRank()).toBe(2);
+  expect(tabB.getPriorityRank()).toBe(1);
+
+  tabA.close();
+  tabB.close();
+});
+
 test('browser tabs priority ignores stale remote tab status messages', () => {
   const priority = createPriority(() => false);
 

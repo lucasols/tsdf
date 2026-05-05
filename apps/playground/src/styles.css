@@ -104,6 +104,10 @@ h3 {
   justify-content: flex-end;
 }
 
+.tab-sync-probe {
+  grid-column: 1 / -1;
+}
+
 .header-actions span {
   color: #5f6f7e;
   font-size: 13px;
