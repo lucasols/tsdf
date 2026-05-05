@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "api": "node server/apiServer.ts",
-    "vite": "vite --host 127.0.0.1",
+    "vite": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@ls-stack/typed-fetch": "^0.18.0",

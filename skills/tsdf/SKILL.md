@@ -255,7 +255,7 @@ Docs: `docs/real-time-updates.md`.
 
 ## List Query specific features
 
-- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`, `invalidateQueries`). Docs: `docs/optimistic-list-updates.md`.
+- **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Docs: `docs/optimistic-list-updates.md`.
 - **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Docs: `docs/partial-resources.md`.
 - **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Docs: `docs/offset-pagination.md`.
 - **`derivedQueries`** — hook results computed locally from already-materialized items when `isComplete(...)` returns `true`; results expose `isDerived: true` and `hasMore: false`, and never materialize a query entry.
