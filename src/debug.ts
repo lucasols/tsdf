@@ -17,6 +17,7 @@ export type TSDFPersistentStorageDebugOperation =
   | 'load'
   | 'load-many'
   | 'adapter-operation'
+  | 'quota-cleanup'
   | 'read-entry'
   | 'read-protected-keys'
   | 'remove'
@@ -56,45 +57,40 @@ export type TSDFDebugLogEntry = {
 };
 
 function defaultConsoleDebugLogger(entry: TSDFDebugLogEntry): void {
-  if (import.meta.env.DEV) {
-    const consoleForLevel = globalThis.console[entry.level];
-    if (typeof consoleForLevel !== 'function') return;
+  const consoleForLevel = globalThis.console[entry.level];
+  if (typeof consoleForLevel !== 'function') return;
 
-    const details = entry.details
-      ? { operation: entry.operation, ...entry.details }
-      : { operation: entry.operation };
+  const details = entry.details
+    ? { operation: entry.operation, ...entry.details }
+    : { operation: entry.operation };
 
-    consoleForLevel(`[tsdf:${entry.area}] ${entry.message}`, details);
-  }
+  consoleForLevel(`[tsdf:${entry.area}] ${entry.message}`, details);
 }
 
 /** Custom debug logger invoked for each emitted TSDF debug entry. */
 export type TSDFDebugLogger = (entry: TSDFDebugLogEntry) => void;
 
-/** Enables manager-wide debug logging for browser-tab sync and persistence. */
-export type TSDFDebugOptions = boolean | TSDFDebugLogger;
+/** Logger option used by manager-wide debug and production-signal logging. */
+export type TSDFLoggerOptions = boolean | TSDFDebugLogger;
 
-export function resolveTSDFDebugLogger(
-  debug: TSDFDebugOptions | undefined,
+export function resolveTSDFLogger(
+  logger: TSDFLoggerOptions | undefined,
 ): TSDFDebugLogger | undefined {
-  if (!import.meta.env.DEV) return undefined;
-  if (debug === undefined || debug === false) return undefined;
-  if (debug === true) return defaultConsoleDebugLogger;
-  return debug;
+  if (logger === undefined || logger === false) return undefined;
+  if (logger === true) return defaultConsoleDebugLogger;
+  return logger;
 }
 
 export function emitTSDFDebugLog(
   logger: TSDFDebugLogger | undefined,
   entry: TSDFDebugLogEntry,
 ): void {
-  if (import.meta.env.DEV) {
-    if (!logger) return;
+  if (!logger) return;
 
-    try {
-      logger(entry);
-    } catch (error) {
-      globalThis.console.error('[tsdf:debug] Debug logger failed', error);
-    }
+  try {
+    logger(entry);
+  } catch (error) {
+    globalThis.console.error('[tsdf:debug] Debug logger failed', error);
   }
 }
 

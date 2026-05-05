@@ -24,7 +24,7 @@ export type {
   TSDFDebugLogger,
   TSDFDebugLogEntry,
   TSDFDebugLogLevel,
-  TSDFDebugOptions,
+  TSDFLoggerOptions,
 } from './debug';
 
 // Document Store types

@@ -63,6 +63,11 @@ export function serializeJsonForStorage(value: unknown): {
   return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
 }
 
+export type ByteBudgetResult = {
+  keptKeys: Set<string>;
+  unprotectedBytes: number;
+};
+
 export function keepEntriesWithinByteBudget<T>(
   entries: T[],
   getKey: (entry: T) => string,
@@ -71,7 +76,7 @@ export function keepEntriesWithinByteBudget<T>(
   isPinned: (entry: T) => boolean,
   isProtected: (entry: T) => boolean,
   maxBytes: number,
-): Set<string> {
+): ByteBudgetResult {
   const keptKeys = new Set<string>();
   let unprotectedBytes = 0;
 
@@ -84,7 +89,7 @@ export function keepEntriesWithinByteBudget<T>(
     for (const entry of entries) {
       keptKeys.add(getKey(entry));
     }
-    return keptKeys;
+    return { keptKeys, unprotectedBytes };
   }
 
   // Sort entries for eviction: protected first, then pinned, then by lastAccessAt (MRU first)
@@ -123,5 +128,5 @@ export function keepEntriesWithinByteBudget<T>(
     }
   }
 
-  return keptKeys;
+  return { keptKeys, unprotectedBytes };
 }

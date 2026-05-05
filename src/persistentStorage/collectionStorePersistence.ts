@@ -41,9 +41,9 @@ import {
 } from './parsePersistedData';
 import {
   createShouldIgnoreItemPredicate,
+  createTimedKeySet,
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
-  createTimedKeySet,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import {
@@ -61,6 +61,10 @@ import {
   scheduleLocalStorageMaintenance,
   scheduleLocalStorageRemoval,
 } from './persistentStorageManager';
+import {
+  logPersistentStorageQuotaCleanup,
+  type QuotaCleanupPhase,
+} from './quotaDebug';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import { COLLECTION_STORAGE_ENTRY_PREFIX } from './storageEntryPrefixes';
 import type {
@@ -221,6 +225,36 @@ export function setupCollectionPersistence<
       valueCodec: itemStorageValueCodec,
     },
   );
+
+  const quotaCleanupAdapter: 'async' | 'local-sync' =
+    localStorageAdapter === null ? 'async' : 'local-sync';
+
+  function logByteBudgetCleanup(
+    phase: QuotaCleanupPhase,
+    totalEntries: number,
+    keptKeys: Set<string>,
+    unprotectedBytes: number,
+  ): void {
+    const prodLogger = config.prodLogger;
+    if (!prodLogger) return;
+    const evictedEntries = totalEntries - keptKeys.size;
+    if (evictedEntries === 0) return;
+
+    logPersistentStorageQuotaCleanup({
+      adapter: quotaCleanupAdapter,
+      prodLogger,
+      evictedEntries,
+      keptEntries: keptKeys.size,
+      maxBytes,
+      namespaceKind: 'collection.item',
+      phase,
+      quota: 'maxBytes',
+      storeName: config.storeName,
+      totalEntries,
+      unprotectedBytes,
+    });
+  }
+
   function getAsyncNamespaceScope():
     | (AsyncStorageNamespaceScope & { kind: 'collection.item' })
     | null {
@@ -383,7 +417,7 @@ export function setupCollectionPersistence<
           sizeBytes: rememberPersistedMetadataSize(itemKey, metadata.sizeBytes),
         }),
       );
-      const keptKeys = keepEntriesWithinByteBudget(
+      const { keptKeys, unprotectedBytes } = keepEntriesWithinByteBudget(
         candidateEntries,
         (entry) => entry.itemKey,
         (entry) => entry.lastAccessAt,
@@ -391,6 +425,12 @@ export function setupCollectionPersistence<
         (entry) => pinnedItemKeys.has(entry.itemKey),
         (entry) => entry.protected,
         effectiveStaticPolicy.maxBytes,
+      );
+      logByteBudgetCleanup(
+        'startup-cleanup',
+        candidateEntries.length,
+        keptKeys,
+        unprotectedBytes,
       );
 
       for (const { itemKey } of candidateEntries) {
@@ -869,7 +909,7 @@ export function setupCollectionPersistence<
         }
       }
 
-      const keptKeys = keepEntriesWithinByteBudget(
+      const { keptKeys, unprotectedBytes } = keepEntriesWithinByteBudget(
         filteredEntries,
         (entry) => entry.itemKey,
         (entry) => entry.lastAccessAt,
@@ -877,6 +917,12 @@ export function setupCollectionPersistence<
         (entry) => pinnedItemKeys.has(entry.itemKey),
         (entry) => protectedItemKeys.has(entry.itemKey),
         maxBytes,
+      );
+      logByteBudgetCleanup(
+        'maintenance',
+        filteredEntries.length,
+        keptKeys,
+        unprotectedBytes,
       );
 
       await Promise.all(
@@ -954,7 +1000,7 @@ export function setupCollectionPersistence<
       ({ payload }) => !shouldIgnoreItem(payload),
     );
 
-    const keptKeys = keepEntriesWithinByteBudget(
+    const { keptKeys, unprotectedBytes } = keepEntriesWithinByteBudget(
       filteredEntries,
       (entry) => entry.itemKey,
       (entry) => entry.lastAccessAt,
@@ -962,6 +1008,12 @@ export function setupCollectionPersistence<
       (entry) => pinnedItemKeys.has(entry.itemKey),
       (entry) => protectedItemKeys.has(entry.itemKey),
       maxBytes,
+    );
+    logByteBudgetCleanup(
+      'maintenance',
+      filteredEntries.length,
+      keptKeys,
+      unprotectedBytes,
     );
 
     await Promise.all(
@@ -1210,7 +1262,7 @@ export function setupCollectionPersistence<
             ({ itemKey }) => !pendingRemoves.has(itemKey),
           );
 
-          const keptKeys = keepEntriesWithinByteBudget(
+          const { keptKeys, unprotectedBytes } = keepEntriesWithinByteBudget(
             remainingCandidates,
             (entry) => entry.itemKey,
             (entry) => entry.lastAccessAt,
@@ -1218,6 +1270,12 @@ export function setupCollectionPersistence<
             (entry) => pinnedItemKeys.has(entry.itemKey),
             (entry) => entry.protected,
             maxBytes,
+          );
+          logByteBudgetCleanup(
+            'flush',
+            remainingCandidates.length,
+            keptKeys,
+            unprotectedBytes,
           );
           if (keptKeys.size !== remainingCandidates.length) {
             for (const { itemKey } of remainingCandidates) {

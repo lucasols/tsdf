@@ -64,7 +64,7 @@ const scheduledAsyncMaintenance = new Map<
 type PersistentStorageRuntimeConfig = Omit<
   PersistentStorageBaseConfig<never>,
   'schema'
-> & { debugLogger?: TSDFDebugLogger };
+> & { debugLogger?: TSDFDebugLogger; prodLogger?: TSDFDebugLogger };
 
 export type PersistentStorageDebugContext = {
   adapterKind: 'async' | 'local-sync';
@@ -478,9 +478,8 @@ export function createPersistentStorageHandle<T>(
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
 
-    if (import.meta.env.DEV) {
-      asyncAdapter.debugLogger = config.debugLogger;
-    }
+    asyncAdapter.debugLogger = config.debugLogger;
+    asyncAdapter.prodLogger = config.prodLogger;
 
     return asyncAdapter.openNamespace<unknown, Record<string, unknown>>({
       sessionKey,
@@ -1005,9 +1004,8 @@ export function createPersistentStorageNamespaceHandle<
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
 
-    if (import.meta.env.DEV) {
-      asyncAdapter.debugLogger = config.debugLogger;
-    }
+    asyncAdapter.debugLogger = config.debugLogger;
+    asyncAdapter.prodLogger = config.prodLogger;
 
     return asyncAdapter.openNamespace<unknown, TMetadata>({
       sessionKey,

@@ -3,6 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
+import type { TSDFDebugLogEntry } from '../../../src/debug';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import {
   createAsyncStorageAdapter,
@@ -16,6 +17,7 @@ import {
 import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
+import { createStoreManager } from '../../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
 import {
   createDocumentStoreTestEnv,
@@ -27,7 +29,7 @@ import {
   type Tables,
 } from '../../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
@@ -216,6 +218,7 @@ export function storeItemKey(tableId: string, id: number): string {
 
 export function createListQueryEnv(options: {
   defaultQuerySize?: number;
+  debugEntries?: TSDFDebugLogEntry[];
   maxItemBytes?: number;
   maxQueryBytes?: number;
   maxQuerySize?: number;
@@ -226,9 +229,22 @@ export function createListQueryEnv(options: {
   sessionKey?: string;
   storeName: string;
 }) {
+  const storeManager =
+    options.debugEntries === undefined
+      ? undefined
+      : createStoreManager({
+          getSessionKey: () => options.sessionKey ?? 'session1',
+          errorNormalizer: normalizeError,
+          blockWindowClose: null,
+          prodLogger: (entry) => {
+            options.debugEntries?.push(entry);
+          },
+        });
+
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
+    storeManager,
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {

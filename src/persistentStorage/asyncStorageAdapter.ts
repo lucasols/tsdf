@@ -25,6 +25,7 @@ import {
   serializeJsonForStorage,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
+import { logPersistentStorageQuotaCleanup } from './quotaDebug';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
@@ -1044,6 +1045,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   readonly #driver: AsyncStorageDriver;
   #debugLogger: AsyncStorageAdapter['debugLogger'];
+  #prodLogger: AsyncStorageAdapter['prodLogger'];
 
   #cachedNamespaceIndexReads: Cache<AsyncStorageNamespaceIndexReadState> =
     createCache({ maxCacheSize: ASYNC_STORAGE_NAMESPACE_INDEX_CACHE_MAX_SIZE });
@@ -1069,6 +1071,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   set debugLogger(debugLogger: AsyncStorageAdapter['debugLogger']) {
     this.#debugLogger = debugLogger;
     this.#driver.debugLogger = debugLogger;
+  }
+
+  get prodLogger(): AsyncStorageAdapter['prodLogger'] {
+    return this.#prodLogger;
+  }
+
+  set prodLogger(prodLogger: AsyncStorageAdapter['prodLogger']) {
+    this.#prodLogger = prodLogger;
+    this.#driver.prodLogger = prodLogger;
   }
 
   async #runWithSessionWriterLock<T>(
@@ -3012,7 +3023,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     if (effectiveStaticPolicy?.maxBytes !== undefined) {
       const pinnedKeys = new Set(effectiveStaticPolicy.pinnedKeys ?? []);
-      const keptKeys = keepEntriesWithinByteBudget(
+      const { keptKeys, unprotectedBytes } = keepEntriesWithinByteBudget(
         candidateEntries,
         (entry) => entry.itemKey,
         (entry) => entry.lastAccessAt,
@@ -3021,6 +3032,29 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         (entry) => entry.protected,
         effectiveStaticPolicy.maxBytes,
       );
+      const prodLogger = args.driver.prodLogger;
+      const evictedEntries = candidateEntries.length - keptKeys.size;
+      if (prodLogger && evictedEntries > 0) {
+        const scopeKind = args.scope.kind;
+        logPersistentStorageQuotaCleanup({
+          adapter: 'async',
+          prodLogger,
+          evictedEntries,
+          keptEntries: keptKeys.size,
+          maxBytes: effectiveStaticPolicy.maxBytes,
+          namespaceKind: scopeKind,
+          phase: 'startup-cleanup',
+          quota:
+            scopeKind === 'listQuery.item'
+              ? 'maxItemBytes'
+              : scopeKind === 'listQuery.query'
+                ? 'maxQueryBytes'
+                : 'maxBytes',
+          storeName: args.scope.storeName,
+          totalEntries: candidateEntries.length,
+          unprotectedBytes,
+        });
+      }
 
       for (const { itemKey } of candidateEntries) {
         if (keptKeys.has(itemKey)) continue;

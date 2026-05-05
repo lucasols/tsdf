@@ -1,6 +1,7 @@
 import {
   clearAllSessionStorage,
   createStoreManager,
+  type TSDFDebugLogEntry,
   type StoreError,
 } from 'tsdf';
 import { indexedDbPersistentStorage } from 'tsdf/indexed-db-storage';
@@ -38,28 +39,31 @@ export function subscribePlaygroundDebugEntries(
   };
 }
 
+function logPlaygroundDebugEntry(entry: TSDFDebugLogEntry): void {
+  console[entry.level](`[tsdf:${entry.area}] ${entry.message}`, {
+    operation: entry.operation,
+    ...entry.details,
+  });
+  playgroundDebugEntries = [
+    {
+      area: entry.area,
+      operation: entry.operation,
+      message: entry.message,
+      details: entry.details,
+    },
+    ...playgroundDebugEntries,
+  ].slice(0, 30);
+  for (const listener of playgroundDebugListeners) {
+    listener();
+  }
+}
+
 export const storeManager = createStoreManager({
   getSessionKey: () => PLAYGROUND_SESSION_KEY,
   errorNormalizer: normalizeError,
   revalidateOnWindowFocus: true,
-  debug(entry) {
-    console[entry.level](`[tsdf:${entry.area}] ${entry.message}`, {
-      operation: entry.operation,
-      ...entry.details,
-    });
-    playgroundDebugEntries = [
-      {
-        area: entry.area,
-        operation: entry.operation,
-        message: entry.message,
-        details: entry.details,
-      },
-      ...playgroundDebugEntries,
-    ].slice(0, 30);
-    for (const listener of playgroundDebugListeners) {
-      listener();
-    }
-  },
+  debugLogger: logPlaygroundDebugEntry,
+  prodLogger: logPlaygroundDebugEntry,
   onMutationError(error) {
     console.warn('[tsdf playground] mutation failed', error);
   },

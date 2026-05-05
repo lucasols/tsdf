@@ -951,9 +951,8 @@ export function createCollectionStore<
               session: resolvedOfflineSessionForPersistentStorage,
             }
           : undefined,
-        ...(import.meta.env.DEV
-          ? { debugLogger: storeManager.debugLogger }
-          : undefined),
+        debugLogger: storeManager.debugLogger,
+        prodLogger: storeManager.prodLogger,
         getSessionKey: getSessionKeyForRuntime,
         storeName: id,
       })

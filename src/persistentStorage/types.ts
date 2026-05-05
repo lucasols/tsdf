@@ -164,6 +164,8 @@ export type AsyncStorageDiscoveredScope = {
 export type AsyncStorageDriver = {
   /** Mutable debug logger used by concrete adapters to emit operation timings. */
   debugLogger?: TSDFDebugLogger;
+  /** Mutable logger used for low-volume production signals. */
+  prodLogger?: TSDFDebugLogger;
   /** Read a single raw record from a logical namespace. */
   get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown>;
   /** Write a single raw record to a logical namespace. */
@@ -242,6 +244,8 @@ export type AsyncStorageAdapter = {
   kind: 'async';
   /** Mutable debug logger used by concrete adapters to emit operation timings. */
   debugLogger?: TSDFDebugLogger;
+  /** Mutable logger used for low-volume production signals. */
+  prodLogger?: TSDFDebugLogger;
   /** Open a logical namespace with managed batching and touch guarantees. */
   openNamespace<
     TValue,
@@ -427,6 +431,8 @@ type ResolvedStorePersistentStorageBaseConfig<
   onPersistentStorageError?: PersistentStorageErrorHandler;
   /** Manager-owned debug logger for persistence internals. */
   debugLogger?: TSDFDebugLogger;
+  /** Manager-owned logger for low-volume production signals. */
+  prodLogger?: TSDFDebugLogger;
 };
 
 export type ResolvedDocumentPersistentStorageConfig<
