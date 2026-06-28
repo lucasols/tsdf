@@ -12,6 +12,10 @@ import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
+  Object.defineProperty(document, 'visibilityState', {
+    value: 'visible',
+    configurable: true,
+  });
 });
 
 afterEach(() => {
@@ -664,7 +668,7 @@ test('document store: immediate reconnect after cooldown clears older trailing t
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 2);
 });
 
-test('document store: onTransportReconnect while unfocused defers invalidation to next focus', async () => {
+test('document store: onTransportReconnect while hidden defers invalidation until visible', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const env = createDocumentStoreTestEnv(0, {
@@ -690,13 +694,13 @@ test('document store: onTransportReconnect while unfocused defers invalidation t
 
   await flushAllTimers();
 
-  // No fetch while unfocused
+  // No fetch while hidden.
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
 
   await tabs.focusTab('a');
   await flushAllTimers();
 
-  // Fetch triggered on focus
+  // Fetch triggered once the app is visible again.
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 
   await advanceTime(1_200);
@@ -704,11 +708,85 @@ test('document store: onTransportReconnect while unfocused defers invalidation t
   await tabs.focusTab('a');
   await flushAllTimers();
 
-  // No extra fetch on later focus events
+  // No extra fetch on later visibility events.
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 });
 
-test('document store: multiple onTransportReconnect calls while unfocused are coalesced', async () => {
+test('document store: visible reconnect revalidates even when strict focus is false', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+  const focusBinding = tabs.bind('a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: {
+      ...focusBinding,
+      getWindowIsFocused: () => false,
+      getWindowCanRunRevalidation: () => true,
+    },
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
+  });
+
+  await advanceTime(100);
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+});
+
+test('document store: hidden reconnect flushes on pageshow resume', async () => {
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
+  });
+
+  await advanceTime(100);
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  Object.defineProperty(document, 'visibilityState', {
+    value: 'hidden',
+    configurable: true,
+  });
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
+
+  Object.defineProperty(document, 'visibilityState', {
+    value: 'visible',
+    configurable: true,
+  });
+
+  act(() => {
+    window.dispatchEvent(new Event('pageshow'));
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+});
+
+test('document store: multiple onTransportReconnect calls while hidden are coalesced', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const env = createDocumentStoreTestEnv(0, {
@@ -748,7 +826,7 @@ test('document store: multiple onTransportReconnect calls while unfocused are co
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 });
 
-test('document store: reconnect trailing flush waits for focus and fires once', async () => {
+test('document store: reconnect trailing flush waits until visible and fires once', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const env = createDocumentStoreTestEnv(0, {
@@ -988,7 +1066,7 @@ test('collection store: focused reconnect burst runs one immediate and one trail
   ).toHaveLength(4);
 });
 
-test('collection store: onTransportReconnect while unfocused defers and coalesces', async () => {
+test('collection store: onTransportReconnect while hidden defers and coalesces', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const env = createCollectionStoreTestEnv(
@@ -1017,7 +1095,7 @@ test('collection store: onTransportReconnect while unfocused defers and coalesce
 
   await flushAllTimers();
 
-  // No fetches while unfocused
+  // No fetches while hidden.
   expect(
     env.serverTable.fetchHistory.filter((e) => e.type === 'fetch'),
   ).toHaveLength(0);
@@ -1094,7 +1172,7 @@ test('list query store: onTransportReconnect while focused invalidates queries a
   `);
 });
 
-test('list query store: onTransportReconnect while unfocused defers and coalesces', async () => {
+test('list query store: onTransportReconnect while hidden defers and coalesces', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const initialData = {
@@ -1128,7 +1206,7 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
 
   await flushAllTimers();
 
-  // No fetches while unfocused
+  // No fetches while hidden.
   expect(env.serverTable.fetchHistory).toHaveLength(0);
 
   await tabs.focusTab('a');
@@ -1161,7 +1239,7 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
   `);
 });
 
-test('list query store: reconnect trailing flush waits for focus and invalidates once', async () => {
+test('list query store: reconnect trailing flush waits until visible and invalidates once', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
   const reconnectCooldownMs = 2_000;
 

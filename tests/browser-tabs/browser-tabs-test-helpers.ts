@@ -40,8 +40,11 @@ function createFocusFlag(initialValue: boolean) {
 
 type FocusControllerBinding = {
   getWindowIsFocused: () => boolean;
+  getWindowCanRunRevalidation: () => boolean;
   /** Per-tab focus subscription. Calls the handler when this tab receives focus. */
   onWindowFocus: (handler: () => void) => () => void;
+  /** Per-tab active subscription. Calls the handler when this tab becomes visible enough to revalidate. */
+  onWindowCanRunRevalidation: (handler: () => void) => () => void;
   /** Per-tab blur subscription. Calls the handler when this tab loses focus. */
   onWindowBlur: (handler: () => void) => () => void;
 };
@@ -49,7 +52,7 @@ type FocusControllerBinding = {
 interface FocusChangeCoordinator<T extends string> {
   /** Returns a `getWindowIsFocused` getter for the given tab, for use in store env creation. */
   getWindowIsFocused(tab: T): () => boolean;
-  /** Returns a binding for use as `bindFocusController` in test env options. Provides per-tab `getWindowIsFocused`, `onWindowFocus`, and `onWindowBlur`. */
+  /** Returns a binding for use as `bindFocusController` in test env options. Provides per-tab focus and revalidation lifecycle events. */
   bind(tab: T): FocusControllerBinding;
   /** Focus a tab. If another tab was focused, it gets blurred first (like a real browser tab switch). */
   focusTab(tab: T): Promise<void>;
@@ -110,7 +113,18 @@ export function createFocusChangeCoordinator<T extends string>(
     bind(tab) {
       return {
         getWindowIsFocused: getFlag(tab).get,
+        getWindowCanRunRevalidation: getFlag(tab).get,
         onWindowFocus(handler) {
+          const listeners = focusListeners.get(tab);
+          if (!listeners) {
+            throw new Error(`Unknown tab "${tab}"`);
+          }
+          listeners.add(handler);
+          return () => {
+            listeners.delete(handler);
+          };
+        },
+        onWindowCanRunRevalidation(handler) {
           const listeners = focusListeners.get(tab);
           if (!listeners) {
             throw new Error(`Unknown tab "${tab}"`);

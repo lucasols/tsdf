@@ -132,4 +132,4 @@ TSDF automatically invalidates data in these scenarios:
 - **Mutation error**: After a failed mutation, affected data is invalidated to revert optimistic updates
 - **Mutation success with `revalidateOnSuccess`**: Affected data is invalidated to fetch the server's actual state
 - **Window focus**: When `revalidateOnWindowFocus` is enabled, all data is invalidated with `lowPriority`
-- **Transport reconnect**: When `onTransportReconnect()` is called, all data is invalidated with `realtimeUpdate` priority. See [Real-Time Updates](./real-time-updates.md)
+- **Transport reconnect**: When `onTransportReconnect()` is called, all data is invalidated with `realtimeUpdate` priority as soon as the document is visible. See [Real-Time Updates](./real-time-updates.md)

@@ -104,9 +104,9 @@ Store-level `store.onTransportReconnect()` remains available for stores backed b
 
 Behavior:
 
-- If the window is **focused**: all data is invalidated immediately with `realtimeUpdate` priority
-- If the window is **not focused**: invalidation is deferred until the window regains focus
-- Multiple reconnect calls while unfocused are coalesced (only one invalidation fires on focus)
+- If the document is **visible**: all data is invalidated immediately with `realtimeUpdate` priority, even when the browser does not report strict focus
+- If the document is **hidden**: invalidation is deferred until the app becomes visible or resumes
+- Multiple reconnect calls while hidden are coalesced (only one invalidation fires on resume)
 - This is a no-op when `usesRealTimeUpdates` is `false`
 
 ## Pattern: WebSocket Integration

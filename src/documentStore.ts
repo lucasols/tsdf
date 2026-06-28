@@ -125,6 +125,7 @@ import {
   type ValidStoreState,
 } from './utils/storeShared';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
+import { isWindowVisible, onWindowVisible } from './utils/windowRevalidation';
 
 /** Lifecycle status for a document store. */
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -290,6 +291,8 @@ export type DocumentStoreOptions<
     initialLastFetchStartTime?: number;
     getWindowIsFocused?: () => boolean;
     onWindowFocus?: (handler: () => void) => () => void;
+    getWindowCanRunRevalidation?: () => boolean;
+    onWindowCanRunRevalidation?: (handler: () => void) => () => void;
     onWindowFocusChange?: (handler: () => void) => () => void;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
@@ -832,6 +835,8 @@ export function createDocumentStore<
 
   const storeEvents = evtmitter<DocumentStoreStoreEvents>();
   const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
+  const getWindowCanRunRevalidation =
+    testOptions?.getWindowCanRunRevalidation ?? isWindowVisible;
 
   function runWithoutBroadcast<T>(callback: () => T): T {
     remoteApplyDepth++;
@@ -1119,8 +1124,9 @@ export function createDocumentStore<
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
-    getWindowIsFocused,
+    getWindowCanRunRevalidation,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
+    testOptions?.onWindowCanRunRevalidation ?? onWindowVisible,
     () => {
       invalidateData('lowPriority');
     },
@@ -1261,12 +1267,12 @@ export function createDocumentStore<
    * needs to be revalidated.
    *
    * - No-op when `usesRealTimeUpdates` is `false`.
-   * - If the window is focused, the first reconnect invalidates immediately
-   *   with `realtimeUpdate` priority.
+   * - If the window is visible, the first reconnect invalidates immediately with
+   *   `realtimeUpdate` priority.
    * - Additional reconnects within `transportReconnectCooldownMs` are coalesced
    *   into one trailing invalidation.
-   * - If the window is **not** focused, reconnect invalidation waits until the
-   *   next window focus event.
+   * - If the window is hidden, reconnect invalidation waits until the next
+   *   window visibility/resume event.
    */
   function onTransportReconnect(): void {
     if (isDisposed) return;
