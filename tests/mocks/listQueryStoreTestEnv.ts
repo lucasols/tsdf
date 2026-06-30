@@ -189,12 +189,10 @@ export function createListQueryStoreTestEnv<
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     testBrowserTabId?: string;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
-    /** Binds this env to a focus coordinator. Provides per-tab focus/visibility hooks for scoped lifecycle events. */
+    /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
     bindFocusController?: {
       getWindowIsFocused: () => boolean;
-      getWindowCanRunRevalidation: () => boolean;
       onWindowFocus: (handler: () => void) => () => void;
-      onWindowCanRunRevalidation: (handler: () => void) => () => void;
       onWindowBlur: (handler: () => void) => () => void;
     };
     dynamicRealtimeThrottleMs?: (params: {
@@ -416,16 +414,9 @@ export function createListQueryStoreTestEnv<
     '~test': {
       ...testOptions,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
-      getWindowCanRunRevalidation:
-        bindFocusController?.getWindowCanRunRevalidation,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {
             return bindFocusController.onWindowFocus(handler);
-          }
-        : undefined,
-      onWindowCanRunRevalidation: bindFocusController
-        ? (handler: () => void) => {
-            return bindFocusController.onWindowCanRunRevalidation(handler);
           }
         : undefined,
       onWindowFocusChange: bindFocusController

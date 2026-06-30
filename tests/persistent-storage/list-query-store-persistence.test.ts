@@ -194,9 +194,7 @@ function createEnv(options: {
   }) => number;
   bindFocusController?: {
     getWindowIsFocused: () => boolean;
-    getWindowCanRunRevalidation: () => boolean;
     onWindowFocus: (handler: () => void) => () => void;
-    onWindowCanRunRevalidation: (handler: () => void) => () => void;
     onWindowBlur: (handler: () => void) => () => void;
   };
 }) {

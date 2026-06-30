@@ -2,10 +2,6 @@ packages:
   - '.'
   - 'apps/*'
 
-allowBuilds:
-  esbuild: true
-  simple-git-hooks: true
-
 onlyBuiltDependencies:
   - esbuild
   - simple-git-hooks

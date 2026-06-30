@@ -250,7 +250,7 @@ socket.on('user-updated', (data) =>
 storeManager.onTransportReconnect(); // notify attached realtime stores after reconnect
 ```
 
-`usesRealTimeUpdates: true` auto-disables `revalidateOnWindowFocus` and defaults hooks to `disableRefetchOnMount: true`. Transport reconnect revalidation runs as soon as the document is visible, even if the browser does not report strict focus.
+`usesRealTimeUpdates: true` auto-disables `revalidateOnWindowFocus` and defaults hooks to `disableRefetchOnMount: true`.
 
 Docs: `docs/real-time-updates.md`.
 

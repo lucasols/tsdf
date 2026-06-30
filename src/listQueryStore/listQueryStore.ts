@@ -98,7 +98,6 @@ import {
   type ValidPayload,
   type ValidStoreState,
 } from '../utils/storeShared';
-import { isWindowVisible, onWindowVisible } from '../utils/windowRevalidation';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import {
@@ -1138,8 +1137,6 @@ type ListQueryStoreOptionsBase<
     initialLastFetchStartTime?: number;
     getWindowIsFocused?: () => boolean;
     onWindowFocus?: (handler: () => void) => () => void;
-    getWindowCanRunRevalidation?: () => boolean;
-    onWindowCanRunRevalidation?: (handler: () => void) => () => void;
     onWindowFocusChange?: (handler: () => void) => () => void;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
@@ -1652,8 +1649,6 @@ export function createListQueryStore<
   }
 
   const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
-  const getWindowCanRunRevalidation =
-    testOptions?.getWindowCanRunRevalidation ?? isWindowVisible;
 
   function runWithoutBroadcast<T>(callback: () => T): T {
     remoteApplyDepth++;
@@ -3020,9 +3015,8 @@ export function createListQueryStore<
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
     transportReconnectCooldownMs,
-    getWindowCanRunRevalidation,
+    getWindowIsFocused,
     testOptions?.onWindowFocus ?? onWindowFocusDefault,
-    testOptions?.onWindowCanRunRevalidation ?? onWindowVisible,
     () => {
       invalidateQueryAndItems({ all: true, type: 'lowPriority' });
     },
@@ -3083,12 +3077,12 @@ export function createListQueryStore<
    * queries and items need to be revalidated.
    *
    * - No-op when `usesRealTimeUpdates` is `false`.
-   * - If the window is visible, the first reconnect invalidates all queries
+   * - If the window is focused, the first reconnect invalidates all queries
    *   and items immediately with `realtimeUpdate` priority.
    * - Additional reconnects within `transportReconnectCooldownMs` are
    *   coalesced into one trailing invalidation.
-   * - If the window is hidden, reconnect invalidation waits until the next
-   *   window visibility/resume event.
+   * - If the window is **not** focused, reconnect invalidation waits until the
+   *   next window focus event.
    */
   function onTransportReconnect(): void {
     if (isDisposed) return;

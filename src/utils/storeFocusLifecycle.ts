@@ -21,22 +21,21 @@ export function createStoreFocusLifecycle(
   revalidateOnWindowFocus: boolean | (() => boolean) | undefined,
   usesRealTimeUpdates: boolean | undefined,
   transportReconnectCooldownMs: number,
-  getWindowCanRunRevalidation: () => boolean,
+  getWindowIsFocused: () => boolean,
   onWindowFocus: (handler: () => void) => () => void,
-  onWindowCanRunRevalidation: (handler: () => void) => () => void,
   onWindowFocusRevalidate: () => void,
   onTransportReconnectRevalidate: () => void,
   debug: FocusLifecycleDebugOptions | undefined,
 ): StoreFocusLifecycle {
   let cleanupFocusListener: (() => void) | null = null;
-  let cleanupReconnectRevalidationListener: (() => void) | null = null;
+  let cleanupReconnectFocusListener: (() => void) | null = null;
   let reconnectCooldownTimeoutId: TimeoutId | null = null;
-  let hasPendingReconnectRevalidate = false;
+  let hasPendingReconnectRevalidateOnFocus = false;
   let lastTransportReconnectRevalidateAt = Number.NEGATIVE_INFINITY;
 
-  function clearReconnectRevalidationListener(): void {
-    cleanupReconnectRevalidationListener?.();
-    cleanupReconnectRevalidationListener = null;
+  function clearReconnectFocusListener(): void {
+    cleanupReconnectFocusListener?.();
+    cleanupReconnectFocusListener = null;
   }
 
   function clearReconnectCooldownTimeout(): void {
@@ -76,17 +75,15 @@ export function createStoreFocusLifecycle(
     onTransportReconnectRevalidate();
   }
 
-  function ensureReconnectRevalidationListener(): void {
-    if (cleanupReconnectRevalidationListener) return;
+  function ensureReconnectFocusListener(): void {
+    if (cleanupReconnectFocusListener) return;
 
-    cleanupReconnectRevalidationListener = onWindowCanRunRevalidation(() => {
-      if (!getWindowCanRunRevalidation()) return;
+    cleanupReconnectFocusListener = onWindowFocus(() => {
+      clearReconnectFocusListener();
 
-      clearReconnectRevalidationListener();
+      if (!hasPendingReconnectRevalidateOnFocus) return;
 
-      if (!hasPendingReconnectRevalidate) return;
-
-      hasPendingReconnectRevalidate = false;
+      hasPendingReconnectRevalidateOnFocus = false;
       runTransportReconnectRevalidate();
     });
   }
@@ -94,15 +91,15 @@ export function createStoreFocusLifecycle(
   function flushTransportReconnectRevalidate(): void {
     clearReconnectCooldownTimeout();
 
-    if (getWindowCanRunRevalidation()) {
-      hasPendingReconnectRevalidate = false;
-      clearReconnectRevalidationListener();
+    if (getWindowIsFocused()) {
+      hasPendingReconnectRevalidateOnFocus = false;
+      clearReconnectFocusListener();
       runTransportReconnectRevalidate();
       return;
     }
 
-    hasPendingReconnectRevalidate = true;
-    ensureReconnectRevalidationListener();
+    hasPendingReconnectRevalidateOnFocus = true;
+    ensureReconnectFocusListener();
   }
 
   function scheduleTrailingTransportReconnectRevalidate(): void {
@@ -117,9 +114,9 @@ export function createStoreFocusLifecycle(
   function reset(): void {
     cleanupFocusListener?.();
     cleanupFocusListener = null;
-    clearReconnectRevalidationListener();
+    clearReconnectFocusListener();
     clearReconnectCooldownTimeout();
-    hasPendingReconnectRevalidate = false;
+    hasPendingReconnectRevalidateOnFocus = false;
     lastTransportReconnectRevalidateAt = Number.NEGATIVE_INFINITY;
 
     if (!revalidateOnWindowFocus) return;
@@ -156,9 +153,9 @@ export function createStoreFocusLifecycle(
   function dispose(): void {
     cleanupFocusListener?.();
     cleanupFocusListener = null;
-    clearReconnectRevalidationListener();
+    clearReconnectFocusListener();
     clearReconnectCooldownTimeout();
-    hasPendingReconnectRevalidate = false;
+    hasPendingReconnectRevalidateOnFocus = false;
     lastTransportReconnectRevalidateAt = Number.NEGATIVE_INFINITY;
   }
 
@@ -170,7 +167,7 @@ export function createStoreFocusLifecycle(
       return;
     }
 
-    if (hasPendingReconnectRevalidate) return;
+    if (hasPendingReconnectRevalidateOnFocus) return;
 
     const now = Date.now();
     const elapsedSinceLastRevalidate = now - lastTransportReconnectRevalidateAt;
