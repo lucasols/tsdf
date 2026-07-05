@@ -675,7 +675,7 @@ test('local-sync restart keeps offline temp rows visible for partial-resource li
     time  |
     10ms  | 🔴 >list-fetch-started
     810ms | 🔴 <list-fetch-finished (value: {"count":2})
-    3.1s  | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
+    13.1s | -- go offline and queue a temp create; the optimistic row has data but no loadedFields metadata
     .     | offline:createUser queued
     "
   `);

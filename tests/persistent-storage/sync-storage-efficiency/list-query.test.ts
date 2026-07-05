@@ -89,7 +89,7 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.list-query-expiration.li."expired-users||1
            |    └ (item data, <"expired-users||1>)
       .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
@@ -195,7 +195,7 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
            |    └ (query data, <{tableId:"first"}>)
       .    | 🔑[1] #3 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
@@ -337,7 +337,7 @@ describe('sync storage efficiency: list-query', () => {
       getParsedLocalStorageValue('tsdf._m.r.n:sess1.lq-query-metadata.li.m'),
     ).toMatchInlineSnapshot(`
       e:
-        "third||1: { a: 1735689604010, p: 'third||1', z: 44 }
+        "third||1: { a: 1735689614010, p: 'third||1', z: 44 }
     `);
     expect(
       getParsedLocalStorageValue('tsdf.sess1.lq-query-metadata.li."third||1'),
@@ -350,7 +350,7 @@ describe('sync storage efficiency: list-query', () => {
         'tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}',
       ),
     ).toMatchInlineSnapshot(`
-      a: 1735689604010
+      a: 1735689614010
       i: ['"third||1']
       p: { tableId: 'third' }
     `);
@@ -588,7 +588,7 @@ describe('sync storage efficiency: list-query', () => {
       `
         e:
           "users||1:
-            a: 1735689603910
+            a: 1735689613910
             f: ['age', 'email', 'id', 'name']
             p: 'users||1'
             z: 83
@@ -599,7 +599,7 @@ describe('sync storage efficiency: list-query', () => {
         'tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}',
       ),
     ).toMatchInlineSnapshot(`
-      a: 1735689605910
+      a: 1735689615910
       i: []
       p: { tableId: 'users' }
     `);
@@ -838,7 +838,7 @@ describe('sync storage efficiency: list-query', () => {
     expect(cleanupOperations).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||1
            |    └ (item data, <"users||1>)
       .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
@@ -920,7 +920,7 @@ describe('sync storage efficiency: list-query', () => {
         'tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}',
       ),
     ).toMatchInlineSnapshot(`
-      a: 1735689604100
+      a: 1735689614100
       i: ['"users||2']
       p: { tableId: 'users' }
     `);
@@ -929,7 +929,7 @@ describe('sync storage efficiency: list-query', () => {
         'tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}',
       ),
     ).toMatchInlineSnapshot(`
-      a: 1735689604100
+      a: 1735689614100
       i: []
 
       p:
@@ -1180,10 +1180,10 @@ describe('sync storage efficiency: list-query', () => {
     `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689604100, o: '✅', p: 'users||1', z: 50 }
+        "users||1: { a: 1735689614100, o: '✅', p: 'users||1', z: 50 }
     `);
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
-      a: 1735689604100
+      a: 1735689614100
       i: ['"users||1']
       o: '✅'
       p: { tableId: 'users' }
@@ -1240,7 +1240,7 @@ describe('sync storage efficiency: list-query', () => {
         'tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"}',
       ),
     ).toMatchInlineSnapshot(`
-      a: 1735689604100
+      a: 1735689614100
       i: ['"users||1']
       p: { tableId: 'users' }
     `);
@@ -1447,19 +1447,19 @@ describe('sync storage efficiency: list-query', () => {
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
         "users||1:
-          a: 1735689603910
+          a: 1735689613910
           f: ['age', 'email', 'id', 'name']
           o: '✅'
           p: 'users||1'
           z: 82
         "users||2:
-          a: 1735689605910
+          a: 1735689615910
           f: ['age', 'email', 'id', 'name']
           p: 'users||2'
           z: 83
     `);
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
-      a: 1735689603910
+      a: 1735689613910
       i: ['"users||1', '"users||2']
       o: '✅'
       p: { tableId: 'users' }

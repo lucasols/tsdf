@@ -119,7 +119,7 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
       'tsdf-uploads/offline-upload-hook-session/avatar/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689605003
+    c: 1735689612000
     i: 'avatar'
     k: 'offline-upload-hook-session'
     l: 1
@@ -127,7 +127,7 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
     n: 'avatar.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689605003
+    u: 1735689612000
     z: 13
   `);
   expect(
@@ -159,8 +159,8 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
     ⋅ fileName: avatar.txt
     ⋅ mimeType: text/plain
     ⋅ sizeBytes: 13
-    ⋅ createdAt: 1735689605003
-    ⋅ updatedAt: 1735689605003
+    ⋅ createdAt: 1735689612000
+    ⋅ updatedAt: 1735689612000
     └─
 
     >>> go online without dependency
@@ -181,7 +181,7 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
       'tsdf-uploads/offline-upload-hook-session/avatar/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689605003
+    c: 1735689612000
     i: 'avatar'
     k: 'offline-upload-hook-session'
     l: 1
@@ -189,7 +189,7 @@ test('useOfflineUploads keeps manual uploads pending across reconnect until a de
     n: 'avatar.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689605003
+    u: 1735689612000
     z: 13
   `);
 
@@ -239,7 +239,7 @@ test('manual uploads expire only after one week in the current online session', 
       'tsdf-uploads/offline-upload-retention-session/stale-manual-upload/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689605003
+    c: 1735689612000
     i: 'stale-manual-upload'
     k: 'offline-upload-retention-session'
     l: 1
@@ -247,7 +247,7 @@ test('manual uploads expire only after one week in the current online session', 
     n: 'retention.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689605003
+    u: 1735689612000
     z: 14
   `);
 
@@ -275,7 +275,7 @@ test('manual uploads expire only after one week in the current online session', 
       'tsdf-uploads/offline-upload-retention-session/stale-manual-upload/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689605003
+    c: 1735689612000
     i: 'stale-manual-upload'
     k: 'offline-upload-retention-session'
     l: 1
@@ -283,7 +283,7 @@ test('manual uploads expire only after one week in the current online session', 
     n: 'retention.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689605003
+    u: 1735689612000
     z: 14
   `);
 
@@ -305,8 +305,8 @@ test('manual uploads expire only after one week in the current online session', 
     - { id: 'stale-manual-upload', state: 'pending' }
   `);
   expect(retentionStartedMetadata).toMatchInlineSnapshot(`
-    c: 1735689605003
-    g: 1736380810012
+    c: 1735689612000
+    g: 1736380817009
     i: 'stale-manual-upload'
     k: 'offline-upload-retention-session'
     l: 1
@@ -314,7 +314,7 @@ test('manual uploads expire only after one week in the current online session', 
     n: 'retention.txt'
     o: 'manual'
     t: 'pending'
-    u: 1736380810012
+    u: 1736380817009
     z: 14
   `);
 
@@ -733,10 +733,10 @@ test('queued direct uploads keep same logical field names isolated per mutation'
     expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
       "tsdf-uploads (1.40 kb)
       └ offline-direct-upload-collision-session (1.37 kb)
-        ├ offline-direct-upload-collision-doc:1735689602000:eeeeeeee:avatar (0.66 kb)
+        ├ offline-direct-upload-collision-doc:1735689612000:eeeeeeee:avatar (0.66 kb)
         │ ├ binary.blob (0.06 kb)
         │ └ metadata.json (0.47 kb)
-        └ offline-direct-upload-collision-doc:1735689602009:i:avatar (0.64 kb)
+        └ offline-direct-upload-collision-doc:1735689612009:i:avatar (0.64 kb)
           ├ binary.blob (0.06 kb)
           └ metadata.json (0.46 kb)"
     `);
@@ -1002,7 +1002,7 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
       'tsdf-uploads/offline-upload-dependency-session/asset-1/metadata.json',
     ),
   ).toMatchInlineSnapshot(`
-    c: 1735689602000
+    c: 1735689612000
     i: 'asset-1'
     k: 'offline-upload-dependency-session'
     l: 1
@@ -1010,7 +1010,7 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
     n: 'dependency.txt'
     o: 'manual'
     t: 'pending'
-    u: 1735689602000
+    u: 1735689612000
     z: 15
   `);
   expect(

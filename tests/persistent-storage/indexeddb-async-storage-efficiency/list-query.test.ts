@@ -157,15 +157,15 @@ describe('indexeddb async storage efficiency: list-query', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.011s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","list-query-expiration","listQuery.item"], ["sess1","list-query-expiration","listQuery.query"]]
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.query"] -> keys=2 exists=yes valid=yes
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.item"] -> keys=2 exists=yes valid=yes
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.item"] -> keys=2 exists=yes valid=yes
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.query"] -> keys=2 exists=yes valid=yes
-      2.019s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","list-query-expiration","listQuery.item"] keys=["\\"expired-users||1"]
-      2.022s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","list-query-expiration","listQuery.query"] keys=["{tableId:\\"expired-users\\"}"]
-      2.027s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","list-query-expiration","listQuery.item"] keys=1
-      2.03s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","list-query-expiration","listQuery.query"] keys=1
+      12.009s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","list-query-expiration","listQuery.item"], ["sess1","list-query-expiration","listQuery.query"]]
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.query"] -> keys=2 exists=yes valid=yes
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.item"] -> keys=2 exists=yes valid=yes
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.item"] -> keys=2 exists=yes valid=yes
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","list-query-expiration","listQuery.query"] -> keys=2 exists=yes valid=yes
+      12.015s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","list-query-expiration","listQuery.item"] keys=["\\"expired-users||1"]
+      12.018s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","list-query-expiration","listQuery.query"] keys=["{tableId:\\"expired-users\\"}"]
+      12.021s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","list-query-expiration","listQuery.item"] keys=1
+      12.024s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","list-query-expiration","listQuery.query"] keys=1
       ""
     `);
     expect(await getIndexedDbStructureSnapshot(mockAdapter))
@@ -298,10 +298,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.008s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","lq-startup-max-queries","listQuery.query"]]
-      2.014s | 📖 scope-state entries+namespacePolicies scope=["sess1","lq-startup-max-queries","listQuery.query"] -> keys=3 exists=yes valid=yes
-      2.017s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","lq-startup-max-queries","listQuery.query"] keys=["{tableId:\\"first\\"}"]
-      2.024s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","lq-startup-max-queries","listQuery.query"] keys=2 static-policy
+      12.006s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","lq-startup-max-queries","listQuery.query"]]
+      12.011s | 📖 scope-state entries+namespacePolicies scope=["sess1","lq-startup-max-queries","listQuery.query"] -> keys=3 exists=yes valid=yes
+      12.013s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","lq-startup-max-queries","listQuery.query"] keys=["{tableId:\\"first\\"}"]
+      12.018s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","lq-startup-max-queries","listQuery.query"] keys=2 static-policy
       ""
     `);
     expect(
@@ -458,7 +458,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
           a: 1735689600100
           p: { tableId: 'second' }
         {tableId:"third"}:
-          a: 1735689604956
+          a: 1735689613966
           p: { tableId: 'third' }
 
       staticPolicy: { b: 103 }
@@ -586,7 +586,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       entries:
         {filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}:
-          a: 1735689604854
+          a: 1735689613862
           p:
             filters:
               - { field: 'name', op: 'eq', value: 'Missing user' }
@@ -874,8 +874,8 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
-        "admins||4: { a: 1735689610219, p: 'admins||4' }
-        "standalone||2: { a: 1735689610219, p: 'standalone||2' }
+        "admins||4: { a: 1735689619227, p: 'admins||4' }
+        "standalone||2: { a: 1735689619227, p: 'standalone||2' }
 
       staticPolicy: { b: 147 }
     `);
@@ -888,10 +888,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       entries:
         {tableId:"admins"}:
-          a: 1735689610173
+          a: 1735689619181
           p: { tableId: 'admins' }
         {tableId:"users"}:
-          a: 1735689607155
+          a: 1735689616163
           p: { tableId: 'users' }
     `);
     expect(
@@ -1132,11 +1132,11 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(cleanupOperations).not.toContain('entries.getMany');
     expect(cleanupOperations).toMatchInlineSnapshot(`
       ""
-      2.013s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","lq-shared-item-cleanup","listQuery.item"], ["sess1","lq-shared-item-cleanup","listQuery.query"]]
-      2.018s | 📖 scope-state entries+namespacePolicies scope=["sess1","lq-shared-item-cleanup","listQuery.query"] -> keys=2 exists=yes valid=yes
-      2.02s | 📖 scope-state entries+namespacePolicies scope=["sess1","lq-shared-item-cleanup","listQuery.item"] -> keys=4 exists=yes valid=yes
-      2.023s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","lq-shared-item-cleanup","listQuery.item"] keys=["\\"users||1"]
-      2.032s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","lq-shared-item-cleanup","listQuery.item"] keys=3 static-policy
+      12.011s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","lq-shared-item-cleanup","listQuery.item"], ["sess1","lq-shared-item-cleanup","listQuery.query"]]
+      12.015s | 📖 scope-state entries+namespacePolicies scope=["sess1","lq-shared-item-cleanup","listQuery.query"] -> keys=2 exists=yes valid=yes
+      12.017s | 📖 scope-state entries+namespacePolicies scope=["sess1","lq-shared-item-cleanup","listQuery.item"] -> keys=4 exists=yes valid=yes
+      12.019s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","lq-shared-item-cleanup","listQuery.item"] keys=["\\"users||1"]
+      12.026s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","lq-shared-item-cleanup","listQuery.item"] keys=3 static-policy
       ""
     `);
   });
@@ -1724,7 +1724,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
           f: ['age', 'email', 'id', 'name']
           o: '✅'
           p: 'users||1'
-        "users||2: { a: 1735689608867, p: 'users||2' }
+        "users||2: { a: 1735689617878, p: 'users||2' }
     `);
     expect(
       await readListQueryItemPayloadSnapshot({

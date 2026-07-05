@@ -324,7 +324,7 @@ describe('indexeddb async storage efficiency: document', () => {
     );
     expect(await readDocumentEntryRow({ mockAdapter, sessionKey, storeName }))
       .toMatchInlineSnapshot(`
-        a: 1735689603001
+        a: 1735689612009
 
         d:
           value: { name: 'Cached document', value: 8 }

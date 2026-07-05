@@ -271,16 +271,16 @@ describe('list-query replay', () => {
     );
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time   | query-items | query-status |
-      0      | Ada         | success      | [query-status, query-items] ui-initialized
-      3.01s  | Ada         | success      | -- queue an offline edit for the existing row
-      .      | Ada pending | success      | [query-items] ui-changed
-      .      | Ada pending | success      | offline:patchUserName queued
-      .      | Ada pending | success      | -- go back online and let replay retries exhaust
-      .      | Ada pending | success      | offline:patchUserName replay-started
-      8.01s  | Ada pending | success      | offline:patchUserName replay-started
-      13.01s | Ada pending | success      | offline:patchUserName replay-started
-      .      | Ada pending | success      | offline:patchUserName resolution-required
+      time | query-items | query-status |
+      0    | Ada         | success      | [query-status, query-items] ui-initialized
+      12s  | Ada         | success      | -- queue an offline edit for the existing row
+      .    | Ada pending | success      | [query-items] ui-changed
+      .    | Ada pending | success      | offline:patchUserName queued
+      .    | Ada pending | success      | -- go back online and let replay retries exhaust
+      .    | Ada pending | success      | offline:patchUserName replay-started
+      17s  | Ada pending | success      | offline:patchUserName replay-started
+      22s  | Ada pending | success      | offline:patchUserName replay-started
+      .    | Ada pending | success      | offline:patchUserName resolution-required
       "
     `);
 

@@ -26,7 +26,7 @@ import {
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import { logPersistentStorageQuotaCleanup } from './quotaDebug';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import { scheduleInitialMaintenanceCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,
@@ -1057,6 +1057,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   #pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
   #readCacheGeneration = 0;
   #recentTouchedBuckets = new Map<string, string>();
+  #cancelStartupCleanup: (() => void) | null = null;
   #startupCleanupScheduled = false;
 
   constructor(driver: AsyncStorageDriver) {
@@ -1292,6 +1293,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     this.#observedScopes.clear();
     this.#pendingNamespaceCommits.clear();
     this.#recentTouchedBuckets.clear();
+    this.#cancelStartupCleanup?.();
+    this.#cancelStartupCleanup = null;
     this.#startupCleanupScheduled = false;
     void this.#driver.__resetForTests?.();
   }
@@ -2378,7 +2381,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     if (this.#startupCleanupScheduled) return;
     this.#startupCleanupScheduled = true;
 
-    scheduleIdleCleanup(() => {
+    this.#cancelStartupCleanup = scheduleInitialMaintenanceCleanup(() => {
+      this.#cancelStartupCleanup = null;
       void this.#runStartupCleanupIfDue().catch(() => {
         // Ignore startup cleanup failures; regular reads and writes still work.
       });

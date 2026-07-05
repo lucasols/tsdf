@@ -144,19 +144,20 @@ describe('async storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📂 dir-open ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
-      1ms  | 👁️ #1 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d._i.r.json
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index)
-      2ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
+      3ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.06 kb
-      5ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d.e.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data)
-      6ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
+      7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data) | 0.09 kb
            ·
-      51ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
+      52ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.06 kb -> 0.06 kb
-      53ms | end
+      54ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -191,20 +192,21 @@ describe('async storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time   |
-      0      | 📂 dir-open ❌ tsdf/sess1/doc-remount-no-cache (store directory)
+      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.851s | 📂 dir-open ❌ tsdf/sess1/doc-remount-no-cache (store directory)
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
+      1.851s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
              |    └ (store directory)
-      1.853s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+      1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data)
-      1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+      1.857s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.858s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
+      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index)
-      1.861s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
+      1.862s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index) | 0.00 kb -> 0.06 kb
-      1.863s | end
+      1.864s | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -289,7 +291,7 @@ describe('async storage efficiency: document', () => {
     });
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       e:
-        - { a: 1735664403022, o: '✅' }
+        - { a: 1735664412122, o: '✅' }
     `);
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -299,7 +301,7 @@ describe('async storage efficiency: document', () => {
 
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689603010, o: '✅' }
+        - { a: 1735689612110, o: '✅' }
     `);
     expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 8 }`,

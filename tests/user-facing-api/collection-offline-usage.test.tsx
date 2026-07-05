@@ -535,7 +535,7 @@ test('direct collection store offline public api', async () => {
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689602000
+      createdAt: 1735689612000
       entityKey: '"1'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"1'
@@ -546,12 +546,12 @@ test('direct collection store offline public api', async () => {
       storeName: 'direct-collection-offline'
       storeType: 'collection'
       syncState: 'pending'
-      updatedAt: 1735689602000
+      updatedAt: 1735689612000
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689602000
+      createdAt: 1735689612000
       entityKey: '"2'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"2'
@@ -562,12 +562,12 @@ test('direct collection store offline public api', async () => {
       storeName: 'direct-collection-offline'
       storeType: 'collection'
       syncState: 'pending'
-      updatedAt: 1735689602000
+      updatedAt: 1735689612000
     - blockedByResolutionIds: []
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689602000
+      createdAt: 1735689612000
       entityKey: '"temp:Todo 3 offline'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"temp:Todo 3 offline'
@@ -579,7 +579,7 @@ test('direct collection store offline public api', async () => {
       storeType: 'collection'
       syncState: 'pending'
       tempId: 'temp:Todo 3 offline'
-      updatedAt: 1735689602000
+      updatedAt: 1735689612000
   `);
   expect(getGlobalOfflineEntities(sessionKey)).toEqual(
     expect.arrayContaining([
@@ -595,7 +595,7 @@ test('direct collection store offline public api', async () => {
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-collection-offline-session'
-    updatedAt: 1735689602000
+    updatedAt: 1735689612000
   `);
 
   await act(async () => {
@@ -637,8 +637,8 @@ test('direct collection store offline public api', async () => {
     childResolutionCount: 0
     childResolutionIds: []
     conflict: { reason: 'server-changed' }
-    createdAt: 1735689607000
-    enqueuedAt: 1735689602000
+    createdAt: 1735689617000
+    enqueuedAt: 1735689612000
     entityRefs:
       - entityKey: '"1'
         entityKind: 'item'
@@ -648,7 +648,7 @@ test('direct collection store offline public api', async () => {
     sessionKey: 'direct-collection-offline-session'
     storeName: 'direct-collection-offline'
     storeType: 'collection'
-    updatedAt: 1735689607000
+    updatedAt: 1735689617000
   `);
   const parsedConflict =
     collectionStore.parseOfflineResolutionConflict(conflict);
@@ -665,7 +665,7 @@ test('direct collection store offline public api', async () => {
       blockedResolutionCount: 0
       childResolutionCount: 0
       childResolutionIds: []
-      createdAt: 1735689607000
+      createdAt: 1735689617000
       entityKey: '"1'
       entityKind: 'item'
       id: 'direct-collection-offline-session:direct-collection-offline:"1'
@@ -676,7 +676,7 @@ test('direct collection store offline public api', async () => {
       storeName: 'direct-collection-offline'
       storeType: 'collection'
       syncState: 'resolution-required'
-      updatedAt: 1735689607000
+      updatedAt: 1735689617000
   `);
   expect(todoTwoHook.result.current.data).toMatchInlineSnapshot(`
     completed: '❌'
@@ -738,7 +738,7 @@ test('direct collection store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-collection-offline-session'
-    updatedAt: 1735689608010
+    updatedAt: 1735689618010
   `);
 
   const onlineRenameResult = await act(async () => {

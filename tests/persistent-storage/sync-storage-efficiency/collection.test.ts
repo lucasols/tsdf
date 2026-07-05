@@ -74,7 +74,7 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.collection-expiration.ci."expired-user
            |    └ (entry data, <"expired-user>)
       .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
@@ -161,7 +161,7 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.collection-startup-max-items.ci."a
            |    └ (entry data, <"a>)
       .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
@@ -535,7 +535,7 @@ describe('sync storage efficiency: collection', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689604100, o: '✅', p: '1', z: 55 }
+        "1: { a: 1735689614100, o: '✅', p: '1', z: 55 }
     `);
   });
 
@@ -755,7 +755,7 @@ describe('sync storage efficiency: collection', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689605910, o: '✅', p: '1', z: 54 }
+        "1: { a: 1735689615910, o: '✅', p: '1', z: 54 }
     `);
   });
 

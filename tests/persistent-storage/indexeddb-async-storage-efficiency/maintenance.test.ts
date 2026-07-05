@@ -218,23 +218,23 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).not.toContain('📄 file-open');
     expect(localStorageOperations).toMatchInlineSnapshot(`
       "
-      time   |
-      2s     | 📖 #1 ❌ tsdf._am.g (async global maintenance)
-      2.009s | 📖 #2 ❌ tsdf.sess1._o_.s (entry data)
-      2.016s | ✍️ #1 ❌->✅ tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
+      time    |
+      12s     | 📖 #1 ❌ tsdf._am.g (async global maintenance)
+      12.007s | 📖 #2 ❌ tsdf.sess1._o_.s (entry data)
+      12.012s | ✍️ #1 ❌->✅ tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
       "
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.009s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
-      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.016s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["d", "@scope"]
+      12.007s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess1","fresh-doc","document"]]
+      12.01s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
+      12.01s | 📖 scope-state entries+namespacePolicies scope=["sess1","fresh-doc","document"] -> keys=1 exists=yes valid=yes
+      12.012s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["d", "@scope"]
       ""
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1735689602016`);
+    ).toMatchInlineSnapshot(`lca: 1735689612012`);
   });
 
   test('startup cleanup deletes invalid IndexedDB rows while keeping valid scopes', async () => {
@@ -481,12 +481,12 @@ describe('indexeddb async storage efficiency: maintenance', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.012s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess2","expired-doc","document"], ["sess2","fresh-doc","document"]]
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess2","expired-doc","document"] -> keys=1 exists=yes valid=yes
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess2","fresh-doc","document"] -> keys=1 exists=yes valid=yes
-      2.019s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["d", "@scope"]
-      2.022s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess2","expired-doc","document"] keys=["d", "@scope"]
+      12.01s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","expired-doc","document"], ["sess2","expired-doc","document"], ["sess2","fresh-doc","document"]]
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","expired-doc","document"] -> keys=1 exists=yes valid=yes
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess2","expired-doc","document"] -> keys=1 exists=yes valid=yes
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess2","fresh-doc","document"] -> keys=1 exists=yes valid=yes
+      12.015s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","expired-doc","document"] keys=["d", "@scope"]
+      12.018s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess2","expired-doc","document"] keys=["d", "@scope"]
       ""
     `);
   });

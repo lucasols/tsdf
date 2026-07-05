@@ -486,7 +486,7 @@ test('direct list-query store offline public api', async () => {
       network: { active: '❌', enabled: '✅' }
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'direct-list-query-offline-session'
-      updatedAt: 1735689602000
+      updatedAt: 1735689612000
     `);
 
     act(() => {
@@ -614,7 +614,7 @@ test('direct list-query store offline public api', async () => {
         blockedResolutionCount: 0
         childResolutionCount: 0
         childResolutionIds: []
-        createdAt: 1735689602000
+        createdAt: 1735689612000
         entityKey: '"["users",1]'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",1]'
@@ -625,12 +625,12 @@ test('direct list-query store offline public api', async () => {
         storeName: 'direct-list-query-offline'
         storeType: 'listQuery'
         syncState: 'pending'
-        updatedAt: 1735689602000
+        updatedAt: 1735689612000
       - blockedByResolutionIds: []
         blockedResolutionCount: 0
         childResolutionCount: 0
         childResolutionIds: []
-        createdAt: 1735689602000
+        createdAt: 1735689612000
         entityKey: '"["users",2]'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",2]'
@@ -641,12 +641,12 @@ test('direct list-query store offline public api', async () => {
         storeName: 'direct-list-query-offline'
         storeType: 'listQuery'
         syncState: 'pending'
-        updatedAt: 1735689602000
+        updatedAt: 1735689612000
       - blockedByResolutionIds: []
         blockedResolutionCount: 0
         childResolutionCount: 0
         childResolutionIds: []
-        createdAt: 1735689602000
+        createdAt: 1735689612000
         entityKey: '"temp:Linus offline'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"temp:Linus offline'
@@ -658,7 +658,7 @@ test('direct list-query store offline public api', async () => {
         storeType: 'listQuery'
         syncState: 'pending'
         tempId: 'temp:Linus offline'
-        updatedAt: 1735689602000
+        updatedAt: 1735689612000
     `);
     expect(getGlobalOfflineEntities(sessionKey)).toEqual(
       expect.arrayContaining([
@@ -674,7 +674,7 @@ test('direct list-query store offline public api', async () => {
       network: { active: '✅', enabled: '✅' }
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'direct-list-query-offline-session'
-      updatedAt: 1735689602000
+      updatedAt: 1735689612000
     `);
 
     await act(async () => {
@@ -716,8 +716,8 @@ test('direct list-query store offline public api', async () => {
       childResolutionCount: 0
       childResolutionIds: []
       conflict: { reason: 'server-changed' }
-      createdAt: 1735689607000
-      enqueuedAt: 1735689602000
+      createdAt: 1735689617000
+      enqueuedAt: 1735689612000
       entityRefs:
         - entityKey: '"["users",1]'
           entityKind: 'item'
@@ -727,7 +727,7 @@ test('direct list-query store offline public api', async () => {
       sessionKey: 'direct-list-query-offline-session'
       storeName: 'direct-list-query-offline'
       storeType: 'listQuery'
-      updatedAt: 1735689607000
+      updatedAt: 1735689617000
     `);
     const parsedConflict =
       listQueryStore.parseOfflineResolutionConflict(conflict);
@@ -744,7 +744,7 @@ test('direct list-query store offline public api', async () => {
         blockedResolutionCount: 0
         childResolutionCount: 0
         childResolutionIds: []
-        createdAt: 1735689607000
+        createdAt: 1735689617000
         entityKey: '"["users",1]'
         entityKind: 'item'
         id: 'direct-list-query-offline-session:direct-list-query-offline:"["users",1]'
@@ -755,7 +755,7 @@ test('direct list-query store offline public api', async () => {
         storeName: 'direct-list-query-offline'
         storeType: 'listQuery'
         syncState: 'resolution-required'
-        updatedAt: 1735689607000
+        updatedAt: 1735689617000
     `);
 
     const createdUserHook = renderHook(() =>
@@ -816,7 +816,7 @@ test('direct list-query store offline public api', async () => {
       network: { active: '❌', enabled: '✅' }
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'direct-list-query-offline-session'
-      updatedAt: 1735689608010
+      updatedAt: 1735689618010
     `);
 
     listHook.unmount();

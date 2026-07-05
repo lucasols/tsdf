@@ -119,7 +119,7 @@ export function setupSyncStorageEfficiencyTestSuite(): void {
   });
 }
 
-export async function waitForScheduledCleanup(delayMs = 2100): Promise<void> {
+export async function waitForScheduledCleanup(delayMs = 12_100): Promise<void> {
   await waitForScheduledCleanupHelper(delayMs);
 }
 

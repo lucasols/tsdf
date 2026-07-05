@@ -497,7 +497,7 @@ describe('sync storage efficiency: document', () => {
     `);
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
-        d: { a: 1735689605910, o: '✅' }
+        d: { a: 1735689615910, o: '✅' }
     `);
   });
 });

@@ -74,7 +74,7 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.expired-doc (entry data)
       .    | 🔑[1] #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
       .    | 🔑[2] #4 ✅ tsdf.sess1.fresh-doc (entry data)
@@ -90,7 +90,7 @@ describe('sync storage efficiency: maintenance', () => {
     `);
 
     expect(getParsedLocalStorageValue('tsdf._m.g')).toMatchInlineSnapshot(
-      `lca: 1735689602000`,
+      `lca: 1735689612000`,
     );
   });
 
@@ -132,7 +132,7 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.corrupted (entry data)
       .    | 🔑[1] #3 ✅ tsdf._m.r.s:sess1.corrupted.m (namespace index)
       .    | 🔑[2] #4 ✅ tsdf.sess1.trigger (entry data)
@@ -200,7 +200,7 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.expired-doc (entry data)
       .    | 🔑[1] #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
       .    | 🔑[2] #4 ✅ tsdf.sess2.expired-doc (entry data)
@@ -290,7 +290,7 @@ describe('sync storage efficiency: maintenance', () => {
     }).toMatchInlineSnapshot(`
       asyncGlobalMaintenance: { lca: 123 }
       externalCache: '{"keep":true}'
-      globalMaintenance: { lca: 1735689602000 }
+      globalMaintenance: { lca: 1735689612000 }
       malformedCompactQueryExists: '❌'
       malformedManifestExists: '❌'
       strayNamespacePayloadExists: '❌'
@@ -352,7 +352,7 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      12s  | 📖 #1 ❌ tsdf._m.g (global maintenance)
       .    | 🔑[0] #2 ✅ tsdf.sess1.orphan-collection.ci."kept-user
            |    └ (entry data, <"kept-user>)
       .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.orphan-collection.ci.m
@@ -491,44 +491,44 @@ describe('sync storage efficiency: maintenance', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
-      time  |
-      190ms | 📖 #1 ✅ tsdf._m.g (global maintenance) | 0.04 kb
-      .     | 🔑[0] #2 ✅ tsdf.user@example.com.protected-doc (entry data)
-      .     | 🔑[1] #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
-            |    └ (namespace index)
-      .     | 🔑[2] #1 ✅ tsdf._m.g (global maintenance)
-      .     | 🔑[3] #4 ✅ tsdf.user@example.com.unprotected-doc (entry data)
-      .     | 🔑[4] #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
-            |    └ (namespace index)
-      .     | 🔑[5] #6 ✅ tsdf.user@example.com._o_.s (entry data)
-      .     | 🔑[6] #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
-      .     | 🔑[7] #8 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
-            |    └ (entry data, <protected-doc:1736380803620:4fzzzxjy>)
-      .     | 🔑[8] #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
-            |    └ (namespace index)
-      .     | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
-            |    └ (entry data, <document>)
-      .     | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
-            |    └ (namespace index)
-      .     | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
-      .     | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
-            |    └ (namespace index)
-      .     | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
-            |    └ (namespace index) | 0.08 kb
-      .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
-            |    └ (namespace index) | 0.06 kb
-      .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
-            |    └ (namespace index) | 0.06 kb
-      .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
-            |    └ (namespace index) | 0.14 kb
-      .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
-            |    └ (namespace index) | 0.09 kb
-      .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
-            |    └ (namespace index) | 0.06 kb
-      .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
-      .     | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
-      .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
+      time   |
+      10.19s | 📖 #1 ✅ tsdf._m.g (global maintenance) | 0.04 kb
+      .      | 🔑[0] #2 ✅ tsdf.user@example.com.protected-doc (entry data)
+      .      | 🔑[1] #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
+             |    └ (namespace index)
+      .      | 🔑[2] #4 ✅ tsdf.user@example.com.unprotected-doc (entry data)
+      .      | 🔑[3] #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
+             |    └ (namespace index)
+      .      | 🔑[4] #1 ✅ tsdf._m.g (global maintenance)
+      .      | 🔑[5] #6 ✅ tsdf.user@example.com._o_.s (entry data)
+      .      | 🔑[6] #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
+      .      | 🔑[7] #8 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
+             |    └ (entry data, <protected-doc:1736380803620:4fzzzxjy>)
+      .      | 🔑[8] #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+             |    └ (namespace index)
+      .      | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
+             |    └ (entry data, <document>)
+      .      | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+             |    └ (namespace index)
+      .      | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
+      .      | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
+      .      | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+             |    └ (namespace index)
+      .      | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
+             |    └ (namespace index) | 0.08 kb
+      .      | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
+             |    └ (namespace index) | 0.06 kb
+      .      | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
+             |    └ (namespace index) | 0.06 kb
+      .      | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+             |    └ (namespace index) | 0.14 kb
+      .      | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+             |    └ (namespace index) | 0.09 kb
+      .      | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+             |    └ (namespace index) | 0.06 kb
+      .      | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
+      .      | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
+      .      | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
     expect(
@@ -626,8 +626,8 @@ describe('sync storage efficiency: maintenance', () => {
     expect(statusSnapshotOperations.timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | ✍️ #1 ❌->✅ tsdf.offline-session-write-skip.protected-doc.oq.protected-doc:1735689602100:zk00000y
-           |    └ (entry data, <protected-doc:1735689602100:zk00000y>) | ❌ -> 0.33 kb
+      0    | ✍️ #1 ❌->✅ tsdf.offline-session-write-skip.protected-doc.oq.protected-doc:1735689612100:zk00000y
+           |    └ (entry data, <protected-doc:1735689612100:zk00000y>) | ❌ -> 0.33 kb
       .    | 📖 #2 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m
            |    └ (namespace index) | 0.14 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oq.m

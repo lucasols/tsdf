@@ -315,27 +315,27 @@ test('logging back into the same session replays durable offline mutations queue
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                    |
-    0     | "value:1 pending:no"  | ui-initialized
-    .     | "value:2 pending:no"  | ui-changed
-    .     | "value:2 pending:yes" | ui-changed
-    .     | "value:2 pending:yes" | offline:updateValue queued
-    .     | "value:2 pending:yes" | session-key-changed (from: offline-session-resume, to: false)
-    .     | "value:2 pending:no"  | ui-changed
-    10ms  | "value:2 pending:no"  | -- the browser goes back online while the app is logged out
-    .     | "value:2 pending:no"  | 🔴 >fetch-started
-    810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
-    .     | "value:1 pending:no"  | ui-changed
-    2s    | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
-    .     | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
-    .     | "value:1 pending:no"  | scheduled-fetch-triggered
-    2.01s | "value:1 pending:yes" | ui-changed
-    .     | "value:1 pending:yes" | 🟠 >fetch-started
-    .     | "value:1 pending:yes" | offline:updateValue replay-started
-    2.81s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
-    3.21s | "value:1 pending:yes" | server-data-changed (value: 2)
-    .     | "value:1 pending:yes" | offline:updateValue replay-finished
-    .     | "value:2 pending:no"  | ui-changed
+    time   | ui                    |
+    0      | "value:1 pending:no"  | ui-initialized
+    .      | "value:2 pending:no"  | ui-changed
+    .      | "value:2 pending:yes" | ui-changed
+    .      | "value:2 pending:yes" | offline:updateValue queued
+    .      | "value:2 pending:yes" | session-key-changed (from: offline-session-resume, to: false)
+    .      | "value:2 pending:no"  | ui-changed
+    10ms   | "value:2 pending:no"  | -- the browser goes back online while the app is logged out
+    .      | "value:2 pending:no"  | 🔴 >fetch-started
+    810ms  | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
+    .      | "value:1 pending:no"  | ui-changed
+    12s    | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
+    .      | "value:1 pending:no"  | session-key-changed (from: false, to: offline-session-resume)
+    .      | "value:1 pending:no"  | scheduled-fetch-triggered
+    12.01s | "value:1 pending:yes" | ui-changed
+    .      | "value:1 pending:yes" | 🟠 >fetch-started
+    .      | "value:1 pending:yes" | offline:updateValue replay-started
+    12.81s | "value:1 pending:yes" | 🟠 <fetch-finished (value: 1)
+    13.21s | "value:1 pending:yes" | server-data-changed (value: 2)
+    .      | "value:1 pending:yes" | offline:updateValue replay-finished
+    .      | "value:2 pending:no"  | ui-changed
     "
   `);
   hook.unmount();
@@ -548,7 +548,7 @@ test('a global offline view sees the same blocked temp item as the store after r
   ).toMatchInlineSnapshot(`
     blockedResolutionCount: 1
     childResolutionCount: 1
-    createdAt: 1735689613010
+    createdAt: 1735689622000
     entityKey: '"temp:Linus offline'
     entityKind: 'item'
     id: 'offline-session-temp-create-dependencies:offline-session-temp-create-dependencies-store:"temp:Linus offline'
@@ -559,7 +559,7 @@ test('a global offline view sees the same blocked temp item as the store after r
     storeType: 'listQuery'
     syncState: 'resolution-required'
     tempId: 'temp:Linus offline'
-    updatedAt: 1735689613010
+    updatedAt: 1735689622000
   `);
 
   // The global session-level view should surface the exact same unresolved
@@ -572,19 +572,19 @@ test('a global offline view sees the same blocked temp item as the store after r
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time   | query-items                    |
-    0      | Ada, Grace                     | ui-initialized
-    3.01s  | Ada, Grace                     | -- queue a temp create and then edit the same temp item while still offline
-    .      | Ada, Grace, Linus offline      | ui-changed
-    .      | Ada, Grace, Linus offline      | offline:createUser queued
-    .      | Ada, Grace, Linus blocked edit | ui-changed
-    .      | Ada, Grace, Linus blocked edit | offline:patchUserName queued
-    .      | Ada, Grace, Linus blocked edit | -- go back online and let replay exhaust every retry for the temp create
-    .      | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    8.01s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    13.01s | Ada, Grace, Linus blocked edit | offline:createUser replay-started
-    .      | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
-    .      | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
+    time | query-items                    |
+    0    | Ada, Grace                     | ui-initialized
+    12s  | Ada, Grace                     | -- queue a temp create and then edit the same temp item while still offline
+    .    | Ada, Grace, Linus offline      | ui-changed
+    .    | Ada, Grace, Linus offline      | offline:createUser queued
+    .    | Ada, Grace, Linus blocked edit | ui-changed
+    .    | Ada, Grace, Linus blocked edit | offline:patchUserName queued
+    .    | Ada, Grace, Linus blocked edit | -- go back online and let replay exhaust every retry for the temp create
+    .    | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    17s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    22s  | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    .    | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
+    .    | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
     "
   `);
 
@@ -1776,7 +1776,7 @@ test('a store initialized while an earlier shared-session replay is already in f
     .     | 🔴 >fetch-started
     .     | offline:updateValue replay-started
     810ms | 🔴 <fetch-finished (value: 1)
-    5.2s  | server-data-changed (value: 2)
+    15.2s | server-data-changed (value: 2)
     .     | offline:updateValue replay-finished
     "
   `);

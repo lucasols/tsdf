@@ -214,7 +214,7 @@ test('direct document store runtime offline controls public api', async () => {
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
-    updatedAt: 1735689602000
+    updatedAt: 1735689612000
   `);
 
   offlineSession
@@ -238,7 +238,7 @@ test('direct document store runtime offline controls public api', async () => {
     network: { active: '✅', enabled: '❌' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
-    updatedAt: 1735689602000
+    updatedAt: 1735689612000
   `);
 
   const unavailableOutageResult = offlineSession.setOfflineRuntimeConfig({
@@ -271,7 +271,7 @@ test('direct document store runtime offline controls public api', async () => {
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
-    updatedAt: 1735689602000
+    updatedAt: 1735689612000
   `);
 });
 

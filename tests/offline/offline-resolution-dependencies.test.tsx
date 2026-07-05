@@ -393,23 +393,23 @@ test('nested descendants cascade into blocked resolutions and discard together',
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time   | query-items                                    |
-    0      | Ada, Grace                                     | ui-initialized
-    3.01s  | Ada, Grace, Parent offline                     | ui-changed
-    .      | Ada, Grace, Parent offline                     | offline:createUser queued
-    .      | Ada, Grace, Parent offline, Child offline      | ui-changed
-    .      | Ada, Grace, Parent offline, Child offline      | offline:createChildUser queued
-    .      | Ada, Grace, Parent offline, Child blocked edit | ui-changed
-    .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
-    .      | Ada, Grace, Parent offline, Child blocked edit | -- go online — parent create replay will fail 3 times, cascading blocked status to descendants
-    .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    8.01s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    13.01s | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
-    .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
-    .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-    .      | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent — should cascade-remove child and grandchild resolutions
-    .      | Ada, Grace                                     | ui-changed
+    time | query-items                                    |
+    0    | Ada, Grace                                     | ui-initialized
+    12s  | Ada, Grace, Parent offline                     | ui-changed
+    .    | Ada, Grace, Parent offline                     | offline:createUser queued
+    .    | Ada, Grace, Parent offline, Child offline      | ui-changed
+    .    | Ada, Grace, Parent offline, Child offline      | offline:createChildUser queued
+    .    | Ada, Grace, Parent offline, Child blocked edit | ui-changed
+    .    | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
+    .    | Ada, Grace, Parent offline, Child blocked edit | -- go online — parent create replay will fail 3 times, cascading blocked status to descendants
+    .    | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+    17s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+    22s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+    .    | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
+    .    | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
+    .    | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
+    .    | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent — should cascade-remove child and grandchild resolutions
+    .    | Ada, Grace                                     | ui-changed
     "
   `);
 

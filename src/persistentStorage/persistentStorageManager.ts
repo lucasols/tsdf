@@ -25,7 +25,10 @@ import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegi
 import type { OfflineNetworkModeConfig } from './offline/types';
 import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
 import { serializeJsonForStorage } from './persistenceUtils';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import {
+  INITIAL_MAINTENANCE_CLEANUP_DELAY_MS,
+  scheduleIdleCleanup,
+} from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
   type LocalStorageMetadataOptions,
@@ -48,6 +51,7 @@ export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
 let localStorageExpirationScanScheduled = false;
 let scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
 let localStorageTouchTimestamps = new Map<string, number>();
+let cancelScheduledLocalStorageExpirationScan: (() => void) | null = null;
 let cancelScheduledLocalStorageMaintenance: (() => void) | null = null;
 let localStorageGlobalMaintenanceRequested = false;
 let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
@@ -181,7 +185,11 @@ function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
   if (adapter === 'local-sync') {
     if (localStorageExpirationScanScheduled) return;
     localStorageExpirationScanScheduled = true;
-    scheduleLocalStorageMaintenance();
+    const timeoutId = setTimeout(() => {
+      cancelScheduledLocalStorageExpirationScan = null;
+      scheduleLocalStorageMaintenance();
+    }, INITIAL_MAINTENANCE_CLEANUP_DELAY_MS);
+    cancelScheduledLocalStorageExpirationScan = () => clearTimeout(timeoutId);
     return;
   }
 
@@ -2219,6 +2227,8 @@ export function refreshLocalStorageTimestamp(
  * low-level reset stays coordinated with the other session/runtime resets.
  */
 export function resetExpirationScanTracking(): void {
+  cancelScheduledLocalStorageExpirationScan?.();
+  cancelScheduledLocalStorageExpirationScan = null;
   cancelScheduledLocalStorageMaintenance?.();
   cancelScheduledLocalStorageMaintenance = null;
   for (const entry of scheduledAsyncMaintenance.values()) {

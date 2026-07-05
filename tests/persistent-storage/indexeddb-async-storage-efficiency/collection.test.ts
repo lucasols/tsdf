@@ -136,11 +136,11 @@ describe('indexeddb async storage efficiency: collection', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.008s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-expiration","collection.item"]]
-      2.014s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
-      2.014s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
-      2.018s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-expiration","collection.item"] keys=["\\"expired-user", "\\"expired-user-2"]
-      2.023s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-expiration","collection.item"] keys=1
+      12.006s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-expiration","collection.item"]]
+      12.011s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
+      12.011s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-expiration","collection.item"] -> keys=3 exists=yes valid=yes
+      12.014s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-expiration","collection.item"] keys=["\\"expired-user", "\\"expired-user-2"]
+      12.017s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-expiration","collection.item"] keys=1
       ""
     `);
 
@@ -247,10 +247,10 @@ describe('indexeddb async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`['b', 'c']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.008s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-startup-max-items","collection.item"]]
-      2.014s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-startup-max-items","collection.item"] -> keys=3 exists=yes valid=yes
-      2.017s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-startup-max-items","collection.item"] keys=["\\"a"]
-      2.024s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-startup-max-items","collection.item"] keys=2 static-policy
+      12.006s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-startup-max-items","collection.item"]]
+      12.011s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-startup-max-items","collection.item"] -> keys=3 exists=yes valid=yes
+      12.013s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-startup-max-items","collection.item"] keys=["\\"a"]
+      12.018s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-startup-max-items","collection.item"] keys=2 static-policy
       ""
     `);
     expect(
@@ -354,10 +354,10 @@ describe('indexeddb async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
-      2.009s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-startup-expiration-max-items","collection.item"]]
-      2.016s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-startup-expiration-max-items","collection.item"] -> keys=4 exists=yes valid=yes
-      2.02s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-startup-expiration-max-items","collection.item"] keys=["\\"a", "\\"b"]
-      2.027s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-startup-expiration-max-items","collection.item"] keys=2 static-policy
+      12.007s | 🗂️ scan(entries.bySession, namespacePolicies.bySession) session=* -> [["sess1","collection-startup-expiration-max-items","collection.item"]]
+      12.013s | 📖 scope-state entries+namespacePolicies scope=["sess1","collection-startup-expiration-max-items","collection.item"] -> keys=4 exists=yes valid=yes
+      12.016s | 🗑️ tx(entries, namespacePolicies).delete scope=["sess1","collection-startup-expiration-max-items","collection.item"] keys=["\\"a", "\\"b"]
+      12.021s | ✍️ tx(entries, namespacePolicies).persistScopeState scope=["sess1","collection-startup-expiration-max-items","collection.item"] keys=2 static-policy
       ""
     `);
   });
@@ -880,7 +880,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689608000
+      a: 1735689617008
 
       d:
         value: { id: '1', name: 'Edited after delete' }
@@ -963,7 +963,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689608000
+      a: 1735689617008
 
       d:
         value: { id: '1', name: 'Edited during write' }
@@ -1415,7 +1415,7 @@ describe('indexeddb async storage efficiency: collection', () => {
         storeName,
       }),
     ).toMatchInlineSnapshot(`
-      a: 1735689604851
+      a: 1735689613859
 
       d:
         value: { id: '1', name: 'Fetched user' }

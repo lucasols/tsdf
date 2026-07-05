@@ -104,8 +104,8 @@ export function setupAsyncStorageEfficiencyTestSuite(): void {
     opfsPersistentStorage.resetForTests?.();
   });
 
-  afterEach(() => {
-    vi.runOnlyPendingTimers();
+  afterEach(async () => {
+    await flushAllTimers();
     localStorage.clear();
     resetMockBrowserOpfsForTests();
     opfsPersistentStorage.resetForTests?.();
@@ -116,7 +116,7 @@ export function setupAsyncStorageEfficiencyTestSuite(): void {
   });
 }
 
-export async function waitForScheduledCleanup(delayMs = 3000): Promise<void> {
+export async function waitForScheduledCleanup(delayMs = 12_100): Promise<void> {
   await advanceTime(delayMs);
   await flushAllTimers();
 }

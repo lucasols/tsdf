@@ -112,7 +112,7 @@ describe('expiration scan', () => {
     }).toMatchInlineSnapshot(`
       expiredEntryExists: '❌'
       freshEntryExists: '✅'
-      globalMaintenance: { lastCleanupAt: 1735689602000 }
+      globalMaintenance: { lastCleanupAt: 1735689612000 }
     `);
   });
 
@@ -144,7 +144,7 @@ describe('expiration scan', () => {
         localStorage.getItem(freshDocInSess2.document.storageKey()) !== null,
       globalMaintenance: persistentStore.storage.getGlobalMaintenanceRaw(),
     }).toMatchInlineSnapshot(`
-      globalMaintenance: { lastCleanupAt: 1735689602000 }
+      globalMaintenance: { lastCleanupAt: 1735689612000 }
       sess1ExpiredEntryExists: '❌'
       sess2ExpiredEntryExists: '❌'
       sess2FreshEntryExists: '✅'
@@ -188,7 +188,7 @@ describe('expiration scan', () => {
         localStorage.getItem(unprotectedDoc.document.storageKey()) !== null,
       globalLastCleanupAt: readGlobalLastCleanupAt(),
     }).toMatchInlineSnapshot(`
-      globalLastCleanupAt: 1735689602000
+      globalLastCleanupAt: 1735689612000
       protectedEntryExists: '✅'
       unprotectedEntryExists: '❌'
     `);
@@ -219,7 +219,7 @@ describe('expiration scan', () => {
           getManagedLocalStorageManifestKeyForSingle(statusKey),
         ) !== null,
     }).toMatchInlineSnapshot(`
-      globalLastCleanupAt: 1735689602000
+      globalLastCleanupAt: 1735689612000
       statusEntryExists: '❌'
       statusManifestExists: '❌'
     `);
