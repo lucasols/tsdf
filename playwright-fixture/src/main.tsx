@@ -84,6 +84,7 @@ function getQueryParams(): {
   sessionKey: string | null;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
   debugEnabled: boolean;
+  disableRefetchOnMount: boolean;
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -98,8 +99,18 @@ function getQueryParams(): {
     | 'opfs';
   const debugParam = searchParams.get('debug');
   const debugEnabled = debugParam === '1' || debugParam === 'true';
+  const disableRefetchOnMount =
+    searchParams.get('disableRefetchOnMount') === '1';
 
-  return { pageId, scenario, storeId, sessionKey, adapterKey, debugEnabled };
+  return {
+    pageId,
+    scenario,
+    storeId,
+    sessionKey,
+    adapterKey,
+    debugEnabled,
+    disableRefetchOnMount,
+  };
 }
 
 function getPersistentStorageAdapter(
@@ -113,6 +124,25 @@ function getPersistentStorageAdapter(
     case 'opfs':
       return opfsPersistentStorage;
   }
+}
+
+function useClearSessionStorageAction(
+  sessionKey: string | false,
+  adapter: StorageAdapter,
+) {
+  const [clearCount, setClearCount] = useState(0);
+  const clearStorage = useCallback(() => {
+    if (sessionKey === false) {
+      setClearCount((current) => current + 1);
+      return;
+    }
+
+    void clearSessionStorage(sessionKey, adapter).then(() => {
+      setClearCount((current) => current + 1);
+    });
+  }, [adapter, sessionKey]);
+
+  return { clearCount, clearStorage };
 }
 
 function FocusControls({
@@ -487,14 +517,20 @@ function PersistDocumentScenario({
   sessionKey,
   adapterKey,
   debugLogger,
+  disableRefetchOnMount,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
   debugLogger?: TSDFDebugLogger;
+  disableRefetchOnMount: boolean;
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
+  const { clearCount, clearStorage } = useClearSessionStorageAction(
+    sessionKey,
+    adapter,
+  );
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
@@ -506,7 +542,10 @@ function PersistDocumentScenario({
     }),
   );
 
-  const document = store.useDocument({ returnRefetchingStatus: true });
+  const document = store.useDocument({
+    disableRefetchOnMount,
+    returnRefetchingStatus: true,
+  });
 
   return (
     <section>
@@ -515,6 +554,7 @@ function PersistDocumentScenario({
         {document.data ? String(document.data.value) : 'null'}
       </div>
       <div data-testid="persist-doc-status">{document.status}</div>
+      <div data-testid="persist-doc-clear-count">{clearCount}</div>
       <button
         data-testid="persist-doc-mutate"
         onClick={() => {
@@ -541,11 +581,7 @@ function PersistDocumentScenario({
       </button>
       <button
         data-testid="persist-doc-clear-storage"
-        onClick={() => {
-          if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, adapter);
-          }
-        }}
+        onClick={clearStorage}
         type="button"
       >
         clear storage
@@ -564,14 +600,20 @@ function PersistCollectionScenario({
   sessionKey,
   adapterKey,
   debugLogger,
+  disableRefetchOnMount,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
   debugLogger?: TSDFDebugLogger;
+  disableRefetchOnMount: boolean;
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
+  const { clearCount, clearStorage } = useClearSessionStorageAction(
+    sessionKey,
+    adapter,
+  );
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
@@ -589,7 +631,10 @@ function PersistCollectionScenario({
     }),
   );
 
-  const item1 = store.useItem('item1', { returnRefetchingStatus: true });
+  const item1 = store.useItem('item1', {
+    disableRefetchOnMount,
+    returnRefetchingStatus: true,
+  });
 
   return (
     <section>
@@ -598,6 +643,7 @@ function PersistCollectionScenario({
         {item1.data?.name ?? 'null'}
       </div>
       <div data-testid="persist-col-item1-status">{item1.status}</div>
+      <div data-testid="persist-col-clear-count">{clearCount}</div>
       <button
         data-testid="persist-col-item1-mutate"
         onClick={() => {
@@ -622,11 +668,7 @@ function PersistCollectionScenario({
       </button>
       <button
         data-testid="persist-col-clear-storage"
-        onClick={() => {
-          if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, adapter);
-          }
-        }}
+        onClick={clearStorage}
         type="button"
       >
         clear storage
@@ -641,14 +683,20 @@ function PersistListScenario({
   sessionKey,
   adapterKey,
   debugLogger,
+  disableRefetchOnMount,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
   adapterKey: 'indexedDb' | 'localStorage' | 'opfs';
   debugLogger?: TSDFDebugLogger;
+  disableRefetchOnMount: boolean;
 }) {
   const adapter = getPersistentStorageAdapter(adapterKey);
+  const { clearCount, clearStorage } = useClearSessionStorageAction(
+    sessionKey,
+    adapter,
+  );
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
@@ -684,7 +732,7 @@ function PersistListScenario({
 
   const query = store.useListQuery(
     { tableId: 'users' },
-    { returnRefetchingStatus: true },
+    { disableRefetchOnMount, returnRefetchingStatus: true },
   );
 
   return (
@@ -694,6 +742,7 @@ function PersistListScenario({
         {query.items.map((item) => item.name).join(',') || 'null'}
       </div>
       <div data-testid="persist-list-status">{query.status}</div>
+      <div data-testid="persist-list-clear-count">{clearCount}</div>
       <button
         data-testid="persist-list-mutate-user1"
         onClick={() => {
@@ -717,11 +766,7 @@ function PersistListScenario({
       </button>
       <button
         data-testid="persist-list-clear-storage"
-        onClick={() => {
-          if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, adapter);
-          }
-        }}
+        onClick={clearStorage}
         type="button"
       >
         clear storage
@@ -731,8 +776,15 @@ function PersistListScenario({
 }
 
 function App() {
-  const { pageId, scenario, storeId, sessionKey, adapterKey, debugEnabled } =
-    getQueryParams();
+  const {
+    pageId,
+    scenario,
+    storeId,
+    sessionKey,
+    adapterKey,
+    debugEnabled,
+    disableRefetchOnMount,
+  } = getQueryParams();
   const resolvedStoreId =
     storeId ?? `playwright-${scenario === 'list' ? 'list' : scenario}-sync`;
   const resolvedSessionKey =
@@ -787,6 +839,7 @@ function App() {
           sessionKey={resolvedSessionKey}
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
+          disableRefetchOnMount={disableRefetchOnMount}
         />
       ) : null}
       {scenario === 'persist-collection' ? (
@@ -796,6 +849,7 @@ function App() {
           sessionKey={resolvedSessionKey}
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
+          disableRefetchOnMount={disableRefetchOnMount}
         />
       ) : null}
       {scenario === 'persist-list' ? (
@@ -805,6 +859,7 @@ function App() {
           sessionKey={resolvedSessionKey}
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
+          disableRefetchOnMount={disableRefetchOnMount}
         />
       ) : null}
     </main>

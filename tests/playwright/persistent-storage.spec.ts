@@ -105,6 +105,14 @@ async function waitForDebounce(page: Page): Promise<void> {
   await page.waitForTimeout(SAVE_DEBOUNCE_MS + 200);
 }
 
+async function disableRefetchOnNextReload(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('disableRefetchOnMount', '1');
+    window.history.replaceState(null, '', url.toString());
+  });
+}
+
 test.describe('persistent storage debug logging', () => {
   test('debug logger records sync persistent storage operations', async ({
     browser,
@@ -312,8 +320,8 @@ for (const adapterCase of [
 
       // Clear storage then reload
       await page.getByTestId('persist-doc-clear-storage').click();
-      // Give clear time to complete (especially for opfs async)
-      await page.waitForTimeout(200);
+      await expect(page.getByTestId('persist-doc-clear-count')).toHaveText('1');
+      await disableRefetchOnNextReload(page);
 
       await page.reload();
 
@@ -421,7 +429,8 @@ for (const adapterCase of [
       await waitForDebounce(page);
 
       await page.getByTestId('persist-col-clear-storage').click();
-      await page.waitForTimeout(200);
+      await expect(page.getByTestId('persist-col-clear-count')).toHaveText('1');
+      await disableRefetchOnNextReload(page);
 
       await page.reload();
 
@@ -528,7 +537,10 @@ for (const adapterCase of [
       await waitForDebounce(page);
 
       await page.getByTestId('persist-list-clear-storage').click();
-      await page.waitForTimeout(200);
+      await expect(page.getByTestId('persist-list-clear-count')).toHaveText(
+        '1',
+      );
+      await disableRefetchOnNextReload(page);
       await page.reload();
 
       await expect(page.getByTestId('persist-list-names')).toHaveText('null');
