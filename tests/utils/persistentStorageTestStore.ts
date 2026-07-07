@@ -1,6 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import type { ItemLoadedFields } from '../../src/listQueryStore/types';
 import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
@@ -29,7 +30,7 @@ const utf8Encoder = new TextEncoder();
 type StorageSeedOptions = { timestamp?: number; version?: number };
 
 type ListQuerySeedItemOptions = StorageSeedOptions & {
-  loadedFields?: string[];
+  loadedFields?: ItemLoadedFields;
 };
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
@@ -86,6 +87,12 @@ function getStoredValueSizeBytes(
 ): number | undefined {
   const raw = storage.getRaw(key);
   return raw === null ? undefined : utf8Encoder.encode(raw).byteLength;
+}
+
+function getLoadedFields(value: unknown): ItemLoadedFields | undefined {
+  return value === '*' || Array.isArray(value)
+    ? __LEGIT_CAST__<ItemLoadedFields, unknown>(value)
+    : undefined;
 }
 
 export type PersistentTestStoreScope = {
@@ -498,12 +505,8 @@ function createPersistentTestStore(
                   ? {
                       data: __LEGIT_CAST__<T, unknown>(v.d),
                       payload: __LEGIT_CAST__<string, unknown>(v.p),
-                      ...('lf' in v && Array.isArray(v.lf)
-                        ? {
-                            loadedFields: __LEGIT_CAST__<string[], unknown>(
-                              v.lf,
-                            ),
-                          }
+                      ...('lf' in v && getLoadedFields(v.lf) !== undefined
+                        ? { loadedFields: getLoadedFields(v.lf) }
                         : {}),
                     }
                   : null,
@@ -533,12 +536,8 @@ function createPersistentTestStore(
                     ? {
                         data: __LEGIT_CAST__<T, unknown>(v.d),
                         payload: __LEGIT_CAST__<string, unknown>(v.p),
-                        ...('lf' in v && Array.isArray(v.lf)
-                          ? {
-                              loadedFields: __LEGIT_CAST__<string[], unknown>(
-                                v.lf,
-                              ),
-                            }
+                        ...('lf' in v && getLoadedFields(v.lf) !== undefined
+                          ? { loadedFields: getLoadedFields(v.lf) }
                           : {}),
                       }
                     : null,

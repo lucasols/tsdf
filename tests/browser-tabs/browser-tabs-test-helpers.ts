@@ -188,6 +188,10 @@ export const partialResourcesConfig: PartialResourcesConfig<Row> = {
     }
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
 };
 
 export function getPublisherTabIds(

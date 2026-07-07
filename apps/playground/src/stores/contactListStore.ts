@@ -49,6 +49,7 @@ export const contactListStore = createListQueryStore<
   partialResources: {
     mergeItems: (prev, fetched) => ({ ...prev, ...fetched }),
     selectFields: (fields, item) => selectContactFields(item, fields),
+    inferFields: (item) => Object.keys(item),
   },
   optimisticListUpdates: [
     {

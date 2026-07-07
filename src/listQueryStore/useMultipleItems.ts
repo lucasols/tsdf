@@ -41,10 +41,15 @@ import {
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
+  getFallbackMissingRequestedFields,
+  getStaleOrMissingRequestedFields,
+  hasFullyLoadedFields,
+  snapshotIsFullyLoaded,
 } from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
+  type ItemLoadedFields,
   type ListQueryOfflineOverlay,
   type ListQueryUseMultipleItemsQuery,
   type PartialResourcesConfig,
@@ -131,13 +136,14 @@ export function useMultipleItems<
         | {
             item: ItemState | null | undefined;
             itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
-            loadedFields: string[] | undefined;
+            loadedFields: ItemLoadedFields | undefined;
           }
         | undefined)
     | undefined,
   itemInvalidationWasTriggered: Set<string>,
   itemFieldInvalidationPriorities: Map<string, FetchType>,
   itemPendingInvalidationFields: Map<string, string[]>,
+  itemsPendingFullInvalidation: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
@@ -234,6 +240,12 @@ export function useMultipleItems<
   );
   const getUnresolvedPendingInvalidationFields = useCallback(
     (itemKey: string): string[] => {
+      const stateInvalidationFields =
+        store.state.itemFieldInvalidationFields[itemKey];
+      if (stateInvalidationFields && stateInvalidationFields.length > 0) {
+        return stateInvalidationFields;
+      }
+
       return excludeLoadedFields(
         store.state.itemLoadedFields[itemKey],
         itemPendingInvalidationFields.get(itemKey),
@@ -368,50 +380,75 @@ export function useMultipleItems<
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
-            const missingFields = excludeLoadedFields(loadedFields, fields);
-            const hasMissingFields = missingFields.length > 0;
-            let missingFieldsAreAvailableInState = false;
+            // Fields genuinely absent from the snapshot: not tracked as loaded
+            // and not vouched by `inferFields`. This is the same signal the
+            // fetch effect uses, so a `loading` override here is always
+            // matched by a scheduled fetch (and vice versa: unvouched data is
+            // never exposed as `success`). Fields may be logical names, so raw
+            // key presence must not be used here.
+            const absentFields = getFallbackMissingRequestedFields(
+              { item: rawItemState, loadedFields },
+              fields,
+              partialResources.inferFields,
+            );
 
-            if (
-              hasMissingFields &&
-              rawItemState &&
-              typeof rawItemState === 'object'
-            ) {
-              const itemRecord =
-                // WORKAROUND: Partial-resource checks need indexed property access, but ItemState is generic and does not expose a string index signature.
-                __LEGIT_CAST__<Record<string, unknown>, ItemState>(
-                  rawItemState,
-                );
-
-              missingFieldsAreAvailableInState = missingFields.every(
-                (f) => f in itemRecord && itemRecord[f] !== undefined,
-              );
-            }
-
-            if (hasMissingFields && !missingFieldsAreAvailableInState) {
+            if (absentFields.length > 0) {
               status =
                 hasCachedDataInState && showPartialAsRefetching
                   ? 'refetching'
                   : 'loading';
             }
+          } else if (
+            partialResources &&
+            fields === '*' &&
+            (status === 'success' || status === 'refetching')
+          ) {
+            if (
+              !snapshotIsFullyLoaded(
+                loadedFields,
+                rawItemState,
+                partialResources.inferFields,
+              )
+            ) {
+              status =
+                hasCachedDataInState && showPartialAsRefetching
+                  ? 'refetching'
+                  : 'loading';
+            } else if (
+              itemFieldInvalidationFields &&
+              itemFieldInvalidationFields.length > 0
+            ) {
+              status = 'refetching';
+            }
           }
 
           if (partialResources && showPartialAsRefetching) {
             if (Array.isArray(fields) && fields.length > 0) {
-              const pendingRequestedFields = excludeLoadedFields(
+              // Same stale-or-missing signal the fetch effect uses: absent
+              // unvouched fields plus fields awaiting an invalidation
+              // re-fetch. Vouched metadata-free fields are NOT pending — no
+              // fetch will run for them.
+              const pendingRequestedFields = getStaleOrMissingRequestedFields(
+                itemKey,
                 loadedFields,
+                rawItemState,
                 fields,
+                partialResources.inferFields,
+                itemsPendingFullInvalidation,
+                getUnresolvedPendingInvalidationFields(itemKey),
               );
 
               if (pendingRequestedFields.length > 0) {
                 loadingFields = pendingRequestedFields;
               }
-            } else if (
-              fields === '*' &&
-              itemFieldInvalidationFields &&
-              itemFieldInvalidationFields.length > 0
-            ) {
-              loadingFields = itemFieldInvalidationFields;
+            } else if (fields === '*') {
+              if (
+                hasFullyLoadedFields(loadedFields) &&
+                itemFieldInvalidationFields &&
+                itemFieldInvalidationFields.length > 0
+              ) {
+                loadingFields = itemFieldInvalidationFields;
+              }
             }
           }
 
@@ -457,6 +494,8 @@ export function useMultipleItems<
     },
     [
       activeOfflineOverlays,
+      getUnresolvedPendingInvalidationFields,
+      itemsPendingFullInvalidation,
       loadFromStateOnly,
       offlineEntitiesByKey,
       partialResources,
@@ -474,15 +513,26 @@ export function useMultipleItems<
           partialResources && Array.isArray(fields) && fields.length > 0
             ? excludeLoadedFields(loadedFields, fields).sort()
             : [];
+        const needsFullFetch =
+          partialResources && fields === '*'
+            ? !snapshotIsFullyLoaded(
+                loadedFields,
+                state.items[itemKey],
+                partialResources.inferFields,
+              ) ||
+              (itemsPendingFullInvalidation.has(itemKey) &&
+                !hasFullyLoadedFields(loadedFields))
+            : false;
 
         return {
           status: itemQuery?.status ?? null,
           refetchOnMount: itemQuery?.refetchOnMount ?? null,
           missingRequestedFieldsKey: JSON.stringify(missingRequestedFields),
+          needsFullFetch,
         };
       });
     },
-    [partialResources, queriesWithId],
+    [itemsPendingFullInvalidation, partialResources, queriesWithId],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -512,8 +562,17 @@ export function useMultipleItems<
           const hasAllRequestedFallbackFields =
             !partialResources ||
             query.fields === undefined ||
-            query.fields === '*' ||
-            fallbackItemHasRequestedFields(fallbackItemState, query.fields);
+            (query.fields === '*'
+              ? snapshotIsFullyLoaded(
+                  fallbackItemState?.loadedFields,
+                  fallbackItemState?.item,
+                  partialResources.inferFields,
+                )
+              : fallbackItemHasRequestedFields(
+                  fallbackItemState,
+                  query.fields,
+                  partialResources.inferFields,
+                ));
 
           if (!hasAllRequestedFallbackFields) return result;
 
@@ -743,26 +802,67 @@ export function useMultipleItems<
         // For partial resources, check if all requested fields are loaded
         if (partialResources && !shouldFetch) {
           const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+          const item = store.state.items[itemKey];
           const unresolvedPendingInvalidationFields =
             getUnresolvedPendingInvalidationFields(itemKey);
+          // A fully-loaded ('*') item that was fully invalidated has no field
+          // list to enumerate; this marker keeps hooks from trusting the stale
+          // snapshot until the item is fully reloaded ('*' again).
+          const hasUnresolvedFullInvalidation =
+            itemsPendingFullInvalidation.has(itemKey) &&
+            !hasFullyLoadedFields(loadedFields);
           const invalidationPriority =
-            unresolvedPendingInvalidationFields.length > 0
+            unresolvedPendingInvalidationFields.length > 0 ||
+            hasUnresolvedFullInvalidation
               ? itemFieldInvalidationPriorities.get(itemKey)
               : undefined;
 
           if (Array.isArray(fields) && fields.length > 0) {
-            const missingFields = excludeLoadedFields(loadedFields, fields);
+            const affectedInvalidationFields = fields.filter((field) =>
+              unresolvedPendingInvalidationFields.includes(field),
+            );
+            // Per-field stale-or-missing check: `inferFields` keeps vouching
+            // for unaffected fields even while other fields of the item have
+            // unresolved invalidations (stale pending fields are never
+            // vouched). Fields still tracked as loaded can only be stale, not
+            // missing — their refetch is handled by the invalidation path
+            // below (event handler for mounted hooks, mount-once gate for
+            // late-mounting ones), so they are excluded here to avoid
+            // re-scheduling them on every effect run.
+            const staleOrMissingFields = getStaleOrMissingRequestedFields(
+              itemKey,
+              loadedFields,
+              item,
+              fields,
+              partialResources.inferFields,
+              itemsPendingFullInvalidation,
+              unresolvedPendingInvalidationFields,
+            );
+            const missingFields =
+              loadedFields === '*'
+                ? []
+                : staleOrMissingFields.filter(
+                    (field) => !loadedFields.includes(field),
+                  );
             const hasMissingFields = missingFields.length > 0;
             const hasAffectedFieldInvalidation =
-              unresolvedPendingInvalidationFields.length > 0 &&
-              fields.some((field) =>
-                unresolvedPendingInvalidationFields.includes(field),
-              );
+              affectedInvalidationFields.length > 0;
+            // Pending invalidations no longer surface as missing fields for
+            // fully loaded ('*') items, so they must trigger the fetch here for
+            // hooks that mount after the invalidation happened.
+            const shouldFetchForInvalidation =
+              hasAffectedFieldInvalidation &&
+              !ignoreItemsInRefetchOnMount.has(itemKey);
 
-            if (hasMissingFields && !itemFetchIsActive) {
+            if (
+              (hasMissingFields || shouldFetchForInvalidation) &&
+              !itemFetchIsActive
+            ) {
               shouldFetch = true;
               requiredFetch = true;
-              fieldsToFetch = missingFields;
+              fieldsToFetch = Array.from(
+                new Set([...missingFields, ...affectedInvalidationFields]),
+              );
               // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
               // Keep stronger priorities intact; only lift low priority.
               if (fetchType === 'lowPriority') {
@@ -778,22 +878,45 @@ export function useMultipleItems<
             ) {
               fetchType = invalidationPriority;
             }
-          } else if (
-            fields === '*' &&
-            unresolvedPendingInvalidationFields.length > 0 &&
-            !itemFetchIsActive &&
-            !ignoreItemsInRefetchOnMount.has(itemKey)
-          ) {
-            shouldFetch = true;
-            requiredFetch = true;
-            fieldsToFetch = unresolvedPendingInvalidationFields;
+          } else if (fields === '*') {
+            const missingFullItem =
+              !snapshotIsFullyLoaded(
+                loadedFields,
+                item,
+                partialResources.inferFields,
+              ) || hasUnresolvedFullInvalidation;
+            // Invalidation-only refetches (item still complete, some fields
+            // stale) are gated on the mount-once set, mirroring the array-field
+            // branch. A missing full item is not gated, so a hook mounting while
+            // another fetch is in flight still refetches once that fetch settles.
+            const shouldFetchForInvalidation =
+              !missingFullItem &&
+              unresolvedPendingInvalidationFields.length > 0 &&
+              !ignoreItemsInRefetchOnMount.has(itemKey);
 
             if (
-              invalidationPriority &&
-              fetchTypePriority[invalidationPriority] >
-                fetchTypePriority[fetchType]
+              (missingFullItem || shouldFetchForInvalidation) &&
+              !itemFetchIsActive
             ) {
-              fetchType = invalidationPriority;
+              shouldFetch = true;
+              requiredFetch = true;
+              fieldsToFetch = missingFullItem
+                ? '*'
+                : unresolvedPendingInvalidationFields;
+
+              // Low-priority follow-ups can be skipped while the scheduler phase
+              // is still fetching; lift a required full fetch to high priority.
+              if (fetchType === 'lowPriority') {
+                fetchType = 'highPriority';
+              }
+
+              if (
+                invalidationPriority &&
+                fetchTypePriority[invalidationPriority] >
+                  fetchTypePriority[fetchType]
+              ) {
+                fetchType = invalidationPriority;
+              }
             }
           }
         }
@@ -840,6 +963,7 @@ export function useMultipleItems<
     ignoreItemsInRefetchOnMount,
     itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
+    itemsPendingFullInvalidation,
     loadFromStateOnly,
     partialResources,
     preloadItems,

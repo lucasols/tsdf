@@ -432,17 +432,15 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (query data, <{tableId:"fourth"}>)
       .     | ✍️ #4 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query data, <{tableId:"fourth"}>) | ❌ -> 0.13 kb
-      .     | ✍️ #3 ✅->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
-            |    └ (item data, <"third||1>) | 0.09 kb -> 0.15 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index) | 0.12 kb
       .     | ✍️ #5 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item data, <"fourth||2>) | ❌ -> 0.09 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.12 kb -> 0.29 kb
+            |    └ (items index) | 0.12 kb -> 0.23 kb
             ·
       3.81s | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
-            |    └ (items index) | 0.29 kb
+            |    └ (items index) | 0.23 kb
       .     | 🔑[0] #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
       .     | 🔑[1] #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
@@ -587,11 +585,7 @@ describe('sync storage efficiency: list-query', () => {
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(
       `
         e:
-          "users||1:
-            a: 1735689613910
-            f: ['age', 'email', 'id', 'name']
-            p: 'users||1'
-            z: 83
+          "users||1: { a: 1735689614100, p: 'users||1', z: 50 }
       `,
     );
     expect(
@@ -609,7 +603,6 @@ describe('sync storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`
       d: { id: 1, name: 'Cached user' }
-      lf: ['age', 'email', 'id', 'name']
       p: 'users||1'
     `);
     expect(refetchOperations).toMatchInlineSnapshot(`
@@ -952,10 +945,8 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (item data, <"users||1>)
       .    | 📖 #4 ✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
            |    └ (items index) | 0.23 kb
-      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-delete-flow.li."users||2
-           |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
       .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
-           |    └ (items index) | 0.23 kb -> 0.18 kb
+           |    └ (items index) | 0.23 kb -> 0.12 kb
       "
     `);
   });
@@ -1248,11 +1239,11 @@ describe('sync storage efficiency: list-query', () => {
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.lq-query-invalidation-flow.li."users||1
-            |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.10 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.18 kb
+            |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
-            |    └ (items index) | 0.18 kb -> 0.18 kb
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -1334,11 +1325,11 @@ describe('sync storage efficiency: list-query', () => {
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.lq-coalesced-invalidations.li."users||1
-            |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.10 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.18 kb
+            |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
-            |    └ (items index) | 0.18 kb -> 0.18 kb
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -1440,23 +1431,13 @@ describe('sync storage efficiency: list-query', () => {
         `tsdf.${sessionKey}.${storeName}.li.`,
       )?.meta,
     ).toMatchInlineSnapshot(`
-      f: ['age', 'email', 'id', 'name']
       o: '✅'
       p: 'users||1'
     `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
-        "users||1:
-          a: 1735689613910
-          f: ['age', 'email', 'id', 'name']
-          o: '✅'
-          p: 'users||1'
-          z: 82
-        "users||2:
-          a: 1735689615910
-          f: ['age', 'email', 'id', 'name']
-          p: 'users||2'
-          z: 83
+        "users||1: { a: 1735689613910, o: '✅', p: 'users||1', z: 49 }
+        "users||2: { a: 1735689613910, p: 'users||2', z: 50 }
     `);
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
       a: 1735689613910
@@ -1648,11 +1629,11 @@ describe('sync storage efficiency: list-query', () => {
       "
       time  |
       1.81s | ✍️ #1 ✅->✅ tsdf.sess1.lq-item-invalidation-flow.li."users||1
-            |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.10 kb
       .     | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.18 kb
+            |    └ (items index) | 0.12 kb
       .     | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
-            |    └ (items index) | 0.18 kb -> 0.18 kb
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -1734,9 +1715,6 @@ describe('sync storage efficiency: list-query', () => {
       0     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
       10ms  | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
-            |    └ (items index)
-            ·
-      810ms | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
             ·
       1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
@@ -1915,12 +1893,167 @@ describe('sync storage efficiency: list-query', () => {
       "
       time |
       1s   | ✍️ #1 ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1
-           |    └ (item data, <"users||1>) | 0.16 kb -> 0.16 kb
+           |    └ (item data, <"users||1>) | 0.10 kb -> 0.10 kb
       .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.18 kb
+           |    └ (items index) | 0.12 kb
       .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
-           |    └ (items index) | 0.18 kb -> 0.18 kb
+           |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
+  });
+
+  test('a budget-evicted in-state query stays evicted across later flushes instead of churning back into storage', async () => {
+    const usersQuery = { tableId: 'users' };
+    const projectsQuery = { tableId: 'projects' };
+    const tasksQuery = { tableId: 'tasks' };
+    const storeName = 'lq-query-budget-stability';
+    const sessionKey = 'sess1';
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      // The budget fits exactly two persisted queries, so keeping three
+      // loaded in memory forces one of them out of persistence.
+      maxQueryBytes: sumPersistedEntryBytes(
+        getLocalListQueryEntrySizeBytes(projectsQuery, [
+          storeItemKey('projects', 1),
+        ]),
+        getLocalListQueryEntrySizeBytes(tasksQuery, [storeItemKey('tasks', 1)]),
+      ),
+      serverData: {
+        users: [{ id: 1, name: 'User 1' }],
+        projects: [{ id: 1, name: 'Project 1' }],
+        tasks: [{ id: 1, name: 'Task 1' }],
+      },
+    });
+
+    await settleStartupBackgroundScan();
+
+    // Fetch three queries with real time gaps so persisted recency is
+    // unambiguous: users is the oldest, tasks the newest.
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.scheduleFetch('highPriority', projectsQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await waitForScheduledCleanup();
+
+    // The third fetch overflowed the budget and the scheduled cleanup evicted
+    // the least recently persisted query (users) even though it is still
+    // loaded in memory.
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
+    ).toMatchInlineSnapshot(`['{tableId:"projects"}', '{tableId:"tasks"}']`);
+
+    // Trigger more flushes with a state change that does not alter any
+    // persisted query content: refetching tasks yields identical data. The
+    // evicted users query must not re-enter storage as if it were freshly
+    // accessed and knock out a different survivor.
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await waitForScheduledCleanup();
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
+    ).toMatchInlineSnapshot(`['{tableId:"projects"}', '{tableId:"tasks"}']`);
+
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await waitForScheduledCleanup();
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
+    ).toMatchInlineSnapshot(`['{tableId:"projects"}', '{tableId:"tasks"}']`);
+  });
+
+  test('a budget-evicted in-state item stays evicted across later flushes instead of churning back into storage', async () => {
+    const storeName = 'lq-item-budget-stability';
+    const sessionKey = 'sess1';
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      // The budget fits exactly two persisted items, so keeping three loaded
+      // in memory forces one of them out of persistence.
+      maxItemBytes: sumPersistedEntryBytes(
+        getLocalListItemEntrySizeBytes(rawItemPayload('users', 2), {
+          id: 2,
+          name: 'User 2',
+        }),
+        getLocalListItemEntrySizeBytes(rawItemPayload('users', 3), {
+          id: 3,
+          name: 'User 3',
+        }),
+      ),
+      serverData: {
+        users: [
+          { id: 1, name: 'User 1' },
+          { id: 2, name: 'User 2' },
+          { id: 3, name: 'User 3' },
+        ],
+      },
+    });
+
+    await settleStartupBackgroundScan();
+
+    // Fetch three standalone items with real time gaps so persisted recency
+    // is unambiguous: users||1 is the oldest, users||3 the newest.
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 1));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 2));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 3));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await waitForScheduledCleanup();
+
+    // The third fetch overflowed the budget and the scheduled cleanup evicted
+    // the least recently persisted item (users||1) even though it is still
+    // loaded in memory.
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
+
+    // Trigger more flushes with a state change that does not alter any
+    // persisted item content: refetching users||3 yields identical data. The
+    // evicted users||1 item must not re-enter storage as if it were freshly
+    // accessed and knock out a different survivor.
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 3));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await waitForScheduledCleanup();
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 3));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await waitForScheduledCleanup();
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
   });
 });

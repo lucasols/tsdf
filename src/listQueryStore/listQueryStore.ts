@@ -103,6 +103,7 @@ import { createMutationApi } from './createMutationApi';
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
+  snapshotIsFullyLoaded,
 } from './itemFieldUtils';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import {
@@ -110,6 +111,7 @@ import {
   type FetchListFnReturn,
   type FieldsInput,
   type FieldsOption,
+  type ItemLoadedFields,
   type ListQueryOfflineOverlay,
   type ListQueryStoreInitialData,
   type ListQueryUseMultipleItemsQuery,
@@ -1041,7 +1043,13 @@ type ListQuerySnapshotItemEntry<
   itemKey: string;
   item: ItemState | null;
   itemQuery: TSDFItemQuery<ItemPayload> | null;
-  loadedFields: string[];
+  /**
+   * The sender's loaded-fields metadata, published as-is: `undefined` means
+   * the sender has no metadata for the item (`inferFields` governs), while an
+   * explicit `[]` means the item is fully invalidated on the sender and it
+   * vouches for nothing.
+   */
+  loadedFields: ItemLoadedFields | undefined;
 };
 
 /** @internal */
@@ -1063,7 +1071,8 @@ export type ListQueryBrowserTabsMessage<
       consistency: SnapshotConsistency;
       item: ItemState | null;
       itemQuery: TSDFItemQuery<ItemPayload> | null;
-      loadedFields: string[];
+      /** See {@link ListQuerySnapshotItemEntry.loadedFields}. */
+      loadedFields: ItemLoadedFields | undefined;
     })
   | (BrowserTabsMessageMeta & {
       kind: 'fetch-start';
@@ -1759,7 +1768,7 @@ export function createListQueryStore<
       itemKey,
       item: store.state.items[itemKey] ?? null,
       itemQuery: store.state.itemQueries[itemKey] ?? null,
-      loadedFields: store.state.itemLoadedFields[itemKey] ?? [],
+      loadedFields: store.state.itemLoadedFields[itemKey],
     }));
   }
 
@@ -1800,7 +1809,7 @@ export function createListQueryStore<
       consistency,
       item: store.state.items[itemKey] ?? null,
       itemQuery: store.state.itemQueries[itemKey] ?? null,
-      loadedFields: store.state.itemLoadedFields[itemKey] ?? [],
+      loadedFields: store.state.itemLoadedFields[itemKey],
     });
     if (!message) return;
 
@@ -1881,6 +1890,18 @@ export function createListQueryStore<
       preloaded: results[index] ?? false,
     }));
   }
+
+  // Invalidation obligations that outlive the state-level
+  // `itemFieldInvalidationFields` record (which is consumed when a re-fetch
+  // starts). Shared by the fetch api (require-fresh imperative reads), the
+  // mutation api (which records invalidations) and the hooks.
+  const itemPendingInvalidationFields = new Map<string, string[]>();
+  // Items whose entire ('*') snapshot was invalidated. A fully-loaded ('*')
+  // item has no enumerable field list to store in `itemPendingInvalidationFields`,
+  // so this set is the durable "everything is stale" marker that survives partial
+  // refetches. It keeps other mounted hooks from trusting the stale snapshot via
+  // `inferFields` until the item is fully reloaded (`loadedFields === '*'` again).
+  const itemsPendingFullInvalidation = new Set<string>();
 
   const {
     getQueryState,
@@ -2028,6 +2049,8 @@ export function createListQueryStore<
       }
     },
     offlineFetchController,
+    itemPendingInvalidationFields,
+    itemsPendingFullInvalidation,
   );
 
   const {
@@ -2035,7 +2058,6 @@ export function createListQueryStore<
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
     itemFieldInvalidationPriorities,
-    itemPendingInvalidationFields,
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,
@@ -2079,6 +2101,8 @@ export function createListQueryStore<
     import.meta.env.TEST && testOptions
       ? testOptions.onOfflineTimelineEvent
       : undefined,
+    itemPendingInvalidationFields,
+    itemsPendingFullInvalidation,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2242,15 +2266,28 @@ export function createListQueryStore<
   function applyLoadedFieldsFromSnapshot(
     draft: State,
     itemKey: string,
-    loadedFields: string[],
+    loadedFields: ItemLoadedFields | undefined,
   ): void {
-    if (loadedFields.length > 0) {
-      const existingLoadedFields = draft.itemLoadedFields[itemKey] ?? [];
-      draft.itemLoadedFields[itemKey] = Array.from(
-        new Set([...existingLoadedFields, ...loadedFields]),
-      ).sort();
-    } else {
-      delete draft.itemLoadedFields[itemKey];
+    // `undefined` means the sender has no metadata for the item (`inferFields`
+    // governs there) — it says nothing about what this tab has loaded.
+    if (loadedFields === undefined) return;
+
+    if (loadedFields === '*') {
+      draft.itemLoadedFields[itemKey] = '*';
+    } else if (loadedFields.length > 0) {
+      const existingLoadedFields = draft.itemLoadedFields[itemKey];
+      if (existingLoadedFields !== '*') {
+        draft.itemLoadedFields[itemKey] = Array.from(
+          new Set([...(existingLoadedFields ?? []), ...loadedFields]),
+        ).sort();
+      }
+    } else if (draft.itemLoadedFields[itemKey] === undefined) {
+      // An explicit `[]` means the item is fully invalidated on the sender.
+      // That is only adoptable when this tab has no metadata of its own —
+      // local metadata must never be erased by a snapshot that vouches for
+      // nothing (e.g. a mutation published while the sender's invalidation
+      // refetch is still in flight).
+      draft.itemLoadedFields[itemKey] = [];
     }
 
     const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
@@ -2270,10 +2307,24 @@ export function createListQueryStore<
 
   function pruneItemInvalidationTracking(): void {
     for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
+      // Fields still owed from earlier invalidations: the ones not yet
+      // reloaded, plus any per-field invalidations still recorded in state —
+      // the state record must never *replace* the tracked pending fields, or
+      // fields owed from an earlier (e.g. full) invalidation would be dropped.
       const remainingFields = excludeLoadedFields(
         store.state.itemLoadedFields[itemKey],
         pendingFields,
       );
+
+      const stateInvalidationFields =
+        store.state.itemFieldInvalidationFields[itemKey];
+      if (stateInvalidationFields && stateInvalidationFields.length > 0) {
+        const mergedFields = Array.from(
+          new Set([...stateInvalidationFields, ...remainingFields]),
+        ).sort();
+        itemPendingInvalidationFields.set(itemKey, mergedFields);
+        continue;
+      }
 
       if (remainingFields.length > 0) {
         itemPendingInvalidationFields.set(itemKey, remainingFields);
@@ -2282,13 +2333,28 @@ export function createListQueryStore<
       }
     }
 
+    // A full-invalidation marker is resolved once the item is fully reloaded
+    // ('*' again); until then it stays so late-mounting hooks keep refetching
+    // their own not-yet-reloaded fields.
+    for (const itemKey of itemsPendingFullInvalidation) {
+      if (store.state.itemLoadedFields[itemKey] === '*') {
+        itemsPendingFullInvalidation.delete(itemKey);
+      }
+    }
+
     for (const itemKey of itemFieldInvalidationPriorities.keys()) {
       const hasPendingStateInvalidation =
         !!store.state.itemFieldInvalidationFields[itemKey];
       const hasPendingTrackedInvalidation =
         (itemPendingInvalidationFields.get(itemKey)?.length ?? 0) > 0;
+      const hasPendingFullInvalidation =
+        itemsPendingFullInvalidation.has(itemKey);
 
-      if (!hasPendingStateInvalidation && !hasPendingTrackedInvalidation) {
+      if (
+        !hasPendingStateInvalidation &&
+        !hasPendingTrackedInvalidation &&
+        !hasPendingFullInvalidation
+      ) {
         itemFieldInvalidationPriorities.delete(itemKey);
       }
     }
@@ -2297,6 +2363,7 @@ export function createListQueryStore<
   function cleanupItemStateMetadata(itemKey: string): void {
     itemFieldInvalidationPriorities.delete(itemKey);
     itemPendingInvalidationFields.delete(itemKey);
+    itemsPendingFullInvalidation.delete(itemKey);
     itemInvalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
   }
@@ -2416,18 +2483,35 @@ export function createListQueryStore<
 
   function itemSnapshotSatisfiesRequestedFields(
     item: ItemState | null,
-    loadedFields: string[],
+    loadedFields: ItemLoadedFields | undefined,
     requestedFields: readonly string[] | undefined,
   ): boolean {
-    if (!partialResources || !requestedFields || requestedFields.length === 0) {
-      return true;
-    }
+    if (!partialResources) return true;
 
     if (item === null) return true;
+
+    // An explicit `[]` means the item is fully invalidated on the sender — the
+    // snapshot vouches for no field, so it must not cancel a pending fetch.
+    if (
+      loadedFields !== undefined &&
+      loadedFields !== '*' &&
+      loadedFields.length === 0
+    ) {
+      return false;
+    }
+
+    if (!requestedFields || requestedFields.length === 0) {
+      return snapshotIsFullyLoaded(
+        loadedFields,
+        item,
+        partialResources.inferFields,
+      );
+    }
 
     return fallbackItemHasRequestedFields(
       { item, loadedFields },
       requestedFields,
+      partialResources.inferFields,
     );
   }
 
@@ -2445,9 +2529,7 @@ export function createListQueryStore<
     }
 
     const requestedFields = request.payload.fields;
-    if (!partialResources || !requestedFields || requestedFields.length === 0) {
-      return true;
-    }
+    if (!partialResources) return true;
 
     const coveredItemKeys = message.query.items.slice(
       request.payload.offset,
@@ -2501,6 +2583,8 @@ export function createListQueryStore<
           );
 
           if (!message.itemQuery && message.item === null) {
+            // The item was deleted on the sender — drop all local metadata.
+            delete draft.itemLoadedFields[message.itemKey];
             delete draft.itemFieldInvalidationFields[message.itemKey];
 
             for (const query of Object.values(draft.queries)) {
@@ -2827,6 +2911,7 @@ export function createListQueryStore<
       queryInvalidationWasTriggered,
       itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,
+      itemsPendingFullInvalidation,
       globalDisableRefetchOnMount,
       partialResources,
       derivedQueries,
@@ -2914,6 +2999,7 @@ export function createListQueryStore<
       itemInvalidationWasTriggered,
       itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,
+      itemsPendingFullInvalidation,
       globalDisableRefetchOnMount,
       fetchItemFn,
       partialResources,

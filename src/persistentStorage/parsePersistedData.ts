@@ -3,10 +3,13 @@ import {
   rc_boolean,
   rc_object,
   rc_parse,
+  rc_literals,
   rc_string,
+  rc_union,
   rc_unknown,
   type RcType,
 } from 'runcheck';
+import type { ItemLoadedFields } from '../listQueryStore/types';
 import type { ValidPayload } from '../utils/storeShared';
 import type {
   ConvertedPersistentStorageDataSchema,
@@ -25,7 +28,7 @@ const persistedCollectionItemDataSchema = rc_object({
 const persistedListQueryItemDataSchema = rc_object({
   data: rc_unknown,
   payload: rc_unknown,
-  loadedFields: rc_array(rc_string).optional(),
+  loadedFields: rc_union(rc_array(rc_string), rc_literals('*')).optional(),
 });
 
 const persistedListQueryDataSchema = rc_object({
@@ -208,7 +211,7 @@ export function parsePersistedCollectionItemData<
 export type ParsedTypedPersistedListQueryItemData<
   ItemPayload extends ValidPayload,
   TData,
-> = { data: TData; payload: ItemPayload; loadedFields?: string[] };
+> = { data: TData; payload: ItemPayload; loadedFields?: ItemLoadedFields };
 
 export type ParsedPersistedListQueryItemData<ItemPayload extends ValidPayload> =
   ParsedTypedPersistedListQueryItemData<ItemPayload, unknown>;

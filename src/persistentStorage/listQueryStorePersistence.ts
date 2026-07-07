@@ -3,6 +3,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { type __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
+  ItemLoadedFields,
   TSDFItemQuery,
   TSFDListQuery,
   TSFDListQueryState,
@@ -129,7 +130,7 @@ type ManagedQueryEntry = {
 type ManagedQueryEntriesByKey = Map<string, ManagedQueryEntry>;
 type EntryNamespaceMetadata = { h?: true; p?: unknown };
 type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & {
-  f?: string[];
+  f?: ItemLoadedFields;
   g?: unknown;
 };
 
@@ -144,16 +145,22 @@ function toItemState<
 ): {
   item: ItemState;
   itemQuery: TSDFItemQuery<ItemPayload>;
-  loadedFields: string[];
+  loadedFields: ItemLoadedFields | undefined;
 } | null {
   const validated = parsePersistedStoreData(persisted.data, dataSchema);
   if (validated === null) return null;
 
   if (shouldIgnoreItem(persisted.payload)) return null;
 
-  const loadedFields = Array.isArray(persisted.loadedFields)
-    ? Array.from(new Set(persisted.loadedFields)).sort()
-    : Object.keys(validated).sort();
+  // Entries persisted without loaded-field metadata (e.g. client-created items)
+  // keep it absent — `inferFields` governs such snapshots; field metadata is
+  // never fabricated from the snapshot's object keys.
+  const loadedFields =
+    persisted.loadedFields === '*'
+      ? '*'
+      : Array.isArray(persisted.loadedFields)
+        ? Array.from(new Set(persisted.loadedFields)).sort()
+        : undefined;
 
   return {
     item: validated,
@@ -214,7 +221,7 @@ type ListQueryPersistenceSetup<
     | {
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
-        loadedFields: string[];
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined;
   readHydratedQuery(
@@ -322,7 +329,7 @@ export function setupListQueryPersistence<
             {
               data: value.d,
               payload: 'p' in value ? value.p : metadata?.p,
-              ...('lf' in value && Array.isArray(value.lf)
+              ...('lf' in value && (Array.isArray(value.lf) || value.lf === '*')
                 ? { loadedFields: value.lf }
                 : {}),
             },
@@ -340,9 +347,7 @@ export function setupListQueryPersistence<
             {
               data: value,
               payload: metadata.p,
-              ...(Array.isArray(metadata.f)
-                ? { loadedFields: metadata.f }
-                : {}),
+              ...(metadata.f !== undefined ? { loadedFields: metadata.f } : {}),
             },
             config.itemPayloadSchema,
             dataSchema,
@@ -392,7 +397,7 @@ export function setupListQueryPersistence<
     {
       asyncValueCodec: asyncItemStorageValueCodec,
       getManifestMeta: (data) => ({
-        ...(Array.isArray(data.loadedFields) ? { f: data.loadedFields } : {}),
+        ...(data.loadedFields !== undefined ? { f: data.loadedFields } : {}),
         p: data.payload,
       }),
       valueCodec: itemStorageValueCodec,
@@ -563,6 +568,21 @@ export function setupListQueryPersistence<
   const querySizeBytesByKey = new Map<string, number>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  // Remembers in-state entries that lost their persistence slot to the byte
+  // budget, keyed by entry key. Without this memory a budget-evicted entry
+  // would re-enter the next flush as if it were freshly accessed (it has no
+  // persisted metadata anymore) and knock out a different survivor, making
+  // every flush churn remove/re-add writes while the state stays over budget.
+  // The snapshot lets a genuinely refetched entry (changed content) count as
+  // fresh again.
+  const budgetEvictedItemRecency = new Map<
+    string,
+    { lastAccessAt: number; snapshot: string }
+  >();
+  const budgetEvictedQueryRecency = new Map<
+    string,
+    { lastAccessAt: number; snapshot: string }
+  >();
   const syncHydrationItemMissCache = createTimedKeySet();
   const syncHydrationQueryMissCache = createTimedKeySet();
   let knownPersistedItemKeys: Set<string> | null = null;
@@ -1105,12 +1125,51 @@ export function setupListQueryPersistence<
     knownPersistedQueryKeys?.delete(queryKey);
   }
 
+  /**
+   * Resolves the recency an in-state entry without persisted metadata should
+   * compete with in the byte budget. Previously budget-evicted entries keep
+   * their remembered (stale) recency while their content is unchanged, so they
+   * deterministically lose again instead of churning back into storage; a
+   * changed snapshot means the entry was genuinely refetched and counts as
+   * freshly accessed.
+   */
+  function getBudgetEvictedLastAccessAt(
+    memory: Map<string, { lastAccessAt: number; snapshot: string }>,
+    key: string,
+    value: unknown,
+    fallback: number,
+  ): number {
+    const remembered = memory.get(key);
+    if (remembered === undefined) return fallback;
+    if (remembered.snapshot !== JSON.stringify(value)) {
+      memory.delete(key);
+      return fallback;
+    }
+    return remembered.lastAccessAt;
+  }
+
+  /**
+   * Remembers an entry evicted by the byte budget while it is still in state,
+   * so later flushes don't re-persist it as if it were freshly accessed (see
+   * budgetEvictedQueryRecency / budgetEvictedItemRecency).
+   */
+  function rememberBudgetEvictedEntry(
+    memory: Map<string, { lastAccessAt: number; snapshot: string }>,
+    key: string,
+    lastAccessAt: number,
+    snapshot: string | undefined,
+    isInState: boolean,
+  ): void {
+    if (!isInState || snapshot === undefined) return;
+    memory.set(key, { lastAccessAt, snapshot });
+  }
+
   function materializeHydratedItemState(
     itemKey: string,
     itemState: {
       item: ItemState;
       itemQuery: TSDFItemQuery<ItemPayload>;
-      loadedFields: string[];
+      loadedFields: ItemLoadedFields | undefined;
     },
   ): void {
     if (!storeRef) return;
@@ -1119,7 +1178,9 @@ export function setupListQueryPersistence<
     storeRef.produceState((draft) => {
       draft.items[itemKey] = itemState.item;
       draft.itemQueries[itemKey] = itemState.itemQuery;
-      draft.itemLoadedFields[itemKey] = itemState.loadedFields;
+      if (itemState.loadedFields !== undefined) {
+        draft.itemLoadedFields[itemKey] = itemState.loadedFields;
+      }
     });
   }
 
@@ -1141,7 +1202,7 @@ export function setupListQueryPersistence<
     | {
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
-        loadedFields: string[];
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined {
     try {
@@ -1164,7 +1225,7 @@ export function setupListQueryPersistence<
     | {
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
-        loadedFields: string[];
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined {
     const snapshot = itemSnapshotByKey.get(itemKey);
@@ -1184,7 +1245,7 @@ export function setupListQueryPersistence<
     | {
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
-        loadedFields: string[];
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined {
     if (localStorageAdapter === null) return undefined;
@@ -1458,7 +1519,7 @@ export function setupListQueryPersistence<
     | {
         item: ItemState;
         itemQuery: TSDFItemQuery<ItemPayload>;
-        loadedFields: string[];
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined {
     if (localStorageAdapter !== null) {
@@ -1529,12 +1590,10 @@ export function setupListQueryPersistence<
     if (!storeRef) return false;
     const existingItemQuery = storeRef.state.itemQueries[itemKey];
     const existingItem = storeRef.state.items[itemKey];
-    const existingLoadedFields = storeRef.state.itemLoadedFields[itemKey];
-    if (
-      existingItemQuery !== undefined &&
-      existingItem !== undefined &&
-      existingLoadedFields !== undefined
-    ) {
+    // `itemLoadedFields` is optional metadata (absent for items persisted
+    // without it, where `inferFields` governs), so state presence is judged by
+    // the item and its query alone.
+    if (existingItemQuery !== undefined && existingItem !== undefined) {
       return existingItemQuery !== null;
     }
     if (existingItemQuery === null) return false;
@@ -1579,12 +1638,7 @@ export function setupListQueryPersistence<
     for (const itemKey of [...new Set(itemKeys)]) {
       const existingItemQuery = storeRef.state.itemQueries[itemKey];
       const existingItem = storeRef.state.items[itemKey];
-      const existingLoadedFields = storeRef.state.itemLoadedFields[itemKey];
-      if (
-        existingItemQuery !== undefined &&
-        existingItem !== undefined &&
-        existingLoadedFields !== undefined
-      ) {
+      if (existingItemQuery !== undefined && existingItem !== undefined) {
         resultsByKey.set(itemKey, Promise.resolve(existingItemQuery !== null));
         continue;
       }
@@ -1934,8 +1988,16 @@ export function setupListQueryPersistence<
           .map(({ queryKey }) => removeLocalStorageQueryEntry(queryKey)),
       );
 
-      for (const { queryKey } of filteredEntries) {
+      for (const { queryKey, lastAccessAt } of filteredEntries) {
         if (!keptQueryKeys.has(queryKey)) {
+          rememberBudgetEvictedEntry(
+            budgetEvictedQueryRecency,
+            queryKey,
+            lastAccessAt,
+            querySnapshotByKey.get(queryKey),
+            storeRef !== null &&
+              Object.hasOwn(storeRef.state.queries, queryKey),
+          );
           forgetPersistedQuery(queryKey);
         }
       }
@@ -2009,6 +2071,13 @@ export function setupListQueryPersistence<
     for (const entry of validEntries) {
       const { queryKey } = entry;
       if (!keptQueryKeys.has(queryKey)) {
+        rememberBudgetEvictedEntry(
+          budgetEvictedQueryRecency,
+          queryKey,
+          entry.lastAccessAt,
+          querySnapshotByKey.get(queryKey),
+          storeRef !== null && Object.hasOwn(storeRef.state.queries, queryKey),
+        );
         forgetPersistedQuery(queryKey);
       }
     }
@@ -2119,8 +2188,15 @@ export function setupListQueryPersistence<
             return itemNamespace.remove(itemKey);
           }),
       );
-      for (const { itemKey } of persistedItemEntries) {
+      for (const { itemKey, lastAccessAt } of persistedItemEntries) {
         if (!keptItemKeys.has(itemKey)) {
+          rememberBudgetEvictedEntry(
+            budgetEvictedItemRecency,
+            itemKey,
+            lastAccessAt,
+            itemSnapshotByKey.get(itemKey),
+            storeRef !== null && storeRef.state.items[itemKey] != null,
+          );
           forgetPersistedItem(itemKey);
         }
       }
@@ -2249,8 +2325,15 @@ export function setupListQueryPersistence<
         .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
         .map(({ itemKey }) => itemNamespace.remove(itemKey)),
     );
-    for (const { itemKey } of persistedItemEntries) {
+    for (const { itemKey, lastAccessAt } of persistedItemEntries) {
       if (!keptItemKeys.has(itemKey)) {
+        rememberBudgetEvictedEntry(
+          budgetEvictedItemRecency,
+          itemKey,
+          lastAccessAt,
+          itemSnapshotByKey.get(itemKey),
+          storeRef !== null && storeRef.state.items[itemKey] != null,
+        );
         forgetPersistedItem(itemKey);
       }
     }
@@ -2398,13 +2481,29 @@ export function setupListQueryPersistence<
           persistedQueryItemKeys.add(itemKey);
         }
 
-        nextQueryKeys.add(queryKey);
         const nextValue = {
           payload: query.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
         };
         const nextSnapshot = JSON.stringify(nextValue);
+
+        if (!previousKnownLocalQueryKeys.has(queryKey)) {
+          const evictedRecency = budgetEvictedQueryRecency.get(queryKey);
+          if (evictedRecency !== undefined) {
+            if (evictedRecency.snapshot === nextSnapshot) {
+              // This query lost its storage slot to the byte budget and its
+              // content hasn't changed since: keep it out of storage instead
+              // of churning it back in (a re-save would look freshly accessed
+              // and knock out a fresher survivor in the next maintenance).
+              continue;
+            }
+            // Content changed since the eviction: treat it as fresh again.
+            budgetEvictedQueryRecency.delete(queryKey);
+          }
+        }
+
+        nextQueryKeys.add(queryKey);
         if (
           querySnapshotByKey.get(queryKey) === nextSnapshot &&
           previousKnownLocalQueryKeys.has(queryKey)
@@ -2439,6 +2538,7 @@ export function setupListQueryPersistence<
       }
 
       for (const [itemKey, item] of itemEntries) {
+        const hasItemInState = Object.hasOwn(state.items, itemKey);
         const hasItemQueryInState = Object.hasOwn(state.itemQueries, itemKey);
         const hasLoadedFieldsInState = Object.hasOwn(
           state.itemLoadedFields,
@@ -2451,7 +2551,12 @@ export function setupListQueryPersistence<
         const itemQuery = hasItemQueryInState
           ? state.itemQueries[itemKey]
           : hydratedItem?.itemQuery;
-        const loadedFields = hasLoadedFieldsInState
+        // For in-state items loadedFields must come exclusively from state: a
+        // missing state entry is a deliberate "no metadata, inferFields
+        // governs" marker (e.g. after a mutation rollback) and must not be
+        // resurrected from the previously persisted snapshot. The hydrated
+        // fallback only applies to items that are not in state at all.
+        const loadedFields = hasItemInState
           ? state.itemLoadedFields[itemKey]
           : hydratedItem?.loadedFields;
 
@@ -2496,6 +2601,23 @@ export function setupListQueryPersistence<
           loadedFields,
         };
         const nextSnapshot = JSON.stringify(nextValue);
+
+        if (!previousKnownLocalItemKeys.has(itemKey)) {
+          const evictedRecency = budgetEvictedItemRecency.get(itemKey);
+          if (evictedRecency !== undefined) {
+            if (evictedRecency.snapshot === nextSnapshot) {
+              // This item lost its storage slot to the byte budget and its
+              // content hasn't changed since: keep it out of storage instead
+              // of churning it back in (a re-save would look freshly accessed
+              // and knock out a fresher survivor in the next maintenance).
+              nextItemKeys.delete(itemKey);
+              continue;
+            }
+            // Content changed since the eviction: treat it as fresh again.
+            budgetEvictedItemRecency.delete(itemKey);
+          }
+        }
+
         if (
           itemSnapshotByKey.get(itemKey) === nextSnapshot &&
           previousKnownLocalItemKeys.has(itemKey)
@@ -2537,6 +2659,25 @@ export function setupListQueryPersistence<
         tasks.push(itemNamespace.remove(itemKey));
         forgetPersistedItem(itemKey);
         removedItemKeys.add(itemKey);
+      }
+
+      // Removing persisted entries may have freed budget room, so let
+      // previously budget-evicted entries compete for a slot again on the
+      // next flush + maintenance pass.
+      if (removedQueryKeys.size > 0) budgetEvictedQueryRecency.clear();
+      if (removedItemKeys.size > 0) budgetEvictedItemRecency.clear();
+
+      // Drop eviction memory for entries that left the state entirely; they
+      // are no longer candidates for persistence.
+      for (const queryKey of budgetEvictedQueryRecency.keys()) {
+        if (!Object.hasOwn(state.queries, queryKey)) {
+          budgetEvictedQueryRecency.delete(queryKey);
+        }
+      }
+      for (const itemKey of budgetEvictedItemRecency.keys()) {
+        if (state.items[itemKey] == null) {
+          budgetEvictedItemRecency.delete(itemKey);
+        }
       }
 
       await Promise.all(tasks);
@@ -2711,17 +2852,34 @@ export function setupListQueryPersistence<
       });
     }
 
+    const inStateQueryLastAccessAt = new Map<string, number>();
     for (const [queryKey, queryData] of finalQueryDataByKey) {
+      const existingMetadata = metadataByKey.get(queryKey);
+      // In-state queries compete for the byte budget with their real persisted
+      // recency (like items do); only genuinely new queries count as accessed
+      // now. Otherwise every in-state query would tie at commitTimestamp and a
+      // freshly fetched query could lose its slot to stale ones. Previously
+      // budget-evicted queries keep their remembered recency so they don't
+      // churn back in as if they were fresh.
+      const lastAccessAt =
+        existingMetadata?.lastAccessAt ??
+        getBudgetEvictedLastAccessAt(
+          budgetEvictedQueryRecency,
+          queryKey,
+          queryData,
+          commitTimestamp,
+        );
+      inStateQueryLastAccessAt.set(queryKey, lastAccessAt);
       const sizeBytes = estimateAsyncQueryEntrySizeBytes({
-        currentCustomMetadata: metadataByKey.get(queryKey)?.customMetadata,
-        lastAccessAt: commitTimestamp,
+        currentCustomMetadata: existingMetadata?.customMetadata,
+        lastAccessAt,
         protectedKeysSnapshotSet: protectedRefs,
         queryKey,
         value: queryData,
       });
       finalQuerySizeBytesByKey.set(queryKey, sizeBytes);
       candidateEntries.push({
-        lastAccessAt: commitTimestamp,
+        lastAccessAt,
         offlineProtected:
           protectedQueryKeys.has(queryKey) ||
           protectedRefs?.has(
@@ -2757,6 +2915,16 @@ export function setupListQueryPersistence<
     finalPersistedQueryKeys.clear();
     for (const queryKey of keptQueryKeys) {
       finalPersistedQueryKeys.add(queryKey);
+      budgetEvictedQueryRecency.delete(queryKey);
+    }
+
+    // Drop eviction memory for queries that are no longer in state — they no
+    // longer compete for the budget (evicted-this-flush keys are still in
+    // finalQueryDataByKey here, so their memory is preserved).
+    for (const queryKey of budgetEvictedQueryRecency.keys()) {
+      if (!finalQueryDataByKey.has(queryKey)) {
+        budgetEvictedQueryRecency.delete(queryKey);
+      }
     }
 
     const evictedQueryKeys: string[] = [];
@@ -2766,6 +2934,16 @@ export function setupListQueryPersistence<
       }
     }
     for (const queryKey of evictedQueryKeys) {
+      const queryData = finalQueryDataByKey.get(queryKey);
+      if (queryData !== undefined) {
+        // Remember the recency this in-state query competed (and lost) with,
+        // so later flushes don't treat it as freshly accessed.
+        budgetEvictedQueryRecency.set(queryKey, {
+          lastAccessAt:
+            inStateQueryLastAccessAt.get(queryKey) ?? commitTimestamp,
+          snapshot: JSON.stringify(queryData),
+        });
+      }
       finalQueryDataByKey.delete(queryKey);
     }
 
@@ -2786,6 +2964,7 @@ export function setupListQueryPersistence<
     const finalPersistedItemKeys = new Set(previousKnownLocalItemKeys);
 
     for (const [itemKey, item] of itemEntries) {
+      const hasItemInState = Object.hasOwn(state.items, itemKey);
       const hasItemQueryInState = Object.hasOwn(state.itemQueries, itemKey);
       const hasLoadedFieldsInState = Object.hasOwn(
         state.itemLoadedFields,
@@ -2798,7 +2977,12 @@ export function setupListQueryPersistence<
       const itemQuery = hasItemQueryInState
         ? state.itemQueries[itemKey]
         : hydratedItem?.itemQuery;
-      const loadedFields = hasLoadedFieldsInState
+      // For in-state items loadedFields must come exclusively from state: a
+      // missing state entry is a deliberate "no metadata, inferFields
+      // governs" marker (e.g. after a mutation rollback) and must not be
+      // resurrected from the previously persisted snapshot. The hydrated
+      // fallback only applies to items that are not in state at all.
+      const loadedFields = hasItemInState
         ? state.itemLoadedFields[itemKey]
         : hydratedItem?.loadedFields;
 
@@ -2830,7 +3014,7 @@ export function setupListQueryPersistence<
       };
       finalItemDataByKey.set(itemKey, {
         metadata: {
-          ...(Array.isArray(loadedFields) ? { f: loadedFields } : {}),
+          ...(loadedFields !== undefined ? { f: loadedFields } : {}),
           p: itemQuery.payload,
           ...(getItemDerivedGroup
             ? { g: getItemDerivedGroup(item, itemQuery.payload) }
@@ -2886,12 +3070,25 @@ export function setupListQueryPersistence<
       });
     }
 
+    const inStateItemLastAccessAt = new Map<string, number>();
     for (const [itemKey, entry] of finalItemDataByKey) {
       const existingMetadata = itemMetadataByKey.get(itemKey);
+      // Same recency rules as queries: previously budget-evicted in-state
+      // items keep their remembered recency instead of counting as freshly
+      // accessed, so they don't churn back into storage on every flush.
+      const lastAccessAt =
+        existingMetadata?.lastAccessAt ??
+        getBudgetEvictedLastAccessAt(
+          budgetEvictedItemRecency,
+          itemKey,
+          entry.value,
+          itemCommitTimestamp,
+        );
+      inStateItemLastAccessAt.set(itemKey, lastAccessAt);
       const sizeBytes = estimateAsyncItemEntrySizeBytes({
         currentCustomMetadata: existingMetadata?.customMetadata,
         itemKey,
-        lastAccessAt: existingMetadata?.lastAccessAt ?? itemCommitTimestamp,
+        lastAccessAt,
         nextCustomMetadata: entry.metadata,
         protectedKeysSnapshotSet: protectedRefs,
         value: entry.value,
@@ -2899,7 +3096,7 @@ export function setupListQueryPersistence<
       finalItemSizeBytesByKey.set(itemKey, sizeBytes);
       itemCandidateEntries.push({
         itemKey,
-        lastAccessAt: existingMetadata?.lastAccessAt ?? itemCommitTimestamp,
+        lastAccessAt,
         offlineProtected:
           protectedItemKeys.has(itemKey) ||
           protectedRefs?.has(
@@ -2934,6 +3131,15 @@ export function setupListQueryPersistence<
     finalPersistedItemKeys.clear();
     for (const itemKey of keptItemKeys) {
       finalPersistedItemKeys.add(itemKey);
+      budgetEvictedItemRecency.delete(itemKey);
+    }
+
+    // Drop eviction memory for items that are no longer in state (see the
+    // matching query sweep above).
+    for (const itemKey of budgetEvictedItemRecency.keys()) {
+      if (!finalItemDataByKey.has(itemKey)) {
+        budgetEvictedItemRecency.delete(itemKey);
+      }
     }
 
     const evictedItemKeys: string[] = [];
@@ -2943,6 +3149,14 @@ export function setupListQueryPersistence<
       }
     }
     for (const itemKey of evictedItemKeys) {
+      const entry = finalItemDataByKey.get(itemKey);
+      if (entry !== undefined) {
+        budgetEvictedItemRecency.set(itemKey, {
+          lastAccessAt:
+            inStateItemLastAccessAt.get(itemKey) ?? itemCommitTimestamp,
+          snapshot: JSON.stringify(entry.value),
+        });
+      }
       finalItemDataByKey.delete(itemKey);
     }
 
@@ -3163,6 +3377,8 @@ export function setupListQueryPersistence<
     querySnapshotByKey.clear();
     itemSizeBytesByKey.clear();
     querySizeBytesByKey.clear();
+    budgetEvictedItemRecency.clear();
+    budgetEvictedQueryRecency.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();

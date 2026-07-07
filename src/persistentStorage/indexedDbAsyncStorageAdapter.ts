@@ -280,9 +280,7 @@ function mergeCustomMetadata(
 type IndexedDbEntryRecord = {
   a: number;
   d: unknown;
-  f?: string[];
   g?: string;
-  h?: 1;
   i: string;
   m?: Record<string, unknown>;
   o?: 1;
@@ -333,9 +331,7 @@ function toPublicMetadata(
 const INDEXED_DB_ENTRY_RECORD_KEYS = new Set([
   'a',
   'd',
-  'f',
   'g',
-  'h',
   'i',
   'm',
   'o',
@@ -445,7 +441,6 @@ function isValidEntryRecord(record: unknown): boolean {
     return false;
   }
 
-  const loadedFields = recordValue.f;
   return (
     typeof recordValue.i === 'string' &&
     typeof recordValue.a === 'number' &&
@@ -454,11 +449,7 @@ function isValidEntryRecord(record: unknown): boolean {
     (recordValue.z === undefined || typeof recordValue.z === 'number') &&
     (recordValue.m === undefined || isObject(recordValue.m)) &&
     (recordValue.g === undefined || typeof recordValue.g === 'string') &&
-    (recordValue.o === undefined || recordValue.o === 1) &&
-    (loadedFields === undefined ||
-      (loadedFields instanceof Array &&
-        loadedFields.every((value) => typeof value === 'string'))) &&
-    (recordValue.h === undefined || recordValue.h === 1)
+    (recordValue.o === undefined || recordValue.o === 1)
   );
 }
 
@@ -494,7 +485,7 @@ function getStaticPolicyFromScopeRecord(
 function compactEntryValue(
   scope: AsyncStorageNamespaceScope,
   value: unknown,
-): Pick<IndexedDbEntryRecord, 'd' | 'f' | 'h'> {
+): Pick<IndexedDbEntryRecord, 'd'> {
   void scope;
   return { d: value };
 }

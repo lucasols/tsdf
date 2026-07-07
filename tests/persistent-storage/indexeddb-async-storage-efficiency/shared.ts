@@ -3,7 +3,10 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
-import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
+import type {
+  OffsetPaginationConfig,
+  PartialResourcesConfig,
+} from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../../src/persistentStorage/offline/sessionCoordinator';
@@ -460,6 +463,26 @@ export function storeItemKey(tableId: string, id: number): string {
   return getCompositeKey(rawItemPayload(tableId, id));
 }
 
+export const partialResourcesConfig: PartialResourcesConfig<Row> = {
+  mergeItems: (prev, fetched) => {
+    if (!prev) return fetched;
+    return { ...prev, ...fetched };
+  },
+  selectFields: (fields, item) => {
+    const result: Record<string, unknown> = {};
+    for (const field of fields) {
+      if (field in item) {
+        result[field] = item[field];
+      }
+    }
+    return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
+  },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
+};
+
 export function createListQueryEnv(options: {
   defaultQuerySize?: number;
   maxItemBytes?: number;
@@ -468,6 +491,7 @@ export function createListQueryEnv(options: {
   maxQueries?: number;
   maxQuerySize?: number;
   offsetPagination?: OffsetPaginationConfig;
+  partialResources?: PartialResourcesConfig<Row>;
   pinnedItems?: string[];
   pinnedQueries?: Array<{ tableId: string }>;
   serverData?: Tables<Row>;
@@ -481,6 +505,7 @@ export function createListQueryEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     id: options.storeName,
     offsetPagination: options.offsetPagination,
+    partialResources: options.partialResources,
     persistentStorage: {
       adapter: mockAdapter.adapter,
       itemPayloadSchema: rc_string,

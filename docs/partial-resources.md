@@ -44,10 +44,17 @@ const userStore = createListQueryStore<User, UserFilter, string, true>({
     selectFields: (fields, item) => {
       const result: Partial<User> = {};
       for (const field of fields) {
-        result[field] = item[field];
+        if (item[field] !== undefined) {
+          result[field] = item[field];
+        }
       }
       return result as User;
     },
+
+    // Infer which logical fields are present when TSDF has an item snapshot
+    // but no loaded-field metadata, such as manually added or offline items.
+    inferFields: (item) =>
+      Object.keys(item).filter((field) => item[field] !== undefined),
   },
 
   // ...other options
@@ -61,6 +68,7 @@ const userStore = createListQueryStore<User, UserFilter, string, true>({
 3. When a hook requests fields that haven't been loaded yet, a fetch is triggered requesting only the missing fields
 4. The `mergeItems` function combines the newly fetched data with previously loaded data
 5. The `selectFields` function extracts the requested fields for the hook's return value
+6. The `inferFields` function identifies fields in metadata-free item snapshots
 
 ## Using Fields in Hooks
 
@@ -166,3 +174,13 @@ selectFields: (fields: string[], item: ItemState) => ItemState;
 ```
 
 Called when a hook requests specific fields. Should return an item containing only the requested fields.
+
+### inferFields
+
+```ts
+inferFields: (item: ItemState) => string[] | '*';
+```
+
+Called when TSDF has an item snapshot but no `itemLoadedFields` metadata for it. This can happen for manually inserted items, persisted fallback snapshots, and offline optimistic rows. Return the logical fields that are available, or `'*'` if the snapshot is complete.
+
+TSDF does not infer fields by checking object keys internally. If your field names are top-level properties, implement that rule explicitly in `inferFields`; if your fields are logical or nested, return those logical field names instead.

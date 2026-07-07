@@ -26,9 +26,16 @@ import {
 } from '../utils/storeShared';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
-import { fallbackItemHasRequestedFields } from './itemFieldUtils';
+import {
+  excludeLoadedFields,
+  fallbackItemHasRequestedFields,
+  getFallbackMissingRequestedFields,
+  getStaleOrMissingRequestedFields,
+  snapshotIsFullyLoaded,
+} from './itemFieldUtils';
 import {
   type FieldsInput,
+  type ItemLoadedFields,
   type OffsetPaginationConfig,
   type PartialResourcesConfig,
   type QueryFetchPayload,
@@ -126,7 +133,7 @@ type CreateFetchApiOptions<
       | {
           item: ItemState;
           itemQuery: TSDFItemQuery<ItemPayload>;
-          loadedFields: string[];
+          loadedFields: ItemLoadedFields | undefined;
         }
       | undefined;
     readHydratedQuery(
@@ -250,6 +257,8 @@ export function createFetchApi<
     ItemPayload
   >['onItemFetchSettled'],
   offlineController: OfflineAwareFetchController | null | undefined,
+  itemPendingInvalidationFields: Map<string, string[]>,
+  itemsPendingFullInvalidation: Set<string>,
 ) {
   type Query = TSFDListQuery<QueryPayload>;
 
@@ -739,7 +748,7 @@ export function createFetchApi<
     | {
         item: ItemState | null | undefined;
         itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
-        loadedFields: string[] | undefined;
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined {
     const hasItem = Object.hasOwn(store.state.items, itemKey);
@@ -765,7 +774,7 @@ export function createFetchApi<
     | {
         item: ItemState | null | undefined;
         itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
-        loadedFields: string[] | undefined;
+        loadedFields: ItemLoadedFields | undefined;
       }
     | undefined {
     const materializedItemState = readMaterializedItemState(itemKey);
@@ -1064,7 +1073,11 @@ export function createFetchApi<
         (partialResources &&
           fields &&
           fields.length > 0 &&
-          !fallbackItemHasRequestedFields(state, fields))
+          !fallbackItemHasRequestedFields(
+            state,
+            fields,
+            partialResources.inferFields,
+          ))
       ) {
         return 'skipped';
       }
@@ -1092,7 +1105,9 @@ export function createFetchApi<
         for (const { itemKey, state } of appendedHydratedItems) {
           draft.items[itemKey] = state.item;
           draft.itemQueries[itemKey] = state.itemQuery;
-          draft.itemLoadedFields[itemKey] = state.loadedFields;
+          if (state.loadedFields !== undefined) {
+            draft.itemLoadedFields[itemKey] = state.loadedFields;
+          }
         }
       },
       { action: 'persistent-storage-load-more' },
@@ -1118,13 +1133,39 @@ export function createFetchApi<
     });
   }
 
-  function hasStaleRequestedFields(
-    itemKey: string,
-    fields: readonly string[],
-  ): boolean {
-    const invalidationFields = store.state.itemFieldInvalidationFields[itemKey];
-    if (!invalidationFields || invalidationFields.length === 0) return false;
-    return fields.some((field) => invalidationFields.includes(field));
+  /**
+   * Fields of an item still awaiting an invalidation re-fetch. Reads the
+   * state-level record first; when a fetch already consumed it (the record is
+   * deleted before the response lands), falls back to the in-memory pending
+   * list minus the fields that were re-loaded since the invalidation.
+   */
+  function getUnresolvedPendingInvalidationFields(itemKey: string): string[] {
+    const stateInvalidationFields =
+      store.state.itemFieldInvalidationFields[itemKey];
+    if (stateInvalidationFields && stateInvalidationFields.length > 0) {
+      return stateInvalidationFields;
+    }
+
+    return excludeLoadedFields(
+      store.state.itemLoadedFields[itemKey],
+      itemPendingInvalidationFields.get(itemKey),
+    );
+  }
+
+  /**
+   * Whether an item snapshot is fresh enough for a require-fresh
+   * (`ignoreStaleState: true`) full ('*') read: no unresolved full ('*')
+   * invalidation and no fields still awaiting an invalidation re-fetch.
+   */
+  function itemSnapshotIsFresh(itemKey: string): boolean {
+    if (
+      store.state.itemLoadedFields[itemKey] !== '*' &&
+      itemsPendingFullInvalidation.has(itemKey)
+    ) {
+      return false;
+    }
+
+    return getUnresolvedPendingInvalidationFields(itemKey).length === 0;
   }
 
   async function awaitListQueryFetch(
@@ -1181,7 +1222,9 @@ export function createFetchApi<
 
               draft.items[itemKey] = hydratedItem.item;
               draft.itemQueries[itemKey] = hydratedItem.itemQuery;
-              draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+              if (hydratedItem.loadedFields !== undefined) {
+                draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+              }
             }
           },
           { action: 'persistent-storage-hydrate' },
@@ -1230,6 +1273,7 @@ export function createFetchApi<
   > {
     const queryKey = getQueryKey(params);
     const fields = normalizeFieldsOption(options.fields);
+    const fullFieldsRequested = options.fields === '*';
     const query = getQueryStateByKey(queryKey);
     const includeStale = !!options.ignoreStaleState;
     const cachedQueryCanBeUsed =
@@ -1239,7 +1283,8 @@ export function createFetchApi<
 
     if (query && cachedQueryCanBeUsed) {
       const needsFieldCheck =
-        partialResources && Array.isArray(fields) && fields.length > 0;
+        partialResources &&
+        ((Array.isArray(fields) && fields.length > 0) || fullFieldsRequested);
 
       if (!needsFieldCheck) {
         return Result.ok({
@@ -1253,14 +1298,43 @@ export function createFetchApi<
 
       const queryNeedsFieldFetch = query.items.some((itemKey) => {
         const itemState = readItemState(itemKey);
-        const invalidation = includeStale
-          ? store.state.itemFieldInvalidationFields[itemKey]
-          : undefined;
 
-        return fields.some(
-          (field) =>
-            !fallbackItemHasRequestedFields(itemState, [field]) ||
-            (invalidation?.includes(field) ?? false),
+        if (fullFieldsRequested) {
+          return (
+            !snapshotIsFullyLoaded(
+              itemState?.loadedFields,
+              itemState?.item,
+              partialResources.inferFields,
+            ) ||
+            (includeStale && !itemSnapshotIsFresh(itemKey))
+          );
+        }
+
+        const requestedFields = Array.isArray(fields) ? fields : [];
+
+        if (includeStale) {
+          // Require-fresh reads must also refetch requested fields that are
+          // still awaiting an invalidation re-fetch (per-field or full), even
+          // when the stale data is present and vouchable in state.
+          return (
+            getStaleOrMissingRequestedFields(
+              itemKey,
+              itemState?.loadedFields,
+              itemState?.item,
+              requestedFields,
+              partialResources.inferFields,
+              itemsPendingFullInvalidation,
+              getUnresolvedPendingInvalidationFields(itemKey),
+            ).length > 0
+          );
+        }
+
+        return (
+          getFallbackMissingRequestedFields(
+            itemState,
+            requestedFields,
+            partialResources.inferFields,
+          ).length > 0
         );
       });
 
@@ -1382,7 +1456,9 @@ export function createFetchApi<
           (draft) => {
             draft.items[itemKey] = hydratedItem.item;
             draft.itemQueries[itemKey] = hydratedItem.itemQuery;
-            draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+            if (hydratedItem.loadedFields !== undefined) {
+              draft.itemLoadedFields[itemKey] = hydratedItem.loadedFields;
+            }
           },
           { action: 'persistent-storage-hydrate' },
         );
@@ -1416,24 +1492,54 @@ export function createFetchApi<
   ): Promise<ResultType<ItemState, StoreFetchError>> {
     const itemKey = getItemKey(itemPayload);
     const fields = normalizeFieldsOption(options.fields);
+    const fullFieldsRequested = options.fields === '*';
     const itemState = readItemState(itemKey);
     const item = itemState?.item;
     const itemQuery = itemState?.itemQuery;
     const includeStale = !!options.ignoreStaleState;
     const needsFieldCheck =
-      partialResources && Array.isArray(fields) && fields.length > 0;
+      partialResources &&
+      ((Array.isArray(fields) && fields.length > 0) || fullFieldsRequested);
     const itemHasAllFields =
-      !needsFieldCheck || fallbackItemHasRequestedFields(itemState, fields);
+      !needsFieldCheck ||
+      (fullFieldsRequested
+        ? snapshotIsFullyLoaded(
+            itemState?.loadedFields,
+            itemState?.item,
+            partialResources.inferFields,
+          )
+        : fallbackItemHasRequestedFields(
+            itemState,
+            Array.isArray(fields) ? fields : [],
+            partialResources.inferFields,
+          ));
     const itemQueryFresh =
       itemQuery?.status === 'success' &&
       !itemQuery.error &&
       !itemQuery.refetchOnMount;
+    // For require-fresh reads of specific fields, the requested fields that
+    // are stale (awaiting an invalidation re-fetch) or missing without a vouch.
+    const staleOrMissingRequestedFields =
+      needsFieldCheck && !fullFieldsRequested && includeStale
+        ? getStaleOrMissingRequestedFields(
+            itemKey,
+            itemState?.loadedFields,
+            item,
+            Array.isArray(fields) ? fields : [],
+            partialResources.inferFields,
+            itemsPendingFullInvalidation,
+            getUnresolvedPendingInvalidationFields(itemKey),
+          )
+        : undefined;
     const cachedItemCanBeUsed =
       item != null &&
       itemHasAllFields &&
       (!includeStale ||
         (itemQueryFresh &&
-          (!needsFieldCheck || !hasStaleRequestedFields(itemKey, fields))));
+          (!needsFieldCheck ||
+            (fullFieldsRequested
+              ? itemSnapshotIsFresh(itemKey)
+              : staleOrMissingRequestedFields?.length === 0))));
 
     if (cachedItemCanBeUsed) {
       return Result.ok(item);
@@ -1445,15 +1551,22 @@ export function createFetchApi<
 
     let fieldsToFetch: FieldsInput | undefined = options.fields;
 
-    if (needsFieldCheck && item != null && itemQueryFresh) {
-      const invalidation = includeStale
-        ? store.state.itemFieldInvalidationFields[itemKey]
-        : undefined;
-      fieldsToFetch = fields.filter(
-        (field) =>
-          !fallbackItemHasRequestedFields(itemState, [field]) ||
-          (invalidation?.includes(field) ?? false),
-      );
+    if (
+      needsFieldCheck &&
+      !fullFieldsRequested &&
+      item != null &&
+      itemQueryFresh
+    ) {
+      // Fetch only the fields that are actually stale or missing — for
+      // require-fresh reads that is `staleOrMissingRequestedFields`; default
+      // reads tolerate staleness and only fetch missing unvouched fields.
+      fieldsToFetch =
+        staleOrMissingRequestedFields ??
+        getFallbackMissingRequestedFields(
+          itemState,
+          Array.isArray(fields) ? fields : [],
+          partialResources.inferFields,
+        );
     }
 
     const result = await awaitItemFetch(itemPayload, {

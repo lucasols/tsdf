@@ -76,6 +76,10 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     }
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
 };
 const fullLoadedFields = ['age', 'email', 'id', 'name'];
 
@@ -537,6 +541,115 @@ describe('opfs: list query store persistence', () => {
         listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`['id', 'name']`);
+  });
+
+  test("round-trip persistence preserves the fully-loaded ('*') marker for cached items", async () => {
+    const storeName = 'lq-opfs-full-star-roundtrip';
+    const sessionKey = 'sess1';
+    const itemPayload = 'users||1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 31, email: 'cached@site.test' }],
+      },
+    });
+
+    writerEnv.apiStore.scheduleItemFetch('highPriority', itemPayload, {
+      fields: '*',
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const itemIndex = __LEGIT_CAST__<
+      { e: Record<string, { f?: unknown; p?: unknown }> },
+      unknown
+    >(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/li._i.r.json`));
+    const itemMetadata = itemIndex.e[listQueryScope.itemKey('users', 1)];
+    expect({ f: itemMetadata?.f, p: itemMetadata?.p }).toMatchInlineSnapshot(`
+        f: '*'
+        p: 'users||1'
+      `);
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`
+      age: 31
+      email: 'cached@site.test'
+      id: 1
+      name: 'Cached'
+    `);
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 32, email: 'fresh@site.test' }],
+      },
+    });
+
+    const preloadPromise =
+      readerEnv.apiStore.preloadItemFromStorage(itemPayload);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+
+    expect(
+      readerEnv.store.state.itemLoadedFields[
+        listQueryScope.itemKey('users', 1)
+      ],
+    ).toBe('*');
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: '*',
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      "
+    `);
+    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      ⋅⋅⋅
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+    expect(
+      readerEnv.store.state.itemLoadedFields[
+        listQueryScope.itemKey('users', 1)
+      ],
+    ).toBe('*');
   });
 
   test('partial-resource persistence stores each item with its own loaded fields', async () => {
@@ -1818,12 +1931,13 @@ describe('opfs: list query store persistence', () => {
     `);
 
     // Drop the in-memory item without touching the persisted copy so the next
-    // preload must go back to storage.
+    // preload must go back to storage. Item keys are the serialized payload, so
+    // the string payload 'users||1' is stored under the key '"users||1'.
     act(() => {
       env.store.produceState((draft) => {
-        delete draft.items['users||1'];
-        delete draft.itemQueries['users||1'];
-        delete draft.itemLoadedFields['users||1'];
+        delete draft.items['"users||1'];
+        delete draft.itemQueries['"users||1'];
+        delete draft.itemLoadedFields['"users||1'];
       });
     });
 

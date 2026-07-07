@@ -1,32 +1,159 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import type { ValidStoreState } from '../utils/storeShared';
-import type { PartialResourcesConfig } from './types';
+import type { ItemLoadedFields, PartialResourcesConfig } from './types';
+
+export function hasFullyLoadedFields(
+  loadedFields: ItemLoadedFields | undefined,
+): boolean {
+  return loadedFields === '*';
+}
+
+/**
+ * Whether a snapshot should be treated as holding every field of the item.
+ * True when the tracked `loadedFields` is the `'*'` sentinel, or when the
+ * snapshot carries no field metadata but `inferFields` reports the item is
+ * complete (`'*'`) — e.g. manually inserted items, offline optimistic rows, or
+ * persisted fallback snapshots.
+ */
+export function snapshotIsFullyLoaded<ItemState extends ValidStoreState>(
+  loadedFields: ItemLoadedFields | undefined,
+  item: ItemState | null | undefined,
+  inferFields: (item: ItemState) => ItemLoadedFields,
+): boolean {
+  if (loadedFields === '*') return true;
+  if (!item) return false;
+  return inferFields(item) === '*';
+}
+
+/**
+ * Like {@link snapshotIsFullyLoaded}, but also returns `false` when the item is
+ * awaiting a full ('*') re-fetch after a full invalidation. A fully-loaded
+ * snapshot that was fully invalidated has its `loadedFields` reset while the
+ * (now stale) item data is still present, so `inferFields` would otherwise
+ * wrongly vouch for it as complete.
+ */
+export function snapshotIsFullyLoadedAndFresh<
+  ItemState extends ValidStoreState,
+>(
+  itemKey: string,
+  loadedFields: ItemLoadedFields | undefined,
+  item: ItemState | null | undefined,
+  inferFields: (item: ItemState) => ItemLoadedFields,
+  itemsPendingFullInvalidation: Set<string>,
+): boolean {
+  if (loadedFields !== '*' && itemsPendingFullInvalidation.has(itemKey)) {
+    return false;
+  }
+  return snapshotIsFullyLoaded(loadedFields, item, inferFields);
+}
+
+/**
+ * Missing requested fields for an item snapshot, letting `inferFields` vouch
+ * for metadata-free item data (e.g. client-created items) — except for stale
+ * fields awaiting a re-fetch after an invalidation (per-field or full), when
+ * the item's stale data must not be vouched for.
+ */
+export function getStaleOrMissingRequestedFields<
+  ItemState extends ValidStoreState,
+>(
+  itemKey: string,
+  loadedFields: ItemLoadedFields | undefined,
+  item: ItemState | null | undefined,
+  requestedFields: readonly string[],
+  inferFields: (item: ItemState) => ItemLoadedFields,
+  itemsPendingFullInvalidation: Set<string>,
+  pendingInvalidationFields: readonly string[],
+): string[] {
+  // Requested fields awaiting an invalidation re-fetch are stale even when
+  // they are tracked as loaded — e.g. per-field invalidations on a fully
+  // loaded ('*') item keep `loadedFields === '*'` while the stale fields live
+  // only in the pending invalidation list.
+  const staleRequestedFields =
+    pendingInvalidationFields.length > 0
+      ? requestedFields.filter((field) =>
+          pendingInvalidationFields.includes(field),
+        )
+      : [];
+
+  const missingLoadedFields = excludeLoadedFields(
+    loadedFields,
+    requestedFields,
+  );
+  if (missingLoadedFields.length === 0) return staleRequestedFields;
+
+  // While a full ('*') invalidation is unresolved, or when there is no item
+  // data to inspect, `inferFields` must not vouch for any missing field.
+  const unvouchedMissingFields =
+    (loadedFields !== '*' && itemsPendingFullInvalidation.has(itemKey)) || !item
+      ? missingLoadedFields
+      : (() => {
+          const inferredFields = inferFields(item);
+          return missingLoadedFields.filter(
+            (field) =>
+              inferredFields !== '*' && !inferredFields.includes(field),
+          );
+        })();
+
+  if (staleRequestedFields.length === 0) return unvouchedMissingFields;
+
+  // Preserve the requested-fields order while deduping the stale ∪ missing
+  // union (a stale field is usually also missing from `loadedFields`).
+  const resultFields = new Set([
+    ...staleRequestedFields,
+    ...unvouchedMissingFields,
+  ]);
+  return requestedFields.filter((field) => resultFields.has(field));
+}
 
 export function fallbackItemHasRequestedFields<
   ItemState extends ValidStoreState,
 >(
   fallbackItemState:
-    | { item: ItemState | null | undefined; loadedFields: string[] | undefined }
+    | {
+        item: ItemState | null | undefined;
+        loadedFields: ItemLoadedFields | undefined;
+      }
     | undefined,
   requestedFields: readonly string[],
+  inferFields: (item: ItemState) => ItemLoadedFields,
 ): boolean {
-  const loadedFields = fallbackItemState?.loadedFields ?? [];
+  return (
+    getFallbackMissingRequestedFields(
+      fallbackItemState,
+      requestedFields,
+      inferFields,
+    ).length === 0
+  );
+}
 
-  if (requestedFields.every((field) => loadedFields.includes(field))) {
-    return true;
-  }
+export function getFallbackMissingRequestedFields<
+  ItemState extends ValidStoreState,
+>(
+  fallbackItemState:
+    | {
+        item: ItemState | null | undefined;
+        loadedFields: ItemLoadedFields | undefined;
+      }
+    | undefined,
+  requestedFields: readonly string[],
+  inferFields: (item: ItemState) => ItemLoadedFields,
+): string[] {
+  const loadedFields = fallbackItemState?.loadedFields;
+
+  if (loadedFields === '*') return [];
+
+  const missingLoadedFields = requestedFields.filter(
+    (field) => !(loadedFields?.includes(field) ?? false),
+  );
+  if (missingLoadedFields.length === 0) return [];
 
   const item = fallbackItemState?.item;
-  if (!item || typeof item !== 'object') return false;
+  if (!item) return missingLoadedFields;
 
-  const itemRecord =
-    // WORKAROUND: Fallback field checks need indexed property access, but ItemState is generic and does not expose a string index signature.
-    __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
+  const inferredFields = inferFields(item);
+  if (inferredFields === '*') return [];
 
-  return requestedFields.every(
-    (field) => field in itemRecord && itemRecord[field] !== undefined,
-  );
+  return missingLoadedFields.filter((field) => !inferredFields.includes(field));
 }
 
 /**
@@ -34,10 +161,11 @@ export function fallbackItemHasRequestedFields<
  * `loadedFields`. When either argument is `undefined` or empty, returns `[]`.
  */
 export function excludeLoadedFields(
-  loadedFields: string[] | undefined,
-  requestedFields: string[] | undefined,
+  loadedFields: ItemLoadedFields | undefined,
+  requestedFields: readonly string[] | undefined,
 ): string[] {
   if (!requestedFields || requestedFields.length === 0) return [];
+  if (loadedFields === '*') return [];
   if (!loadedFields || loadedFields.length === 0) return [...requestedFields];
 
   return requestedFields.filter((field) => !loadedFields.includes(field));
@@ -52,7 +180,7 @@ export function excludeLoadedFields(
 export function applyPartialItemMerge<ItemState extends ValidStoreState>(
   draft: {
     items: Record<string, ItemState | null>;
-    itemLoadedFields: Record<string, string[]>;
+    itemLoadedFields: Record<string, ItemLoadedFields>;
   },
   itemKey: string,
   data: ItemState,
@@ -64,11 +192,13 @@ export function applyPartialItemMerge<ItemState extends ValidStoreState>(
   draft.items[itemKey] = reusePrevIfEqual(prev, merged);
 
   if (fields && fields.length > 0) {
-    const existingFields = draft.itemLoadedFields[itemKey] ?? [];
-    const fieldSet = new Set([...existingFields, ...fields]);
+    const existingFields = draft.itemLoadedFields[itemKey];
+    if (existingFields === '*') return merged;
+
+    const fieldSet = new Set([...(existingFields ?? []), ...fields]);
     draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
   } else {
-    draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
+    draft.itemLoadedFields[itemKey] = '*';
   }
 
   return merged;

@@ -13,6 +13,7 @@ import { shouldApplyOfflineOverlay } from '../persistentStorage/offline/entityMe
 import type { InternalGlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
+  ItemLoadedFields,
   ListQueryOfflineOverlay,
   TSFDListQueryState,
   TSFDUsePendingOfflineItemsReturn,
@@ -54,7 +55,7 @@ export function usePendingOfflineItems<
         | {
             item: ItemState | null | undefined;
             itemQuery: { payload: ItemPayload } | null | undefined;
-            loadedFields: string[] | undefined;
+            loadedFields: ItemLoadedFields | undefined;
           }
         | undefined)
     | undefined,

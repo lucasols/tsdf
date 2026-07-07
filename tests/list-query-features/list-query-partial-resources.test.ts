@@ -41,6 +41,10 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     }
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
 };
 
 const initialServerData: Tables = {
@@ -164,6 +168,124 @@ describe('useItem with partial resources', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('getItemFromStateOrFetch with fields "*" fetches when cached item is only partially loaded', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    // Start from the realistic list-card case: the query cached only the
+    // columns needed by the list UI.
+    const partialListPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+    await flushAllTimers();
+    await partialListPromise;
+
+    const fullItemPromise = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+
+    const fullItem = await fullItemPromise;
+
+    expect(fullItem.ok ? fullItem.value : null).toMatchInlineSnapshot(`
+      address: 'Address 1'
+      age: 10
+      country: 'Country 1'
+      id: 1
+      name: 'User 1'
+    `);
+    expect(env.serverTable.getRequestHistory('all', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+  });
+
+  test('addItemToState item fields inferred by partial resources satisfy matching partial item hooks without refetching', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    // The partial resource config owns field inference for snapshots that do
+    // not have loaded-field metadata, so write sites do not duplicate it.
+    act(() => {
+      env.apiStore.addItemToState('users||20', {
+        id: 20,
+        name: 'Created User',
+      });
+    });
+    env.serverTable.clearFetchHistory();
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||20', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
+
+      renders.add(pick(result, ['status', 'data', 'error']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:20, name:Created User} ⋅ error: null
+      "
+    `);
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('fallback field inference uses partial resource config instead of cached object keys', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: {
+        ...partialResourcesConfig,
+        inferFields: () => ['id'],
+      },
+    });
+
+    // The item object has a `name`, but the config says only `id` can be
+    // inferred from metadata-free fallback snapshots. Requesting `name` must
+    // therefore fetch instead of trusting a shallow object-key check.
+    act(() => {
+      env.apiStore.addItemToState('users||1', { id: 1, name: 'Cached Name' });
+    });
+    env.serverTable.clearFetchHistory();
+
+    const hook = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        fields: ['name'],
+        returnRefetchingStatus: true,
+      }),
+    );
+
+    await flushAllTimers();
+
+    expect(pick(hook.result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+        data: { name: 'User 1' }
+        error: null
+        status: 'success'
+      `);
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['name']
+            itemId: 'users||1'
+      `);
+  });
+
   test('getItemFromStateOrFetch refetches a stale requested field when stale state is ignored', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
@@ -273,6 +395,51 @@ describe('useItem with partial resources', () => {
       - _type: 'item'
         payload: { itemId: 'users||1' }
         time: '10ms -> 810ms | duration: 800ms'
+    `);
+  });
+
+  test('fields "*" refetches full item when cached item is only partially loaded', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const partialListPromise = env.apiStore.awaitListQueryFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+    await flushAllTimers();
+    await partialListPromise;
+    env.serverTable.fetchHistory.length = 0;
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        showPartialAsRefetching: true,
+        fields: '*',
+      });
+
+      renders.add(pick(result, ['status', 'data', 'error']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: refetching ⋅ data: {id:1, name:User 1} ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ data: {id:1, name:User 1, address:Address 1, age:10, country:Country 1}
+      ⋅ error: null
+      └─
+      "
+    `);
+
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '820ms -> 1.62s | duration: 800ms'
     `);
   });
 
@@ -563,6 +730,49 @@ describe('useListQuery with partial resources', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('getQueryFromStateOrFetch with fields "*" fetches when cached query items are only partially loaded', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const partialQueryPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+    await flushAllTimers();
+    await partialQueryPromise;
+
+    const fullQueryPromise = env.apiStore.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { fields: '*' },
+    );
+    await flushAllTimers();
+
+    const fullQuery = await fullQueryPromise;
+
+    expect(fullQuery.ok ? fullQuery.value.items[0]?.data : null)
+      .toMatchInlineSnapshot(`
+        address: 'Address 1'
+        age: 10
+        country: 'Country 1'
+        id: 1
+        name: 'User 1'
+      `);
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+  });
+
   test('getQueryFromStateOrFetch refetches a stale requested field when stale state is ignored', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
@@ -678,6 +888,57 @@ describe('useListQuery with partial resources', () => {
           pos: { limit: 50, offset: 0 }
         returned_items: 5
         time: '10ms -> 810ms | duration: 800ms'
+    `);
+  });
+
+  test('fields "*" refetches full list when cached query items are only partially loaded', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const partialListPromise = env.apiStore.awaitListQueryFetch(
+      { tableId: 'users' },
+      { fields: ['id', 'name'] },
+    );
+    await flushAllTimers();
+    await partialListPromise;
+    env.serverTable.fetchHistory.length = 0;
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        {
+          returnRefetchingStatus: true,
+          showPartialAsRefetching: true,
+          fields: '*',
+        },
+      );
+
+      renders.add(pick(result, ['status', 'items', 'error']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: refetching ⋅ items: [{id:1, name:User 1}, …(4 more)] ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1, address:Address 1, age:10, country:Country 1}, …(4 more)]
+      ⋅ error: null
+      └─
+      "
+    `);
+
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '820ms -> 1.62s | duration: 800ms'
     `);
   });
 
@@ -1169,6 +1430,63 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
   });
 
+  test('per-field invalidation of a fully loaded item: hook mounting after the invalidation refetches the invalidated fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    // fully load the item, marking it as '*' loaded
+    const fullFetch = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+    await fullFetch;
+
+    // field-scoped invalidation while NO hook is mounted
+    env.serverTable.updateItem('users||1', { address: 'Updated Address 1' });
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        fields: ['address'],
+      });
+    });
+
+    await flushAllTimers();
+
+    const hookRenders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'address'],
+      });
+      hookRenders.add(pick(result, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    expect(hookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, address:Address 1}
+      -> status: refetching ⋅ data: {id:1, address:Address 1}
+      -> status: success ⋅ data: {id:1, address:Updated Address 1}
+      "
+    `);
+
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['address']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
+  });
+
   test('per-field invalidation keeps the highest emitted priority for mounted full-resource hooks', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
@@ -1634,10 +1952,9 @@ describe('await* preload with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.store.state.itemLoadedFields[storeItemKey])
-      .toMatchInlineSnapshot(`
-        ['address', 'age', 'country', 'id', 'name']
-      `);
+    expect(
+      env.store.state.itemLoadedFields[storeItemKey],
+    ).toMatchInlineSnapshot(`"*"`);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -1651,6 +1968,75 @@ describe('await* preload with partial resources', () => {
         payload: { itemId: 'users||1' }
         time: '10ms -> 810ms | duration: 800ms'
     `);
+  });
+
+  test('full fetch satisfies later nested logical fields without object-key refetches', async () => {
+    type NestedRow = Row & { values: Record<string, string> };
+
+    const nestedPartialResources: PartialResourcesConfig<NestedRow> = {
+      mergeItems: (prev, fetched) => {
+        if (!prev) return fetched;
+        return {
+          ...prev,
+          ...fetched,
+          values: { ...prev.values, ...fetched.values },
+        };
+      },
+      selectFields: (fields, item) => {
+        return __LEGIT_CAST__<NestedRow, Row>({
+          id: item.id,
+          name: item.name,
+          values: Object.fromEntries(
+            fields
+              .filter((field) => field in item.values)
+              .map((field) => [field, item.values[field]]),
+          ),
+        });
+      },
+      inferFields: (item) => Object.keys(item.values),
+    };
+    const env = createListQueryStoreTestEnv<NestedRow>(
+      {
+        users: [
+          {
+            id: 1,
+            name: 'User 1',
+            values: { favoriteColor: 'Blue', title: 'Manager' },
+          },
+        ],
+      },
+      { partialResources: nestedPartialResources },
+    );
+
+    const preloadPromise = env.apiStore.awaitItemFetch('users||1', {
+      fields: '*',
+    });
+
+    await flushAllTimers();
+    await preloadPromise;
+    env.serverTable.fetchHistory.length = 0;
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['favoriteColor'],
+      });
+
+      renders.add(pick(result, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:User 1, values:{favoriteColor:Blue}}
+      "
+    `);
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(
+      `[]`,
+    );
   });
 
   test('awaitListQueryFetch with fields "*" satisfies later list hook without refetch', async () => {
