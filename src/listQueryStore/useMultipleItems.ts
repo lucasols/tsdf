@@ -45,6 +45,7 @@ import {
   getStaleOrMissingRequestedFields,
   hasFullyLoadedFields,
   snapshotIsFullyLoaded,
+  snapshotIsFullyLoadedAndFresh,
 } from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
@@ -403,20 +404,42 @@ export function useMultipleItems<
             fields === '*' &&
             (status === 'success' || status === 'refetching')
           ) {
-            if (
+            // "Data absent" (incomplete snapshot) is different from "complete
+            // but stale" (e.g. after a full item invalidation): only a
+            // genuinely incomplete snapshot may hide data behind `loading` —
+            // stale but complete data stays visible while it refetches. A full
+            // item invalidation resets `loadedFields` to `[]` but leaves the
+            // pending-full-invalidation marker, which proves the item data was
+            // complete when invalidated (and is still present).
+            const isIncomplete =
               !snapshotIsFullyLoaded(
                 loadedFields,
                 rawItemState,
                 partialResources.inferFields,
-              )
-            ) {
+              ) &&
+              !(
+                itemsPendingFullInvalidation.has(itemKey) &&
+                hasCachedDataInState
+              );
+            const isStale =
+              !isIncomplete &&
+              !snapshotIsFullyLoadedAndFresh(
+                itemKey,
+                loadedFields,
+                rawItemState,
+                partialResources.inferFields,
+                itemsPendingFullInvalidation,
+              );
+
+            if (isIncomplete) {
               status =
                 hasCachedDataInState && showPartialAsRefetching
                   ? 'refetching'
                   : 'loading';
             } else if (
-              itemFieldInvalidationFields &&
-              itemFieldInvalidationFields.length > 0
+              isStale ||
+              (itemFieldInvalidationFields &&
+                itemFieldInvalidationFields.length > 0)
             ) {
               status = 'refetching';
             }

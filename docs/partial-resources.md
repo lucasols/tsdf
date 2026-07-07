@@ -139,6 +139,8 @@ When a hook requests fields that are partially loaded:
 
 If you enable `showPartialAsRefetching`, the hook exposes `loadingFields` with the requested fields that are still pending. When cached partial data already exists, TSDF keeps it visible during the follow-up fetch.
 
+Invalidations are refetches, not new loads: when an invalidation (full or per-field) marks cached data as stale, hooks whose requested fields are still present keep the stale data visible while the refetch is in flight (with a `refetching` status when `returnRefetchingStatus` is enabled). Data is only hidden behind `loading` when a requested field was genuinely never loaded.
+
 ## Fields in Scheduling and Fetching
 
 Fields propagate through the scheduling and fetching APIs:

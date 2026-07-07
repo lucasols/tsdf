@@ -337,6 +337,145 @@ describe('partial resources: full invalidation of a fully-loaded item', () => {
             itemId: 'users||1'
       `);
   });
+
+  // Finding: a full invalidation of a fully-loaded ('*') item resets
+  // `itemLoadedFields` to `[]` while the (still complete, now stale) item data
+  // stays in state. The '*' hook status selector only checked
+  // `snapshotIsFullyLoaded`, so for apps whose `inferFields` reports a key
+  // list (never '*') the stale-but-complete snapshot was treated as a NEW
+  // load: data hidden (`data: null`, status `loading`) until the refetch
+  // resolved. Array-field hooks already kept stale data visible through the
+  // same invalidation — a full invalidation of complete data is a refetch,
+  // not a load.
+  test("a '*' hook keeps stale data visible while a full invalidation refetch is in flight", async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    const refetchingRenders = createLoggerStore();
+    const defaultRenders = createLoggerStore();
+
+    // Two '*' hooks: one exposing refetches, one with the default status
+    // mapping (refetching -> success) — the common app usage where a `null`
+    // data blip is user-visible (e.g. a form resetting its fields).
+    renderHook(() => {
+      const refetchingHook = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: '*',
+      });
+      const defaultHook = env.apiStore.useItem('users||1', { fields: '*' });
+
+      refetchingRenders.add({
+        status: refetchingHook.status,
+        name: refetchingHook.data?.name ?? null,
+      });
+      defaultRenders.add({
+        status: defaultHook.status,
+        name: defaultHook.data?.name ?? null,
+      });
+    });
+
+    await flushAllTimers();
+
+    refetchingRenders.addMark('full invalidation');
+    defaultRenders.addMark('full invalidation');
+
+    // Server data changes, then the whole item is invalidated.
+    env.serverTable.updateItem('users||1', { name: 'Renamed User 1' });
+
+    act(() => {
+      env.apiStore.invalidateItem('users||1');
+    });
+
+    await flushAllTimers();
+
+    // The stale (still complete) data stays visible with a `refetching`
+    // status until the fresh value arrives. Previously the data blipped to
+    // `null` with a `loading` status for the whole refetch.
+    expect(refetchingRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ name: null
+      -> status: success ⋅ name: User 1
+
+      >>> full invalidation
+
+      -> status: refetching ⋅ name: User 1
+      -> status: success ⋅ name: Renamed User 1
+      "
+    `);
+
+    // With the default status mapping the refetch is completely invisible:
+    // no loading state and no data blip — matching how invalidation behaves
+    // in non-partial-resources stores.
+    expect(defaultRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ name: null
+      -> status: success ⋅ name: User 1
+
+      >>> full invalidation
+
+      -> status: success ⋅ name: User 1
+      -> status: success ⋅ name: Renamed User 1
+      "
+    `);
+
+    // Initial full load plus a single full refetch for the invalidation.
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+  });
+
+  // Same stale-vs-missing conflation through the late-mount flow: the item is
+  // fully invalidated while no hook is mounted (e.g. the user navigates away
+  // and an external update invalidates the record), then a '*' hook mounts.
+  // The cached complete snapshot must be shown as a refetch, not hidden as a
+  // new load.
+  test("a '*' hook mounting after a full invalidation shows the cached data as refetching", async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Fully load the item ('*') without any hook mounted.
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+    await preload;
+
+    // Server data changes, then the whole item is invalidated while unmounted.
+    env.serverTable.updateItem('users||1', { name: 'Renamed User 1' });
+
+    act(() => {
+      env.apiStore.invalidateItem('users||1');
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { status, data } = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: '*',
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    await flushAllTimers();
+
+    // The hook mounts straight into a refetch over the visible cached data.
+    // Previously it mounted as `loading` with `data: null` even though the
+    // complete (stale) snapshot was cached.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: refetching ⋅ name: User 1
+      -> status: success ⋅ name: Renamed User 1
+      "
+    `);
+  });
 });
 
 describe('partial resources: status and fetch decisions agree on inferFields', () => {
