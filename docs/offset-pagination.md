@@ -17,10 +17,7 @@ const store = createListQueryStore<Task, TaskFilter, string, false, true>({
     return api.getTasks(filter, { offset, limit, signal });
   },
 
-  offsetPagination: {
-    maxInvalidationLimit: 200,
-    maxParallel: 3,
-  },
+  offsetPagination: { maxInvalidationLimit: 200, maxParallel: 3 },
 
   // ...other options
 });
@@ -107,5 +104,15 @@ function TaskList() {
 You can specify a custom size for `loadMore`:
 
 ```ts
-store.loadMore(filter, 25); // load 25 more items (instead of defaultQuerySize)
+store.loadMore(filter, 25); // load 25 more items
+```
+
+When no size is passed, `loadMore` uses the store's `defaultLoadMoreSize`, falling back to `defaultQuerySize` when it is not set:
+
+```ts
+const store = createListQueryStore({
+  // ...
+  defaultQuerySize: 50, // initial loads fetch 50 items
+  defaultLoadMoreSize: 25, // loadMore() without a size fetches 25 more
+});
 ```

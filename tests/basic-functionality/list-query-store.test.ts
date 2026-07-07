@@ -486,6 +486,55 @@ describe('fetch query', () => {
     `);
   });
 
+  test('loadMore without an explicit size uses the store defaultLoadMoreSize instead of defaultQuerySize', async () => {
+    const query: ListQueryParams = { tableId: 'products' };
+
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      defaultQuerySize: 5,
+      defaultLoadMoreSize: 3,
+    });
+
+    // initial load still uses defaultQuerySize (5 items)
+    env.scheduleFetch('highPriority', query);
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState(query)?.items.length).toBe(5);
+
+    // loadMore without a size requests defaultLoadMoreSize (3) additional items
+    env.apiStore.loadMore(query);
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState(query)?.items.length).toBe(8);
+
+    // an explicit size still overrides the default
+    env.apiStore.loadMore(query, 10);
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState(query)?.items.length).toBe(18);
+
+    // the options-object form also overrides the default
+    env.apiStore.loadMore(query, { size: 2 });
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState(query)?.items.length).toBe(20);
+
+    // requested limits: 5 (initial), then +3 (default), +10 and +2 (explicit)
+    expect(
+      env.serverTable
+        .getRequestHistory('list', { includeTime: false })
+        .map((entry) => entry.payload),
+    ).toMatchInlineSnapshot(`
+      - fields: '*'
+        pos: { limit: 5, offset: 0 }
+      - fields: '*'
+        pos: { limit: 8, offset: 0 }
+      - fields: '*'
+        pos: { limit: 18, offset: 0 }
+      - fields: '*'
+        pos: { limit: 20, offset: 0 }
+    `);
+  });
+
   test('do not load more if the query not exists or hasMore === false', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
