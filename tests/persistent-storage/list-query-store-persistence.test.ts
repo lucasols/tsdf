@@ -2,6 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
+import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
@@ -59,6 +60,10 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     }
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
 };
 const fullLoadedFields = ['age', 'email', 'id', 'name'];
 const persistentStore = createLocalStoragePersistentTestStore();
@@ -718,7 +723,6 @@ describe('localStorage: list query store persistence', () => {
         .listQuery.readItemEntry<Row>('users', 1).data,
     ).toMatchInlineSnapshot(`
       data: { id: 1, name: 'Cached' }
-      loadedFields: ['age', 'email', 'id', 'name']
       payload: 'users||1'
     `);
   });
@@ -777,6 +781,187 @@ describe('localStorage: list query store persistence', () => {
       .toMatchInlineSnapshot(`
         ['id', 'name']
       `);
+  });
+
+  test("round-trip persistence preserves the fully-loaded ('*') marker for cached items", async () => {
+    const itemPayload = rawItemPayload('users', 1);
+    const storeName = 'lq-full-star-roundtrip';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 31, email: 'cached@site.test' }],
+      },
+    });
+
+    // The writer fetches the complete item; the persisted snapshot must carry
+    // the fully-loaded marker (`lf: '*'`) instead of an enumerated field list.
+    writerEnv.apiStore.scheduleItemFetch('highPriority', itemPayload, {
+      fields: '*',
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      getParsedLocalStorageValue(
+        itemStorageKey(storeName, sessionKey, 'users', 1),
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { age: 31, email: 'cached@site.test', id: 1, name: 'Cached' }
+      lf: '*'
+      p: 'users||1'
+    `);
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 32, email: 'fresh@site.test' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    // A full ('*') read must be satisfiable straight from hydration: the first
+    // render is already a success, which only happens when the restored marker
+    // is '*' — a fabricated field list would not vouch for a complete item.
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: '*',
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    // Assert the synchronous hydration result before flushing the mount effect.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      "
+    `);
+    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+    expect(
+      readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)],
+    ).toBe('*');
+
+    await flushAllTimers();
+
+    // The hydrated snapshot only revalidates (a single low-priority refetch of
+    // the complete item), it never blocks the UI behind a loading state.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      ⋅⋅⋅
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+    `);
+    expect(
+      readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)],
+    ).toBe('*');
+  });
+
+  test('a failed mutation rollback does not resurrect stale loadedFields into the persisted snapshot', async () => {
+    const itemPayload = rawItemPayload('users', 1);
+    const storeName = 'lq-rollback-loaded-fields';
+    const sessionKey = 'sess1';
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Server' }] },
+    });
+
+    // A manually added item has no loadedFields metadata entry — for such
+    // items `inferFields` governs the staleness baseline, so the persisted
+    // snapshot must carry no `lf` field either.
+    act(() => {
+      env.apiStore.addItemToState(itemPayload, { id: 1, name: 'Client draft' });
+    });
+    await advanceTime(1100);
+    expect(
+      getParsedLocalStorageValue(
+        itemStorageKey(storeName, sessionKey, 'users', 1),
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Client draft' }
+      p: 'users||1'
+    `);
+
+    // Start a slow save that will ultimately fail. The rollback snapshot is
+    // captured now, while the item is still metadata-free.
+    let rejectMutation: (error: Error) => void = () => {};
+    let mutationResult!: Promise<unknown>;
+    act(() => {
+      mutationResult = env.apiStore.performMutation(itemPayload, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(itemPayload, (draft) => {
+            draft.name = 'Optimistic';
+          });
+        },
+        mutation: () =>
+          new Promise((_resolve, reject) => {
+            rejectMutation = reject;
+          }),
+      });
+    });
+
+    // While the save is in flight the item gets invalidated (e.g. by a
+    // real-time event). On a partial-resources store this clears the loaded
+    // fields to `[]`, and the refetch it schedules is deferred until the
+    // mutation settles. Make that deferred refetch fail so no fresh fetch
+    // metadata masks what the rollback leaves behind.
+    env.serverTable.setNextFetchError(itemPayload, 'refetch offline');
+    act(() => {
+      env.apiStore.invalidateItem(itemPayload);
+    });
+
+    // A regular flush runs mid-mutation and persists the transient `lf: []`.
+    await advanceTime(1100);
+    expect(
+      getParsedLocalStorageValue(
+        itemStorageKey(storeName, sessionKey, 'users', 1),
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Optimistic' }
+      lf: []
+      p: 'users||1'
+    `);
+
+    // The save fails: the rollback restores the metadata-free baseline,
+    // deleting the state loadedFields entry while the item stays in state.
+    rejectMutation(new Error('save failed'));
+    await act(async () => {
+      await mutationResult;
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The follow-up flush must persist the item without `lf` again. The state
+    // deliberately has no metadata anymore, so the stale mid-mutation `lf`
+    // must not be resurrected from the previously persisted snapshot.
+    expect(
+      getParsedLocalStorageValue(
+        itemStorageKey(storeName, sessionKey, 'users', 1),
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Client draft' }
+      p: 'users||1'
+    `);
   });
 
   test('partial-resource persistence stores each item with its own loaded fields', async () => {
@@ -1014,6 +1199,145 @@ describe('localStorage: list query store persistence', () => {
     expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
       .toMatchInlineSnapshot(`
         ['age', 'email', 'id', 'name']
+      `);
+  });
+
+  test('a hydrated fields:"*" hook does not report success from a partial persisted snapshot', async () => {
+    const itemPayload = rawItemPayload('users', 1);
+    const storeName = 'lq-item-partial-full-hook';
+    const sessionKey = 'sess1';
+
+    // Persisted entry only holds a partial field set (id/name). This config's
+    // inferFields never returns '*', so the fallback snapshot is genuinely
+    // incomplete — a fields:'*' hook must not trust it.
+    persistentStore
+      .scope(storeName, sessionKey)
+      .listQuery.seedItem(
+        'users',
+        1,
+        { id: 1, name: 'Cached' },
+        { loadedFields: ['id', 'name'] },
+      );
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(itemPayload, {
+        fields: '*',
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        name: data?.name ?? null,
+        age: data?.age ?? null,
+        email: data?.email ?? null,
+      });
+    });
+
+    await flushAllTimers();
+
+    // The fields:'*' hook must revalidate: it may not surface `success` from the
+    // partial persisted fallback (which lacks age/email). Previously the
+    // fallback render treated any fields:'*' request as satisfied.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ name: null ⋅ age: null ⋅ email: null
+      -> status: success ⋅ name: Fresh ⋅ age: 21 ⋅ email: fresh@site.test
+      "
+    `);
+
+    // A full-item fetch is issued to complete the missing fields.
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+  });
+
+  test('hydrating an item persisted without loadedFields metadata does not fabricate metadata from object keys', async () => {
+    const itemPayload = rawItemPayload('users', 1);
+    const storeName = 'lq-item-metadata-free-hydration';
+    const sessionKey = 'sess1';
+
+    // A client-created item is persisted. `addItemToState` sets no
+    // `itemLoadedFields`, so the persisted entry carries no `lf` metadata —
+    // `inferFields` is the designed authority for such snapshots.
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+    });
+
+    // No hooks are mounted on the writer env; no act() wrapper needed.
+    writerEnv.apiStore.addItemToState(itemPayload, {
+      id: 1,
+      name: 'Created',
+      email: 'created@site.test',
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The persisted entry has no `lf` key.
+    expect(
+      getParsedLocalStorageValue(
+        itemStorageKey(storeName, sessionKey, 'users', 1),
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { email: 'created@site.test', id: 1, name: 'Created' }
+      p: 'users||1'
+    `);
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', email: 'fresh@site.test' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name'],
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    await flushAllTimers();
+
+    // Cached data is visible immediately and the mount revalidation refreshes
+    // the requested fields.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Created
+      -> status: refetching ⋅ name: Created
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+
+    // Only the fields actually fetched become loaded-field metadata. Previously
+    // hydration fabricated `['email', 'id', 'name']` from the snapshot's object
+    // keys — the shallow inference the partial-resources design forbids — and
+    // the never-fetched email was falsely marked as loaded/fresh.
+    expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
+      .toMatchInlineSnapshot(`
+        ['id', 'name']
       `);
   });
 

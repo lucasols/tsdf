@@ -31,6 +31,10 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     }
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
 };
 
 beforeAll(() => {
@@ -164,7 +168,7 @@ describe('query coalescing with partial resources', () => {
 
     const itemKey = env.getStoreItemKeyFromRaw('table1||1');
     expect(env.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
-      `['address', 'country', 'id', 'name']`,
+      `"*"`,
     );
   });
 

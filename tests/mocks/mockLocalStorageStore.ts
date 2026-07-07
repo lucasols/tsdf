@@ -1,3 +1,4 @@
+import type { ItemLoadedFields } from '../../src/listQueryStore/types';
 import {
   createLocalStoragePersistentTestStore,
   type PersistentTestStoreScope,
@@ -18,7 +19,7 @@ type MockLocalStorageInitialScope = {
       tableId: string;
       id: number | string;
       data: unknown;
-      loadedFields?: string[];
+      loadedFields?: ItemLoadedFields;
       timestamp?: number;
       version?: number;
     }>;

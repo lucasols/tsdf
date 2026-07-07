@@ -348,6 +348,9 @@ test('usePendingOfflineItems can opt resolution-required visible items back in',
   });
   await flushAllTimers();
 
+  // The opt-in hook shows the item's in-memory optimistic value ('Ada
+  // conflict'), not the persisted base snapshot ('Ada') — a storage preload
+  // must never clobber newer in-memory state with the persisted copy.
   expect(hook.result.current).toMatchInlineSnapshot(`
     defaultPending:
       deletedItems: []
@@ -355,7 +358,7 @@ test('usePendingOfflineItems can opt resolution-required visible items back in',
 
     includeResolutionRequired:
       deletedItems: []
-      items: ['Ada']
+      items: ['Ada conflict']
   `);
 });
 

@@ -77,6 +77,7 @@ const partialResourcesConfig: PartialResourcesConfig<OfflineStorageUserRow> = {
       result,
     );
   },
+  inferFields: (item) => Object.keys(item),
 };
 
 function createOfflineDocumentEnv({

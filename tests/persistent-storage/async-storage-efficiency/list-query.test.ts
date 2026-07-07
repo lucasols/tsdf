@@ -502,8 +502,6 @@ describe('async storage efficiency: list-query', () => {
              |    └ (query data, <{tableId:"fourth"}>)
       .      | 👁️ #8 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
              |    └ (item data, <"fourth||2>)
-      3.662s | ✍️ #5 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
-             |    └ (item data, <"third||1>) | 0.04 kb -> 0.04 kb ⚠️ UNCHANGED
       3.663s | ✍️ #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3370518832.p.json
              |    └ (query data, <{tableId:"fourth"}>) | 0.00 kb -> 0.03 kb
       .      | ✍️ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
@@ -511,7 +509,7 @@ describe('async storage efficiency: list-query', () => {
       3.667s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.33 kb -> 0.33 kb
       .      | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
-             |    └ (items index) | 0.12 kb -> 0.29 kb
+             |    └ (items index) | 0.12 kb -> 0.23 kb
       3.669s | end
       "
     `);
@@ -652,11 +650,7 @@ describe('async storage efficiency: list-query', () => {
       getParsedOpfsFileData('tsdf/sess1/lq-query-becomes-empty/li._i.r.json'),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1:
-          a: 1735689600000
-          f: ['age', 'email', 'id', 'name']
-          p: 'users||1'
-          z: 95
+        "users||1: { a: 1735689600000, p: 'users||1', z: 63 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -787,7 +781,7 @@ describe('async storage efficiency: list-query', () => {
       maxItemBytes: sumPersistedEntryBytes(
         getAsyncListItemEntrySizeBytes(rawItemPayload('standalone', 1), {
           id: 1,
-          name: 'Expired oldest',
+          name: 'Expired recent',
         }),
         getAsyncListItemEntrySizeBytes(rawItemPayload('admins', 4), {
           id: 4,
@@ -806,7 +800,7 @@ describe('async storage efficiency: list-query', () => {
     // Persist two standalone items that will later look expired to the cleanup pass.
     env.apiStore.addItemToState(rawItemPayload('standalone', 1), {
       id: 1,
-      name: 'Expired oldest',
+      name: 'Expired recent',
     });
     await advanceTime(1100);
     await flushAllTimers();
@@ -814,18 +808,24 @@ describe('async storage efficiency: list-query', () => {
     await advanceTime(100);
     env.apiStore.addItemToState(rawItemPayload('standalone', 2), {
       id: 2,
-      name: 'Expired newer',
+      name: 'Expired older',
     });
     await advanceTime(1100);
     await flushAllTimers();
 
-    // Persist one query-backed item before introducing a second query-backed item.
+    // Persist one query-backed item before introducing a second query-backed
+    // item. This flush already overflows maxItemBytes, so the least recently
+    // persisted item (standalone||1) loses its storage slot here while staying
+    // loaded in memory.
     env.scheduleFetch('highPriority', usersQuery);
     await flushAllTimers();
     await advanceTime(1100);
     await flushAllTimers();
 
-    // Backdate the standalone entries so the later maxItemBytes cleanup sees them as stale persisted candidates.
+    // Backdate the standalone entries so the later maxItemBytes cleanup sees
+    // them as stale candidates (standalone||1 is already out of storage, so its
+    // backdate only touches leftover metadata). The timestamps are distinct so
+    // the recency ordering stays deterministic.
     mockAdapter.setMetadata(
       listQueryScope.listQuery.itemStorageKey('standalone', 1),
       {
@@ -841,7 +841,7 @@ describe('async storage efficiency: list-query', () => {
         ...mockAdapter.readMetadata(
           listQueryScope.listQuery.itemStorageKey('standalone', 2),
         ),
-        lastAccessAt: expiredTimestamp,
+        lastAccessAt: expiredTimestamp - 60 * 60 * 1000,
       },
     );
 
@@ -854,9 +854,13 @@ describe('async storage efficiency: list-query', () => {
     await flushAllTimers();
     const operationsBreakdown = readCapture.finish().timelineString;
 
+    // The budget keeps the two most recently accessed items: the freshly
+    // fetched admins||4 and the query-backed users||3. The stale standalone||2
+    // is removed, and the previously budget-evicted standalone||1 is not
+    // resurrected as if it were freshly accessed.
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
-    ).toMatchInlineSnapshot(`['"admins||4', '"standalone||2']`);
+    ).toMatchInlineSnapshot(`['"admins||4', '"users||3']`);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-expired-during-max-items/li._i.r.json',
@@ -864,7 +868,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         "admins||4: { a: 1735689619212, p: 'admins||4', z: 76 }
-        "standalone||2: { a: 1735689619212, p: 'standalone||2', z: 70 }
+        "users||3: { a: 1735689616251, p: 'users||3', z: 68 }
 
       s: { b: 147 }
     `);
@@ -888,35 +892,29 @@ describe('async storage efficiency: list-query', () => {
       time   |
       1.85s  | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data)
-      .      | 🗑️ #2 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
-             |    └ (item data, <"standalone||1>)
-      .      | 🗑️ #3 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
-             |    └ (item data, <"users||3>)
-      .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~3111345837.p.json
-             |    └ (item data)
-      .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
+      .      | 🗑️ #2 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3111345837.p.json
+             |    └ (item data, <"standalone||2>)
+      .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data)
       1.853s | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data) | 0.00 kb -> 0.03 kb
-      .      | ✍️ #4 tsdf/sess1/lq-expired-during-max-items/li.h~3111345837.p.json
-             |    └ (item data) | 0.00 kb -> 0.06 kb
-      .      | ✍️ #5 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
+      .      | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data) | 0.00 kb -> 0.08 kb
-      1.857s | ✍️ #6 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+      1.857s | ✍️ #4 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.16 kb -> 0.30 kb
-      .      | ✍️ #7 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.28 kb -> 0.28 kb
+      .      | ✍️ #5 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+             |    └ (items index) | 0.28 kb -> 0.26 kb
       1.859s | end
       "
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (1.13 kb)
-      ├ sess1 (1.06 kb)
-      │ └ lq-expired-during-max-items (1.05 kb)
-      │   ├ li._i.r.json (0.30 kb)
+      "tsdf (1.12 kb)
+      ├ sess1 (1.05 kb)
+      │ └ lq-expired-during-max-items (1.04 kb)
+      │   ├ li._i.r.json (0.28 kb)
       │   ├ li.h~2792428996.p.json (0.12 kb)
-      │   ├ li.h~3111345837.p.json (0.10 kb)
+      │   ├ li.h~3224064498.p.json (0.11 kb)
       │   ├ lq._i.r.json (0.33 kb)
       │   ├ lq.h~2316387135.p.json (0.07 kb)
       │   └ lq.h~2902406637.p.json (0.07 kb)
@@ -1192,12 +1190,10 @@ describe('async storage efficiency: list-query', () => {
              |    └ (query data, <{tableId:"users"}>) | 0.05 kb -> 0.03 kb
       .      | ✍️ #3 tsdf/sess1/lq-delete-flow/lq.h~1805955701.p.json
              |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.03 kb -> 0.00 kb
-      .      | ✍️ #4 tsdf/sess1/lq-delete-flow/li.h~1937155452.p.json
-             |    └ (item data, <"users||2>) | 0.04 kb -> 0.04 kb ⚠️ UNCHANGED
+      1.043s | ✍️ #4 tsdf/sess1/lq-delete-flow/li._i.r.json
+             |    └ (items index) | 0.23 kb -> 0.12 kb
       1.046s | ✍️ #5 tsdf/sess1/lq-delete-flow/lq._i.r.json
              |    └ (queries index) | 0.51 kb -> 0.51 kb
-      .      | ✍️ #6 tsdf/sess1/lq-delete-flow/li._i.r.json
-             |    └ (items index) | 0.23 kb -> 0.18 kb
       1.048s | end
       "
     `);
@@ -1567,7 +1563,7 @@ describe('async storage efficiency: list-query', () => {
       1.852s | ✍️ #1 tsdf/sess1/lq-query-invalidation-flow/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.05 kb
       1.856s | ✍️ #2 tsdf/sess1/lq-query-invalidation-flow/li._i.r.json
-             |    └ (items index) | 0.18 kb -> 0.18 kb
+             |    └ (items index) | 0.12 kb -> 0.12 kb
       1.858s | end
       "
     `);
@@ -1654,7 +1650,7 @@ describe('async storage efficiency: list-query', () => {
       1.852s | ✍️ #1 tsdf/sess1/lq-coalesced-invalidations/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.06 kb
       1.856s | ✍️ #2 tsdf/sess1/lq-coalesced-invalidations/li._i.r.json
-             |    └ (items index) | 0.18 kb -> 0.18 kb
+             |    └ (items index) | 0.12 kb -> 0.12 kb
       1.858s | end
       "
     `);
@@ -1721,17 +1717,8 @@ describe('async storage efficiency: list-query', () => {
       getParsedOpfsFileData('tsdf/sess1/lq-offline-marker-flow/li._i.r.json'),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1:
-          a: 1735689600000
-          f: ['age', 'email', 'id', 'name']
-          o: '✅'
-          p: 'users||1'
-          z: 94
-        "users||2:
-          a: 1735689613968
-          f: ['age', 'email', 'id', 'name']
-          p: 'users||2'
-          z: 95
+        "users||1: { a: 1735689600000, o: '✅', p: 'users||1', z: 62 }
+        "users||2: { a: 1735689613968, p: 'users||2', z: 63 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -1998,7 +1985,7 @@ describe('async storage efficiency: list-query', () => {
       1.853s | ✍️ #2 tsdf/sess1/lq-item-invalidation-flow/li.h~228010772.p.json
              |    └ (item data, <"users||1>) | 0.06 kb -> 0.05 kb
       1.857s | ✍️ #3 tsdf/sess1/lq-item-invalidation-flow/li._i.r.json
-             |    └ (items index) | 0.18 kb -> 0.18 kb
+             |    └ (items index) | 0.12 kb -> 0.12 kb
       1.859s | end
       "
     `);
@@ -2250,11 +2237,7 @@ describe('async storage efficiency: list-query', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/lq-mutation-flow/li._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          "users||1:
-            a: 1735689600000
-            f: ['age', 'email', 'id', 'name']
-            p: 'users||1'
-            z: 95
+          "users||1: { a: 1735689600000, p: 'users||1', z: 63 }
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -2387,11 +2370,14 @@ describe('async storage efficiency: list-query', () => {
           name: 'Project 1',
         }),
       ),
+      // All three queries fit the query budget — the byte pressure that forces
+      // an eviction during the tasks flush comes from maxItemBytes alone.
       maxQueryBytes: sumPersistedEntryBytes(
         getAsyncListQueryEntrySizeBytes(usersQuery, [storeItemKey('users', 1)]),
         getAsyncListQueryEntrySizeBytes(projectsQuery, [
           storeItemKey('projects', 1),
         ]),
+        getAsyncListQueryEntrySizeBytes(tasksQuery, [storeItemKey('tasks', 1)]),
       ),
       serverData: {
         users: [{ id: 1, name: 'User 1' }],
@@ -2422,18 +2408,277 @@ describe('async storage efficiency: list-query', () => {
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time   |
-      1.85s  | 🗑️ #1 ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~2924752681.p.json
-             |    └ (item data, <"projects||1>)
-      .      | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~228010772.p.json
+      1.85s  | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.h~4263007875.p.json
+             |    └ (query data)
+      .      | 🗑️ #2 ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~228010772.p.json
+             |    └ (item data, <"users||1>)
+      .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~1128283337.p.json
              |    └ (item data)
-      1.853s | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~228010772.p.json
+      1.853s | ✍️ #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.h~4263007875.p.json
+             |    └ (query data) | 0.00 kb -> 0.03 kb
+      .      | ✍️ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~1128283337.p.json
              |    └ (item data) | 0.00 kb -> 0.05 kb
-      1.857s | ✍️ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
-             |    └ (items index) | 0.16 kb -> 0.15 kb
+      1.857s | ✍️ #4 tsdf/sess1/list-query-opfs-eviction-efficiency/lq._i.r.json
+             |    └ (queries index) | 0.34 kb -> 0.48 kb
+      .      | ✍️ #5 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
+             |    └ (items index) | 0.27 kb -> 0.27 kb
       1.859s | end
       "
     `);
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
     expect(mockAdapter.payloadGetManyRequests).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a newly fetched query evicts the least recently used in-state query when the query budget is full', async () => {
+    const storeName = 'lq-query-budget-recency';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const projectsQuery = { tableId: 'projects' };
+    const tasksQuery = { tableId: 'tasks' };
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      // The budget fits exactly two persisted queries, so fetching a third
+      // must evict one even though all three stay loaded in memory.
+      maxQueryBytes: sumPersistedEntryBytes(
+        getAsyncListQueryEntrySizeBytes(projectsQuery, [
+          storeItemKey('projects', 1),
+        ]),
+        getAsyncListQueryEntrySizeBytes(tasksQuery, [storeItemKey('tasks', 1)]),
+      ),
+      serverData: {
+        users: [{ id: 1, name: 'User 1' }],
+        projects: [{ id: 1, name: 'Project 1' }],
+        tasks: [{ id: 1, name: 'Task 1' }],
+      },
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Fetch and persist users, then projects, with a real time gap so their
+    // persisted lastAccessAt timestamps differ (users is the oldest).
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.scheduleFetch('highPriority', projectsQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listQuery.listStoredQueryKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['{tableId:"projects"}', '{tableId:"users"}']
+      `);
+
+    // Fetching tasks overflows the query budget. The new query must win a
+    // persistence slot: unchanged in-state queries compete with their real
+    // persisted recency, so the least recently persisted one (users) is
+    // evicted — the fresh fetch is never silently dropped.
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listQuery.listStoredQueryKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['{tableId:"projects"}', '{tableId:"tasks"}']
+      `);
+    // The evicted query's item is dropped with it — its only reference was
+    // the users query, which is no longer persisted.
+    expect(listQueryScope.listQuery.listStoredItemKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['"projects||1', '"tasks||1']
+      `);
+  });
+
+  test('a budget-evicted in-state query stays evicted across later flushes instead of churning back into storage', async () => {
+    const storeName = 'lq-query-budget-stability';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const projectsQuery = { tableId: 'projects' };
+    const tasksQuery = { tableId: 'tasks' };
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      // The budget fits exactly two persisted queries, so keeping three
+      // loaded in memory forces one of them out of persistence.
+      maxQueryBytes: sumPersistedEntryBytes(
+        getAsyncListQueryEntrySizeBytes(projectsQuery, [
+          storeItemKey('projects', 1),
+        ]),
+        getAsyncListQueryEntrySizeBytes(tasksQuery, [storeItemKey('tasks', 1)]),
+      ),
+      serverData: {
+        users: [{ id: 1, name: 'User 1' }],
+        projects: [{ id: 1, name: 'Project 1' }],
+        tasks: [{ id: 1, name: 'Task 1' }],
+      },
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Fetch three queries with real time gaps so persisted recency is
+    // unambiguous: users is the oldest, tasks the newest.
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.scheduleFetch('highPriority', projectsQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The third fetch overflowed the budget and evicted the least recently
+    // persisted query (users) even though it is still loaded in memory.
+    expect(listQueryScope.listQuery.listStoredQueryKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['{tableId:"projects"}', '{tableId:"tasks"}']
+      `);
+
+    // Trigger more flushes with a state change that does not alter any
+    // persisted query content: refetching tasks yields identical data. The
+    // evicted users query must not re-enter storage as if it were freshly
+    // accessed and knock out a different survivor — that would make every
+    // flush churn remove/re-add writes while the state stays over budget.
+    const churnCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listQuery.listStoredQueryKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['{tableId:"projects"}', '{tableId:"tasks"}']
+      `);
+
+    env.scheduleFetch('highPriority', tasksQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listQuery.listStoredQueryKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['{tableId:"projects"}', '{tableId:"tasks"}']
+      `);
+
+    // The two follow-up flushes must not have produced any query entry
+    // removals or re-writes — the persisted set is already stable.
+    expect(churnCapture.finish().timelineString).toMatchInlineSnapshot(
+      `"empty"`,
+    );
+  });
+
+  test('a budget-evicted in-state item stays evicted across later flushes instead of churning back into storage', async () => {
+    const storeName = 'lq-item-budget-stability';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      // The budget fits exactly two persisted standalone items, so keeping
+      // three loaded in memory forces one of them out of persistence.
+      maxItemBytes: sumPersistedEntryBytes(
+        getAsyncListItemEntrySizeBytes(rawItemPayload('users', 2), {
+          id: 2,
+          name: 'User 2',
+        }),
+        getAsyncListItemEntrySizeBytes(rawItemPayload('users', 3), {
+          id: 3,
+          name: 'User 3',
+        }),
+      ),
+      serverData: {
+        users: [
+          { id: 1, name: 'User 1' },
+          { id: 2, name: 'User 2' },
+          { id: 3, name: 'User 3' },
+        ],
+      },
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Fetch three standalone items with real time gaps so persisted recency
+    // is unambiguous: users||1 is the oldest, users||3 the newest.
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 1));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 2));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 3));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The third fetch overflowed the budget and evicted the least recently
+    // persisted item (users||1) even though it is still loaded in memory.
+    expect(listQueryScope.listQuery.listStoredItemKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['"users||2', '"users||3']
+      `);
+
+    // Trigger more flushes with a state change that does not alter any
+    // persisted item content: refetching users||3 yields identical data. The
+    // evicted users||1 item must not re-enter storage as if it were freshly
+    // accessed and knock out a different survivor.
+    const churnCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 3));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listQuery.listStoredItemKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['"users||2', '"users||3']
+      `);
+
+    env.apiStore.scheduleItemFetch('highPriority', rawItemPayload('users', 3));
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listQuery.listStoredItemKeys().sort())
+      .toMatchInlineSnapshot(`
+        ['"users||2', '"users||3']
+      `);
+
+    // The two follow-up flushes must not have produced any item entry
+    // removals or re-writes — the persisted set is already stable. The only
+    // captured operations are failed opens of the queries index (this test
+    // never persists a query, so the file does not exist): read-only probes,
+    // no writes and no removals.
+    expect(churnCapture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time   |
+      1.81s  | 👁️ #1 file-open ❌ tsdf/sess1/lq-item-budget-stability/lq._i.r.json
+             |    └ (queries index)
+             ·
+      4.721s | 👁️ #1 file-open ❌ tsdf/sess1/lq-item-budget-stability/lq._i.r.json
+             |    └ (queries index)
+      4.722s | end
+      "
+    `);
   });
 });

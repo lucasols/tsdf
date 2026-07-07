@@ -1116,6 +1116,7 @@ test('list query partial-resources remote snapshots clear satisfied local invali
     });
     const full = envB.apiStore.useItem('users||1', {
       returnRefetchingStatus: true,
+      showPartialAsRefetching: true,
       disableRefetches: true,
       fields: '*',
     });
@@ -1128,8 +1129,9 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   });
   await advanceTime(0);
 
-  // Before tab A refetches, unaffected hooks should stay readable and the full
-  // hook should continue exposing the cached object instead of dropping to loading.
+  // Before tab A refetches, unaffected field hooks should stay readable. The
+  // full hook should keep cached data visible, but cannot claim success from a
+  // field-list cache entry.
   expect(pick(envBHooks.result.current.name, ['status', 'data']))
     .toMatchInlineSnapshot(`
       data: { name: 'Alice' }
@@ -1143,7 +1145,7 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   expect(pick(envBHooks.result.current.full, ['status', 'data']))
     .toMatchInlineSnapshot(`
       data: { age: 30, name: 'Alice' }
-      status: 'success'
+      status: 'refetching'
     `);
 
   envA.serverTable.setItem('users||1', { id: 1, name: 'Alice', age: 31 });
@@ -1174,7 +1176,7 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   expect(pick(envBHooks.result.current.full, ['status', 'data']))
     .toMatchInlineSnapshot(`
       data: { age: 31, name: 'Alice' }
-      status: 'success'
+      status: 'refetching'
     `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
@@ -1186,6 +1188,25 @@ test('list query partial-resources remote snapshots clear satisfied local invali
     .     | 31       | Alice:31  | Alice     | [age-hook, full-hook] ui-changed
     "
   `);
+
+  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: '*',
+  });
+  await flushAllTimers();
+
+  // A real full-resource sibling snapshot is still allowed to satisfy the full
+  // hook and records the full-loaded sentinel.
+  expect(envB.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
+    `"*"`,
+  );
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    1,
+  );
+  expect(pick(envBHooks.result.current.full, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, id: 1, name: 'Alice' }
+      status: 'success'
+    `);
 });
 
 // review below this
@@ -1734,4 +1755,89 @@ test('item deletion on one tab cleans up partial-resource field metadata on sibl
     envB.store.state.itemFieldInvalidationFields[itemKeyB],
   ).toBeUndefined();
   expect(envB.store.state.queries[queryKeyB]?.items).not.toContain(itemKeyB);
+});
+
+test('a mutation snapshot sent while the sender is fully invalidated does not erase sibling field metadata', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-partial-full-invalidation-mutation-snapshot',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
+  });
+
+  // Both tabs fully load the item ('*').
+  renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: '*',
+    });
+
+    envA.trackItemUI('full-hook', getTrackedUserSummary(item.data));
+    return item;
+  });
+  await flushAllTimers();
+
+  const envBHook = renderHook(() => {
+    const item = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: '*',
+    });
+
+    envB.trackItemUI('full-hook', getTrackedUserSummary(item.data));
+    envB.trackItemUI('full-hook-status', item.status);
+    return item;
+  });
+  await flushAllTimers();
+
+  const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toBe('*');
+  const envBFetchCountBeforeInvalidation = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
+  );
+  expect(envBFetchCountBeforeInvalidation).toBe(1);
+  envB.clearTimeline();
+
+  // Tab A fully invalidates the item (local only — invalidations are not
+  // broadcast). Its local `itemLoadedFields` is reset to `[]` while its
+  // mounted hook refetches.
+  act(() => {
+    envA.apiStore.invalidateItem('users||1');
+  });
+  // The '*' refetch is now in flight on tab A (800ms). Before it lands, tab A
+  // performs a client mutation, whose optimistic + confirmed item snapshots
+  // are published while tab A's loaded-fields metadata is still `[]`.
+  await advanceTime(100);
+  const mutationPromise = envA.performClientItemUpdateAction(
+    'users||1',
+    { age: 31 },
+    { withOptimisticUpdate: true },
+  );
+  await flushAllTimers();
+  await mutationPromise;
+  // Let any snapshot published at mutation settlement reach tab B as well.
+  await flushAllTimers();
+
+  // Tab B's own '*' metadata must survive those snapshots: the sender's `[]`
+  // vouches for nothing but says nothing about what the receiver has loaded.
+  // Previously the `[]` on the wire erased tab B's metadata, blanking the
+  // mounted '*' hook to loading and scheduling a duplicate fetch.
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toBe('*');
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeInvalidation,
+  );
+  expect(pick(envBHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, id: 1, name: 'Alice' }
+      status: 'success'
+    `);
+  // The timeline shows tab B only consumes incoming snapshots — the status
+  // never leaves success and no local fetch is started.
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | full-hook | full-hook-status |
+    4.62s | Alice:30  | success          | -- timeline-cleared
+    4.72s | Alice:30  | success          | [users||1] <optimistic-item-snapshot-received (value: {"id":1,"name":"Alice","age":31})
+    .     | Alice:31  | success          | [full-hook] ui-changed
+    "
+  `);
 });

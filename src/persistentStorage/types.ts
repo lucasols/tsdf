@@ -2,6 +2,7 @@ import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { type RcType } from 'runcheck';
 import type { TSDFDebugLogger } from '../debug';
+import type { ItemLoadedFields } from '../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
   AnyOfflineOperationDefinition,
@@ -620,8 +621,12 @@ export type PersistedListQueryItemData<State> = {
   data: State;
   /** Payload stored to validate and rehydrate item queries. */
   payload: unknown;
-  /** Optional list of selected fields that were loaded from the query result. */
-  loadedFields?: string[];
+  /**
+   * Loaded-fields metadata for the item: a list of selected fields that were
+   * loaded, or `'*'` when the item is fully loaded. Absent when the item has
+   * no loaded-fields metadata (`inferFields` governs such snapshots).
+   */
+  loadedFields?: ItemLoadedFields;
 };
 
 /** Shape of a single persisted list query entry. */

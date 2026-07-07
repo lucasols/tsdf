@@ -40,6 +40,7 @@ import {
   type OnListQueryInvalidate,
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
+  type ItemLoadedFields,
   type PartialResourcesConfig,
   type TSDFItemQuery,
   type TSFDListQuery,
@@ -253,6 +254,8 @@ export function createMutationApi<
   onOfflineTimelineEvent:
     | ((event: TestOfflineTimelineEvent) => void)
     | undefined,
+  itemPendingInvalidationFields: Map<string, string[]>,
+  itemsPendingFullInvalidation: Set<string>,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -277,7 +280,7 @@ export function createMutationApi<
     itemKey: string;
     item: ItemState | null | undefined;
     itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
-    loadedFields: string[] | undefined;
+    loadedFields: ItemLoadedFields | undefined;
     invalidationFields: string[] | undefined;
     invalidationPriority: FetchType | undefined;
     pendingInvalidationFields: string[] | undefined;
@@ -438,7 +441,6 @@ export function createMutationApi<
   const queryInvalidationWasTriggered = new Set<string>();
   const itemInvalidationWasTriggered = new Set<string>();
   const itemFieldInvalidationPriorities = new Map<string, FetchType>();
-  const itemPendingInvalidationFields = new Map<string, string[]>();
 
   function invalidateQueryAndItems(args: InvalidateQueryAndItemsArgs) {
     const itemPayload: ItemPayload | ItemPayload[] | FilterItem | false =
@@ -530,9 +532,11 @@ export function createMutationApi<
               const loadedFields = draft.itemLoadedFields[itemKey];
               if (!loadedFields) continue;
 
-              draft.itemLoadedFields[itemKey] = loadedFields.filter(
-                (f) => !invalidateFields.includes(f),
-              );
+              if (loadedFields !== '*') {
+                draft.itemLoadedFields[itemKey] = loadedFields.filter(
+                  (f) => !invalidateFields.includes(f),
+                );
+              }
               const existingInvalidationFields =
                 draft.itemFieldInvalidationFields[itemKey] ?? [];
               draft.itemFieldInvalidationFields[itemKey] = Array.from(
@@ -573,16 +577,34 @@ export function createMutationApi<
 
       if (!item) continue;
 
-      const trackedInvalidationFields = partialResources
-        ? Array.from(
-            new Set([
-              ...(store.state.itemLoadedFields[itemKey] ?? []),
-              ...(itemPendingInvalidationFields.get(itemKey) ?? []),
-            ]),
-          ).sort()
-        : [];
+      // Metadata-free items (manually added, offline rows, hydrated fallback
+      // snapshots) have no `itemLoadedFields` entry — their staleness baseline
+      // is whatever `inferFields` currently vouches for, otherwise the
+      // invalidation would leave no durable marker behind.
+      let effectiveLoadedFields = store.state.itemLoadedFields[itemKey];
+      if (partialResources && effectiveLoadedFields === undefined) {
+        const itemState = store.state.items[itemKey];
+        if (itemState) {
+          effectiveLoadedFields = partialResources.inferFields(itemState);
+        }
+      }
+
+      const itemWasFullyLoaded =
+        partialResources && effectiveLoadedFields === '*';
+      const trackedInvalidationFields =
+        partialResources && !itemWasFullyLoaded
+          ? Array.from(
+              new Set([
+                ...(effectiveLoadedFields === '*'
+                  ? []
+                  : (effectiveLoadedFields ?? [])),
+                ...(itemPendingInvalidationFields.get(itemKey) ?? []),
+              ]),
+            ).sort()
+          : [];
       const trackedInvalidationPriority =
-        trackedInvalidationFields.length > 0
+        trackedInvalidationFields.length > 0 ||
+        itemsPendingFullInvalidation.has(itemKey)
           ? itemFieldInvalidationPriorities.get(itemKey)
           : undefined;
       const nextInvalidationPriority =
@@ -598,6 +620,24 @@ export function createMutationApi<
         fetchTypePriority[nextInvalidationPriority];
 
       if (currentInvalidationPriority >= newInvalidationPriority) continue;
+
+      // Update the invalidation tracking maps before the state change so
+      // subscribers notified by it see the same invalidation transaction.
+      if (itemWasFullyLoaded) {
+        // No enumerable field list for a '*' item — record the durable
+        // full-invalidation marker so catch-up hooks refetch their own fields
+        // instead of trusting the stale snapshot.
+        itemsPendingFullInvalidation.add(itemKey);
+        itemPendingInvalidationFields.delete(itemKey);
+        itemFieldInvalidationPriorities.set(itemKey, nextInvalidationPriority);
+      } else if (trackedInvalidationFields.length > 0) {
+        itemPendingInvalidationFields.set(itemKey, trackedInvalidationFields);
+        itemFieldInvalidationPriorities.set(itemKey, nextInvalidationPriority);
+      } else {
+        itemPendingInvalidationFields.delete(itemKey);
+        itemFieldInvalidationPriorities.delete(itemKey);
+      }
+      itemInvalidationWasTriggered.delete(itemKey);
 
       store.produceState(
         (draft) => {
@@ -615,14 +655,6 @@ export function createMutationApi<
         { action: 'invalidate-item' },
       );
 
-      if (trackedInvalidationFields.length > 0) {
-        itemPendingInvalidationFields.set(itemKey, trackedInvalidationFields);
-        itemFieldInvalidationPriorities.set(itemKey, nextInvalidationPriority);
-      } else {
-        itemPendingInvalidationFields.delete(itemKey);
-        itemFieldInvalidationPriorities.delete(itemKey);
-      }
-      itemInvalidationWasTriggered.delete(itemKey);
       emitInvalidateItem({ priority: nextInvalidationPriority, itemKey });
 
       if (onInvalidateItem) {
@@ -1024,6 +1056,7 @@ export function createMutationApi<
     for (const { itemKey } of itemsId) {
       itemFieldInvalidationPriorities.delete(itemKey);
       itemPendingInvalidationFields.delete(itemKey);
+      itemsPendingFullInvalidation.delete(itemKey);
       itemInvalidationWasTriggered.delete(itemKey);
       publishItemSnapshot(itemKey);
     }
@@ -1040,6 +1073,7 @@ export function createMutationApi<
     itemInvalidationWasTriggered.clear();
     itemFieldInvalidationPriorities.clear();
     itemPendingInvalidationFields.clear();
+    itemsPendingFullInvalidation.clear();
   }
 
   type ListQueryMutationArgs<T> = {
@@ -1339,7 +1373,6 @@ export function createMutationApi<
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
     itemFieldInvalidationPriorities,
-    itemPendingInvalidationFields,
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,

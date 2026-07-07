@@ -104,7 +104,7 @@ Docs: `docs/fetch-scheduling.md`, `docs/batch-fetching.md`.
 - **Batch groups** — `getItemsBatchKey` groups items into separate batch schedulers; return `false` to opt out for that item and use the per-item fetch function.
 - **Bulk hooks** — `useMultipleItems` and `useMultipleListQueries` let callers subscribe to many resources through one hook while sharing the same scheduler/cache machinery.
 - **Selectors + deep equality** — hook `selector` options reduce re-renders by returning only the data the component needs.
-- **Partial resources** — List Query stores with `TPartialResources = true` can fetch only requested item fields and track field-level invalidation.
+- **Partial resources** — List Query stores with `TPartialResources = true` can fetch only requested item fields and track field-level invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`; `inferFields` handles metadata-free snapshots such as manually added or offline items.
 - **Derived queries** — `derivedQueries` compute list results from already-loaded items when `isComplete(...)` returns `true`, avoiding unnecessary query fetches and query cache entries.
 - **Cache limits** — `maxItems`, `maxQueries`, and `onStateCleanup` bound memory while protecting mounted, fetching, and mutating entries.
 - **Adaptive throttling** — `lowPriorityThrottleMs`, `mediumPriorityDelayMs`, `baseCoalescingWindowMs`, and `dynamicRealtimeThrottleMs(...)` tune work for hook mounts, background refetches, focus/reconnect, and realtime updates.
@@ -257,7 +257,7 @@ Docs: `docs/real-time-updates.md`.
 ## List Query specific features
 
 - **`optimisticListUpdates`** — auto add/remove/re-sort items in matching queries when item state changes (`filterItem`, `sort`, `appendNewTo`). Docs: `docs/optimistic-list-updates.md`.
-- **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Docs: `docs/partial-resources.md`.
+- **Partial resources** (set `TPartialResources = true`) — fetch only specific fields per item; tracks loaded fields and supports per-field invalidation. `partialResources` requires `mergeItems`, `selectFields`, and `inferFields`. `fetchListFn` / `fetchItemFn` receive `{ fields }`. Docs: `docs/partial-resources.md`.
 - **Offset pagination** (set `TOffsetPagination = true`) — real offset/limit pagination instead of size-mode re-fetches. `fetchListFn` receives `{ offset, limit }`; `offsetPagination: { maxInvalidationLimit, maxParallel }`. Docs: `docs/offset-pagination.md`.
 - **`derivedQueries`** — hook results computed locally from already-materialized items when `isComplete(...)` returns `true`; results expose `isDerived: true` and `hasMore: false`, and never materialize a query entry.
 - **`addItemToState(payload, data, { addItemToQueries: { queries, appendTo } })`** — insert a new item into specific queries with `'start' | 'end' | (payloads) => index` placement.

@@ -52,6 +52,7 @@ const partialUserResourcesConfig: PartialResourcesConfig<PartialUserRow> = {
     }
     return __LEGIT_CAST__<PartialUserRow, Record<string, unknown>>(result);
   },
+  inferFields: (item) => Object.keys(item),
 };
 
 let network = createOfflineNetworkMock();

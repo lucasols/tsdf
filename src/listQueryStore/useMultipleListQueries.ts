@@ -43,12 +43,17 @@ import {
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
+  getFallbackMissingRequestedFields,
+  getStaleOrMissingRequestedFields,
+  snapshotIsFullyLoaded,
+  snapshotIsFullyLoadedAndFresh,
 } from './itemFieldUtils';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type DerivedQueryContext,
   type DerivedQueriesConfig,
   type FieldsInput,
+  type ItemLoadedFields,
   type ListQueryOfflineOverlay,
   type ListQueryUseMultipleListQueriesQuery,
   type PartialResourcesConfig,
@@ -144,7 +149,7 @@ export function useMultipleListQueries<
         | {
             item: ItemState | null | undefined;
             itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
-            loadedFields: string[] | undefined;
+            loadedFields: ItemLoadedFields | undefined;
           }
         | undefined)
     | undefined,
@@ -157,6 +162,7 @@ export function useMultipleListQueries<
   queryInvalidationWasTriggered: Set<string>,
   itemFieldInvalidationPriorities: Map<string, FetchType>,
   itemPendingInvalidationFields: Map<string, string[]>,
+  itemsPendingFullInvalidation: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
   derivedQueries:
@@ -389,6 +395,14 @@ export function useMultipleListQueries<
 
   const getUnresolvedPendingInvalidationFields = useCallback(
     (itemKey: string, state?: State): string[] => {
+      const itemFieldInvalidationFields = state
+        ? state.itemFieldInvalidationFields
+        : store.state.itemFieldInvalidationFields;
+      const stateInvalidationFields = itemFieldInvalidationFields[itemKey];
+      if (stateInvalidationFields && stateInvalidationFields.length > 0) {
+        return stateInvalidationFields;
+      }
+
       const itemLoadedFields = state
         ? state.itemLoadedFields
         : store.state.itemLoadedFields;
@@ -673,46 +687,126 @@ export function useMultipleListQueries<
             },
           );
 
+          // Partial-resource bookkeeping shared by the status override and the
+          // `loadingFields` computation below — computed at most once per query.
+          let staleOrMissingRequestedFields: Set<string> | undefined;
+          let hasAnyIncompleteItem = false;
+          let hasAnyStaleItem = false;
+          const statusCanBeOverridden =
+            status === 'success' || status === 'refetching';
+
+          if (
+            partialResources &&
+            (statusCanBeOverridden || showPartialAsRefetching)
+          ) {
+            if (Array.isArray(fields) && fields.length > 0) {
+              // Union of stale-or-missing requested fields across the query's
+              // items.
+              staleOrMissingRequestedFields = new Set();
+
+              for (const itemKey of effectiveQuery.query.items) {
+                for (const field of getStaleOrMissingRequestedFields(
+                  itemKey,
+                  state.itemLoadedFields[itemKey],
+                  state.items[itemKey],
+                  fields,
+                  partialResources.inferFields,
+                  itemsPendingFullInvalidation,
+                  getUnresolvedPendingInvalidationFields(itemKey, state),
+                )) {
+                  staleOrMissingRequestedFields.add(field);
+                }
+
+                // Stop scanning once no further field could be added — or on
+                // the first hit when the per-field breakdown is not needed.
+                if (
+                  staleOrMissingRequestedFields.size === fields.length ||
+                  (!showPartialAsRefetching &&
+                    staleOrMissingRequestedFields.size > 0)
+                ) {
+                  break;
+                }
+              }
+            } else if (fields === '*') {
+              // "Data absent" (incomplete snapshot) is different from
+              // "complete but stale" (e.g. after a full item invalidation):
+              // only genuinely incomplete items may hide the list behind
+              // `loading` — stale but complete items stay visible while they
+              // refetch. A full item invalidation resets `loadedFields` to
+              // `[]` but leaves the pending-full-invalidation marker, which
+              // proves the item data was complete when invalidated (and is
+              // still present).
+              hasAnyIncompleteItem = effectiveQuery.query.items.some(
+                (itemKey) => {
+                  const item = state.items[itemKey];
+                  if (
+                    snapshotIsFullyLoaded(
+                      state.itemLoadedFields[itemKey],
+                      item,
+                      partialResources.inferFields,
+                    )
+                  ) {
+                    return false;
+                  }
+
+                  return !(
+                    itemsPendingFullInvalidation.has(itemKey) && item != null
+                  );
+                },
+              );
+              hasAnyStaleItem =
+                !hasAnyIncompleteItem &&
+                effectiveQuery.query.items.some(
+                  (itemKey) =>
+                    !snapshotIsFullyLoadedAndFresh(
+                      itemKey,
+                      state.itemLoadedFields[itemKey],
+                      state.items[itemKey],
+                      partialResources.inferFields,
+                      itemsPendingFullInvalidation,
+                    ),
+                );
+            }
+          }
+
           // Override status when partial resources has items with missing fields
           if (
             partialResources &&
             Array.isArray(fields) &&
-            fields.length > 0 &&
-            (status === 'success' || status === 'refetching')
+            statusCanBeOverridden &&
+            staleOrMissingRequestedFields &&
+            staleOrMissingRequestedFields.size > 0
           ) {
-            const someItemMissingFields = effectiveQuery.query.items.some(
-              (itemKey) => {
-                const loadedFields = state.itemLoadedFields[itemKey] ?? [];
-                return fields.some((f) => !loadedFields.includes(f));
-              },
-            );
-            const someItemMissingFieldsInState =
-              effectiveQuery.query.items.some((itemKey) => {
-                const item = state.items[itemKey];
-                if (!item || typeof item !== 'object') return true;
-                const itemRecord =
-                  // WORKAROUND: Partial-resource checks need indexed property access, but ItemState is generic and does not expose a string index signature.
-                  __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
-                return fields.some(
-                  (f) => !(f in itemRecord) || itemRecord[f] === undefined,
-                );
-              });
+            // Some item genuinely lacks data for a requested field: not
+            // tracked as loaded and not vouched by `inferFields`. Fields may
+            // be logical names, so raw key presence must not be used here —
+            // this must agree with the fetch effect's decision.
+            const someItemMissingFieldDataInState =
+              effectiveQuery.query.items.some(
+                (itemKey) =>
+                  getFallbackMissingRequestedFields(
+                    {
+                      item: state.items[itemKey],
+                      loadedFields: state.itemLoadedFields[itemKey],
+                    },
+                    fields,
+                    partialResources.inferFields,
+                  ).length > 0,
+              );
 
-            if (someItemMissingFields) {
-              if (!hasCachedItemsInState) {
-                status = 'loading';
-              } else if (someItemMissingFieldsInState) {
-                status = showPartialAsRefetching ? 'refetching' : 'loading';
-              } else {
-                // Requested fields are present in cached items; keep stale data
-                // visible and expose a refetching status while metadata catches up.
-                status = 'refetching';
-              }
+            if (!hasCachedItemsInState) {
+              status = 'loading';
+            } else if (someItemMissingFieldDataInState) {
+              status = showPartialAsRefetching ? 'refetching' : 'loading';
+            } else {
+              // Requested fields are present in cached items; keep stale data
+              // visible and expose a refetching status while metadata catches up.
+              status = 'refetching';
             }
           } else if (
             partialResources &&
             fields === '*' &&
-            (status === 'success' || status === 'refetching')
+            statusCanBeOverridden
           ) {
             const hasAnyFieldInvalidation = effectiveQuery.query.items.some(
               (itemKey) => {
@@ -726,35 +820,42 @@ export function useMultipleListQueries<
               },
             );
 
-            if (hasAnyFieldInvalidation) {
+            if (hasAnyIncompleteItem) {
+              if (!hasCachedItemsInState) {
+                status = 'loading';
+              } else {
+                status = showPartialAsRefetching ? 'refetching' : 'loading';
+              }
+            } else if (hasAnyStaleItem || hasAnyFieldInvalidation) {
               status = 'refetching';
             }
           }
 
           if (partialResources && showPartialAsRefetching) {
             if (Array.isArray(fields) && fields.length > 0) {
-              const pendingRequestedFields = fields.filter((field) =>
+              const pendingRequestedFields =
                 status === 'loading' && effectiveQuery.query.items.length === 0
-                  ? true
-                  : effectiveQuery.query.items.some((itemKey) => {
-                      const loadedFields =
-                        state.itemLoadedFields[itemKey] ?? [];
-                      return !loadedFields.includes(field);
-                    }),
-              );
+                  ? [...fields]
+                  : fields.filter(
+                      (field) =>
+                        staleOrMissingRequestedFields?.has(field) ?? false,
+                    );
 
               if (pendingRequestedFields.length > 0) {
                 loadingFields = pendingRequestedFields;
               }
             } else if (fields === '*') {
-              const pendingInvalidationFields = Array.from(
-                new Set(
-                  effectiveQuery.query.items.flatMap(
-                    (itemKey) =>
-                      state.itemFieldInvalidationFields[itemKey] ?? [],
-                  ),
-                ),
-              ).sort();
+              const hasAnyPartialItem = hasAnyIncompleteItem || hasAnyStaleItem;
+              const pendingInvalidationFields = hasAnyPartialItem
+                ? []
+                : Array.from(
+                    new Set(
+                      effectiveQuery.query.items.flatMap(
+                        (itemKey) =>
+                          state.itemFieldInvalidationFields[itemKey] ?? [],
+                      ),
+                    ),
+                  ).sort();
 
               if (pendingInvalidationFields.length > 0) {
                 loadingFields = pendingInvalidationFields;
@@ -803,8 +904,10 @@ export function useMultipleListQueries<
       );
     },
     [
+      getUnresolvedPendingInvalidationFields,
       getVisibleQueryItemKeys,
       isOfflineMode,
+      itemsPendingFullInvalidation,
       offlineEntitiesByKey,
       partialResources,
       queriesWithId,
@@ -846,6 +949,7 @@ export function useMultipleListQueries<
             const requestedFields = Array.isArray(queryConfig.fields)
               ? queryConfig.fields
               : undefined;
+            const requiresFullItems = queryConfig.fields === '*';
             const fallbackItemStatesByKey = new Map<
               string,
               ReturnType<NonNullable<typeof readFallbackItemState>>
@@ -855,15 +959,30 @@ export function useMultipleListQueries<
               const fallbackItemState = readFallbackItemState(itemKey);
               fallbackItemStatesByKey.set(itemKey, fallbackItemState);
 
-              if (
-                requestedFields &&
-                partialResources &&
-                !fallbackItemHasRequestedFields(
-                  fallbackItemState,
-                  requestedFields,
-                )
-              ) {
-                return result;
+              if (partialResources) {
+                // A '*' query must not present a partial fallback snapshot as a
+                // fully-loaded success; require each item to be complete (or
+                // reported complete by `inferFields`).
+                if (requiresFullItems) {
+                  if (
+                    !snapshotIsFullyLoaded(
+                      fallbackItemState?.loadedFields,
+                      fallbackItemState?.item,
+                      partialResources.inferFields,
+                    )
+                  ) {
+                    return result;
+                  }
+                } else if (
+                  requestedFields &&
+                  !fallbackItemHasRequestedFields(
+                    fallbackItemState,
+                    requestedFields,
+                    partialResources.inferFields,
+                  )
+                ) {
+                  return result;
+                }
               }
             }
             const fallbackItems = selectVisibleItems(
@@ -953,9 +1072,14 @@ export function useMultipleListQueries<
             requestedFields && requestedFields.length > 0
               ? effectiveQuery.query.items
                   .flatMap((itemKey) => {
-                    return excludeLoadedFields(
+                    return getStaleOrMissingRequestedFields(
+                      itemKey,
                       state.itemLoadedFields[itemKey],
+                      state.items[itemKey],
                       requestedFields,
+                      partialResources.inferFields,
+                      itemsPendingFullInvalidation,
+                      getUnresolvedPendingInvalidationFields(itemKey, state),
                     );
                   })
                   .filter(
@@ -1006,6 +1130,7 @@ export function useMultipleListQueries<
       [
         getHighestPendingInvalidationPriority,
         getUnresolvedPendingInvalidationFields,
+        itemsPendingFullInvalidation,
         partialResources,
         queriesWithId,
         resolveEffectiveQuery,
@@ -1172,11 +1297,16 @@ export function useMultipleListQueries<
 
           if (Array.isArray(fields) && fields.length > 0) {
             const hasMissingRequestedFields = effectiveQueryState.items.some(
-              (itemKey) => {
-                const loadedFields =
-                  store.state.itemLoadedFields[itemKey] ?? [];
-                return fields.some((field) => !loadedFields.includes(field));
-              },
+              (itemKey) =>
+                getStaleOrMissingRequestedFields(
+                  itemKey,
+                  store.state.itemLoadedFields[itemKey],
+                  store.state.items[itemKey],
+                  fields,
+                  partialResources.inferFields,
+                  itemsPendingFullInvalidation,
+                  getUnresolvedPendingInvalidationFields(itemKey),
+                ).length > 0,
             );
 
             if (hasMissingRequestedFields && !isQueryFetchInFlight) {
@@ -1222,6 +1352,16 @@ export function useMultipleListQueries<
               }
             }
           } else if (fields === '*') {
+            const hasAnyPartialItem = effectiveQueryState.items.some(
+              (itemKey) =>
+                !snapshotIsFullyLoadedAndFresh(
+                  itemKey,
+                  store.state.itemLoadedFields[itemKey],
+                  store.state.items[itemKey],
+                  partialResources.inferFields,
+                  itemsPendingFullInvalidation,
+                ),
+            );
             const hasAnyFieldInvalidation = effectiveQueryState.items.some(
               (itemKey) => {
                 return (
@@ -1230,7 +1370,10 @@ export function useMultipleListQueries<
               },
             );
 
-            if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
+            if (
+              (hasAnyPartialItem || hasAnyFieldInvalidation) &&
+              !isQueryFetchInFlight
+            ) {
               shouldFetch = true;
               requiredFetch = true;
 
@@ -1301,6 +1444,7 @@ export function useMultipleListQueries<
     automaticRetryState,
     itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
+    itemsPendingFullInvalidation,
     getHighestPendingInvalidationPriority,
     getUnresolvedPendingInvalidationFields,
     stickyDerivedQueryKeys,

@@ -41,6 +41,9 @@ export type TSDFItemQuery<ItemPayload extends ValidPayload> = {
   payload: ItemPayload;
 };
 
+/** Loaded partial-resource fields for one item, or `'*'` when fully loaded. */
+export type ItemLoadedFields = string[] | '*';
+
 /** Raw t-state shape used by a list-query store. */
 export type TSFDListQueryState<
   ItemState extends ValidStoreState,
@@ -54,7 +57,7 @@ export type TSFDListQueryState<
   /** Item query records keyed by item store key. */
   itemQueries: Record<string, TSDFItemQuery<ItemPayload> | null>;
   /** Loaded partial-resource fields for each item key. */
-  itemLoadedFields: Record<string, string[]>;
+  itemLoadedFields: Record<string, ItemLoadedFields>;
   /** Pending field invalidations for each item key. */
   itemFieldInvalidationFields: Record<string, string[]>;
 };
@@ -342,6 +345,11 @@ export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
   mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
   /** Returns an item containing only the requested fields. */
   selectFields: (fields: string[], item: ItemState) => ItemState;
+  /**
+   * Infers which logical fields are present in an item snapshot when loaded
+   * field metadata is unavailable.
+   */
+  inferFields: (item: ItemState) => ItemLoadedFields;
 };
 
 export type DerivedQuerySummary<QueryPayload extends ValidPayload> = {

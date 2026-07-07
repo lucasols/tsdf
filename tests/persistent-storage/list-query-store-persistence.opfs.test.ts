@@ -76,6 +76,10 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     }
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
+  inferFields: (item) =>
+    Object.entries(item)
+      .filter(([, value]) => value !== undefined)
+      .map(([field]) => field),
 };
 const fullLoadedFields = ['age', 'email', 'id', 'name'];
 
@@ -1818,12 +1822,13 @@ describe('opfs: list query store persistence', () => {
     `);
 
     // Drop the in-memory item without touching the persisted copy so the next
-    // preload must go back to storage.
+    // preload must go back to storage. Item keys are the serialized payload, so
+    // the string payload 'users||1' is stored under the key '"users||1'.
     act(() => {
       env.store.produceState((draft) => {
-        delete draft.items['users||1'];
-        delete draft.itemQueries['users||1'];
-        delete draft.itemLoadedFields['users||1'];
+        delete draft.items['"users||1'];
+        delete draft.itemQueries['"users||1'];
+        delete draft.itemLoadedFields['"users||1'];
       });
     });
 

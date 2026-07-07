@@ -2,6 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
+import type { ItemLoadedFields } from '../../src/listQueryStore/types';
 import { estimateManagedAsyncStorageEntrySizeBytes } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
   encodePersistedAsyncNamespaceKind,
@@ -38,7 +39,7 @@ type IndexedDbNamespacePolicyRecord = {
 type StorageSeedOptions = { timestamp?: number; version?: number };
 
 type ListQuerySeedItemOptions = StorageSeedOptions & {
-  loadedFields?: string[];
+  loadedFields?: ItemLoadedFields;
 };
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
@@ -202,24 +203,11 @@ function isValidEntryRecord(value: unknown): boolean {
   const record = getRecord(value);
   if (record === null) return false;
 
-  const allowedKeys = new Set([
-    'a',
-    'd',
-    'f',
-    'g',
-    'h',
-    'i',
-    'm',
-    'o',
-    'p',
-    'v',
-    'z',
-  ]);
+  const allowedKeys = new Set(['a', 'd', 'g', 'i', 'm', 'o', 'p', 'v', 'z']);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
     return false;
   }
 
-  const loadedFields = record.f;
   return (
     typeof record.i === 'string' &&
     typeof record.a === 'number' &&
@@ -228,11 +216,7 @@ function isValidEntryRecord(value: unknown): boolean {
     (record.z === undefined || typeof record.z === 'number') &&
     (record.m === undefined || getRecord(record.m) !== null) &&
     (record.g === undefined || typeof record.g === 'string') &&
-    (record.o === undefined || record.o === 1) &&
-    (loadedFields === undefined ||
-      (loadedFields instanceof Array &&
-        loadedFields.every((entry) => typeof entry === 'string'))) &&
-    (record.h === undefined || record.h === 1)
+    (record.o === undefined || record.o === 1)
   );
 }
 
@@ -407,9 +391,7 @@ function mergeCustomMetadata(fields: {
 type IndexedDbEntryRecord = {
   a: number;
   d: unknown;
-  f?: string[];
   g?: string;
-  h?: 1;
   i: string;
   m?: Record<string, unknown>;
   o?: 1;
@@ -421,7 +403,7 @@ type IndexedDbEntryRecord = {
 function compactEntryValue(
   scope: AsyncStorageNamespaceScope,
   value: unknown,
-): Pick<IndexedDbEntryRecord, 'd' | 'f' | 'h'> {
+): Pick<IndexedDbEntryRecord, 'd'> {
   const record = getRecord(value);
 
   switch (scope.kind) {
@@ -467,9 +449,9 @@ function buildCustomMetadata(
           : typeof record.p === 'string'
             ? { p: record.p }
             : {}),
-        ...(Array.isArray(record.loadedFields)
+        ...(Array.isArray(record.loadedFields) || record.loadedFields === '*'
           ? { f: record.loadedFields }
-          : Array.isArray(record.lf)
+          : Array.isArray(record.lf) || record.lf === '*'
             ? { f: record.lf }
             : {}),
       };

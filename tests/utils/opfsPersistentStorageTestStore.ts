@@ -1,6 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import type { ItemLoadedFields } from '../../src/listQueryStore/types';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getPayloadRecordKey,
@@ -87,7 +88,7 @@ function getLogicalStorageKey(
 type StorageSeedOptions = { timestamp?: number; version?: number };
 
 type ListQuerySeedItemOptions = StorageSeedOptions & {
-  loadedFields?: string[];
+  loadedFields?: ItemLoadedFields;
 };
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };

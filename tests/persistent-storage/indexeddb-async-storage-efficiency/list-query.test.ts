@@ -1,3 +1,4 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
@@ -19,6 +20,7 @@ import {
   flushInvalidationPersistence,
   getAsyncListItemEntrySizeBytes,
   getAsyncListQueryEntrySizeBytes,
+  partialResourcesConfig,
   rawItemPayload,
   resolveAfterIndexedDbStorage,
   setProtectedKeysSnapshot,
@@ -664,10 +666,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
-        "users||1:
-          a: 1735689600000
-          f: ['age', 'email', 'id', 'name']
-          p: 'users||1'
+        "users||1: { a: 1735689600000, p: 'users||1' }
     `);
     expect(
       await readListQueryItemPayloadSnapshot({
@@ -794,7 +793,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
       maxItemBytes: sumPersistedEntryBytes(
         getAsyncListItemEntrySizeBytes(rawItemPayload('standalone', 1), {
           id: 1,
-          name: 'Expired oldest',
+          name: 'Expired recent',
         }),
         getAsyncListItemEntrySizeBytes(rawItemPayload('admins', 4), {
           id: 4,
@@ -813,7 +812,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
     // Persist two standalone items that will later look expired to the cleanup pass.
     env.apiStore.addItemToState(rawItemPayload('standalone', 1), {
       id: 1,
-      name: 'Expired oldest',
+      name: 'Expired recent',
     });
     await advanceTime(1100);
     await settleIndexedDbStorage();
@@ -821,18 +820,24 @@ describe('indexeddb async storage efficiency: list-query', () => {
     await advanceTime(100);
     env.apiStore.addItemToState(rawItemPayload('standalone', 2), {
       id: 2,
-      name: 'Expired newer',
+      name: 'Expired older',
     });
     await advanceTime(1100);
     await settleIndexedDbStorage();
 
-    // Persist one query-backed item before introducing a second query-backed item.
+    // Persist one query-backed item before introducing a second query-backed
+    // item. This flush already overflows the item budget, so the least recently
+    // persisted item (standalone||1) loses its storage slot here while staying
+    // loaded in memory.
     env.scheduleFetch('highPriority', usersQuery);
     await settleIndexedDbStorage();
     await advanceTime(1100);
     await settleIndexedDbStorage();
 
-    // Backdate the standalone entries so the later maxItems cleanup sees them as stale persisted candidates.
+    // Backdate the standalone entries so the later maxItems cleanup sees them
+    // as stale candidates (standalone||1 is already out of storage, so its
+    // backdate only touches leftover metadata). The timestamps are distinct so
+    // the recency ordering stays deterministic.
     mockAdapter.setMetadata(
       listQueryScope.listQuery.itemStorageKey('standalone', 1),
       {
@@ -848,7 +853,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
         ...(await mockAdapter.readMetadata(
           listQueryScope.listQuery.itemStorageKey('standalone', 2),
         )),
-        lastAccessAt: expiredTimestamp,
+        lastAccessAt: expiredTimestamp - 60 * 60 * 1000,
       },
     );
     await settleIndexedDbStorage();
@@ -863,9 +868,13 @@ describe('indexeddb async storage efficiency: list-query', () => {
     await settleIndexedDbStorage();
     const operationsBreakdown = readCapture.finish().timelineString;
 
+    // The budget keeps the two most recently accessed items: the freshly
+    // fetched admins||4 and the query-backed users||3. The stale standalone||2
+    // is removed, and the previously budget-evicted standalone||1 is not
+    // resurrected as if it were freshly accessed.
     expect(
       (await listQueryScope.listQuery.listStoredItemKeys()).sort(),
-    ).toMatchInlineSnapshot(`['"admins||4', '"standalone||2']`);
+    ).toMatchInlineSnapshot(`['"admins||4', '"users||3']`);
     expect(
       await readListQueryItemNamespaceSnapshot({
         mockAdapter,
@@ -874,8 +883,8 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
-        "admins||4: { a: 1735689619227, p: 'admins||4' }
-        "standalone||2: { a: 1735689619227, p: 'standalone||2' }
+        "admins||4: { a: 1735689619226, p: 'admins||4' }
+        "users||3: { a: 1735689616210, p: 'users||3' }
 
       staticPolicy: { b: 147 }
     `);
@@ -888,10 +897,10 @@ describe('indexeddb async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       entries:
         {tableId:"admins"}:
-          a: 1735689619181
+          a: 1735689619180
           p: { tableId: 'admins' }
         {tableId:"users"}:
-          a: 1735689616163
+          a: 1735689616164
           p: { tableId: 'users' }
     `);
     expect(
@@ -913,9 +922,9 @@ describe('indexeddb async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       ""
       1.812s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-expired-during-max-items","listQuery.query"] order=lru-desc -> ["{tableId:\\"users\\"}"]
-      1.816s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-expired-during-max-items","listQuery.item"] order=lru-desc -> ["\\"users||3", "\\"standalone||1"]
+      1.816s | 🔎 entries.byScopeLastAccessAt scope=["sess1","lq-expired-during-max-items","listQuery.item"] order=lru-desc -> ["\\"users||3", "\\"standalone||2"]
       1.862s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-expired-during-max-items","listQuery.query"] put=["{tableId:\\"admins\\"}"] delete=[] touch=[] static-policy
-      1.914s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-expired-during-max-items","listQuery.item"] put=["\\"admins||4", "\\"standalone||2"] delete=["\\"standalone||1", "\\"users||3"] touch=[] static-policy
+      1.91s | ✍️ tx(entries, namespacePolicies).commit scope=["sess1","lq-expired-during-max-items","listQuery.item"] put=["\\"admins||4"] delete=["\\"standalone||2"] touch=[] static-policy
       ""
     `);
 
@@ -942,7 +951,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
             rows:
               - key: ['["sess1","lq-expired-during-max-items","li"]', '"admins||4']
                 value: 'JSON object | 0.3 kb'
-              - key: ['["sess1","lq-expired-during-max-items","li"]', '"standalone||2']
+              - key: ['["sess1","lq-expired-during-max-items","li"]', '"users||3']
                 value: 'JSON object | 0.3 kb'
               - key: ['["sess1","lq-expired-during-max-items","lq"]', '{tableId:"admins"}']
                 value: 'JSON object | 0.3 kb'
@@ -1497,6 +1506,122 @@ describe('indexeddb async storage efficiency: list-query', () => {
     );
   });
 
+  test("round-trip persistence preserves the fully-loaded ('*') marker for cached items", async () => {
+    const storeName = 'lq-full-star-roundtrip';
+    const sessionKey = 'sess1';
+    const itemPayload = rawItemPayload('users', 1);
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+
+    // Writer session: fetch the complete item so the fully-loaded ('*') marker
+    // must be persisted alongside the item data.
+    const writerEnv = createListQueryEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 31, email: 'cached@site.test' }],
+      },
+    });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    writerEnv.apiStore.scheduleItemFetch('highPriority', itemPayload, {
+      fields: '*',
+    });
+
+    await settleIndexedDbStorage();
+    await advanceTime(1100);
+    await settleIndexedDbStorage();
+
+    // The persisted manifest metadata must carry `f: '*'`; if the adapter
+    // rejected the marker the entry would be silently dropped on read.
+    expect(
+      await readListQueryItemNamespaceSnapshot({
+        mockAdapter,
+        sessionKey,
+        storeName,
+      }),
+    ).toMatchInlineSnapshot(`
+      entries:
+        "users||1: { a: 1735689613862, f: '*', p: 'users||1' }
+    `);
+    expect(
+      await readListQueryItemPayloadSnapshot({
+        id: 1,
+        mockAdapter,
+        sessionKey,
+        storeName,
+        tableId: 'users',
+      }),
+    ).toMatchInlineSnapshot(`
+      age: 31
+      email: 'cached@site.test'
+      id: 1
+      name: 'Cached'
+    `);
+
+    // Reader session: same storage, but the server now has newer data so we
+    // can tell hydrated data ('Cached') apart from fetched data ('Fresh').
+    const readerEnv = createListQueryEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 32, email: 'fresh@site.test' }],
+      },
+    });
+
+    // Hydrate the cached snapshot into the reader before any hook subscribes.
+    expect(
+      await resolveAfterIndexedDbStorage(
+        readerEnv.apiStore.preloadItemFromStorage(itemPayload),
+        mockAdapter,
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||1', preloaded: '✅' }`);
+
+    // Hydration restored the fully-loaded marker, so a `fields: '*'` read is
+    // satisfiable from the cached snapshot.
+    expect(
+      readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)],
+    ).toBe('*');
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: '*',
+        returnRefetchingStatus: true,
+      });
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    await settleIndexedDbStorage();
+
+    // The hook renders success with the hydrated data right away and only
+    // transitions through a background revalidation, never a blocking load.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+
+    // The only network request is the low-priority revalidation of the
+    // hydrated item, not a fields-driven fetch of missing data.
+    expect(
+      readerEnv.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+    `);
+
+    // The marker survives the revalidation.
+    expect(
+      readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)],
+    ).toBe('*');
+  });
+
   test('useListQuery invalidation snapshots the full query persistence timeline through the refetch save', async () => {
     const storeName = 'lq-query-invalidation-flow';
     const sessionKey = 'sess1';
@@ -1719,12 +1844,8 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
-        "users||1:
-          a: 1735689600000
-          f: ['age', 'email', 'id', 'name']
-          o: '✅'
-          p: 'users||1'
-        "users||2: { a: 1735689617878, p: 'users||2' }
+        "users||1: { a: 1735689600000, o: '✅', p: 'users||1' }
+        "users||2: { a: 1735689617832, p: 'users||2' }
     `);
     expect(
       await readListQueryItemPayloadSnapshot({
@@ -2189,10 +2310,7 @@ describe('indexeddb async storage efficiency: list-query', () => {
       }),
     ).toMatchInlineSnapshot(`
       entries:
-        "users||1:
-          a: 1735689600000
-          f: ['age', 'email', 'id', 'name']
-          p: 'users||1'
+        "users||1: { a: 1735689600000, p: 'users||1' }
     `);
     expect(mutationOperations).toContain(
       'commit scope=["sess1","lq-mutation-flow","listQuery.item"] put=["\\"users||1"] delete=[] touch=[] static-policy',
@@ -2311,23 +2429,14 @@ describe('indexeddb async storage efficiency: list-query', () => {
           }),
         ),
       ),
-      maxQueryBytes: Math.max(
-        sumPersistedEntryBytes(
-          getAsyncListQueryEntrySizeBytes(usersQuery, [
-            storeItemKey('users', 1),
-          ]),
-          getAsyncListQueryEntrySizeBytes(projectsQuery, [
-            storeItemKey('projects', 1),
-          ]),
-        ),
-        sumPersistedEntryBytes(
-          getAsyncListQueryEntrySizeBytes(projectsQuery, [
-            storeItemKey('projects', 1),
-          ]),
-          getAsyncListQueryEntrySizeBytes(tasksQuery, [
-            storeItemKey('tasks', 1),
-          ]),
-        ),
+      // All three queries fit the query budget — the byte pressure that forces
+      // an eviction during the tasks flush comes from maxItemBytes alone.
+      maxQueryBytes: sumPersistedEntryBytes(
+        getAsyncListQueryEntrySizeBytes(usersQuery, [storeItemKey('users', 1)]),
+        getAsyncListQueryEntrySizeBytes(projectsQuery, [
+          storeItemKey('projects', 1),
+        ]),
+        getAsyncListQueryEntrySizeBytes(tasksQuery, [storeItemKey('tasks', 1)]),
       ),
       serverData: {
         users: [{ id: 1, name: 'User 1' }],
