@@ -269,7 +269,7 @@ type ListQueryScheduleItemFetchApi<
 };
 
 type ListQueryLoadMoreWithFieldsOptions<TPartialResources extends boolean> = {
-  /** Number of additional items to request. Defaults to the store's `defaultLoadMoreSize`, then `defaultQuerySize`. */
+  /** Number of additional items to request. Defaults to the store's `defaultQuerySize`. */
   size?: number;
 } & ListQueryFetchFieldsOption<TPartialResources>;
 
@@ -284,7 +284,7 @@ type ListQueryLoadMoreApi<
         | [options: ListQueryLoadMoreWithFieldsOptions<TPartialResources>]
     :
         | [
-            /** Number of additional items to request. Defaults to the store's `defaultLoadMoreSize`, then `defaultQuerySize`. */
+            /** Number of additional items to request. Defaults to the store's `defaultQuerySize`. */
             size?: number,
             options?: ListQueryFetchFieldsOption<TPartialResources>,
           ]
@@ -1123,8 +1123,6 @@ type ListQueryStoreOptionsBase<
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   /** Default number of items requested by list-query fetches. Defaults to 50. */
   defaultQuerySize?: number;
-  /** Default number of additional items requested by `loadMore(...)` calls without an explicit size. Defaults to `defaultQuerySize`. */
-  defaultLoadMoreSize?: number;
   /** Max items per item batch. Defaults to 50. Triggers an immediate fetch when reached. */
   maxItemBatchSize?: number;
   /** Maximum number of cached items kept in memory. Defaults to 5,000. Item pressure may evict whole inactive queries to avoid leaving cached queries partially loaded. */
@@ -1299,7 +1297,6 @@ export function createListQueryStore<
     batchFetchItemFn,
     getItemsBatchKey,
     defaultQuerySize = 50,
-    defaultLoadMoreSize,
     maxItemBatchSize = 50,
     maxItems = 5_000,
     maxQueries = 1_000,
@@ -1945,7 +1942,6 @@ export function createListQueryStore<
     onSchedulerEvent,
     usesRealTimeUpdates,
     defaultQuerySize,
-    defaultLoadMoreSize,
     maxItemBatchSize,
     getQueryKey,
     getItemKey,

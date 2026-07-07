@@ -164,7 +164,6 @@ export function createListQueryStoreTestEnv<
     backgroundCoalescingDelayMs,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
-    defaultLoadMoreSize,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     testScenario,
     usesRealTimeUpdates,
@@ -206,7 +205,6 @@ export function createListQueryStoreTestEnv<
     backgroundCoalescingDelayMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
-    defaultLoadMoreSize?: number;
     lowPriorityThrottleMs?: number;
     testScenario?: ListQueryStoreTestScenario;
     usesRealTimeUpdates?: boolean;
@@ -402,7 +400,6 @@ export function createListQueryStoreTestEnv<
     transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     defaultQuerySize,
-    defaultLoadMoreSize,
     usesRealTimeUpdates,
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     maxItems,

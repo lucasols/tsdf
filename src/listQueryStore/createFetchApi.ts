@@ -114,7 +114,6 @@ type CreateFetchApiOptions<
   ) => void;
   usesRealTimeUpdates: boolean;
   defaultQuerySize: number;
-  defaultLoadMoreSize?: number;
   maxItemBatchSize?: number;
   getQueryKey: (params: QueryPayload) => string;
   getItemKey: (params: ItemPayload) => string;
@@ -222,7 +221,6 @@ export function createFetchApi<
     | undefined,
   usesRealTimeUpdates: boolean,
   defaultQuerySize: number,
-  defaultLoadMoreSize: number | undefined,
   maxItemBatchSize: number | undefined,
   getQueryKey: (params: QueryPayload) => string,
   getItemKey: (params: ItemPayload) => string,
@@ -1000,7 +998,7 @@ export function createFetchApi<
     const loadSize =
       typeof sizeOrOptions === 'number'
         ? sizeOrOptions
-        : (sizeOrOptions?.size ?? defaultLoadMoreSize ?? defaultQuerySize);
+        : (sizeOrOptions?.size ?? defaultQuerySize);
 
     const queryState = getQueryStateByKey(queryKey);
 
