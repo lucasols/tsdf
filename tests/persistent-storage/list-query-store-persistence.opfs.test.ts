@@ -543,6 +543,115 @@ describe('opfs: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['id', 'name']`);
   });
 
+  test("round-trip persistence preserves the fully-loaded ('*') marker for cached items", async () => {
+    const storeName = 'lq-opfs-full-star-roundtrip';
+    const sessionKey = 'sess1';
+    const itemPayload = 'users||1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 31, email: 'cached@site.test' }],
+      },
+    });
+
+    writerEnv.apiStore.scheduleItemFetch('highPriority', itemPayload, {
+      fields: '*',
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const itemIndex = __LEGIT_CAST__<
+      { e: Record<string, { f?: unknown; p?: unknown }> },
+      unknown
+    >(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/li._i.r.json`));
+    const itemMetadata = itemIndex.e[listQueryScope.itemKey('users', 1)];
+    expect({ f: itemMetadata?.f, p: itemMetadata?.p }).toMatchInlineSnapshot(`
+        f: '*'
+        p: 'users||1'
+      `);
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`
+      age: 31
+      email: 'cached@site.test'
+      id: 1
+      name: 'Cached'
+    `);
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 32, email: 'fresh@site.test' }],
+      },
+    });
+
+    const preloadPromise =
+      readerEnv.apiStore.preloadItemFromStorage(itemPayload);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+
+    expect(
+      readerEnv.store.state.itemLoadedFields[
+        listQueryScope.itemKey('users', 1)
+      ],
+    ).toBe('*');
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: '*',
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      "
+    `);
+    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      ⋅⋅⋅
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('item', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+    expect(
+      readerEnv.store.state.itemLoadedFields[
+        listQueryScope.itemKey('users', 1)
+      ],
+    ).toBe('*');
+  });
+
   test('partial-resource persistence stores each item with its own loaded fields', async () => {
     const storeName = 'lq-opfs-partial-multiple-item-fields';
     const sessionKey = 'sess1';

@@ -667,9 +667,12 @@ function normalizeLogicalPayload(
       return {
         data: record !== null && 'd' in record ? record.d : value,
         payload: metadata.customMetadata.p,
-        ...(Array.isArray(metadata.customMetadata.f)
+        ...(Array.isArray(metadata.customMetadata.f) ||
+        metadata.customMetadata.f === '*'
           ? { loadedFields: metadata.customMetadata.f }
-          : record !== null && 'lf' in record && Array.isArray(record.lf)
+          : record !== null &&
+              'lf' in record &&
+              (Array.isArray(record.lf) || record.lf === '*')
             ? { loadedFields: record.lf }
             : {}),
       };

@@ -89,6 +89,12 @@ function getStoredValueSizeBytes(
   return raw === null ? undefined : utf8Encoder.encode(raw).byteLength;
 }
 
+function getLoadedFields(value: unknown): ItemLoadedFields | undefined {
+  return value === '*' || Array.isArray(value)
+    ? __LEGIT_CAST__<ItemLoadedFields, unknown>(value)
+    : undefined;
+}
+
 export type PersistentTestStoreScope = {
   document: {
     storageKey: () => string;
@@ -499,12 +505,8 @@ function createPersistentTestStore(
                   ? {
                       data: __LEGIT_CAST__<T, unknown>(v.d),
                       payload: __LEGIT_CAST__<string, unknown>(v.p),
-                      ...('lf' in v && Array.isArray(v.lf)
-                        ? {
-                            loadedFields: __LEGIT_CAST__<string[], unknown>(
-                              v.lf,
-                            ),
-                          }
+                      ...('lf' in v && getLoadedFields(v.lf) !== undefined
+                        ? { loadedFields: getLoadedFields(v.lf) }
                         : {}),
                     }
                   : null,
@@ -534,12 +536,8 @@ function createPersistentTestStore(
                     ? {
                         data: __LEGIT_CAST__<T, unknown>(v.d),
                         payload: __LEGIT_CAST__<string, unknown>(v.p),
-                        ...('lf' in v && Array.isArray(v.lf)
-                          ? {
-                              loadedFields: __LEGIT_CAST__<string[], unknown>(
-                                v.lf,
-                              ),
-                            }
+                        ...('lf' in v && getLoadedFields(v.lf) !== undefined
+                          ? { loadedFields: getLoadedFields(v.lf) }
                           : {}),
                       }
                     : null,
