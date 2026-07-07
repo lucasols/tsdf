@@ -346,8 +346,21 @@ export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
   /** Returns an item containing only the requested fields. */
   selectFields: (fields: string[], item: ItemState) => ItemState;
   /**
-   * Infers which logical fields are present in an item snapshot when loaded
-   * field metadata is unavailable.
+   * Reports which logical fields are genuinely present in an item snapshot,
+   * or `'*'` when the snapshot is complete.
+   *
+   * It is the only availability signal for snapshots without loaded-field
+   * metadata (manually inserted items, persisted fallback snapshots, offline
+   * optimistic rows), but it is also consulted for metadata-tracked items:
+   * metadata only records what fetches delivered, so `inferFields` can vouch
+   * for fields present beyond the tracked list (e.g. written by a mutation)
+   * and avoid refetching data that is already there.
+   *
+   * Because it can vouch for any snapshot, it must only report fields whose
+   * data is genuinely usable — never return `'*'` unconditionally unless
+   * every snapshot the store can hold is complete. Staleness is handled by
+   * TSDF: fields awaiting an invalidation refetch are excluded before
+   * `inferFields` is consulted.
    */
   inferFields: (item: ItemState) => ItemLoadedFields;
 };

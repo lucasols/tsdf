@@ -509,9 +509,22 @@ export function useMultipleItems<
       return queriesWithId.map(({ itemKey, fields }) => {
         const itemQuery = state.itemQueries[itemKey];
         const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+        // Same stale-or-missing signal the fetch effect uses, so every
+        // transition the effect would act on wakes it. A metadata-only signal
+        // misses invalidations of metadata-free (`inferFields`-vouched) items:
+        // their tracked missing fields are identical before and after the
+        // invalidation, so hooks would not refetch until another state change.
         const missingRequestedFields =
           partialResources && Array.isArray(fields) && fields.length > 0
-            ? excludeLoadedFields(loadedFields, fields).sort()
+            ? getStaleOrMissingRequestedFields(
+                itemKey,
+                state.itemLoadedFields[itemKey],
+                state.items[itemKey],
+                fields,
+                partialResources.inferFields,
+                itemsPendingFullInvalidation,
+                getUnresolvedPendingInvalidationFields(itemKey),
+              ).sort()
             : [];
         const needsFullFetch =
           partialResources && fields === '*'
@@ -532,7 +545,12 @@ export function useMultipleItems<
         };
       });
     },
-    [itemsPendingFullInvalidation, partialResources, queriesWithId],
+    [
+      getUnresolvedPendingInvalidationFields,
+      itemsPendingFullInvalidation,
+      partialResources,
+      queriesWithId,
+    ],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {

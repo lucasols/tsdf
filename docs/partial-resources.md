@@ -51,8 +51,9 @@ const userStore = createListQueryStore<User, UserFilter, string, true>({
       return result as User;
     },
 
-    // Infer which logical fields are present when TSDF has an item snapshot
-    // but no loaded-field metadata, such as manually added or offline items.
+    // Report which logical fields are genuinely present in an item snapshot —
+    // the only signal for metadata-free snapshots (manually added or offline
+    // items), and a way to vouch for fields present beyond tracked metadata.
     inferFields: (item) =>
       Object.keys(item).filter((field) => item[field] !== undefined),
   },
@@ -68,7 +69,7 @@ const userStore = createListQueryStore<User, UserFilter, string, true>({
 3. When a hook requests fields that haven't been loaded yet, a fetch is triggered requesting only the missing fields
 4. The `mergeItems` function combines the newly fetched data with previously loaded data
 5. The `selectFields` function extracts the requested fields for the hook's return value
-6. The `inferFields` function identifies fields in metadata-free item snapshots
+6. The `inferFields` function reports which fields are genuinely present in an item snapshot, complementing (or substituting for) the tracked metadata
 
 ## Using Fields in Hooks
 
@@ -181,6 +182,10 @@ Called when a hook requests specific fields. Should return an item containing on
 inferFields: (item: ItemState) => string[] | '*';
 ```
 
-Called when TSDF has an item snapshot but no `itemLoadedFields` metadata for it. This can happen for manually inserted items, persisted fallback snapshots, and offline optimistic rows. Return the logical fields that are available, or `'*'` if the snapshot is complete.
+Reports which logical fields are genuinely present in an item snapshot. Return the available fields, or `'*'` if the snapshot is complete.
 
-TSDF does not infer fields by checking object keys internally. If your field names are top-level properties, implement that rule explicitly in `inferFields`; if your fields are logical or nested, return those logical field names instead.
+It is the only availability signal for snapshots without `itemLoadedFields` metadata — manually inserted items, persisted fallback snapshots, and offline optimistic rows. But it is also consulted for metadata-tracked items: the loaded-fields metadata only records what fetches delivered, so `inferFields` can additionally vouch for fields that are present beyond the tracked list (e.g. written into the item by a mutation), avoiding refetches of data that is already there. Returning `'*'` marks the snapshot complete even when the tracked metadata is a partial field list.
+
+Because it can vouch for any snapshot, `inferFields` must only report fields whose data is genuinely usable — inspect the item, don't return `'*'` unconditionally unless every snapshot your store can ever hold is complete. Staleness is not its concern: fields awaiting an invalidation refetch are excluded by TSDF before `inferFields` is consulted.
+
+TSDF does not infer fields by checking object keys internally. If your field names are top-level properties, implement that rule explicitly in `inferFields` (excluding keys with `undefined` values); if your fields are logical or nested, return those logical field names instead.

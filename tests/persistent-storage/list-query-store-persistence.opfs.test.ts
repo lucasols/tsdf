@@ -575,9 +575,9 @@ describe('opfs: list query store persistence', () => {
     >(getParsedOpfsFileData(`tsdf/${sessionKey}/${storeName}/li._i.r.json`));
     const itemMetadata = itemIndex.e[listQueryScope.itemKey('users', 1)];
     expect({ f: itemMetadata?.f, p: itemMetadata?.p }).toMatchInlineSnapshot(`
-        f: '*'
-        p: 'users||1'
-      `);
+      f: '*'
+      p: 'users||1'
+    `);
     expect(
       getParsedOpfsFileData(
         `tsdf/${sessionKey}/${storeName}/li.<${listQueryScope.itemKey('users', 1)}>.p.json`,
@@ -642,9 +642,9 @@ describe('opfs: list query store persistence', () => {
     expect(
       readerEnv.serverTable.getRequestHistory('item', { includeTime: false }),
     ).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload: { itemId: 'users||1' }
-      `);
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+    `);
     expect(
       readerEnv.store.state.itemLoadedFields[
         listQueryScope.itemKey('users', 1)

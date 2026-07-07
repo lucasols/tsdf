@@ -230,16 +230,14 @@ describe('partial resources: full invalidation of a fully-loaded item', () => {
     expect(result.current.name.status).toBe('success');
     expect(result.current.address.status).toBe('success');
 
-    // Each refetch requested only its own field — no duplicate or full fetches.
+    // A single refetch coalesced both mounted hooks' fields (same as the
+    // metadata-tracked case above) — no serialized per-hook refetches and no
+    // over-broad ('*') fetch.
     expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
       .toMatchInlineSnapshot(`
         - _type: 'item'
           payload:
-            fields: ['name']
-            itemId: 'users||1'
-        - _type: 'item'
-          payload:
-            fields: ['address']
+            fields: ['address', 'name']
             itemId: 'users||1'
       `);
   });
@@ -961,5 +959,67 @@ describe('partial resources: inferFields reporting a complete snapshot', () => {
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(
       `[]`,
     );
+  });
+
+  // `itemLoadedFields` metadata only records what fetches delivered, so it is
+  // a lower bound on what a snapshot holds. When a mutation writes the
+  // remaining fields into a partially fetched item, `inferFields` vouches for
+  // the data beyond the tracked metadata — hooks must trust it instead of
+  // refetching fields that are already present.
+  test('hooks trust fields written beyond the tracked metadata without refetching', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: starInferFieldsConfig,
+    });
+
+    // The item is partially fetched: metadata tracks only ['id', 'name'].
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: ['id', 'name'],
+    });
+    await flushAllTimers();
+    await preload;
+
+    // A client mutation fills in the remaining fields (e.g. a confirmed
+    // mutation response merged into state). The tracked metadata is not
+    // updated — only `inferFields` can vouch for the written fields.
+    act(() => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.address = 'Client Address 1';
+        draft.age = 10;
+        draft.country = 'Country 1';
+      });
+    });
+    const storeItemKey = env.getStoreItemKeyFromRaw('users||1');
+    expect(
+      env.store.state.itemLoadedFields[storeItemKey],
+    ).toMatchInlineSnapshot(`['id', 'name']`);
+
+    // One hook reads a mutation-written field, another reads the full item.
+    const { result } = renderHook(() => {
+      const addressHook = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['address'],
+      });
+      const fullHook = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: '*',
+      });
+      return { address: addressHook, full: fullHook };
+    });
+
+    await flushAllTimers();
+
+    // Both hooks trust the snapshot (`inferFields` reports it complete):
+    // success with the client-written data, and no fetch beyond the initial
+    // partial load.
+    expect(result.current.address.status).toBe('success');
+    expect(result.current.address.data?.address).toBe('Client Address 1');
+    expect(result.current.full.status).toBe('success');
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+      `);
   });
 });
