@@ -2484,6 +2484,14 @@ export function createCollectionStore<
     () => {
       invalidateItem(() => true, 'realtimeUpdate');
     },
+    () => {
+      for (const scheduler of batchKeySchedulers.values()) {
+        scheduler.reevaluateDelayedRTU();
+      }
+      for (const scheduler of perItemSchedulers.values()) {
+        scheduler.reevaluateDelayedRTU();
+      }
+    },
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,

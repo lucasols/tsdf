@@ -1601,6 +1601,18 @@ export function createFetchApi<
     itemKeyToPayload.clear();
   }
 
+  function reevaluateDelayedRTUs() {
+    for (const scheduler of querySchedulers.values()) {
+      scheduler.reevaluateDelayedRTU();
+    }
+    for (const scheduler of batchKeySchedulers.values()) {
+      scheduler.reevaluateDelayedRTU();
+    }
+    for (const scheduler of perItemSchedulers.values()) {
+      scheduler.reevaluateDelayedRTU();
+    }
+  }
+
   function syncRemoteFetchStart(
     targetKey: string,
     requestIds: string[],
@@ -1691,5 +1703,6 @@ export function createFetchApi<
     deleteQueryFetchResources,
     deleteItemFetchResources,
     resetSchedulers,
+    reevaluateDelayedRTUs,
   };
 }

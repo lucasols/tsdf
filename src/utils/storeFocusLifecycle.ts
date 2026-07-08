@@ -25,6 +25,7 @@ export function createStoreFocusLifecycle(
   onWindowFocus: (handler: () => void) => () => void,
   onWindowFocusRevalidate: () => void,
   onTransportReconnectRevalidate: () => void,
+  onWindowFocusReevaluateDelayedRTU: () => void,
   debug: FocusLifecycleDebugOptions | undefined,
 ): StoreFocusLifecycle {
   let cleanupFocusListener: (() => void) | null = null;
@@ -119,15 +120,23 @@ export function createStoreFocusLifecycle(
     hasPendingReconnectRevalidateOnFocus = false;
     lastTransportReconnectRevalidateAt = Number.NEGATIVE_INFINITY;
 
-    if (!revalidateOnWindowFocus) return;
-
     if (usesRealTimeUpdates) {
-      logWindowFocusRevalidate?.('window focus revalidation skipped', {
-        reason: 'real-time-updates',
-        status: 'skipped',
-      });
+      if (revalidateOnWindowFocus) {
+        logWindowFocusRevalidate?.('window focus revalidation skipped', {
+          reason: 'real-time-updates',
+          status: 'skipped',
+        });
+      }
+
+      // Realtime stores skip focus revalidation, but a delayed realtime
+      // update priced with the unfocused throttle must be re-evaluated on
+      // focus so it fires at the focused cadence instead of keeping the tab
+      // stale for the rest of the background window.
+      cleanupFocusListener = onWindowFocus(onWindowFocusReevaluateDelayedRTU);
       return;
     }
+
+    if (!revalidateOnWindowFocus) return;
 
     cleanupFocusListener = onWindowFocus(() => {
       const enabled = isFocusRevalidationEnabled();

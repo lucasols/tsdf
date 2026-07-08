@@ -103,11 +103,15 @@ function matchesShouldCancel<T>(
 
 type DelayedRequest<T> = QueuedRequest<T> & { timeoutId: TimeoutId };
 
+/** Absolute fire time is kept so the delay can be re-evaluated when the
+ * dynamic throttle changes (e.g. window regains focus) */
+type RtuDelayedRequest<T> = DelayedRequest<T> & { fireAt: number };
+
 /** Pending states that can coexist with any phase */
 type PendingStates<T> = {
   /** Requests scheduled for after current fetch completes */
   scheduledRequests: Map<string, PendingRequest<T>>;
-  rtuDelayed: DelayedRequest<T> | null;
+  rtuDelayed: RtuDelayedRequest<T> | null;
   mediumPriorityDelayed: DelayedRequest<T> | null;
   /** Request IDs with active mutations (value = count of active mutations) */
   mutationsInProgress: Map<string, number>;
@@ -445,6 +449,45 @@ export class RequestScheduler<T> {
     }
 
     this.#state = this.#createInitialState();
+  }
+
+  /** Re-evaluates the pending delayed realtime update fetch against the
+   * current dynamic throttle, rescheduling it sooner (or firing it right away
+   * when the recomputed interval has already elapsed). Used when the window
+   * regains focus so a refetch priced with the background throttle doesn't
+   * keep the tab stale. Never extends the pending delay. */
+  reevaluateDelayedRTU(): void {
+    const rtu = this.#state.pending.rtuDelayed;
+    if (!rtu || !this.#dynamicRealtimeThrottleMs) return;
+
+    const { timing } = this.#state;
+    const newFireAt =
+      timing.lastFetchStartTime +
+      timing.lastFetchDuration +
+      this.#dynamicRealtimeThrottleMs(timing.lastFetchDuration);
+
+    if (newFireAt >= rtu.fireAt) return;
+
+    clearTimeout(rtu.timeoutId);
+    this.#state.pending.rtuDelayed = null;
+
+    const wasDelayed = this.#scheduleDelayedRTU(
+      Date.now(),
+      rtu.requestId,
+      rtu.payload,
+      rtu.remoteStartCancelable,
+    );
+
+    if (!wasDelayed) {
+      this.#onEvent?.('scheduled-rt-fetch-started');
+      this.#scheduleRequest(
+        rtu.requestId,
+        'highPriority',
+        rtu.payload,
+        undefined,
+        rtu.remoteStartCancelable,
+      );
+    }
   }
 
   cancelCoalescingRequests(requestIds: string[]): boolean {
@@ -1145,6 +1188,7 @@ export class RequestScheduler<T> {
       priority: 'realtimeUpdate',
       addedAt: startTime,
       remoteStartCancelable,
+      fireAt: startTime + delay,
     };
 
     this.#onEvent?.('rt-fetch-scheduled', { delayMs: delay });

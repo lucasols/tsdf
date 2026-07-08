@@ -1127,6 +1127,9 @@ export function createDocumentStore<
     () => {
       invalidateData('realtimeUpdate');
     },
+    () => {
+      scheduler.reevaluateDelayedRTU();
+    },
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,

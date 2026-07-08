@@ -374,6 +374,305 @@ test('document store: dynamicRealtimeThrottleMs receives correct windowIsNotFocu
   expect(receivedParams.some((p) => p.windowIsNotFocused === true)).toBe(true);
 });
 
+// -- Realtime stores: pending delayed RTU is re-evaluated on refocus -----------
+
+test('document store: pending background realtime update fires promptly when the tab regains focus', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    // hidden tabs throttle realtime refetches to 2min, focused tabs to 1s
+    dynamicRealtimeThrottleMs: ({ windowIsNotFocused }) =>
+      windowIsNotFocused ? 120_000 : 1_000,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
+  });
+
+  // first RTU fetch establishes the fetch timing the dynamic throttle needs
+  env.emulateExternalRTU(1);
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
+
+  // the user backgrounds the tab and a WS change arrives right after: the
+  // refetch is scheduled with the 2min background throttle
+  await tabs.blur();
+  env.emulateExternalRTU(2);
+
+  // 10s pass in background: the throttle is still holding the refetch
+  await advanceTime(10_000);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
+
+  // the user returns: the pending refetch must be re-evaluated with the
+  // focused throttle (1s, already elapsed) and fire right away instead of
+  // waiting out the remaining ~110s of the background window
+  await tabs.focusTab('a');
+  await advanceTime(2_000);
+
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
+
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time    | ui |
+    0       | 0  | ui-initialized
+    .       | 0  | server-data-changed (value: 1)
+    .       | 0  | received-ws-data-change-event
+    10ms    | 0  | 🔴 >fetch-started
+    810ms   | 0  | 🔴 <fetch-finished (value: 1)
+    .       | 1  | ui-changed
+    .       | 1  | 🔕 window-blurred
+    815ms   | 1  | server-data-changed (value: 2)
+    .       | 1  | received-ws-data-change-event
+    .       | 1  | rt-fetch-scheduled (delay: 119995ms)
+    10.815s | 1  | scheduled-rt-fetch-started
+    .       | 1  | 👁 window-focused
+    10.825s | 1  | 🟠 >fetch-started
+    11.625s | 1  | 🟠 <fetch-finished (value: 2)
+    .       | 2  | ui-changed
+    "
+  `);
+});
+
+test('document store: refocus reschedules the pending realtime update to the shorter focused delay', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    // focused throttle is 5s, so right after refocus the interval since the
+    // last fetch has NOT elapsed yet — the fetch must be rescheduled, not fired
+    dynamicRealtimeThrottleMs: ({ windowIsNotFocused }) =>
+      windowIsNotFocused ? 120_000 : 5_000,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
+  });
+
+  // establish fetch timing (fetch ends at ~810ms)
+  env.emulateExternalRTU(1);
+  await flushAllTimers();
+
+  // background RTU gets the 2min throttle
+  await tabs.blur();
+  env.emulateExternalRTU(2);
+
+  // refocus 2s later: 5s focused interval since last fetch end not elapsed yet
+  await advanceTime(2_000);
+  await tabs.focusTab('a');
+
+  // must NOT fire immediately — the focused throttle still applies
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
+
+  // ...but must fire once the focused interval completes (5s after the last
+  // fetch end), not after the remaining background window
+  await advanceTime(3_100);
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
+
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui |
+    0      | 0  | ui-initialized
+    .      | 0  | server-data-changed (value: 1)
+    .      | 0  | received-ws-data-change-event
+    10ms   | 0  | 🔴 >fetch-started
+    810ms  | 0  | 🔴 <fetch-finished (value: 1)
+    .      | 1  | ui-changed
+    .      | 1  | 🔕 window-blurred
+    815ms  | 1  | server-data-changed (value: 2)
+    .      | 1  | received-ws-data-change-event
+    .      | 1  | rt-fetch-scheduled (delay: 119995ms)
+    2.815s | 1  | rt-fetch-scheduled (delay: 2995ms)
+    .      | 1  | 👁 window-focused
+    5.81s  | 1  | scheduled-rt-fetch-started
+    5.82s  | 1  | 🟠 >fetch-started
+    6.62s  | 1  | 🟠 <fetch-finished (value: 2)
+    .      | 2  | ui-changed
+    "
+  `);
+});
+
+test('document store: refocus does not change the pending realtime update when the throttle ignores focus', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    // same throttle focused or not: refocusing must not move the fire time
+    dynamicRealtimeThrottleMs: () => 2_000,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
+  });
+
+  // establish fetch timing (fetch ends at ~810ms)
+  env.emulateExternalRTU(1);
+  await flushAllTimers();
+
+  // RTU while blurred is delayed until 2s after the last fetch end (~2.81s)
+  await tabs.blur();
+  env.emulateExternalRTU(2);
+
+  await advanceTime(500);
+  await tabs.focusTab('a');
+
+  // refocus must not promote the fetch: the throttle is focus-independent
+  await advanceTime(1_000);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
+
+  // the fetch fires at the originally scheduled time
+  await advanceTime(600);
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
+
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui |
+    0      | 0  | ui-initialized
+    .      | 0  | server-data-changed (value: 1)
+    .      | 0  | received-ws-data-change-event
+    10ms   | 0  | 🔴 >fetch-started
+    810ms  | 0  | 🔴 <fetch-finished (value: 1)
+    .      | 1  | ui-changed
+    .      | 1  | 🔕 window-blurred
+    815ms  | 1  | server-data-changed (value: 2)
+    .      | 1  | received-ws-data-change-event
+    .      | 1  | rt-fetch-scheduled (delay: 1995ms)
+    1.315s | 1  | 👁 window-focused
+    2.81s  | 1  | scheduled-rt-fetch-started
+    2.82s  | 1  | 🟠 >fetch-started
+    3.62s  | 1  | 🟠 <fetch-finished (value: 2)
+    .      | 2  | ui-changed
+    "
+  `);
+});
+
+test('collection store: pending background realtime update fires promptly when the tab regains focus', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createCollectionStoreTestEnv(
+    { '1': { name: 'Alice' } },
+    {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: ({ windowIsNotFocused }) =>
+        windowIsNotFocused ? 120_000 : 1_000,
+      bindFocusController: tabs.bind('a'),
+    },
+  );
+
+  renderHook(() => env.apiStore.useItem('1'));
+
+  // first RTU fetch establishes the fetch timing the dynamic throttle needs
+  act(() => {
+    env.serverTable.setItem(
+      '1',
+      { name: 'Alice v2' },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  env.serverTable.fetchHistory.length = 0;
+
+  // background RTU is delayed by the 2min background throttle
+  await tabs.blur();
+  act(() => {
+    env.serverTable.setItem(
+      '1',
+      { name: 'Alice v3' },
+      { triggerRTUEvent: true },
+    );
+  });
+
+  await advanceTime(10_000);
+  expect(env.serverTable.getRequestHistory('item')).toHaveLength(0);
+
+  // refocus: the pending refetch is re-evaluated with the focused throttle
+  // (already elapsed) and fires right away
+  await tabs.focusTab('a');
+  await advanceTime(2_000);
+
+  expect(env.serverTable.getRequestHistory('item')).toHaveLength(1);
+
+  // the UI ends up with the value from the background change
+  expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Alice v3' }`,
+  );
+});
+
+test('list query store: pending background realtime update fires promptly when the tab regains focus', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createListQueryStoreTestEnv(
+    {
+      users: [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+      ],
+    },
+    {
+      testScenario: { loaded: { tables: ['users'] } },
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: ({ windowIsNotFocused }) =>
+        windowIsNotFocused ? 120_000 : 1_000,
+      bindFocusController: tabs.bind('a'),
+    },
+  );
+
+  renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
+
+  // first RTU fetch establishes the fetch timing the dynamic throttle needs
+  act(() => {
+    env.serverTable.setItem(
+      'users||1',
+      { id: 1, name: 'Alice v2' },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  env.serverTable.fetchHistory.length = 0;
+
+  // background RTU is delayed by the 2min background throttle
+  await tabs.blur();
+  act(() => {
+    env.serverTable.setItem(
+      'users||2',
+      { id: 2, name: 'Bob v2' },
+      { triggerRTUEvent: true },
+    );
+  });
+
+  await advanceTime(10_000);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(0);
+
+  // refocus: the pending list refetch is re-evaluated with the focused
+  // throttle (already elapsed) and fires right away
+  await tabs.focusTab('a');
+  await advanceTime(2_000);
+
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(1);
+
+  // the refetched list reflects the change that arrived in background
+  expect(env.apiStore.getItemState('users||2')).toMatchInlineSnapshot(`
+    id: 2
+    name: 'Bob v2'
+  `);
+});
+
 // -- CollectionStore: revalidateOnWindowFocus ----------------------------------
 
 test('collection store: focus triggers lowPriority invalidation for all items', async () => {

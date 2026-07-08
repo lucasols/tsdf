@@ -1926,6 +1926,7 @@ export function createListQueryStore<
     deleteQueryFetchResources,
     deleteItemFetchResources,
     resetSchedulers,
+    reevaluateDelayedRTUs,
   } = createFetchApi<ItemState, QueryPayload, ItemPayload>(
     store,
     normalizedFetchListFn,
@@ -3109,6 +3110,7 @@ export function createListQueryStore<
     () => {
       invalidateQueryAndItems({ all: true, type: 'realtimeUpdate' });
     },
+    reevaluateDelayedRTUs,
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,
