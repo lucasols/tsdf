@@ -90,6 +90,8 @@ dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {
 
 This prevents the UI from being overwhelmed by rapid updates while keeping data fresh.
 
+When the window regains focus, any refetch still waiting on the background throttle is re-evaluated with the focused throttle: it fires immediately if the focused interval has already elapsed, or is rescheduled to the shorter focused delay. Returning to a tab never has to wait out the rest of a long background window.
+
 ## Transport Reconnection
 
 When your WebSocket or SSE connection drops and reconnects, events may have been missed. Call the manager-level `onTransportReconnect()` once for the shared transport:

@@ -43,6 +43,10 @@ const DEFAULT_LOW_PRIORITY_THROTTLE_MS = 40 * 60 * 1_000;
 const DEFAULT_BASE_COALESCING_WINDOW_MS = 16;
 const DEFAULT_BACKGROUND_COALESCING_DELAY_MS = 3_000;
 
+/** Minimum interval between realtime-update fetches, recomputed per fetch.
+ * When the window regains focus, a refetch still waiting on the unfocused
+ * interval is re-evaluated with the focused one, firing immediately if it has
+ * already elapsed. */
 export type DynamicRealtimeThrottleMs = (params: {
   readonly lastFetchDuration: number;
   readonly windowIsNotFocused: boolean;
