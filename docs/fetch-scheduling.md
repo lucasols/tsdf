@@ -6,12 +6,12 @@ TSDF uses a `RequestScheduler` to intelligently manage when and how fetches are 
 
 Every fetch request has a priority that determines its behavior:
 
-| Priority         | When used                                       | Behavior                                                                                                                                                            |
-| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lowPriority`    | Hook mount (default), window focus revalidation | Throttled — skipped if a fetch happened recently (within `lowPriorityThrottleMs`)                                                                                   |
-| `mediumPriority` | Background refetches                            | Delayed by `mediumPriorityDelayMs`, then executed. Cancelled if another fetch starts. If the store has never been fetched, automatically promotes to `highPriority` |
-| `realtimeUpdate` | Real-time data pushes                           | Uses `dynamicRealtimeThrottleMs` for adaptive throttling based on last fetch duration                                                                               |
-| `highPriority`   | Explicit invalidation, `ensureIsLoaded`         | Executes immediately (after coalescing window). Never throttled                                                                                                     |
+| Priority         | When used                                       | Behavior                                                                                                                                                                                       |
+| ---------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lowPriority`    | Hook mount (default), window focus revalidation | Throttled — skipped if a fetch happened recently (within `lowPriorityThrottleMs`)                                                                                                              |
+| `mediumPriority` | Background refetches                            | Delayed by `mediumPriorityDelayMs`, then executed. Cancelled if another fetch including the same request starts. If the store has never been fetched, automatically promotes to `highPriority` |
+| `realtimeUpdate` | Real-time data pushes                           | Uses `dynamicRealtimeThrottleMs` for adaptive throttling based on last fetch duration                                                                                                          |
+| `highPriority`   | Explicit invalidation, `ensureIsLoaded`         | Executes immediately (after coalescing window). Never throttled                                                                                                                                |
 
 ## Throttling
 
@@ -62,10 +62,12 @@ This prevents race conditions where a fetch could overwrite optimistic updates.
 Medium-priority fetches have special behavior:
 
 1. The fetch is delayed by `mediumPriorityDelayMs`
-2. If another fetch (of any priority) starts during the delay, the medium-priority fetch is cancelled
+2. If another fetch (of any priority) for the same data starts during the delay, the medium-priority fetch is cancelled
 3. If the store has never been fetched (`wasLoaded === false`), the fetch is promoted to `highPriority` immediately
 
 This is useful for background refetches that should yield to user-initiated actions.
+
+Delayed medium-priority fetches are tracked per request: on schedulers shared by multiple items (batch fetching via `getItemsBatchKey`), each item keeps its own delay timer, and a fetch of one item does not cancel another item's pending medium-priority refetch. Re-invalidating the same item during the delay resets its timer.
 
 ## Configuration Reference
 

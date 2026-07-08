@@ -77,7 +77,9 @@ type SchedulerPhase<T> =
         string,
         { awaitCallbacks: Array<(wasAborted: boolean) => void> }
       >;
-      rtuAfterFetch: QueuedRequest<T> | null;
+      /** Realtime updates received during the fetch, keyed by requestId, to
+       * be rescheduled after it completes */
+      rtuAfterFetch: Map<string, QueuedRequest<T>>;
     };
 
 type PendingRequestMatcher<T> = (request: {
@@ -111,8 +113,14 @@ type RtuDelayedRequest<T> = DelayedRequest<T> & { fireAt: number };
 type PendingStates<T> = {
   /** Requests scheduled for after current fetch completes */
   scheduledRequests: Map<string, PendingRequest<T>>;
-  rtuDelayed: RtuDelayedRequest<T> | null;
-  mediumPriorityDelayed: DelayedRequest<T> | null;
+  /** Delayed realtime update requests keyed by requestId — per request for
+   * the same reason as mediumPriorityDelayed */
+  rtuDelayed: Map<string, RtuDelayedRequest<T>>;
+  /** Delayed medium priority requests keyed by requestId. Schedulers can be
+   * shared by multiple requests (batch schedulers), so each request needs its
+   * own delayed slot — otherwise concurrent invalidations would drop all but
+   * the last one. */
+  mediumPriorityDelayed: Map<string, DelayedRequest<T>>;
   /** Request IDs with active mutations (value = count of active mutations) */
   mutationsInProgress: Map<string, number>;
 };
@@ -230,8 +238,8 @@ export class RequestScheduler<T> {
       phase: { type: 'idle' },
       pending: {
         scheduledRequests: new Map(),
-        rtuDelayed: null,
-        mediumPriorityDelayed: null,
+        rtuDelayed: new Map(),
+        mediumPriorityDelayed: new Map(),
         mutationsInProgress: new Map(),
       },
       timing: {
@@ -250,8 +258,8 @@ export class RequestScheduler<T> {
     return (
       phase.type !== 'idle' ||
       pending.scheduledRequests.size > 0 ||
-      pending.rtuDelayed !== null ||
-      pending.mediumPriorityDelayed !== null
+      pending.rtuDelayed.size > 0 ||
+      pending.mediumPriorityDelayed.size > 0
     );
   }
 
@@ -437,11 +445,11 @@ export class RequestScheduler<T> {
     if (phase.type === 'coalescing') {
       clearTimeout(phase.timeoutId);
     }
-    if (pending.rtuDelayed) {
-      clearTimeout(pending.rtuDelayed.timeoutId);
+    for (const rtu of pending.rtuDelayed.values()) {
+      clearTimeout(rtu.timeoutId);
     }
-    if (pending.mediumPriorityDelayed) {
-      clearTimeout(pending.mediumPriorityDelayed.timeoutId);
+    for (const delayed of pending.mediumPriorityDelayed.values()) {
+      clearTimeout(delayed.timeoutId);
     }
 
     if (abort.controller) {
@@ -457,8 +465,8 @@ export class RequestScheduler<T> {
    * regains focus so a refetch priced with the background throttle doesn't
    * keep the tab stale. Never extends the pending delay. */
   reevaluateDelayedRTU(): void {
-    const rtu = this.#state.pending.rtuDelayed;
-    if (!rtu || !this.#dynamicRealtimeThrottleMs) return;
+    if (!this.#dynamicRealtimeThrottleMs) return;
+    if (this.#state.pending.rtuDelayed.size === 0) return;
 
     const { timing } = this.#state;
     const newFireAt =
@@ -466,27 +474,30 @@ export class RequestScheduler<T> {
       timing.lastFetchDuration +
       this.#dynamicRealtimeThrottleMs(timing.lastFetchDuration);
 
-    if (newFireAt >= rtu.fireAt) return;
+    // Snapshot the entries since rescheduling mutates the map
+    for (const rtu of Array.from(this.#state.pending.rtuDelayed.values())) {
+      if (newFireAt >= rtu.fireAt) continue;
 
-    clearTimeout(rtu.timeoutId);
-    this.#state.pending.rtuDelayed = null;
+      clearTimeout(rtu.timeoutId);
+      this.#state.pending.rtuDelayed.delete(rtu.requestId);
 
-    const wasDelayed = this.#scheduleDelayedRTU(
-      Date.now(),
-      rtu.requestId,
-      rtu.payload,
-      rtu.remoteStartCancelable,
-    );
-
-    if (!wasDelayed) {
-      this.#onEvent?.('scheduled-rt-fetch-started');
-      this.#scheduleRequest(
+      const wasDelayed = this.#scheduleDelayedRTU(
+        Date.now(),
         rtu.requestId,
-        'highPriority',
         rtu.payload,
-        undefined,
         rtu.remoteStartCancelable,
       );
+
+      if (!wasDelayed) {
+        this.#onEvent?.('scheduled-rt-fetch-started');
+        this.#scheduleRequest(
+          rtu.requestId,
+          'highPriority',
+          rtu.payload,
+          undefined,
+          rtu.remoteStartCancelable,
+        );
+      }
     }
   }
 
@@ -521,43 +532,39 @@ export class RequestScheduler<T> {
       wasCancelled = true;
     }
 
-    const rtuDelayed = this.#state.pending.rtuDelayed;
-    if (
-      rtuDelayed &&
-      requestIds.includes(rtuDelayed.requestId) &&
-      matchesShouldCancel(shouldCancel, rtuDelayed.requestId, rtuDelayed)
-    ) {
-      this.#clearRtuDelayed();
-      wasCancelled = true;
+    for (const requestId of requestIds) {
+      const rtuDelayed = this.#state.pending.rtuDelayed.get(requestId);
+      if (
+        rtuDelayed &&
+        matchesShouldCancel(shouldCancel, requestId, rtuDelayed)
+      ) {
+        this.#clearRtuDelayed(requestId);
+        wasCancelled = true;
+      }
     }
 
-    const mediumPriorityDelayed = this.#state.pending.mediumPriorityDelayed;
-    if (
-      mediumPriorityDelayed &&
-      requestIds.includes(mediumPriorityDelayed.requestId) &&
-      matchesShouldCancel(
-        shouldCancel,
-        mediumPriorityDelayed.requestId,
-        mediumPriorityDelayed,
-      )
-    ) {
-      this.#cancelMediumPriority();
-      wasCancelled = true;
+    for (const requestId of requestIds) {
+      const mediumDelayed =
+        this.#state.pending.mediumPriorityDelayed.get(requestId);
+      if (
+        mediumDelayed &&
+        matchesShouldCancel(shouldCancel, requestId, mediumDelayed)
+      ) {
+        this.#cancelMediumPriority(requestId);
+        wasCancelled = true;
+      }
     }
 
     if (this.#state.phase.type === 'fetching') {
-      const rtuAfterFetch = this.#state.phase.rtuAfterFetch;
-      if (
-        rtuAfterFetch &&
-        requestIds.includes(rtuAfterFetch.requestId) &&
-        matchesShouldCancel(
-          shouldCancel,
-          rtuAfterFetch.requestId,
-          rtuAfterFetch,
-        )
-      ) {
-        this.#state.phase.rtuAfterFetch = null;
-        wasCancelled = true;
+      for (const requestId of requestIds) {
+        const rtuAfterFetch = this.#state.phase.rtuAfterFetch.get(requestId);
+        if (
+          rtuAfterFetch &&
+          matchesShouldCancel(shouldCancel, requestId, rtuAfterFetch)
+        ) {
+          this.#state.phase.rtuAfterFetch.delete(requestId);
+          wasCancelled = true;
+        }
       }
     }
 
@@ -855,11 +862,16 @@ export class RequestScheduler<T> {
       fetchId,
       startTime,
       fetchingRequests,
-      rtuAfterFetch: null,
+      rtuAfterFetch: new Map(),
     };
 
-    this.#clearRtuDelayed();
-    this.#cancelMediumPriority();
+    // A starting fetch only supersedes the delayed refetches of the requests
+    // it includes — other requests sharing this scheduler keep their pending
+    // delayed refetch
+    for (const requestId of requests.keys()) {
+      this.#clearRtuDelayed(requestId);
+      this.#cancelMediumPriority(requestId);
+    }
 
     const shouldAbort = this.#createShouldAbort(
       fetchId,
@@ -899,7 +911,6 @@ export class RequestScheduler<T> {
 
     const { fetchingRequests: callbacks, rtuAfterFetch } = this.#state.phase;
 
-    this.#clearRtuDelayed();
     this.#state.phase = { type: 'idle' };
 
     for (const [requestId, { awaitCallbacks }] of callbacks) {
@@ -909,13 +920,23 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (rtuAfterFetch) {
-      this.#scheduleDelayedRTU(
+    for (const rtu of rtuAfterFetch.values()) {
+      const wasDelayed = this.#scheduleDelayedRTU(
         Date.now(),
-        rtuAfterFetch.requestId,
-        rtuAfterFetch.payload,
-        rtuAfterFetch.remoteStartCancelable,
+        rtu.requestId,
+        rtu.payload,
+        rtu.remoteStartCancelable,
       );
+      if (!wasDelayed) {
+        this.#onEvent?.('scheduled-rt-fetch-started');
+        this.#scheduleRequest(
+          rtu.requestId,
+          'highPriority',
+          rtu.payload,
+          undefined,
+          rtu.remoteStartCancelable,
+        );
+      }
     }
 
     this.#flushScheduledRequests();
@@ -1085,11 +1106,11 @@ export class RequestScheduler<T> {
     return false;
   }
 
-  #clearRtuDelayed(): void {
-    const rtu = this.#state.pending.rtuDelayed;
+  #clearRtuDelayed(requestId: string): void {
+    const rtu = this.#state.pending.rtuDelayed.get(requestId);
     if (rtu) {
       clearTimeout(rtu.timeoutId);
-      this.#state.pending.rtuDelayed = null;
+      this.#state.pending.rtuDelayed.delete(requestId);
       this.#onEvent?.('rt-fetch-cancelled');
     }
   }
@@ -1110,23 +1131,33 @@ export class RequestScheduler<T> {
       return false;
     }
 
-    if (pending.rtuDelayed && pending.rtuDelayed.requestId === requestId) {
-      pending.rtuDelayed.payload = this.#coalescePayload
-        ? this.#coalescePayload(pending.rtuDelayed.payload, payload)
+    const existingDelayed = pending.rtuDelayed.get(requestId);
+    if (existingDelayed) {
+      existingDelayed.payload = this.#coalescePayload
+        ? this.#coalescePayload(existingDelayed.payload, payload)
         : payload;
-      pending.rtuDelayed.remoteStartCancelable =
-        pending.rtuDelayed.remoteStartCancelable && remoteStartCancelable;
+      existingDelayed.remoteStartCancelable =
+        existingDelayed.remoteStartCancelable && remoteStartCancelable;
       return true;
     }
 
     if (phase.type === 'fetching') {
-      phase.rtuAfterFetch = {
-        requestId,
-        payload,
-        priority: 'realtimeUpdate',
-        addedAt: startTime,
-        remoteStartCancelable,
-      };
+      const existing = phase.rtuAfterFetch.get(requestId);
+      if (existing) {
+        existing.payload = this.#coalescePayload
+          ? this.#coalescePayload(existing.payload, payload)
+          : payload;
+        existing.remoteStartCancelable =
+          existing.remoteStartCancelable && remoteStartCancelable;
+      } else {
+        phase.rtuAfterFetch.set(requestId, {
+          requestId,
+          payload,
+          priority: 'realtimeUpdate',
+          addedAt: startTime,
+          remoteStartCancelable,
+        });
+      }
       return true;
     }
 
@@ -1171,9 +1202,14 @@ export class RequestScheduler<T> {
 
     const delay = minimumRealtimeInterval - timeSinceLastFetch;
 
-    this.#state.pending.rtuDelayed = {
+    const existing = this.#state.pending.rtuDelayed.get(requestId);
+    if (existing) {
+      clearTimeout(existing.timeoutId);
+    }
+
+    this.#state.pending.rtuDelayed.set(requestId, {
       timeoutId: setTimeout(() => {
-        this.#state.pending.rtuDelayed = null;
+        this.#state.pending.rtuDelayed.delete(requestId);
         this.#onEvent?.('scheduled-rt-fetch-started');
         this.#scheduleRequest(
           requestId,
@@ -1189,7 +1225,7 @@ export class RequestScheduler<T> {
       addedAt: startTime,
       remoteStartCancelable,
       fireAt: startTime + delay,
-    };
+    });
 
     this.#onEvent?.('rt-fetch-scheduled', { delayMs: delay });
 
@@ -1221,20 +1257,29 @@ export class RequestScheduler<T> {
       );
     }
 
-    if (this.#state.pending.mediumPriorityDelayed) {
-      clearTimeout(this.#state.pending.mediumPriorityDelayed.timeoutId);
+    const existing = this.#state.pending.mediumPriorityDelayed.get(requestId);
+    let mergedPayload = payload;
+    let mergedRemoteStartCancelable = remoteStartCancelable;
+    if (existing) {
+      // Rescheduling the same request resets its timer and coalesces payloads
+      clearTimeout(existing.timeoutId);
+      mergedPayload = this.#coalescePayload
+        ? this.#coalescePayload(existing.payload, payload)
+        : payload;
+      mergedRemoteStartCancelable =
+        existing.remoteStartCancelable && remoteStartCancelable;
     }
 
-    this.#state.pending.mediumPriorityDelayed = {
+    this.#state.pending.mediumPriorityDelayed.set(requestId, {
       timeoutId: setTimeout(() => {
         this.#executeMediumPriorityFetch(requestId);
       }, delayMs),
       requestId,
-      payload,
+      payload: mergedPayload,
       priority: 'mediumPriority',
       addedAt: startTime,
-      remoteStartCancelable,
-    };
+      remoteStartCancelable: mergedRemoteStartCancelable,
+    });
 
     this.#onEvent?.('medium-priority-scheduled', { delayMs });
 
@@ -1242,16 +1287,18 @@ export class RequestScheduler<T> {
   }
 
   #executeMediumPriorityFetch(requestId: string): void {
-    const delayedRequest = this.#state.pending.mediumPriorityDelayed;
-    if (!delayedRequest || delayedRequest.requestId !== requestId) return;
+    const delayedRequest =
+      this.#state.pending.mediumPriorityDelayed.get(requestId);
+    if (!delayedRequest) return;
 
-    this.#state.pending.mediumPriorityDelayed = null;
+    this.#state.pending.mediumPriorityDelayed.delete(requestId);
 
     this.#onEvent?.('medium-priority-fetch-started');
 
-    const { phase, pending } = this.#state;
-
-    if (phase.type !== 'idle' || pending.mutationsInProgress.has(requestId)) {
+    if (this.#state.phase.type === 'fetching') {
+      // Wait for the in-flight fetch to finish instead of joining it — the
+      // running fetch started before this invalidation, so its response may
+      // not include the change that triggered it
       this.#addToScheduledRequests(
         requestId,
         delayedRequest.payload,
@@ -1262,6 +1309,8 @@ export class RequestScheduler<T> {
       return;
     }
 
+    // Handles the remaining cases: joins an open coalescing window, waits for
+    // an in-progress mutation, or starts a new coalescing window when idle
     this.#scheduleRequest(
       requestId,
       'highPriority',
@@ -1271,10 +1320,11 @@ export class RequestScheduler<T> {
     );
   }
 
-  #cancelMediumPriority(): void {
-    if (this.#state.pending.mediumPriorityDelayed) {
-      clearTimeout(this.#state.pending.mediumPriorityDelayed.timeoutId);
-      this.#state.pending.mediumPriorityDelayed = null;
+  #cancelMediumPriority(requestId: string): void {
+    const delayed = this.#state.pending.mediumPriorityDelayed.get(requestId);
+    if (delayed) {
+      clearTimeout(delayed.timeoutId);
+      this.#state.pending.mediumPriorityDelayed.delete(requestId);
       this.#onEvent?.('medium-priority-cancelled');
     }
   }
