@@ -1,6 +1,6 @@
 {
   "name": "tsdf",
-  "version": "17.0.0-beta.1",
+  "version": "17.0.0-beta.2",
   "description": "A data fetching solution based on t-state",
   "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Lucas Santos",
