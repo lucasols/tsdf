@@ -157,6 +157,52 @@ export function getFallbackMissingRequestedFields<
 }
 
 /**
+ * Fields from `requestedFields` that are genuinely absent from the snapshot —
+ * not tracked as loaded, not vouched by `inferFields`, and not merely stale
+ * (awaiting an invalidation re-fetch). Stale fields were loaded when their
+ * invalidation was recorded, so their stale data is still present and may stay
+ * visible while the re-fetch runs; only genuinely absent fields have no data
+ * to show. Staleness is proven either by the field being in the unresolved
+ * pending invalidation list, or — for an item with data still present — by the
+ * unresolved full ('*') invalidation marker, which means the snapshot was
+ * complete when invalidated.
+ */
+export function getGenuinelyMissingRequestedFields<
+  ItemState extends ValidStoreState,
+>(
+  itemKey: string,
+  fallbackItemState:
+    | {
+        item: ItemState | null | undefined;
+        loadedFields: ItemLoadedFields | undefined;
+      }
+    | undefined,
+  requestedFields: readonly string[],
+  inferFields: (item: ItemState) => ItemLoadedFields,
+  itemsPendingFullInvalidation: Set<string>,
+  unresolvedPendingInvalidationFields: readonly string[],
+): string[] {
+  const fallbackMissingFields = getFallbackMissingRequestedFields(
+    fallbackItemState,
+    requestedFields,
+    inferFields,
+  );
+  if (fallbackMissingFields.length === 0) return fallbackMissingFields;
+
+  if (itemsPendingFullInvalidation.has(itemKey) && fallbackItemState?.item) {
+    return [];
+  }
+
+  if (unresolvedPendingInvalidationFields.length === 0) {
+    return fallbackMissingFields;
+  }
+
+  return fallbackMissingFields.filter(
+    (field) => !unresolvedPendingInvalidationFields.includes(field),
+  );
+}
+
+/**
  * Returns the fields from `requestedFields` that are not yet present in
  * `loadedFields`. When either argument is `undefined` or empty, returns `[]`.
  */

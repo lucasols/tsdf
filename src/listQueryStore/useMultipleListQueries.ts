@@ -43,7 +43,7 @@ import {
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
-  getFallbackMissingRequestedFields,
+  getGenuinelyMissingRequestedFields,
   getStaleOrMissingRequestedFields,
   snapshotIsFullyLoaded,
   snapshotIsFullyLoadedAndFresh,
@@ -778,19 +778,24 @@ export function useMultipleListQueries<
             staleOrMissingRequestedFields.size > 0
           ) {
             // Some item genuinely lacks data for a requested field: not
-            // tracked as loaded and not vouched by `inferFields`. Fields may
-            // be logical names, so raw key presence must not be used here —
-            // this must agree with the fetch effect's decision.
+            // tracked as loaded, not vouched by `inferFields`, and not merely
+            // stale (awaiting an invalidation re-fetch — stale-only fields
+            // keep cached items visible as `refetching` while the fetch
+            // effect reloads them). Fields may be logical names, so raw key
+            // presence must not be used here.
             const someItemMissingFieldDataInState =
               effectiveQuery.query.items.some(
                 (itemKey) =>
-                  getFallbackMissingRequestedFields(
+                  getGenuinelyMissingRequestedFields(
+                    itemKey,
                     {
                       item: state.items[itemKey],
                       loadedFields: state.itemLoadedFields[itemKey],
                     },
                     fields,
                     partialResources.inferFields,
+                    itemsPendingFullInvalidation,
+                    getUnresolvedPendingInvalidationFields(itemKey, state),
                   ).length > 0,
               );
 

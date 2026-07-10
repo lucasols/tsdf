@@ -723,6 +723,308 @@ describe('partial resources: invalidating an item of a mounted fields:"*" list q
   });
 });
 
+describe('partial resources: invalidating previously loaded absent fields', () => {
+  const dataWithAbsentAddress: Tables = {
+    users: initialServerData.users!.map((item) =>
+      item.id === 1 ? { ...item, address: undefined } : item,
+    ),
+  };
+
+  test('a list keeps cached items visible while an absent requested field refetches', async () => {
+    const env = createListQueryStoreTestEnv(dataWithAbsentAddress, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    const defaultRenders = createLoggerStore();
+    const refetchingRenders = createLoggerStore();
+
+    // Both hooks request an absent-but-valid field. The completed request's
+    // loaded-field metadata is the only proof that `address` was loaded.
+    const { result } = renderHook(() => {
+      const defaultResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address'] },
+      );
+      const refetchingResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address'], returnRefetchingStatus: true },
+      );
+
+      defaultRenders.add({
+        status: defaultResult.status,
+        itemsCount: defaultResult.items.length,
+        address: defaultResult.items[0]?.address ?? null,
+      });
+      refetchingRenders.add({
+        status: refetchingResult.status,
+        itemsCount: refetchingResult.items.length,
+        address: refetchingResult.items[0]?.address ?? null,
+      });
+
+      return { defaultResult, refetchingResult };
+    });
+
+    await flushAllTimers();
+    defaultRenders.addMark('full item invalidation');
+    refetchingRenders.addMark('full item invalidation');
+
+    // Keep the refetch pending after invalidation so the stale UI state is
+    // observable before the server supplies the formerly absent field.
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => env.apiStore.invalidateItem('users||1'));
+    await advanceTime(100);
+
+    // An ordinary invalidation maps refetching to success and never blanks the
+    // list merely because `inferFields` cannot infer an undefined value.
+    expect({
+      defaultStatus: result.current.defaultResult.status,
+      defaultIsLoading: result.current.defaultResult.isLoading,
+      defaultItemsCount: result.current.defaultResult.items.length,
+      refetchingStatus: result.current.refetchingResult.status,
+      refetchingIsLoading: result.current.refetchingResult.isLoading,
+      refetchingItemsCount: result.current.refetchingResult.items.length,
+    }).toMatchInlineSnapshot(`
+      defaultIsLoading: '❌'
+      defaultItemsCount: 5
+      defaultStatus: 'success'
+      refetchingIsLoading: '❌'
+      refetchingItemsCount: 5
+      refetchingStatus: 'refetching'
+    `);
+    expect(defaultRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ itemsCount: 0 ⋅ address: null
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+      "
+    `);
+    expect(refetchingRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ itemsCount: 0 ⋅ address: null
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: refetching ⋅ itemsCount: 5 ⋅ address: null
+      "
+    `);
+
+    // Finish the pending request and verify the fresh value replaces the
+    // visible stale snapshot.
+    await flushAllTimers();
+    expect(defaultRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ itemsCount: 0 ⋅ address: null
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+      ⋅⋅⋅
+      -> status: success ⋅ itemsCount: 5 ⋅ address: New Address 1
+      "
+    `);
+    expect(refetchingRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ itemsCount: 0 ⋅ address: null
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: refetching ⋅ itemsCount: 5 ⋅ address: null
+      ⋅⋅⋅
+      -> status: success ⋅ itemsCount: 5 ⋅ address: New Address 1
+      "
+    `);
+  });
+
+  test('an item keeps cached data visible while an absent requested field refetches', async () => {
+    const env = createListQueryStoreTestEnv(dataWithAbsentAddress, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Load the complete resource first so this path also proves that an array
+    // hook understands pending invalidation metadata derived from `'*'`.
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+    await preload;
+
+    const defaultRenders = createLoggerStore();
+    const refetchingRenders = createLoggerStore();
+
+    // Array-field consumers mount over the fully loaded snapshot. Once it is
+    // invalidated, only pending metadata proves the undefined address is stale.
+    const { result } = renderHook(() => {
+      const defaultResult = env.apiStore.useItem('users||1', {
+        fields: ['id', 'name', 'address'],
+      });
+      const refetchingResult = env.apiStore.useItem('users||1', {
+        fields: ['id', 'name', 'address'],
+        returnRefetchingStatus: true,
+      });
+
+      defaultRenders.add({
+        status: defaultResult.status,
+        name: defaultResult.data?.name ?? null,
+        address: defaultResult.data?.address ?? null,
+      });
+      refetchingRenders.add({
+        status: refetchingResult.status,
+        name: refetchingResult.data?.name ?? null,
+        address: refetchingResult.data?.address ?? null,
+      });
+
+      return { defaultResult, refetchingResult };
+    });
+
+    await flushAllTimers();
+    defaultRenders.addMark('full item invalidation');
+    refetchingRenders.addMark('full item invalidation');
+
+    // Invalidate the fully requested item and leave its refetch unresolved.
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => env.apiStore.invalidateItem('users||1'));
+    await advanceTime(100);
+
+    // Cached item data remains usable during an ordinary invalidation; callers
+    // opting into refetching status see that distinction without `isLoading`.
+    expect({
+      defaultStatus: result.current.defaultResult.status,
+      defaultIsLoading: result.current.defaultResult.isLoading,
+      defaultName: result.current.defaultResult.data?.name ?? null,
+      refetchingStatus: result.current.refetchingResult.status,
+      refetchingIsLoading: result.current.refetchingResult.isLoading,
+      refetchingName: result.current.refetchingResult.data?.name ?? null,
+    }).toMatchInlineSnapshot(`
+      defaultIsLoading: '❌'
+      defaultName: 'User 1'
+      defaultStatus: 'success'
+      refetchingIsLoading: '❌'
+      refetchingName: 'User 1'
+      refetchingStatus: 'refetching'
+    `);
+    expect(defaultRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: User 1 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: success ⋅ name: User 1 ⋅ address: null
+      "
+    `);
+    expect(refetchingRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: User 1 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: success ⋅ name: User 1 ⋅ address: null
+      -> status: refetching ⋅ name: User 1 ⋅ address: null
+      "
+    `);
+
+    // Resolve the request and confirm the newly defined field is exposed.
+    await flushAllTimers();
+    expect(defaultRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: User 1 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: success ⋅ name: User 1 ⋅ address: null
+      ⋅⋅⋅
+      -> status: success ⋅ name: User 1 ⋅ address: New Address 1
+      "
+    `);
+    expect(refetchingRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: User 1 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: success ⋅ name: User 1 ⋅ address: null
+      -> status: refetching ⋅ name: User 1 ⋅ address: null
+      ⋅⋅⋅
+      -> status: success ⋅ name: User 1 ⋅ address: New Address 1
+      "
+    `);
+  });
+
+  test('a list keeps cached items visible when a fully loaded item with an absent field refetches', async () => {
+    const env = createListQueryStoreTestEnv(dataWithAbsentAddress, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Load item 1 as a complete ('*') resource first. Its full invalidation
+    // below then leaves only the durable full-invalidation marker (there is no
+    // enumerable pending field list for a '*' snapshot) as the proof that the
+    // undefined `address` is stale rather than absent.
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+    await preload;
+
+    const renders = createLoggerStore();
+
+    const { result } = renderHook(() => {
+      const listResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address'], returnRefetchingStatus: true },
+      );
+
+      renders.add({
+        status: listResult.status,
+        itemsCount: listResult.items.length,
+        address: listResult.items[0]?.address ?? null,
+      });
+
+      return listResult;
+    });
+
+    await flushAllTimers();
+    renders.addMark('full item invalidation');
+
+    // Invalidate the fully ('*') loaded item and leave its refetch unresolved.
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => env.apiStore.invalidateItem('users||1'));
+    await advanceTime(100);
+
+    // The list must not blank while the marker-only invalidation refetches:
+    // the marker proves item 1 was complete when invalidated, so its undefined
+    // `address` is stale, not absent.
+    expect({
+      status: result.current.status,
+      isLoading: result.current.isLoading,
+      itemsCount: result.current.items.length,
+    }).toMatchInlineSnapshot(`
+      isLoading: '❌'
+      itemsCount: 5
+      status: 'refetching'
+    `);
+
+    // Finish the pending request and verify the fresh value replaces the
+    // visible stale snapshot.
+    await flushAllTimers();
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ itemsCount: 0 ⋅ address: null
+      -> status: success ⋅ itemsCount: 5 ⋅ address: null
+
+      >>> full item invalidation
+
+      -> status: refetching ⋅ itemsCount: 5 ⋅ address: null
+      -> status: success ⋅ itemsCount: 5 ⋅ address: New Address 1
+      "
+    `);
+  });
+});
+
 describe('partial resources: imperative getters with ignoreStaleState honor pending invalidations', () => {
   // Finding 5 (P2): `getItemFromStateOrFetch` / `getQueryFromStateOrFetch`
   // with `ignoreStaleState: true` (= "require fresh data") only consulted the

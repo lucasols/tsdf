@@ -41,7 +41,7 @@ import {
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
-  getFallbackMissingRequestedFields,
+  getGenuinelyMissingRequestedFields,
   getStaleOrMissingRequestedFields,
   hasFullyLoadedFields,
   snapshotIsFullyLoaded,
@@ -240,15 +240,20 @@ export function useMultipleItems<
     [offlineEntitiesByKey, offlineOverlays],
   );
   const getUnresolvedPendingInvalidationFields = useCallback(
-    (itemKey: string): string[] => {
-      const stateInvalidationFields =
-        store.state.itemFieldInvalidationFields[itemKey];
+    (itemKey: string, state?: State): string[] => {
+      const itemFieldInvalidationFields = state
+        ? state.itemFieldInvalidationFields
+        : store.state.itemFieldInvalidationFields;
+      const stateInvalidationFields = itemFieldInvalidationFields[itemKey];
       if (stateInvalidationFields && stateInvalidationFields.length > 0) {
         return stateInvalidationFields;
       }
 
+      const itemLoadedFields = state
+        ? state.itemLoadedFields
+        : store.state.itemLoadedFields;
       return excludeLoadedFields(
-        store.state.itemLoadedFields[itemKey],
+        itemLoadedFields[itemKey],
         itemPendingInvalidationFields.get(itemKey),
       );
     },
@@ -381,16 +386,21 @@ export function useMultipleItems<
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
-            // Fields genuinely absent from the snapshot: not tracked as loaded
-            // and not vouched by `inferFields`. This is the same signal the
-            // fetch effect uses, so a `loading` override here is always
-            // matched by a scheduled fetch (and vice versa: unvouched data is
-            // never exposed as `success`). Fields may be logical names, so raw
-            // key presence must not be used here.
-            const absentFields = getFallbackMissingRequestedFields(
+            // Fields genuinely absent from the snapshot: not tracked as
+            // loaded, not vouched by `inferFields`, and not merely stale
+            // (awaiting an invalidation re-fetch — stale fields keep their
+            // data visible while refetching in the background). The fetch
+            // effect acts on the superset of this signal plus stale fields,
+            // so a `loading` override here is always matched by a scheduled
+            // fetch. Fields may be logical names, so raw key presence must
+            // not be used here.
+            const absentFields = getGenuinelyMissingRequestedFields(
+              itemKey,
               { item: rawItemState, loadedFields },
               fields,
               partialResources.inferFields,
+              itemsPendingFullInvalidation,
+              getUnresolvedPendingInvalidationFields(itemKey, state),
             );
 
             if (absentFields.length > 0) {
@@ -458,7 +468,7 @@ export function useMultipleItems<
                 fields,
                 partialResources.inferFields,
                 itemsPendingFullInvalidation,
-                getUnresolvedPendingInvalidationFields(itemKey),
+                getUnresolvedPendingInvalidationFields(itemKey, state),
               );
 
               if (pendingRequestedFields.length > 0) {
@@ -546,7 +556,7 @@ export function useMultipleItems<
                 fields,
                 partialResources.inferFields,
                 itemsPendingFullInvalidation,
-                getUnresolvedPendingInvalidationFields(itemKey),
+                getUnresolvedPendingInvalidationFields(itemKey, state),
               ).sort()
             : [];
         const needsFullFetch =
