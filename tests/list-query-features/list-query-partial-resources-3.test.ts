@@ -406,7 +406,7 @@ describe('list query field accumulation edge cases', () => {
           fields: ['id', 'name', 'address']
           pos: { limit: 50, offset: 0 }
         returned_items: 10
-        time: '820ms -> 1.62s | duration: 800ms'
+        time: '920ms -> 1.72s | duration: 800ms'
     `);
   });
 });

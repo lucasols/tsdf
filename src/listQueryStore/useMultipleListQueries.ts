@@ -45,6 +45,7 @@ import {
   fallbackItemHasRequestedFields,
   getGenuinelyMissingRequestedFields,
   getStaleOrMissingRequestedFields,
+  hasFullyLoadedFields,
   snapshotIsFullyLoaded,
   snapshotIsFullyLoadedAndFresh,
 } from './itemFieldUtils';
@@ -424,8 +425,20 @@ export function useMultipleListQueries<
       for (const itemKey of itemKeys) {
         const unresolvedInvalidationFields =
           getUnresolvedPendingInvalidationFields(itemKey);
-        if (unresolvedInvalidationFields.length === 0) continue;
+        // A fully invalidated ('*'-loaded) item has no field list to
+        // enumerate — the pending-full marker alone proves every field
+        // (requested ones included) is awaiting the re-fetch.
+        const hasUnresolvedFullInvalidation =
+          itemsPendingFullInvalidation.has(itemKey) &&
+          !hasFullyLoadedFields(store.state.itemLoadedFields[itemKey]);
         if (
+          unresolvedInvalidationFields.length === 0 &&
+          !hasUnresolvedFullInvalidation
+        ) {
+          continue;
+        }
+        if (
+          !hasUnresolvedFullInvalidation &&
           requestedFields &&
           !requestedFields.some((field) =>
             unresolvedInvalidationFields.includes(field),
@@ -446,7 +459,12 @@ export function useMultipleListQueries<
 
       return highestPriority;
     },
-    [getUnresolvedPendingInvalidationFields, itemFieldInvalidationPriorities],
+    [
+      getUnresolvedPendingInvalidationFields,
+      itemFieldInvalidationPriorities,
+      itemsPendingFullInvalidation,
+      store,
+    ],
   );
 
   const getVisibleQueryItemKeys = useCallback(
@@ -1301,8 +1319,19 @@ export function useMultipleListQueries<
             effectiveQueryState.status === 'loadingMore';
 
           if (Array.isArray(fields) && fields.length > 0) {
-            const hasMissingRequestedFields = effectiveQueryState.items.some(
-              (itemKey) =>
+            // Stale fields (previously loaded, owed after an invalidation)
+            // and genuinely missing fields (never loaded, not vouched by
+            // `inferFields`) both require a fetch, but at different
+            // priorities: missing data justifies an immediate required fetch,
+            // while stale data must refetch at the tracked invalidation
+            // priority so scheduler throttling (e.g. realtime updates) stays
+            // effective.
+            let hasStaleOrMissingRequestedFields = false;
+            let hasGenuinelyMissingFields = false;
+            for (const itemKey of effectiveQueryState.items) {
+              const unresolvedInvalidationFields =
+                getUnresolvedPendingInvalidationFields(itemKey);
+              if (
                 getStaleOrMissingRequestedFields(
                   itemKey,
                   store.state.itemLoadedFields[itemKey],
@@ -1310,48 +1339,57 @@ export function useMultipleListQueries<
                   fields,
                   partialResources.inferFields,
                   itemsPendingFullInvalidation,
-                  getUnresolvedPendingInvalidationFields(itemKey),
-                ).length > 0,
-            );
+                  unresolvedInvalidationFields,
+                ).length === 0
+              ) {
+                continue;
+              }
 
-            if (hasMissingRequestedFields && !isQueryFetchInFlight) {
-              shouldFetch = true;
-              requiredFetch = true;
-              fieldsToFetch = fields;
-              // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-              // Keep stronger priorities intact; only lift low priority.
-              if (fetchType === 'lowPriority') {
-                fetchType = 'highPriority';
+              hasStaleOrMissingRequestedFields = true;
+
+              if (
+                getGenuinelyMissingRequestedFields(
+                  itemKey,
+                  {
+                    item: store.state.items[itemKey],
+                    loadedFields: store.state.itemLoadedFields[itemKey],
+                  },
+                  fields,
+                  partialResources.inferFields,
+                  itemsPendingFullInvalidation,
+                  unresolvedInvalidationFields,
+                ).length > 0
+              ) {
+                hasGenuinelyMissingFields = true;
+                break;
               }
             }
 
-            const hasAffectedFieldInvalidation = effectiveQueryState.items.some(
-              (itemKey) => {
-                const itemFieldInvalidationFields =
-                  getUnresolvedPendingInvalidationFields(itemKey);
-
-                return (
-                  itemFieldInvalidationFields.length > 0 &&
-                  fields.some((f) => itemFieldInvalidationFields.includes(f))
-                );
-              },
-            );
-
-            if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
+            if (hasStaleOrMissingRequestedFields && !isQueryFetchInFlight) {
               shouldFetch = true;
               requiredFetch = true;
               fieldsToFetch = fields;
 
-              const invalidationPriority =
-                getHighestPendingInvalidationPriority(
-                  effectiveQueryState.items,
-                  fields,
-                );
+              const invalidationPriority = hasGenuinelyMissingFields
+                ? undefined
+                : getHighestPendingInvalidationPriority(
+                    effectiveQueryState.items,
+                    fields,
+                  );
 
-              if (
-                invalidationPriority &&
+              if (!invalidationPriority) {
+                // Genuinely missing data — or stale fields with no tracked
+                // invalidation priority (e.g. invalidations adopted from
+                // another tab) — must fetch immediately. Low-priority
+                // follow-ups can be skipped while the scheduler phase is
+                // still fetching; keep stronger priorities intact, only lift
+                // low priority.
+                if (fetchType === 'lowPriority') {
+                  fetchType = 'highPriority';
+                }
+              } else if (
                 fetchTypePriority[invalidationPriority] >
-                  fetchTypePriority[fetchType]
+                fetchTypePriority[fetchType]
               ) {
                 fetchType = invalidationPriority;
               }

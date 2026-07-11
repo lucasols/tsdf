@@ -735,6 +735,8 @@ export function useMultipleItems<
     }
   }, [automaticRetryState, queriesWithId, store, visibleStoreState]);
 
+  const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
+
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
@@ -743,17 +745,6 @@ export function useMultipleItems<
     );
 
     if (matchingQueries.length === 0) return;
-    if (itemInvalidationWasTriggered.has(event.itemKey)) return;
-
-    const allQueriesDisableRefetches = matchingQueries.every(
-      (q) => q.disableRefetches,
-    );
-    if (
-      allQueriesDisableRefetches &&
-      store.state.itemQueries[event.itemKey]?.wasLoaded
-    ) {
-      return;
-    }
 
     let fieldsToFetch: string[] | undefined;
     if (event.invalidateFields && event.invalidateFields.length > 0) {
@@ -766,6 +757,25 @@ export function useMultipleItems<
       });
 
       if (!hasAffectedHook) return;
+    }
+
+    // A new invalidation is a new refetch obligation: re-open the mount-once
+    // gate so the auto-fetch effect can schedule the refetch of this
+    // instance's own stale fields at the tracked invalidation priority. The
+    // fetch scheduled below only covers the first hook instance's fields —
+    // the scheduler coalesces/dedupes the per-instance schedules.
+    ignoreItemsInRefetchOnMount.delete(event.itemKey);
+
+    if (itemInvalidationWasTriggered.has(event.itemKey)) return;
+
+    const allQueriesDisableRefetches = matchingQueries.every(
+      (q) => q.disableRefetches,
+    );
+    if (
+      allQueriesDisableRefetches &&
+      store.state.itemQueries[event.itemKey]?.wasLoaded
+    ) {
+      return;
     }
 
     const firstQuery = matchingQueries[0];
@@ -783,8 +793,6 @@ export function useMultipleItems<
     });
     itemInvalidationWasTriggered.add(event.itemKey);
   });
-
-  const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
   useLayoutEffect(() => {
     if (
@@ -869,17 +877,10 @@ export function useMultipleItems<
               : undefined;
 
           if (Array.isArray(fields) && fields.length > 0) {
-            const affectedInvalidationFields = fields.filter((field) =>
-              unresolvedPendingInvalidationFields.includes(field),
-            );
             // Per-field stale-or-missing check: `inferFields` keeps vouching
             // for unaffected fields even while other fields of the item have
             // unresolved invalidations (stale pending fields are never
-            // vouched). Fields still tracked as loaded can only be stale, not
-            // missing — their refetch is handled by the invalidation path
-            // below (event handler for mounted hooks, mount-once gate for
-            // late-mounting ones), so they are excluded here to avoid
-            // re-scheduling them on every effect run.
+            // vouched).
             const staleOrMissingFields = getStaleOrMissingRequestedFields(
               itemKey,
               loadedFields,
@@ -889,21 +890,36 @@ export function useMultipleItems<
               itemsPendingFullInvalidation,
               unresolvedPendingInvalidationFields,
             );
-            const missingFields =
-              loadedFields === '*'
-                ? []
-                : staleOrMissingFields.filter(
-                    (field) => !loadedFields.includes(field),
-                  );
+            // Genuinely missing fields (never loaded, not vouched, not merely
+            // stale) justify an immediate required fetch. Stale fields (owed
+            // after an invalidation, cached data still present) refetch at the
+            // tracked invalidation priority so scheduler throttling (e.g.
+            // realtime updates) stays effective; their refetch is handled by
+            // the invalidation path below (event handler for mounted hooks,
+            // mount-once gate for late-mounting ones) to avoid re-scheduling
+            // on every effect run.
+            const missingFields = getGenuinelyMissingRequestedFields(
+              itemKey,
+              { item, loadedFields },
+              fields,
+              partialResources.inferFields,
+              itemsPendingFullInvalidation,
+              unresolvedPendingInvalidationFields,
+            );
+            const staleInvalidatedFields = staleOrMissingFields.filter(
+              (field) => !missingFields.includes(field),
+            );
             const hasMissingFields = missingFields.length > 0;
-            const hasAffectedFieldInvalidation =
-              affectedInvalidationFields.length > 0;
-            // Pending invalidations no longer surface as missing fields for
-            // fully loaded ('*') items, so they must trigger the fetch here for
-            // hooks that mount after the invalidation happened.
+            const hasStaleInvalidatedFields = staleInvalidatedFields.length > 0;
+            // Stale fields with a tracked invalidation priority are gated on
+            // the mount-once set — the local `invalidateItem` event re-opens
+            // the gate for each new invalidation. Untracked stale fields
+            // (e.g. invalidations adopted from another tab via state sync)
+            // have no local event to re-open the gate, so they stay ungated.
             const shouldFetchForInvalidation =
-              hasAffectedFieldInvalidation &&
-              !ignoreItemsInRefetchOnMount.has(itemKey);
+              hasStaleInvalidatedFields &&
+              (!invalidationPriority ||
+                !ignoreItemsInRefetchOnMount.has(itemKey));
 
             if (
               (hasMissingFields || shouldFetchForInvalidation) &&
@@ -912,17 +928,25 @@ export function useMultipleItems<
               shouldFetch = true;
               requiredFetch = true;
               fieldsToFetch = Array.from(
-                new Set([...missingFields, ...affectedInvalidationFields]),
+                new Set([...missingFields, ...staleInvalidatedFields]),
               );
-              // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-              // Keep stronger priorities intact; only lift low priority.
-              if (fetchType === 'lowPriority') {
+              // Genuinely missing data — or stale fields with no tracked
+              // invalidation priority (e.g. invalidations adopted from
+              // another tab) — must fetch immediately. Low-priority
+              // follow-ups can be skipped while the scheduler phase is still
+              // fetching; keep stronger priorities intact, only lift low
+              // priority.
+              if (
+                (hasMissingFields || !invalidationPriority) &&
+                fetchType === 'lowPriority'
+              ) {
                 fetchType = 'highPriority';
               }
             }
 
             if (
-              hasAffectedFieldInvalidation &&
+              hasStaleInvalidatedFields &&
+              !hasMissingFields &&
               invalidationPriority &&
               fetchTypePriority[invalidationPriority] >
                 fetchTypePriority[fetchType]
@@ -930,20 +954,31 @@ export function useMultipleItems<
               fetchType = invalidationPriority;
             }
           } else if (fields === '*') {
+            // A fully invalidated item whose (now stale) data is still
+            // present is a refetch of stale data, not a load of missing data
+            // — it must keep the tracked invalidation priority.
+            const hasStaleFullInvalidation =
+              hasUnresolvedFullInvalidation && !!item;
             const missingFullItem =
-              !snapshotIsFullyLoaded(
+              !hasStaleFullInvalidation &&
+              (!snapshotIsFullyLoaded(
                 loadedFields,
                 item,
                 partialResources.inferFields,
-              ) || hasUnresolvedFullInvalidation;
-            // Invalidation-only refetches (item still complete, some fields
-            // stale) are gated on the mount-once set, mirroring the array-field
-            // branch. A missing full item is not gated, so a hook mounting while
-            // another fetch is in flight still refetches once that fetch settles.
+              ) ||
+                hasUnresolvedFullInvalidation);
+            // Invalidation-only refetches (stale data still present) are gated
+            // on the mount-once set, mirroring the array-field branch. A
+            // missing full item is not gated, so a hook mounting while another
+            // fetch is in flight still refetches once that fetch settles.
+            // Untracked invalidations (adopted from another tab) have no
+            // local event to re-open the gate, so they stay ungated too.
             const shouldFetchForInvalidation =
               !missingFullItem &&
-              unresolvedPendingInvalidationFields.length > 0 &&
-              !ignoreItemsInRefetchOnMount.has(itemKey);
+              (unresolvedPendingInvalidationFields.length > 0 ||
+                hasStaleFullInvalidation) &&
+              (!invalidationPriority ||
+                !ignoreItemsInRefetchOnMount.has(itemKey));
 
             if (
               (missingFullItem || shouldFetchForInvalidation) &&
@@ -951,17 +986,24 @@ export function useMultipleItems<
             ) {
               shouldFetch = true;
               requiredFetch = true;
-              fieldsToFetch = missingFullItem
-                ? '*'
-                : unresolvedPendingInvalidationFields;
+              fieldsToFetch =
+                missingFullItem || hasStaleFullInvalidation
+                  ? '*'
+                  : unresolvedPendingInvalidationFields;
 
-              // Low-priority follow-ups can be skipped while the scheduler phase
-              // is still fetching; lift a required full fetch to high priority.
-              if (fetchType === 'lowPriority') {
+              // Genuinely missing data — or stale data with no tracked
+              // invalidation priority — must fetch immediately; only lift low
+              // priority. Stale-only refetches keep the tracked invalidation
+              // priority so scheduler throttling stays effective.
+              if (
+                (missingFullItem || !invalidationPriority) &&
+                fetchType === 'lowPriority'
+              ) {
                 fetchType = 'highPriority';
               }
 
               if (
+                !missingFullItem &&
                 invalidationPriority &&
                 fetchTypePriority[invalidationPriority] >
                   fetchTypePriority[fetchType]

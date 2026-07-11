@@ -569,30 +569,32 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-age-hook |
-    4.62s | Alice:30      | -- timeline-cleared
-    .     | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
-    .     | Alice:30      | [users||1] received-ws-data-change-event
-    .     | Alice:30      | rt-fetch-scheduled (delay: 100ms)
-    4.63s | Alice:30      | rt-fetch-cancelled
-    .     | Alice:30      | 🟠 [users||1] >fetch-started
-    5.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
-    .     | Alicia:31     | [name-age-hook] ui-changed
-    9.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
+    time   | name-age-hook |
+    4.62s  | Alice:30      | -- timeline-cleared
+    .      | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .      | Alice:30      | [users||1] received-ws-data-change-event
+    .      | Alice:30      | rt-fetch-scheduled (delay: 100ms)
+    4.72s  | Alice:30      | scheduled-rt-fetch-started
+    4.73s  | Alice:30      | 🟠 [users||1] >fetch-started
+    5.53s  | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
+    .      | Alicia:31     | [name-age-hook] ui-changed
+    10.34s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | city-hook | name-age-hook |
-    4.62s | London    | Alice:30      | -- timeline-cleared
-    .     | London    | Alice:30      | [users||1] received-ws-data-change-event
-    .     | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
-    5.43s | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
-    .     | London    | Alice:30      | rt-fetch-cancelled
-    .     | London    | Alicia:31     | [name-age-hook] ui-changed
-    8.44s | London    | Alicia:31     | 🟠 [users||1] >fetch-started
-    9.24s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
-    .     | Lisbon    | Alicia:31     | [city-hook] ui-changed
+    time   | city-hook | name-age-hook |
+    4.62s  | London    | Alice:30      | -- timeline-cleared
+    .      | London    | Alice:30      | [users||1] received-ws-data-change-event
+    .      | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .      | London    | Alice:30      | rt-fetch-cancelled
+    .      | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
+    .      | London    | Alicia:31     | [name-age-hook] ui-changed
+    6.53s  | London    | Alicia:31     | scheduled-rt-fetch-started
+    9.54s  | London    | Alicia:31     | 🟠 [users||1] >fetch-started
+    10.34s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Lisbon    | Alicia:31     | [city-hook] ui-changed
     "
   `);
 });
@@ -684,30 +686,32 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
 
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-age  |
-    4.62s | Alice:30  | -- timeline-cleared
-    .     | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
-    .     | Alice:30  | [users||1] received-ws-data-change-event
-    .     | Alice:30  | rt-fetch-scheduled (delay: 100ms)
-    4.63s | Alice:30  | rt-fetch-cancelled
-    .     | Alice:30  | 🟠 [users||1] >fetch-started
-    5.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
-    .     | Alicia:31 | [name-age] ui-changed
-    9.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
+    time   | name-age  |
+    4.62s  | Alice:30  | -- timeline-cleared
+    .      | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .      | Alice:30  | [users||1] received-ws-data-change-event
+    .      | Alice:30  | rt-fetch-scheduled (delay: 100ms)
+    4.72s  | Alice:30  | scheduled-rt-fetch-started
+    4.73s  | Alice:30  | 🟠 [users||1] >fetch-started
+    5.53s  | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
+    .      | Alicia:31 | [name-age] ui-changed
+    10.34s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-age-city    |
-    4.62s | Alice:30:London  | -- timeline-cleared
-    .     | Alice:30:London  | [users||1] received-ws-data-change-event
-    .     | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
-    5.43s | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
-    .     | Alice:30:London  | rt-fetch-cancelled
-    .     | Alicia:31:London | [name-age-city] ui-changed
-    8.44s | Alicia:31:London | 🟠 [users||1] >fetch-started
-    9.24s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
-    .     | Alicia:31:Lisbon | [name-age-city] ui-changed
+    time   | name-age-city    |
+    4.62s  | Alice:30:London  | -- timeline-cleared
+    .      | Alice:30:London  | [users||1] received-ws-data-change-event
+    .      | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .      | Alice:30:London  | rt-fetch-cancelled
+    .      | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
+    .      | Alicia:31:London | [name-age-city] ui-changed
+    6.53s  | Alicia:31:London | scheduled-rt-fetch-started
+    9.54s  | Alicia:31:London | 🟠 [users||1] >fetch-started
+    10.34s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Alicia:31:Lisbon | [name-age-city] ui-changed
     "
   `);
 });
@@ -779,30 +783,32 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
 
   expect(focusedTab.timelineString).toMatchInlineSnapshot(`
     "
-    time  | first-item | second-item |
-    4.62s | Alice:30   | Bob:25      | -- timeline-cleared
-    .     | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
-    .     | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
-    .     | Alice:30   | Bob:25      | rt-fetch-scheduled (delay: 100ms)
-    4.63s | Alice:30   | Bob:25      | rt-fetch-cancelled
-    .     | Alice:30   | Bob:25      | 🟠 >list-fetch-started
-    5.43s | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
-    .     | Alicia:31  | Bob:25      | [first-item] ui-changed
-    9.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    time   | first-item | second-item |
+    4.62s  | Alice:30   | Bob:25      | -- timeline-cleared
+    .      | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .      | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
+    .      | Alice:30   | Bob:25      | rt-fetch-scheduled (delay: 100ms)
+    4.72s  | Alice:30   | Bob:25      | scheduled-rt-fetch-started
+    4.73s  | Alice:30   | Bob:25      | 🟠 >list-fetch-started
+    5.53s  | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Alicia:31  | Bob:25      | [first-item] ui-changed
+    10.34s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
   expect(backgroundTab.timelineString).toMatchInlineSnapshot(`
     "
-    time  | first-item       | second-item  |
-    4.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
-    .     | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
-    .     | Alice:30:London  | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
-    5.43s | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    .     | Alice:30:London  | Bob:25:Paris | rt-fetch-cancelled
-    .     | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
-    8.44s | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
-    9.24s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
-    .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item] ui-changed
+    time   | first-item       | second-item  |
+    4.62s  | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
+    .      | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
+    .      | Alice:30:London  | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .      | Alice:30:London  | Bob:25:Paris | rt-fetch-cancelled
+    .      | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
+    .      | Alicia:31:London | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
+    6.53s  | Alicia:31:London | Bob:25:Paris | scheduled-rt-fetch-started
+    9.54s  | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
+    10.34s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Alicia:31:Lisbon | Bob:25:Paris | [first-item] ui-changed
     "
   `);
   expect(backgroundTab.serverTable.getRequestHistory('list'))
@@ -818,7 +824,7 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
           fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         returned_items: 2
-        time: '8.44s -> 9.24s | duration: 800ms'
+        time: '9.54s -> 10.34s | duration: 800ms'
     `);
 });
 

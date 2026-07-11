@@ -1919,7 +1919,7 @@ describe('RTU with partial resources', () => {
         payload:
           fields: ['id', 'name']
           itemId: 'users||1'
-        time: '820ms -> 1.62s | duration: 800ms'
+        time: '920ms -> 1.72s | duration: 800ms'
     `);
   });
 });

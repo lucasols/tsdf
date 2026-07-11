@@ -2306,6 +2306,34 @@ export function createListQueryStore<
     }
   }
 
+  /**
+   * A confirmed remote snapshot cancels the pending local fetches it
+   * satisfies, but the sender may have refetched only a subset of the
+   * invalidated fields (it fetches only its own hooks' fields). Any fields
+   * still owed after applying the snapshot are re-announced so mounted hooks
+   * re-schedule refetches of their own remaining stale fields — without
+   * this, the cancelled local refetch would leave them stale forever.
+   */
+  function emitRemainingInvalidationFieldsAfterSnapshot(itemKey: string): void {
+    const stateInvalidationFields =
+      store.state.itemFieldInvalidationFields[itemKey];
+    const remainingFields =
+      stateInvalidationFields && stateInvalidationFields.length > 0
+        ? stateInvalidationFields
+        : excludeLoadedFields(
+            store.state.itemLoadedFields[itemKey],
+            itemPendingInvalidationFields.get(itemKey),
+          );
+
+    if (remainingFields.length === 0) return;
+
+    events.emit('invalidateItem', {
+      priority: itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority',
+      itemKey,
+      invalidateFields: remainingFields,
+    });
+  }
+
   function pruneItemInvalidationTracking(): void {
     for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
       // Fields still owed from earlier invalidations: the ones not yet
@@ -2614,6 +2642,9 @@ export function createListQueryStore<
       cleanupItemStateMetadata(message.itemKey);
     }
     pruneItemInvalidationTracking();
+    if (message.consistency === 'confirmed') {
+      emitRemainingInvalidationFieldsAfterSnapshot(message.itemKey);
+    }
     if (message.item === null && message.itemQuery === null) {
       if (payloadToCleanup) {
         deleteItemFetchResources([
@@ -2710,6 +2741,9 @@ export function createListQueryStore<
         item.itemKey,
         toBrowserTabsSyncVersion(message, message.consistency),
       );
+      if (message.consistency === 'confirmed') {
+        emitRemainingInvalidationFieldsAfterSnapshot(item.itemKey);
+      }
     }
     touchQueries([message.queryKey]);
     touchItems(message.items.map(({ itemKey }) => itemKey));
