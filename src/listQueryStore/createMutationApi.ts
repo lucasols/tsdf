@@ -490,15 +490,40 @@ export function createMutationApi<
           string,
           string[]
         >();
+        // Only fields with a displayable cached value can go stale: the ones
+        // tracked as loaded, or vouched by `inferFields` for metadata-free
+        // items (mirroring the full-invalidation path). A never-loaded field
+        // must not be recorded — it stays classified as genuinely missing so
+        // its first load runs immediately instead of waiting out a throttle.
+        const staleInvalidateFieldsByItemKey = new Map<string, string[]>();
 
         for (const { itemKey } of itemsKey) {
+          let effectiveLoadedFields = store.state.itemLoadedFields[itemKey];
+          if (effectiveLoadedFields === undefined) {
+            const itemState = store.state.items[itemKey];
+            if (itemState) {
+              effectiveLoadedFields = partialResources.inferFields(itemState);
+            }
+          }
+
+          const staleInvalidateFields =
+            effectiveLoadedFields === '*'
+              ? invalidateFields
+              : invalidateFields.filter(
+                  (field) => effectiveLoadedFields?.includes(field) ?? false,
+                );
+
+          if (staleInvalidateFields.length === 0) continue;
+
+          staleInvalidateFieldsByItemKey.set(itemKey, staleInvalidateFields);
+
           const existingPriority = itemFieldInvalidationPriorities.get(itemKey);
           const existingPendingFields =
             itemPendingInvalidationFields.get(itemKey) ?? [];
           nextPendingInvalidationFieldsByItemKey.set(
             itemKey,
             Array.from(
-              new Set([...existingPendingFields, ...invalidateFields]),
+              new Set([...existingPendingFields, ...staleInvalidateFields]),
             ).sort(),
           );
 
@@ -528,34 +553,46 @@ export function createMutationApi<
 
         store.produceState(
           (draft) => {
-            for (const { itemKey } of itemsKey) {
+            for (const [
+              itemKey,
+              staleInvalidateFields,
+            ] of staleInvalidateFieldsByItemKey) {
               const loadedFields = draft.itemLoadedFields[itemKey];
               if (!loadedFields) continue;
 
               if (loadedFields !== '*') {
                 draft.itemLoadedFields[itemKey] = loadedFields.filter(
-                  (f) => !invalidateFields.includes(f),
+                  (f) => !staleInvalidateFields.includes(f),
                 );
               }
               const existingInvalidationFields =
                 draft.itemFieldInvalidationFields[itemKey] ?? [];
               draft.itemFieldInvalidationFields[itemKey] = Array.from(
-                new Set([...existingInvalidationFields, ...invalidateFields]),
+                new Set([
+                  ...existingInvalidationFields,
+                  ...staleInvalidateFields,
+                ]),
               ).sort();
             }
           },
           { action: 'invalidate-item-fields' },
         );
 
-        // Emit invalidation events so hooks can detect missing fields and refetch
-        for (const { itemKey } of itemsKey) {
+        // Emit invalidation events so hooks can refetch their stale fields.
+        // Items where no invalidated field was loaded have nothing stale to
+        // re-announce; hooks requesting such fields already treat them as
+        // missing and fetch immediately on their own.
+        for (const [
+          itemKey,
+          staleInvalidateFields,
+        ] of staleInvalidateFieldsByItemKey) {
           itemInvalidationWasTriggered.delete(itemKey);
           const itemPriority =
             nextInvalidationPriorityByItemKey.get(itemKey) ?? priority;
           emitInvalidateItem({
             priority: itemPriority,
             itemKey,
-            invalidateFields,
+            invalidateFields: staleInvalidateFields,
           });
         }
       } else {

@@ -1646,6 +1646,50 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
     expect(env.serverTable.getRequestHistory('list').length).toBe(2);
   });
 
+  test('invalidating a never-loaded field does not delay its first load behind the throttle', async () => {
+    const env = createRealtimeEnv();
+
+    // Load some of the item's fields so the item scheduler has a baseline
+    // fetch for the throttle — but never load 'age'.
+    renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime event invalidates a field that was never loaded, inside the
+    // throttle window. There is no cached 'age' value that could go stale.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['age'],
+      });
+    });
+
+    // A hook mounts requesting the never-loaded field: this is genuinely
+    // missing data with nothing to display — it must fetch immediately
+    // instead of waiting out the realtime throttle as if it were stale.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['age'] }),
+    );
+
+    await flushAllTimers();
+
+    expect(result.current.data?.age).toBe(10);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      970ms | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"age":10})
+      "
+    `);
+  });
+
   test('a realtime full item invalidation on a mounted item hook stays throttled', async () => {
     const env = createRealtimeEnv();
 
@@ -1684,5 +1728,118 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
     `);
 
     expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+  });
+});
+
+describe('partial resources: invalidations arriving while a hook is off-screen', () => {
+  // Finding: the `invalidateItem` event handler returned early when all of a
+  // hook's instances were off-screen — before re-opening the mount-once
+  // refetch gate. Per-field invalidations never set `refetchOnMount`, so
+  // nothing else could rescue the instance: back on-screen it kept showing
+  // the stale field with `status: 'success'` and never refetched.
+
+  function createOffScreenRealtimeEnv() {
+    return createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+  }
+
+  test('a field invalidated while its hook is off-screen refetches when the hook returns on-screen', async () => {
+    const env = createOffScreenRealtimeEnv();
+
+    // Load the item's fields through a mounted hook...
+    const { result, rerender } = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) =>
+        env.apiStore.useItem('users||1', {
+          fields: ['name', 'address'],
+          isOffScreen,
+        }),
+      { initialProps: { isOffScreen: false } },
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // ...then move it off-screen (e.g. the row scrolled out of a virtualized
+    // list).
+    rerender({ isOffScreen: true });
+
+    // The address changes on the server, and a realtime event invalidates
+    // only that field while the hook is off-screen.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['address'],
+      });
+    });
+
+    // The whole realtime throttle window passes while still off-screen —
+    // off-screen hooks must not fetch.
+    await flushAllTimers();
+    expect(env.serverTable.getRequestHistory('item').length).toBe(1);
+    expect(result.current.data?.address).toBe('Address 1');
+
+    // Back on-screen: the stale field must refetch and show the fresh value.
+    rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('success');
+    expect(result.current.data?.address).toBe('New Address 1');
+    // One initial load plus one refetch of only the stale field.
+    expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+  });
+
+  test('an off-screen hook still refetches after an on-screen hook consumed the same full invalidation', async () => {
+    const env = createOffScreenRealtimeEnv();
+
+    // Two hooks on the same item: one stays on-screen with its own field,
+    // the other loads a different field and then goes off-screen.
+    renderHook(() => env.apiStore.useItem('users||1', { fields: ['name'] }));
+    const offScreenHook = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) =>
+        env.apiStore.useItem('users||1', { fields: ['address'], isOffScreen }),
+      { initialProps: { isOffScreen: false } },
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    offScreenHook.rerender({ isOffScreen: true });
+
+    // A realtime record-change event fully invalidates the item. The
+    // on-screen hook consumes the event (it schedules its own refetch and
+    // clears `refetchOnMount`), the off-screen hook cannot react yet.
+    await advanceTime(100);
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        {
+          id: 1,
+          name: 'New User 1',
+          address: 'New Address 1',
+          age: 10,
+          country: 'Country 1',
+        },
+        { triggerRTUEvent: true },
+      );
+    });
+
+    // The on-screen hook's throttled refetch of its own field resolves while
+    // the other hook is still off-screen.
+    await flushAllTimers();
+    expect(offScreenHook.result.current.data?.address).toBe('Address 1');
+
+    // Back on-screen: the hook's own stale field must refetch too — the
+    // other hook's consumption of the invalidation event must not have
+    // discarded this hook's refetch obligation.
+    offScreenHook.rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(offScreenHook.result.current.status).toBe('success');
+    expect(offScreenHook.result.current.data?.address).toBe('New Address 1');
   });
 });

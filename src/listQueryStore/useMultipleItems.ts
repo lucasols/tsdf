@@ -740,31 +740,43 @@ export function useMultipleItems<
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
-    const matchingQueries = fetchQueriesWithId.filter(
-      ({ itemKey, isOffScreen }) => !isOffScreen && itemKey === event.itemKey,
+    const queriesForItem = fetchQueriesWithId.filter(
+      ({ itemKey }) => itemKey === event.itemKey,
     );
-
-    if (matchingQueries.length === 0) return;
 
     let fieldsToFetch: string[] | undefined;
     if (event.invalidateFields && event.invalidateFields.length > 0) {
       fieldsToFetch = Array.from(new Set(event.invalidateFields)).sort();
-
-      const hasAffectedHook = matchingQueries.some(({ fields }) => {
-        if (fields === '*') return true;
-        if (!fields || fields.length === 0) return true;
-        return fields.some((field) => event.invalidateFields?.includes(field));
-      });
-
-      if (!hasAffectedHook) return;
     }
+
+    const affectedQueries = fieldsToFetch
+      ? queriesForItem.filter(({ fields }) => {
+          if (fields === '*') return true;
+          if (!fields || fields.length === 0) return true;
+          return fields.some((field) =>
+            event.invalidateFields?.includes(field),
+          );
+        })
+      : queriesForItem;
+
+    if (affectedQueries.length === 0) return;
 
     // A new invalidation is a new refetch obligation: re-open the mount-once
     // gate so the auto-fetch effect can schedule the refetch of this
-    // instance's own stale fields at the tracked invalidation priority. The
-    // fetch scheduled below only covers the first hook instance's fields —
+    // instance's own stale fields at the tracked invalidation priority. This
+    // must happen even when every affected instance is off-screen — the gate
+    // means "one automatic attempt per invalidation" and an off-screen
+    // instance hasn't spent its attempt yet; the effect schedules its refetch
+    // when it returns on-screen. Only the scheduling below is on-screen-only.
+    // The fetch scheduled below only covers the first hook instance's fields —
     // the scheduler coalesces/dedupes the per-instance schedules.
     ignoreItemsInRefetchOnMount.delete(event.itemKey);
+
+    const matchingQueries = affectedQueries.filter(
+      ({ isOffScreen }) => !isOffScreen,
+    );
+
+    if (matchingQueries.length === 0) return;
 
     if (itemInvalidationWasTriggered.has(event.itemKey)) return;
 

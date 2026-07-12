@@ -2313,6 +2313,11 @@ export function createListQueryStore<
    * still owed after applying the snapshot are re-announced so mounted hooks
    * re-schedule refetches of their own remaining stale fields — without
    * this, the cancelled local refetch would leave them stale forever.
+   *
+   * Only called when the snapshot actually cancelled a pending local fetch:
+   * that cancellation is the refetch obligation being destroyed, and gating
+   * on it also guarantees the cross-tab re-announce ping-pong terminates —
+   * a repeat cycle requires a new pending fetch at snapshot arrival.
    */
   function emitRemainingInvalidationFieldsAfterSnapshot(itemKey: string): void {
     const stateInvalidationFields =
@@ -2325,7 +2330,20 @@ export function createListQueryStore<
             itemPendingInvalidationFields.get(itemKey),
           );
 
-    if (remainingFields.length === 0) return;
+    if (remainingFields.length === 0) {
+      // A full invalidation of a '*'-loaded item is tracked only by the
+      // full-invalidation marker — there is no field list to re-announce.
+      // Re-announce the full invalidation itself so hooks whose cancelled
+      // refetch was vouched by the snapshot re-schedule their own fields.
+      if (itemsPendingFullInvalidation.has(itemKey)) {
+        events.emit('invalidateItem', {
+          priority:
+            itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority',
+          itemKey,
+        });
+      }
+      return;
+    }
 
     events.emit('invalidateItem', {
       priority: itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority',
@@ -2627,13 +2645,16 @@ export function createListQueryStore<
       );
     });
 
-    if (message.consistency === 'confirmed') {
-      itemScheduler?.cancelPendingRequests([message.itemKey], ({ payload }) =>
-        itemSnapshotSatisfiesRequestedFields(
-          message.item,
-          message.loadedFields,
-          payload.fields,
-        ),
+    let cancelledPendingItemFetch = false;
+    if (message.consistency === 'confirmed' && itemScheduler) {
+      cancelledPendingItemFetch = itemScheduler.cancelPendingRequests(
+        [message.itemKey],
+        ({ payload }) =>
+          itemSnapshotSatisfiesRequestedFields(
+            message.item,
+            message.loadedFields,
+            payload.fields,
+          ),
       );
     }
 
@@ -2642,7 +2663,7 @@ export function createListQueryStore<
       cleanupItemStateMetadata(message.itemKey);
     }
     pruneItemInvalidationTracking();
-    if (message.consistency === 'confirmed') {
+    if (cancelledPendingItemFetch) {
       emitRemainingInvalidationFieldsAfterSnapshot(message.itemKey);
     }
     if (message.item === null && message.itemQuery === null) {
@@ -2665,31 +2686,36 @@ export function createListQueryStore<
       { kind: 'list-query-snapshot' }
     >,
   ): void {
+    let cancelledPendingQueryFetch = false;
+    const itemKeysWithCancelledFetch = new Set<string>();
     if (message.consistency === 'confirmed') {
       const snapshotItemsByKey = new Map(
         message.items.map((item) => [item.itemKey, item]),
       );
 
-      getOrCreateQueryScheduler(message.queryKey).cancelPendingRequests(
-        [message.queryKey],
-        (request) =>
-          querySnapshotSatisfiesPendingQueryFetch(
-            message,
-            snapshotItemsByKey,
-            request,
-          ),
+      cancelledPendingQueryFetch = getOrCreateQueryScheduler(
+        message.queryKey,
+      ).cancelPendingRequests([message.queryKey], (request) =>
+        querySnapshotSatisfiesPendingQueryFetch(
+          message,
+          snapshotItemsByKey,
+          request,
+        ),
       );
 
       for (const item of message.items) {
         const itemScheduler = getKnownItemScheduler(item.itemKey);
 
-        itemScheduler?.cancelPendingRequests([item.itemKey], ({ payload }) =>
-          itemSnapshotSatisfiesRequestedFields(
-            item.item,
-            item.loadedFields,
-            payload.fields,
-          ),
+        const cancelled = itemScheduler?.cancelPendingRequests(
+          [item.itemKey],
+          ({ payload }) =>
+            itemSnapshotSatisfiesRequestedFields(
+              item.item,
+              item.loadedFields,
+              payload.fields,
+            ),
         );
+        if (cancelled) itemKeysWithCancelledFetch.add(item.itemKey);
       }
     }
 
@@ -2741,7 +2767,10 @@ export function createListQueryStore<
         item.itemKey,
         toBrowserTabsSyncVersion(message, message.consistency),
       );
-      if (message.consistency === 'confirmed') {
+      if (
+        cancelledPendingQueryFetch ||
+        itemKeysWithCancelledFetch.has(item.itemKey)
+      ) {
         emitRemainingInvalidationFieldsAfterSnapshot(item.itemKey);
       }
     }

@@ -716,6 +716,138 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   `);
 });
 
+test('a full invalidation of a fully-loaded item is re-announced to a background tab whose cancelled refetch left fields stale', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-full-invalidation-reannounce',
+    data: { users: [{ id: 1, name: 'Alice', age: 30, city: 'London' }] },
+    focusedTab: 'a',
+    usesRealTimeUpdates: true,
+  });
+
+  // Both tabs first load the item as a full resource (fields: '*') so their
+  // loadedFields become the '*' sentinel — a later full invalidation of a
+  // '*'-loaded item is tracked only by the full-invalidation marker, with no
+  // per-field list left to re-announce.
+  const envAFullHook = renderHook(() =>
+    envA.apiStore.useItem('users||1', { fields: '*' }),
+  );
+  await flushAllTimers();
+  const envBFullHook = renderHook(() =>
+    envB.apiStore.useItem('users||1', { fields: '*' }),
+  );
+  await flushAllTimers();
+
+  // Steady-state subset hooks: the focused tab watches name/age, the
+  // background tab watches only city. Both are satisfied from state.
+  const envAHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age'],
+    });
+
+    envA.trackItemUI('name-age-hook', getTrackedUserSummary(item.data));
+    return item;
+  });
+  const envBHook = renderHook(() => {
+    const item = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['city'],
+    });
+
+    envB.trackItemUI(
+      'city-hook',
+      typeof item.data?.city === 'string' ? item.data.city : null,
+    );
+    return item;
+  });
+  await flushAllTimers();
+
+  // Unmount the full-resource hooks so nothing refetches '*' after the
+  // invalidation — only the subset hooks remain mounted.
+  envAFullHook.unmount();
+  envBFullHook.unmount();
+  await flushAllTimers();
+
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+  expect(envA.store.state.itemLoadedFields[itemKey]).toBe('*');
+  expect(envB.store.state.itemLoadedFields[itemKey]).toBe('*');
+
+  const envAFetchCountBeforeRTU = countFetchHistoryEntries(
+    envA.serverTable.fetchHistory,
+    'fetch',
+  );
+  const envBFetchCountBeforeRTU = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
+  );
+  expect(envAFetchCountBeforeRTU).toBe(1);
+  expect(envBFetchCountBeforeRTU).toBe(1);
+
+  envA.clearTimeline();
+  envB.clearTimeline();
+
+  // The real-time update changes all fields, so both tabs invalidate the item
+  // fully. The focused tab refetches only its own name/age fields and
+  // broadcasts a snapshot whose merged item still carries the stale city —
+  // which wrongly cancels the background tab's pending city refetch (the
+  // snapshot vouches for city via inferFields). The surviving
+  // full-invalidation marker must be re-announced so the background tab
+  // reschedules its city refetch instead of staying stale forever.
+  act(() => {
+    envA.serverTable.setItem(
+      'users||1',
+      { id: 1, name: 'Alicia', age: 31, city: 'Lisbon' },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  const envAFetchEntries = envA.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  const envBFetchEntries = envB.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch')).toBe(
+    envAFetchCountBeforeRTU + 1,
+  );
+  // The background tab must refetch its own city field after the re-announce.
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeRTU + 1,
+  );
+  expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['name', 'age']`,
+  );
+  expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['city']`,
+  );
+  expect(pick(envAHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { city: 'Lisbon' }
+      status: 'success'
+    `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | city-hook |
+    4.62s  | London    | -- timeline-cleared
+    .      | London    | [users||1] received-ws-data-change-event
+    .      | London    | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | London    | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alicia","age":31,"city":"London"})
+    .      | London    | rt-fetch-cancelled
+    .      | London    | rt-fetch-scheduled (delay: 1000ms)
+    6.53s  | London    | scheduled-rt-fetch-started
+    9.54s  | London    | 🟠 [users||1] >fetch-started
+    10.34s | London    | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Lisbon    | [city-hook] ui-changed
+    "
+  `);
+});
+
 test('focused RTU list refetch lets makes a background tab correctly invalidate the list with extra fields', async () => {
   const { envA: focusedTab, envB: backgroundTab } = createEnvs({
     storeId: 'list-query-focused-item-rtu-extra-field',
