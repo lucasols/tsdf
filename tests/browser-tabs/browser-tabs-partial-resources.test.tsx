@@ -539,7 +539,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['name', 'age']`,
+    `fields: ['age', 'name']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
@@ -569,30 +569,32 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
   `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-age-hook |
-    4.62s | Alice:30      | -- timeline-cleared
-    .     | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
-    .     | Alice:30      | [users||1] received-ws-data-change-event
-    .     | Alice:30      | rt-fetch-scheduled (delay: 100ms)
-    4.63s | Alice:30      | rt-fetch-cancelled
-    .     | Alice:30      | 🟠 [users||1] >fetch-started
-    5.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
-    .     | Alicia:31     | [name-age-hook] ui-changed
-    9.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
+    time   | name-age-hook |
+    4.62s  | Alice:30      | -- timeline-cleared
+    .      | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .      | Alice:30      | [users||1] received-ws-data-change-event
+    .      | Alice:30      | rt-fetch-scheduled (delay: 100ms)
+    4.72s  | Alice:30      | scheduled-rt-fetch-started
+    4.73s  | Alice:30      | 🟠 [users||1] >fetch-started
+    5.53s  | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    .      | Alicia:31     | [name-age-hook] ui-changed
+    10.34s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | city-hook | name-age-hook |
-    4.62s | London    | Alice:30      | -- timeline-cleared
-    .     | London    | Alice:30      | [users||1] received-ws-data-change-event
-    .     | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
-    5.43s | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
-    .     | London    | Alice:30      | rt-fetch-cancelled
-    .     | London    | Alicia:31     | [name-age-hook] ui-changed
-    8.44s | London    | Alicia:31     | 🟠 [users||1] >fetch-started
-    9.24s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
-    .     | Lisbon    | Alicia:31     | [city-hook] ui-changed
+    time   | city-hook | name-age-hook |
+    4.62s  | London    | Alice:30      | -- timeline-cleared
+    .      | London    | Alice:30      | [users||1] received-ws-data-change-event
+    .      | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .      | London    | Alice:30      | rt-fetch-cancelled
+    .      | London    | Alice:30      | rt-fetch-scheduled (delay: 1000ms)
+    .      | London    | Alicia:31     | [name-age-hook] ui-changed
+    6.53s  | London    | Alicia:31     | scheduled-rt-fetch-started
+    9.54s  | London    | Alicia:31     | 🟠 [users||1] >fetch-started
+    10.34s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Lisbon    | Alicia:31     | [city-hook] ui-changed
     "
   `);
 });
@@ -674,7 +676,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['name', 'age']`,
+    `fields: ['age', 'name']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
@@ -684,30 +686,294 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
 
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-age  |
-    4.62s | Alice:30  | -- timeline-cleared
-    .     | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
-    .     | Alice:30  | [users||1] received-ws-data-change-event
-    .     | Alice:30  | rt-fetch-scheduled (delay: 100ms)
-    4.63s | Alice:30  | rt-fetch-cancelled
-    .     | Alice:30  | 🟠 [users||1] >fetch-started
-    5.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
-    .     | Alicia:31 | [name-age] ui-changed
-    9.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
+    time   | name-age  |
+    4.62s  | Alice:30  | -- timeline-cleared
+    .      | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .      | Alice:30  | [users||1] received-ws-data-change-event
+    .      | Alice:30  | rt-fetch-scheduled (delay: 100ms)
+    4.72s  | Alice:30  | scheduled-rt-fetch-started
+    4.73s  | Alice:30  | 🟠 [users||1] >fetch-started
+    5.53s  | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    .      | Alicia:31 | [name-age] ui-changed
+    10.34s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-age-city    |
-    4.62s | Alice:30:London  | -- timeline-cleared
-    .     | Alice:30:London  | [users||1] received-ws-data-change-event
-    .     | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
-    5.43s | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
-    .     | Alice:30:London  | rt-fetch-cancelled
-    .     | Alicia:31:London | [name-age-city] ui-changed
-    8.44s | Alicia:31:London | 🟠 [users||1] >fetch-started
-    9.24s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
-    .     | Alicia:31:Lisbon | [name-age-city] ui-changed
+    time   | name-age-city    |
+    4.62s  | Alice:30:London  | -- timeline-cleared
+    .      | Alice:30:London  | [users||1] received-ws-data-change-event
+    .      | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .      | Alice:30:London  | rt-fetch-cancelled
+    .      | Alice:30:London  | rt-fetch-scheduled (delay: 1000ms)
+    .      | Alicia:31:London | [name-age-city] ui-changed
+    6.53s  | Alicia:31:London | scheduled-rt-fetch-started
+    9.54s  | Alicia:31:London | 🟠 [users||1] >fetch-started
+    10.34s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Alicia:31:Lisbon | [name-age-city] ui-changed
+    "
+  `);
+});
+
+test('a full invalidation of a fully-loaded item is re-announced to a background tab whose cancelled refetch left fields stale', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-full-invalidation-reannounce',
+    data: { users: [{ id: 1, name: 'Alice', age: 30, city: 'London' }] },
+    focusedTab: 'a',
+    usesRealTimeUpdates: true,
+  });
+
+  // Both tabs first load the item as a full resource (fields: '*') so their
+  // loadedFields become the '*' sentinel — a later full invalidation of a
+  // '*'-loaded item is tracked only by the full-invalidation marker, with no
+  // per-field list left to re-announce.
+  const envAFullHook = renderHook(() =>
+    envA.apiStore.useItem('users||1', { fields: '*' }),
+  );
+  await flushAllTimers();
+  const envBFullHook = renderHook(() =>
+    envB.apiStore.useItem('users||1', { fields: '*' }),
+  );
+  await flushAllTimers();
+
+  // Steady-state subset hooks: the focused tab watches name/age, the
+  // background tab watches only city. Both are satisfied from state.
+  const envAHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age'],
+    });
+
+    envA.trackItemUI('name-age-hook', getTrackedUserSummary(item.data));
+    return item;
+  });
+  const envBHook = renderHook(() => {
+    const item = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['city'],
+    });
+
+    envB.trackItemUI(
+      'city-hook',
+      typeof item.data?.city === 'string' ? item.data.city : null,
+    );
+    return item;
+  });
+  await flushAllTimers();
+
+  // Unmount the full-resource hooks so nothing refetches '*' after the
+  // invalidation — only the subset hooks remain mounted.
+  envAFullHook.unmount();
+  envBFullHook.unmount();
+  await flushAllTimers();
+
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+  expect(envA.store.state.itemLoadedFields[itemKey]).toBe('*');
+  expect(envB.store.state.itemLoadedFields[itemKey]).toBe('*');
+
+  const envAFetchCountBeforeRTU = countFetchHistoryEntries(
+    envA.serverTable.fetchHistory,
+    'fetch',
+  );
+  const envBFetchCountBeforeRTU = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
+  );
+  expect(envAFetchCountBeforeRTU).toBe(1);
+  expect(envBFetchCountBeforeRTU).toBe(1);
+
+  envA.clearTimeline();
+  envB.clearTimeline();
+
+  // The real-time update changes all fields, so both tabs invalidate the item
+  // fully. The focused tab refetches only its own name/age fields and
+  // broadcasts a snapshot whose merged item still carries the stale city —
+  // which wrongly cancels the background tab's pending city refetch (the
+  // snapshot vouches for city via inferFields). The surviving
+  // full-invalidation marker must be re-announced so the background tab
+  // reschedules its city refetch instead of staying stale forever.
+  act(() => {
+    envA.serverTable.setItem(
+      'users||1',
+      { id: 1, name: 'Alicia', age: 31, city: 'Lisbon' },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  const envAFetchEntries = envA.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  const envBFetchEntries = envB.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch')).toBe(
+    envAFetchCountBeforeRTU + 1,
+  );
+  // The background tab must refetch its own city field after the re-announce.
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeRTU + 1,
+  );
+  expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['age', 'name']`,
+  );
+  expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['city']`,
+  );
+  expect(pick(envAHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(pick(envBHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { city: 'Lisbon' }
+      status: 'success'
+    `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | city-hook |
+    4.62s  | London    | -- timeline-cleared
+    .      | London    | [users||1] received-ws-data-change-event
+    .      | London    | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | London    | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alicia","age":31,"city":"London"})
+    .      | London    | rt-fetch-cancelled
+    .      | London    | rt-fetch-scheduled (delay: 1000ms)
+    6.53s  | London    | scheduled-rt-fetch-started
+    9.54s  | London    | 🟠 [users||1] >fetch-started
+    10.34s | London    | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Lisbon    | [city-hook] ui-changed
+    "
+  `);
+});
+
+test('a surviving full invalidation is not downgraded to a field-only re-announce by a coexisting per-field invalidation', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-full-invalidation-not-downgraded',
+    data: {
+      users: [{ id: 1, name: 'Alice', age: 30, city: 'London', role: 'admin' }],
+    },
+    focusedTab: 'a',
+    usesRealTimeUpdates: true,
+  });
+
+  // Same setup as the previous test: both tabs load the item as a full
+  // resource ('*') so a later full invalidation is tracked only by the
+  // full-invalidation marker.
+  const envAFullHook = renderHook(() =>
+    envA.apiStore.useItem('users||1', { fields: '*' }),
+  );
+  await flushAllTimers();
+  const envBFullHook = renderHook(() =>
+    envB.apiStore.useItem('users||1', { fields: '*' }),
+  );
+  await flushAllTimers();
+
+  // Steady-state subset hooks: the focused tab watches name/age, the
+  // background tab watches only city.
+  const envAHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age'],
+    });
+
+    envA.trackItemUI('name-age-hook', getTrackedUserSummary(item.data));
+    return item;
+  });
+  const envBHook = renderHook(() => {
+    const item = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['city'],
+    });
+
+    envB.trackItemUI(
+      'city-hook',
+      typeof item.data?.city === 'string' ? item.data.city : null,
+    );
+    return item;
+  });
+  await flushAllTimers();
+
+  envAFullHook.unmount();
+  envBFullHook.unmount();
+  await flushAllTimers();
+
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+  expect(envA.store.state.itemLoadedFields[itemKey]).toBe('*');
+  expect(envB.store.state.itemLoadedFields[itemKey]).toBe('*');
+
+  const envBFetchCountBeforeRTU = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
+  );
+
+  envA.clearTimeline();
+  envB.clearTimeline();
+
+  // A real-time update changes all fields — both tabs invalidate the item
+  // fully (tracked by the full-invalidation marker).
+  act(() => {
+    envA.serverTable.setItem(
+      'users||1',
+      { id: 1, name: 'Alicia', age: 31, city: 'Lisbon', role: 'editor' },
+      { triggerRTUEvent: true },
+    );
+  });
+
+  // While both tabs' throttled refetches are still pending, the background
+  // tab also receives a per-field invalidation for 'role' — a field no
+  // mounted hook displays, so it stays recorded as an explicit unresolved
+  // field alongside the full-invalidation marker.
+  await advanceTime(100);
+  act(() => {
+    envB.apiStore.invalidateQueryAndItems({
+      queryPayload: false,
+      itemPayload: 'users||1',
+      type: 'realtimeUpdate',
+      fields: ['role'],
+    });
+  });
+  await flushAllTimers();
+
+  // The focused tab refetched only name/age and its snapshot (whose merged
+  // item still carries the stale city, vouched via inferFields) cancelled the
+  // background tab's pending refetch. The re-announce after that cancellation
+  // must stay a FULL invalidation — the surviving 'role' field record must
+  // not downgrade it to a role-only event, or the city hook would never
+  // reschedule and would show the stale city forever.
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeRTU + 1,
+  );
+  const envBFetchEntries = envB.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
+    `fields: ['city']`,
+  );
+  expect(pick(envBHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { city: 'Lisbon' }
+      status: 'success'
+    `);
+  expect(pick(envAHook.result.current, ['status', 'data']))
+    .toMatchInlineSnapshot(`
+      data: { age: 31, name: 'Alicia' }
+      status: 'success'
+    `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | city-hook |
+    4.62s  | London    | -- timeline-cleared
+    .      | London    | [users||1] received-ws-data-change-event
+    .      | London    | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | London    | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alicia","age":31,"city":"London","role":"admin"})
+    .      | London    | rt-fetch-cancelled
+    .      | London    | rt-fetch-scheduled (delay: 1000ms)
+    6.53s  | London    | scheduled-rt-fetch-started
+    9.54s  | London    | 🟠 [users||1] >fetch-started
+    10.34s | London    | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .      | Lisbon    | [city-hook] ui-changed
     "
   `);
 });
@@ -779,30 +1045,32 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
 
   expect(focusedTab.timelineString).toMatchInlineSnapshot(`
     "
-    time  | first-item | second-item |
-    4.62s | Alice:30   | Bob:25      | -- timeline-cleared
-    .     | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
-    .     | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
-    .     | Alice:30   | Bob:25      | rt-fetch-scheduled (delay: 100ms)
-    4.63s | Alice:30   | Bob:25      | rt-fetch-cancelled
-    .     | Alice:30   | Bob:25      | 🟠 >list-fetch-started
-    5.43s | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
-    .     | Alicia:31  | Bob:25      | [first-item] ui-changed
-    9.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    time   | first-item | second-item |
+    4.62s  | Alice:30   | Bob:25      | -- timeline-cleared
+    .      | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .      | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
+    .      | Alice:30   | Bob:25      | rt-fetch-scheduled (delay: 100ms)
+    4.72s  | Alice:30   | Bob:25      | scheduled-rt-fetch-started
+    4.73s  | Alice:30   | Bob:25      | 🟠 >list-fetch-started
+    5.53s  | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Alicia:31  | Bob:25      | [first-item] ui-changed
+    10.34s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
   expect(backgroundTab.timelineString).toMatchInlineSnapshot(`
     "
-    time  | first-item       | second-item  |
-    4.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
-    .     | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
-    .     | Alice:30:London  | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
-    5.43s | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    .     | Alice:30:London  | Bob:25:Paris | rt-fetch-cancelled
-    .     | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
-    8.44s | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
-    9.24s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
-    .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item] ui-changed
+    time   | first-item       | second-item  |
+    4.62s  | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
+    .      | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
+    .      | Alice:30:London  | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
+    5.53s  | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .      | Alice:30:London  | Bob:25:Paris | rt-fetch-cancelled
+    .      | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
+    .      | Alicia:31:London | Bob:25:Paris | rt-fetch-scheduled (delay: 1000ms)
+    6.53s  | Alicia:31:London | Bob:25:Paris | scheduled-rt-fetch-started
+    9.54s  | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
+    10.34s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Alicia:31:Lisbon | Bob:25:Paris | [first-item] ui-changed
     "
   `);
   expect(backgroundTab.serverTable.getRequestHistory('list'))
@@ -818,7 +1086,7 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
           fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         returned_items: 2
-        time: '8.44s -> 9.24s | duration: 800ms'
+        time: '9.54s -> 10.34s | duration: 800ms'
     `);
 });
 

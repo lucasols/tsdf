@@ -1464,3 +1464,1058 @@ describe('partial resources: inferFields reporting a complete snapshot', () => {
       `);
   });
 });
+
+describe('partial resources: invalidating fields vouched beyond the tracked metadata', () => {
+  // Finding: the invalidation staleness baseline consulted `inferFields` only
+  // when the `itemLoadedFields` metadata entry was entirely absent. But hooks
+  // display any field `inferFields` vouches for — including fields a mutation
+  // wrote beyond the tracked metadata (see the "hooks trust fields written
+  // beyond the tracked metadata" test above). A field is invalidatable
+  // exactly when it is displayable, so the baseline must be the UNION of the
+  // tracked metadata and `inferFields`, or invalidations of vouched-only
+  // fields are silently dropped and hooks show the stale value forever.
+
+  test('invalidating a mutation-written field beyond the tracked metadata refetches it', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: starInferFieldsConfig,
+    });
+
+    // The item is partially fetched: metadata tracks only ['id', 'name'].
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: ['id', 'name'],
+    });
+    await flushAllTimers();
+    await preload;
+
+    // A client mutation fills in the remaining fields — only `inferFields`
+    // vouches for them, the tracked metadata is not updated.
+    act(() => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.address = 'Client Address 1';
+        draft.age = 10;
+        draft.country = 'Country 1';
+      });
+    });
+
+    // A hook displays the mutation-written field without fetching.
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['address'],
+      }),
+    );
+    await flushAllTimers();
+    expect(result.current.data?.address).toBe('Client Address 1');
+    expect(env.serverTable.getRequestHistory('item').length).toBe(1);
+
+    // The server has newer data and the app invalidates exactly that field.
+    env.serverTable.updateItem('users||1', { address: 'Server Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['address'],
+      });
+    });
+    await flushAllTimers();
+
+    // The hook must refetch the invalidated field even though it is not part
+    // of the tracked metadata — it is displayed, so it can be stale.
+    expect(result.current.status).toBe('success');
+    expect(result.current.data?.address).toBe('Server Address 1');
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+        - _type: 'item'
+          payload:
+            fields: ['address']
+            itemId: 'users||1'
+      `);
+  });
+
+  test('a full invalidation marks mutation-written fields stale for hooks that mount later', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // The item is partially fetched through a mounted hook: metadata tracks
+    // only ['name']. A client mutation then writes 'address' beyond it.
+    renderHook(() => env.apiStore.useItem('users||1', { fields: ['name'] }));
+    await flushAllTimers();
+    act(() => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.address = 'Client Address 1';
+      });
+    });
+
+    // The server has newer data and a full invalidation fires. The mounted
+    // ['name'] hook consumes the invalidation event and refetches its own
+    // field right away.
+    env.serverTable.updateItem('users||1', { address: 'Server Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+      });
+    });
+    await flushAllTimers();
+
+    // A hook for the mutation-written field mounts only after the
+    // invalidation settled: the field must still be owed a refetch — the full
+    // invalidation covered everything displayable, not just the tracked
+    // metadata fields.
+    const lateHook = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['address'],
+      }),
+    );
+    await flushAllTimers();
+
+    expect(lateHook.result.current.status).toBe('success');
+    expect(lateHook.result.current.data?.address).toBe('Server Address 1');
+  });
+});
+
+describe('partial resources: realtime invalidations keep the scheduler throttle', () => {
+  // Finding: a full realtime invalidation resets `itemLoadedFields` to `[]`
+  // while the (stale) item data stays in state. The auto-fetch effect then
+  // classified every previously loaded field as "missing requested data" and
+  // promoted the refetch from `realtimeUpdate` to `highPriority` — cancelling
+  // the scheduler's delayed realtime fetch and firing an immediate duplicate
+  // request. Previously loaded fields owed after an invalidation are STALE,
+  // not missing: they must refetch at the tracked invalidation priority so
+  // the realtime throttle stays effective.
+
+  function createRealtimeEnv() {
+    return createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+  }
+
+  /** Mounts a list query hook and resolves the initial load so the realtime
+   * throttle has a baseline fetch. */
+  async function primeMountedListQuery(
+    env: ReturnType<typeof createRealtimeEnv>,
+  ) {
+    renderHook(() => {
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address'] },
+      );
+    });
+    await flushAllTimers();
+    env.clearTimeline();
+  }
+
+  /** The shape a realtime record-change event produces: a full invalidation
+   * of the query and its items at `realtimeUpdate` priority. */
+  function invalidateAllAsRealtimeUpdate(
+    env: ReturnType<typeof createRealtimeEnv>,
+  ) {
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: { tableId: 'users' },
+        itemPayload: (item) => item.startsWith('users||'),
+        type: 'realtimeUpdate',
+      });
+    });
+  }
+
+  test('a realtime full invalidation refetches once, delayed by the throttle, without an immediate duplicate fetch', async () => {
+    const env = createRealtimeEnv();
+    await primeMountedListQuery(env);
+
+    // A realtime record-change event fully invalidates the query and its
+    // items inside the throttle window.
+    await advanceTime(100);
+    invalidateAllAsRealtimeUpdate(env);
+
+    await flushAllTimers();
+
+    // The refetch must stay delayed by the throttle: one rt-fetch-scheduled,
+    // no rt-fetch-cancelled, and a single list fetch at the throttle
+    // boundary. Previously the auto-fetch effect promoted the stale fields to
+    // `highPriority`, cancelling the delayed fetch and firing immediately.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | rt-fetch-scheduled (delay: 900ms)
+      1.81s | scheduled-rt-fetch-started
+      1.82s | 🟠 >list-fetch-started
+      2.62s | 🟠 <list-fetch-finished (value: {"count":5})
+      "
+    `);
+
+    // Exactly one refetch after the initial load — fired at the throttle
+    // boundary, not at invalidation time.
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['address', 'id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '1.82s -> 2.62s | duration: 800ms'
+    `);
+  });
+
+  test('repeated realtime invalidations inside the throttle window coalesce into one delayed refetch', async () => {
+    const env = createRealtimeEnv();
+    await primeMountedListQuery(env);
+
+    // Two realtime record-change events arrive inside the same throttle
+    // window.
+    await advanceTime(100);
+    invalidateAllAsRealtimeUpdate(env);
+
+    await advanceTime(200);
+    invalidateAllAsRealtimeUpdate(env);
+
+    await flushAllTimers();
+
+    // Both invalidations coalesce into a single delayed realtime refetch —
+    // no cancellation, no immediate fetches, one refetch request total.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | rt-fetch-scheduled (delay: 900ms)
+      1.81s | scheduled-rt-fetch-started
+      1.82s | 🟠 >list-fetch-started
+      2.62s | 🟠 <list-fetch-finished (value: {"count":5})
+      "
+    `);
+
+    expect(env.serverTable.getRequestHistory('list').length).toBe(2);
+  });
+
+  test('a genuinely missing requested field still fetches immediately instead of waiting for a throttle', async () => {
+    const env = createRealtimeEnv();
+    await primeMountedListQuery(env);
+
+    // A second hook on the same query requests a field that was never loaded
+    // ('age'). This is genuinely missing data — the fetch must run
+    // immediately (promoted past the lowPriority mount default), not wait for
+    // any throttle.
+    await advanceTime(100);
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'age'] },
+      ),
+    );
+
+    await flushAllTimers();
+
+    // The missing field is fetched immediately and resolves with data.
+    expect(result.current.status).toBe('success');
+    expect(result.current.items[0]?.age).toBe(10);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      920ms | 🟠 >list-fetch-started
+      1.72s | 🟠 <list-fetch-finished (value: {"count":5})
+      "
+    `);
+  });
+
+  test('mixed stale + genuinely missing fields fetch immediately, covering both', async () => {
+    const env = createRealtimeEnv();
+    await primeMountedListQuery(env);
+
+    // A realtime invalidation marks the loaded fields stale (delayed refetch
+    // scheduled)...
+    await advanceTime(100);
+    invalidateAllAsRealtimeUpdate(env);
+
+    // ...then a hook mounts requesting a genuinely never-loaded field ('age')
+    // alongside the now-stale ones.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address', 'age'] },
+      ),
+    );
+
+    await flushAllTimers();
+
+    // Genuinely missing data justifies an immediate required fetch. It covers
+    // the stale fields too, superseding the delayed realtime refetch — so
+    // only one refetch happens in total.
+    expect(result.current.status).toBe('success');
+    expect(result.current.items[0]?.age).toBe(10);
+    expect(env.serverTable.getRequestHistory('list').length).toBe(2);
+  });
+
+  test('invalidating a never-loaded field does not delay its first load behind the throttle', async () => {
+    const env = createRealtimeEnv();
+
+    // Load some of the item's fields so the item scheduler has a baseline
+    // fetch for the throttle — but never load 'age'.
+    renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime event invalidates a field that was never loaded, inside the
+    // throttle window. There is no cached 'age' value that could go stale.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['age'],
+      });
+    });
+
+    // A hook mounts requesting the never-loaded field: this is genuinely
+    // missing data with nothing to display — it must fetch immediately
+    // instead of waiting out the realtime throttle as if it were stale.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['age'] }),
+    );
+
+    await flushAllTimers();
+
+    expect(result.current.data?.age).toBe(10);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      970ms | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"age":10})
+      "
+    `);
+  });
+
+  test('a realtime full item invalidation on a mounted item hook stays throttled', async () => {
+    const env = createRealtimeEnv();
+
+    // Load an item through a mounted field hook so the item scheduler has a
+    // baseline fetch for the throttle.
+    renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the item inside the
+    // throttle window.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    await flushAllTimers();
+
+    // Same contract as the list query: the item refetch stays delayed by the
+    // throttle instead of being promoted to an immediate highPriority fetch.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | rt-fetch-scheduled (delay: 900ms)
+      1.81s | scheduled-rt-fetch-started
+      1.82s | 🟠 >fetch-started
+      2.62s | 🟠 <fetch-finished (value: {"address":"Address 1","name":"User 1"})
+      "
+    `);
+
+    expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+  });
+
+  test('an explicit high-priority field invalidation escalates past a pending throttled full invalidation', async () => {
+    const env = createRealtimeEnv();
+
+    // Load an item through a mounted field hook so the item scheduler has a
+    // baseline fetch for the throttle.
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the item inside the
+    // throttle window — its refetch is scheduled at the throttle boundary.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // While that refetch is still waiting, the app explicitly invalidates one
+    // field at highPriority (e.g. a mutation response says 'name' changed).
+    await advanceTime(50);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    // The high-priority field must refetch immediately instead of being
+    // dropped and left to wait out the realtime throttle with the rest. The
+    // immediate fetch replaces (cancels) the pending throttled refetch that
+    // was carrying the other stale field ('address'), so it must carry that
+    // owed field along — a single fetch covering both.
+    await advanceTime(100);
+
+    await flushAllTimers();
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1","address":"New Address 1"})
+      .     | rt-fetch-scheduled (delay: 900ms)
+      970ms | rt-fetch-cancelled
+      .     | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"address":"New Address 1","name":"New User 1"})
+      "
+    `);
+    expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+
+    // Both the escalated field and the field owed to the cancelled throttled
+    // refetch end up fresh.
+    expect(result.current.data).toMatchInlineSnapshot(`
+      address: 'New Address 1'
+      name: 'New User 1'
+    `);
+  });
+
+  test('an escalated field invalidation does not strand stale fields owed to other mounted hooks', async () => {
+    const env = createRealtimeEnv();
+
+    // Two independent components display different fields of the same item.
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    const addressHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the item inside the
+    // throttle window — both hooks' stale fields ride on a single delayed
+    // refetch scheduled at the throttle boundary.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // While that refetch is still waiting, the app explicitly invalidates
+    // only 'name' at highPriority. The immediate escalated fetch replaces the
+    // delayed one — which was also carrying the address hook's stale field.
+    await advanceTime(50);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // The address hook's owed field must ride along on the escalated fetch —
+    // one immediate request covering both hooks' stale fields. Without this,
+    // the cancelled delayed fetch was the only carrier of 'address' and the
+    // address hook would show the stale value forever.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1","address":"New Address 1"})
+      .     | rt-fetch-scheduled (delay: 900ms)
+      970ms | rt-fetch-cancelled
+      .     | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"address":"New Address 1","name":"New User 1"})
+      "
+    `);
+    expect(nameHook.result.current.data?.name).toBe('New User 1');
+    expect(addressHook.result.current.data?.address).toBe('New Address 1');
+  });
+
+  test('stale fields owed to other hooks are preserved regardless of hook registration order', async () => {
+    const env = createRealtimeEnv();
+
+    // Same scenario as above, but the hook that does NOT match the escalated
+    // event's fields registers first — so its handler runs first and becomes
+    // the one scheduling the immediate fetch, while the name hook's handler
+    // contributes afterwards.
+    const addressHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['address'] }),
+    );
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // Full realtime invalidation inside the throttle window...
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // ...escalated by an explicit high-priority 'name' invalidation.
+    await advanceTime(50);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // Still a single immediate fetch covering both hooks' stale fields.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1","address":"New Address 1"})
+      .     | rt-fetch-scheduled (delay: 900ms)
+      970ms | rt-fetch-cancelled
+      .     | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"address":"New Address 1","name":"New User 1"})
+      "
+    `);
+    expect(nameHook.result.current.data?.name).toBe('New User 1');
+    expect(addressHook.result.current.data?.address).toBe('New Address 1');
+  });
+
+  test('successive realtime field invalidations inside the throttle window all land in the delayed refetch', async () => {
+    const env = createRealtimeEnv();
+
+    // Two independent components display different fields of the same item.
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    const addressHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // A realtime event invalidates 'name' inside the throttle window — the
+    // refetch is scheduled at the throttle boundary.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { name: 'New User 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['name'],
+      });
+    });
+
+    // A second realtime event invalidates 'address' while that delayed fetch
+    // is still pending. Both fields must ride on the same delayed fetch.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['address'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // A single delayed refetch fires at the throttle boundary carrying BOTH
+    // invalidated fields — the delayed fetch must execute with the payload
+    // coalesced across the whole wait, not the payload captured when it was
+    // first scheduled (which only carried 'name', leaving 'address' stale
+    // forever).
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['address', 'name']
+            itemId: 'users||1'
+      `);
+
+    expect(nameHook.result.current.data?.name).toBe('New User 1');
+    expect(addressHook.result.current.data?.address).toBe('New Address 1');
+  });
+});
+
+describe('partial resources: query invalidations with multiple same-payload hooks', () => {
+  // Finding: the `invalidateQuery` event handler dedups per query key, so
+  // with two hook instances watching the same query with different field
+  // subsets only the first instance's fields were scheduled on invalidation —
+  // the other instance's fields were never refetched and kept showing stale
+  // data forever.
+  test('a query invalidation refetches the fields of every mounted hook watching the query', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Two components watch the same list with different field subsets.
+    const nameHook = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['name'] }),
+    );
+    const addressHook = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // The server data changes and the app invalidates the query.
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: { tableId: 'users' },
+        itemPayload: false,
+        type: 'highPriority',
+      });
+    });
+    await flushAllTimers();
+
+    // A single coalesced refetch must cover both hooks' field subsets — the
+    // per-instance schedules merge in the scheduler's coalescing window.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['address', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+
+    // Both hooks must show the fresh values — with the buggy per-key dedup
+    // the second hook's fields were dropped and it kept the stale address
+    // forever.
+    expect(nameHook.result.current.items[0]?.name).toBe('New User 1');
+    expect(addressHook.result.current.items[0]?.address).toBe('New Address 1');
+  });
+});
+
+describe('partial resources: invalidations arriving while a hook is off-screen', () => {
+  // Finding: the `invalidateItem` event handler returned early when all of a
+  // hook's instances were off-screen — before re-opening the mount-once
+  // refetch gate. Per-field invalidations never set `refetchOnMount`, so
+  // nothing else could rescue the instance: back on-screen it kept showing
+  // the stale field with `status: 'success'` and never refetched.
+
+  function createOffScreenRealtimeEnv() {
+    return createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+  }
+
+  test('a field invalidated while its hook is off-screen refetches when the hook returns on-screen', async () => {
+    const env = createOffScreenRealtimeEnv();
+
+    // Load the item's fields through a mounted hook...
+    const { result, rerender } = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) =>
+        env.apiStore.useItem('users||1', {
+          fields: ['name', 'address'],
+          isOffScreen,
+        }),
+      { initialProps: { isOffScreen: false } },
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // ...then move it off-screen (e.g. the row scrolled out of a virtualized
+    // list).
+    rerender({ isOffScreen: true });
+
+    // The address changes on the server, and a realtime event invalidates
+    // only that field while the hook is off-screen.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['address'],
+      });
+    });
+
+    // The whole realtime throttle window passes while still off-screen —
+    // off-screen hooks must not fetch.
+    await flushAllTimers();
+    expect(env.serverTable.getRequestHistory('item').length).toBe(1);
+    expect(result.current.data?.address).toBe('Address 1');
+
+    // Back on-screen: the stale field must refetch and show the fresh value.
+    rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(result.current.status).toBe('success');
+    expect(result.current.data?.address).toBe('New Address 1');
+    // One initial load plus one refetch of only the stale field.
+    expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+  });
+
+  test('an off-screen hook still refetches after an on-screen hook consumed the same full invalidation', async () => {
+    const env = createOffScreenRealtimeEnv();
+
+    // Two hooks on the same item: one stays on-screen with its own field,
+    // the other loads a different field and then goes off-screen.
+    renderHook(() => env.apiStore.useItem('users||1', { fields: ['name'] }));
+    const offScreenHook = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) =>
+        env.apiStore.useItem('users||1', { fields: ['address'], isOffScreen }),
+      { initialProps: { isOffScreen: false } },
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    offScreenHook.rerender({ isOffScreen: true });
+
+    // A realtime record-change event fully invalidates the item. The
+    // on-screen hook consumes the event (it schedules its own refetch and
+    // clears `refetchOnMount`), the off-screen hook cannot react yet.
+    await advanceTime(100);
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        {
+          id: 1,
+          name: 'New User 1',
+          address: 'New Address 1',
+          age: 10,
+          country: 'Country 1',
+        },
+        { triggerRTUEvent: true },
+      );
+    });
+
+    // The on-screen hook's throttled refetch of its own field resolves while
+    // the other hook is still off-screen.
+    await flushAllTimers();
+    expect(offScreenHook.result.current.data?.address).toBe('Address 1');
+
+    // Back on-screen: the hook's own stale field must refetch too — the
+    // other hook's consumption of the invalidation event must not have
+    // discarded this hook's refetch obligation.
+    offScreenHook.rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(offScreenHook.result.current.status).toBe('success');
+    expect(offScreenHook.result.current.data?.address).toBe('New Address 1');
+  });
+
+  test('an off-screen query instance still refetches its fields after an on-screen instance consumed the query invalidation', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Two components watch the same list with different field subsets; the
+    // address one later goes off-screen (e.g. a collapsed panel).
+    const nameHook = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['name'] }),
+    );
+    const addressHook = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) =>
+        env.apiStore.useListQuery(
+          { tableId: 'users' },
+          { fields: ['address'], isOffScreen },
+        ),
+      { initialProps: { isOffScreen: false } },
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    addressHook.rerender({ isOffScreen: true });
+
+    // The server data changes and the app invalidates the query while the
+    // address instance is off-screen.
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: { tableId: 'users' },
+        itemPayload: false,
+        type: 'highPriority',
+      });
+    });
+    await flushAllTimers();
+
+    // Only the on-screen instance refetches, with its own fields — off-screen
+    // instances must not fetch.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+    expect(addressHook.result.current.items[0]?.address).toBe('Address 1');
+
+    // Back on-screen: the instance's fields are still owed a refetch — the
+    // visible instance consuming the invalidation (clearing the query's
+    // shared `refetchOnMount`) must not have discarded this instance's
+    // obligation.
+    addressHook.rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(addressHook.result.current.items[0]?.address).toBe('New Address 1');
+    // Exactly one extra fetch, scoped to the returning instance's fields.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'list'
+          payload:
+            fields: ['address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+    // The on-screen instance keeps its fresh value too.
+    expect(nameHook.result.current.items[0]?.name).toBe('New User 1');
+  });
+});
+
+describe("partial resources: invalidations arriving during a field's first fetch", () => {
+  // Finding: a per-field invalidation of a never-loaded field is not recorded
+  // as stale — correct on its own, since the field's first load must run
+  // immediately instead of being throttled as a stale refetch (see the
+  // throttle suite above). But when the field's FIRST fetch is already in
+  // flight, the in-flight response predates the invalidation and commits
+  // possibly-stale data as fresh. With the invalidation discarded, no
+  // follow-up refetch is owed and the stale value sticks forever.
+
+  function createRealtimeEnv() {
+    return createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+  }
+
+  test("an invalidation arriving during a field's first item fetch still produces a follow-up refetch", async () => {
+    const env = createRealtimeEnv();
+
+    // The first-ever fetch of the item starts (no field was loaded before).
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['age'] }),
+    );
+
+    // While that fetch is in flight, the value changes on the server and the
+    // realtime invalidation for the field arrives. The in-flight response was
+    // produced before the change, so it will still carry the old value.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['age'],
+      });
+    });
+
+    // The in-flight fetch settles with the pre-invalidation value...
+    await advanceTime(800);
+    expect(result.current.data?.age).toBe(10);
+
+    // ...and only fetches from here on can observe the changed value.
+    act(() => {
+      env.serverTable.updateItem('users||1', { age: 99 });
+    });
+
+    await flushAllTimers();
+
+    // The invalidation must survive the in-flight first fetch: a follow-up
+    // refetch (still throttled — it is a realtime refetch of now-stale data)
+    // picks up the changed value.
+    expect(result.current.data?.age).toBe(99);
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['age']
+            itemId: 'users||1'
+        - _type: 'item'
+          payload:
+            fields: ['age']
+            itemId: 'users||1'
+      `);
+  });
+
+  test("an invalidation arriving during a field's first list fetch still produces a follow-up refetch", async () => {
+    const env = createRealtimeEnv();
+
+    // The first-ever list fetch starts, loading 'name' for all items.
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['name'] }),
+    );
+
+    // While the list fetch is in flight, item 1's name changes on the server
+    // and its realtime invalidation arrives — 'name' was never loaded, so the
+    // invalidation has no displayable value to mark stale yet.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['name'],
+      });
+    });
+
+    // The in-flight list fetch settles with the pre-invalidation value...
+    await advanceTime(800);
+    expect(result.current.items[0]?.name).toBe('User 1');
+
+    // ...and only fetches from here on can observe the changed value.
+    act(() => {
+      env.serverTable.updateItem('users||1', { name: 'Renamed User 1' });
+    });
+
+    await flushAllTimers();
+
+    // The list fetch committing 'name' must not swallow the invalidation that
+    // arrived while it was in flight — a follow-up refetch picks up the
+    // changed value.
+    expect(result.current.items[0]?.name).toBe('Renamed User 1');
+  });
+});
+
+describe("partial resources: a fields:'*' query mounting over genuinely missing data", () => {
+  // Finding: the `'*'` branch of the query auto-fetch effect adopted the
+  // tracked invalidation priority whenever any pending invalidation existed —
+  // even when the hook's items were genuinely missing data (fields never
+  // loaded, not merely stale). A first load of missing data must run
+  // immediately; only refetches of still-displayable stale data may wait out
+  // the realtime throttle. The item-side `'*'` branch already distinguishes
+  // these.
+
+  test('a full-resource hook mounting with never-loaded fields fetches immediately despite a pending realtime invalidation', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+
+    // Prime the query with a subset of fields — 'address', 'age' and
+    // 'country' are never loaded.
+    renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name'] },
+      ),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime invalidation of the loaded field arrives: its refetch is
+    // correctly throttled (stale data is still displayable).
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: (itemKey) => itemKey.startsWith('users||'),
+        type: 'realtimeUpdate',
+        fields: ['name'],
+      });
+    });
+
+    // A full-resource hook mounts on the same query: most of its fields were
+    // never loaded, so this is a first load of missing data — it must fetch
+    // immediately instead of inheriting the pending realtime priority and
+    // waiting out the throttle.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: '*' }),
+    );
+
+    // Enough time for an immediate fetch to finish, but before the throttled
+    // alternative (throttle boundary ~1.81s) would even have started fetching.
+    await advanceTime(850);
+    expect(result.current.status).toBe('success');
+    expect(result.current.items[0]?.age).toBe(10);
+
+    await flushAllTimers();
+
+    // A single full fetch serves both the missing data and the pending 'name'
+    // invalidation — no separate throttled refetch remains.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+  });
+});

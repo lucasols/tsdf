@@ -1209,15 +1209,7 @@ export class RequestScheduler<T> {
 
     this.#state.pending.rtuDelayed.set(requestId, {
       timeoutId: setTimeout(() => {
-        this.#state.pending.rtuDelayed.delete(requestId);
-        this.#onEvent?.('scheduled-rt-fetch-started');
-        this.#scheduleRequest(
-          requestId,
-          'highPriority',
-          payload,
-          undefined,
-          remoteStartCancelable,
-        );
+        this.#executeDelayedRTUFetch(requestId);
       }, delay),
       requestId,
       payload,
@@ -1230,6 +1222,24 @@ export class RequestScheduler<T> {
     this.#onEvent?.('rt-fetch-scheduled', { delayMs: delay });
 
     return true;
+  }
+
+  /** Executes from the current delayed entry, not from the args captured when
+   * the timeout was created — realtime updates arriving during the delay
+   * coalesce their payloads into the entry. */
+  #executeDelayedRTUFetch(requestId: string): void {
+    const delayedRequest = this.#state.pending.rtuDelayed.get(requestId);
+    if (!delayedRequest) return;
+
+    this.#state.pending.rtuDelayed.delete(requestId);
+    this.#onEvent?.('scheduled-rt-fetch-started');
+    this.#scheduleRequest(
+      requestId,
+      'highPriority',
+      delayedRequest.payload,
+      undefined,
+      delayedRequest.remoteStartCancelable,
+    );
   }
 
   #handleMediumPriority(

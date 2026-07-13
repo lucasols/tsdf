@@ -99,7 +99,10 @@ import {
   type ValidStoreState,
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
-import { createMutationApi } from './createMutationApi';
+import {
+  createMutationApi,
+  type DroppedFieldInvalidation,
+} from './createMutationApi';
 import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
@@ -1902,6 +1905,15 @@ export function createListQueryStore<
   // refetches. It keeps other mounted hooks from trusting the stale snapshot via
   // `inferFields` until the item is fully reloaded (`loadedFields === '*'` again).
   const itemsPendingFullInvalidation = new Set<string>();
+  // Per-field invalidations of never-loaded fields, dropped from the stale
+  // record so the field's first load stays immediate — kept here so a fetch
+  // that was already in flight when the invalidation arrived (and whose
+  // response therefore predates it) gets re-announced at settle. See
+  // `reannounceInvalidationsDroppedDuringFetch`.
+  const itemDroppedFieldInvalidations = new Map<
+    string,
+    Map<string, DroppedFieldInvalidation>
+  >();
 
   const {
     getQueryState,
@@ -1971,12 +1983,12 @@ export function createListQueryStore<
         .filter(({ requestId }) => results.get(requestId) === true)
         .map(({ requestId }) => requestId);
       if (successfulQueryKeys.length > 0) {
-        touchQueries(successfulQueryKeys);
-        touchItems(
-          successfulQueryKeys.flatMap(
-            (queryKey) => store.state.queries[queryKey]?.items ?? [],
-          ),
+        const committedItemKeys = successfulQueryKeys.flatMap(
+          (queryKey) => store.state.queries[queryKey]?.items ?? [],
         );
+        touchQueries(successfulQueryKeys);
+        touchItems(committedItemKeys);
+        reannounceInvalidationsDroppedDuringFetch(committedItemKeys, startedAt);
         if (shouldScheduleCacheLimitEnforcement()) {
           scheduleCacheLimitEnforcement();
         }
@@ -2021,7 +2033,9 @@ export function createListQueryStore<
         .filter(({ requestId }) => results.get(requestId) === true)
         .map((request) => ({ itemKey: request.requestId }));
       if (successfulItems.length > 0) {
-        touchItems(successfulItems.map(({ itemKey }) => itemKey));
+        const committedItemKeys = successfulItems.map(({ itemKey }) => itemKey);
+        touchItems(committedItemKeys);
+        reannounceInvalidationsDroppedDuringFetch(committedItemKeys, startedAt);
         if (shouldScheduleCacheLimitEnforcement()) {
           scheduleCacheLimitEnforcement();
         }
@@ -2061,6 +2075,7 @@ export function createListQueryStore<
     itemFieldInvalidationPriorities,
     invalidateQueryAndItems,
     invalidateItem,
+    reannounceInvalidationsDroppedDuringFetch,
     startItemMutation,
     updateItemState: updateItemStateBase,
     addItemToState: addItemToStateBase,
@@ -2104,6 +2119,7 @@ export function createListQueryStore<
       : undefined,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
+    itemDroppedFieldInvalidations,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2306,6 +2322,53 @@ export function createListQueryStore<
     }
   }
 
+  /**
+   * A confirmed remote snapshot cancels the pending local fetches it
+   * satisfies, but the sender may have refetched only a subset of the
+   * invalidated fields (it fetches only its own hooks' fields). Any fields
+   * still owed after applying the snapshot are re-announced so mounted hooks
+   * re-schedule refetches of their own remaining stale fields — without
+   * this, the cancelled local refetch would leave them stale forever.
+   *
+   * Only called when the snapshot actually cancelled a pending local fetch:
+   * that cancellation is the refetch obligation being destroyed, and gating
+   * on it also guarantees the cross-tab re-announce ping-pong terminates —
+   * a repeat cycle requires a new pending fetch at snapshot arrival.
+   */
+  function emitRemainingInvalidationFieldsAfterSnapshot(itemKey: string): void {
+    const priority =
+      itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority';
+
+    // A surviving full-invalidation marker means every not-yet-reloaded
+    // field is still owed, not just the explicitly tracked field list (a
+    // per-field invalidation can coexist with an unresolved full one).
+    // Re-announce the full invalidation itself so hooks whose fields are
+    // owed only through the marker also re-schedule — downgrading it to the
+    // explicit field list would leave them stale forever.
+    if (itemsPendingFullInvalidation.has(itemKey)) {
+      events.emit('invalidateItem', { priority, itemKey });
+      return;
+    }
+
+    const stateInvalidationFields =
+      store.state.itemFieldInvalidationFields[itemKey];
+    const remainingFields =
+      stateInvalidationFields && stateInvalidationFields.length > 0
+        ? stateInvalidationFields
+        : excludeLoadedFields(
+            store.state.itemLoadedFields[itemKey],
+            itemPendingInvalidationFields.get(itemKey),
+          );
+
+    if (remainingFields.length === 0) return;
+
+    events.emit('invalidateItem', {
+      priority,
+      itemKey,
+      invalidateFields: remainingFields,
+    });
+  }
+
   function pruneItemInvalidationTracking(): void {
     for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
       // Fields still owed from earlier invalidations: the ones not yet
@@ -2365,6 +2428,7 @@ export function createListQueryStore<
     itemFieldInvalidationPriorities.delete(itemKey);
     itemPendingInvalidationFields.delete(itemKey);
     itemsPendingFullInvalidation.delete(itemKey);
+    itemDroppedFieldInvalidations.delete(itemKey);
     itemInvalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
   }
@@ -2599,13 +2663,16 @@ export function createListQueryStore<
       );
     });
 
-    if (message.consistency === 'confirmed') {
-      itemScheduler?.cancelPendingRequests([message.itemKey], ({ payload }) =>
-        itemSnapshotSatisfiesRequestedFields(
-          message.item,
-          message.loadedFields,
-          payload.fields,
-        ),
+    let cancelledPendingItemFetch = false;
+    if (message.consistency === 'confirmed' && itemScheduler) {
+      cancelledPendingItemFetch = itemScheduler.cancelPendingRequests(
+        [message.itemKey],
+        ({ payload }) =>
+          itemSnapshotSatisfiesRequestedFields(
+            message.item,
+            message.loadedFields,
+            payload.fields,
+          ),
       );
     }
 
@@ -2614,6 +2681,9 @@ export function createListQueryStore<
       cleanupItemStateMetadata(message.itemKey);
     }
     pruneItemInvalidationTracking();
+    if (cancelledPendingItemFetch) {
+      emitRemainingInvalidationFieldsAfterSnapshot(message.itemKey);
+    }
     if (message.item === null && message.itemQuery === null) {
       if (payloadToCleanup) {
         deleteItemFetchResources([
@@ -2634,31 +2704,36 @@ export function createListQueryStore<
       { kind: 'list-query-snapshot' }
     >,
   ): void {
+    let cancelledPendingQueryFetch = false;
+    const itemKeysWithCancelledFetch = new Set<string>();
     if (message.consistency === 'confirmed') {
       const snapshotItemsByKey = new Map(
         message.items.map((item) => [item.itemKey, item]),
       );
 
-      getOrCreateQueryScheduler(message.queryKey).cancelPendingRequests(
-        [message.queryKey],
-        (request) =>
-          querySnapshotSatisfiesPendingQueryFetch(
-            message,
-            snapshotItemsByKey,
-            request,
-          ),
+      cancelledPendingQueryFetch = getOrCreateQueryScheduler(
+        message.queryKey,
+      ).cancelPendingRequests([message.queryKey], (request) =>
+        querySnapshotSatisfiesPendingQueryFetch(
+          message,
+          snapshotItemsByKey,
+          request,
+        ),
       );
 
       for (const item of message.items) {
         const itemScheduler = getKnownItemScheduler(item.itemKey);
 
-        itemScheduler?.cancelPendingRequests([item.itemKey], ({ payload }) =>
-          itemSnapshotSatisfiesRequestedFields(
-            item.item,
-            item.loadedFields,
-            payload.fields,
-          ),
+        const cancelled = itemScheduler?.cancelPendingRequests(
+          [item.itemKey],
+          ({ payload }) =>
+            itemSnapshotSatisfiesRequestedFields(
+              item.item,
+              item.loadedFields,
+              payload.fields,
+            ),
         );
+        if (cancelled) itemKeysWithCancelledFetch.add(item.itemKey);
       }
     }
 
@@ -2710,6 +2785,12 @@ export function createListQueryStore<
         item.itemKey,
         toBrowserTabsSyncVersion(message, message.consistency),
       );
+      if (
+        cancelledPendingQueryFetch ||
+        itemKeysWithCancelledFetch.has(item.itemKey)
+      ) {
+        emitRemainingInvalidationFieldsAfterSnapshot(item.itemKey);
+      }
     }
     touchQueries([message.queryKey]);
     touchItems(message.items.map(({ itemKey }) => itemKey));
