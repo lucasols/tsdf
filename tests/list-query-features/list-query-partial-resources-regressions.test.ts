@@ -1666,7 +1666,7 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
         time: '10ms -> 810ms | duration: 800ms'
       - _type: 'list'
         payload:
-          fields: ['id', 'name', 'address']
+          fields: ['address', 'id', 'name']
           pos: { limit: 50, offset: 0 }
         returned_items: 5
         time: '1.82s -> 2.62s | duration: 800ms'
@@ -1840,7 +1840,7 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
       910ms | rt-fetch-scheduled (delay: 900ms)
       1.81s | scheduled-rt-fetch-started
       1.82s | 🟠 >fetch-started
-      2.62s | 🟠 <fetch-finished (value: {"name":"User 1","address":"Address 1"})
+      2.62s | 🟠 <fetch-finished (value: {"address":"Address 1","name":"User 1"})
       "
     `);
 
@@ -2035,6 +2035,65 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
     expect(nameHook.result.current.data?.name).toBe('New User 1');
     expect(addressHook.result.current.data?.address).toBe('New Address 1');
   });
+
+  test('successive realtime field invalidations inside the throttle window all land in the delayed refetch', async () => {
+    const env = createRealtimeEnv();
+
+    // Two independent components display different fields of the same item.
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    const addressHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // A realtime event invalidates 'name' inside the throttle window — the
+    // refetch is scheduled at the throttle boundary.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { name: 'New User 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['name'],
+      });
+    });
+
+    // A second realtime event invalidates 'address' while that delayed fetch
+    // is still pending. Both fields must ride on the same delayed fetch.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { address: 'New Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['address'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // A single delayed refetch fires at the throttle boundary carrying BOTH
+    // invalidated fields — the delayed fetch must execute with the payload
+    // coalesced across the whole wait, not the payload captured when it was
+    // first scheduled (which only carried 'name', leaving 'address' stale
+    // forever).
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['address', 'name']
+            itemId: 'users||1'
+      `);
+
+    expect(nameHook.result.current.data?.name).toBe('New User 1');
+    expect(addressHook.result.current.data?.address).toBe('New Address 1');
+  });
 });
 
 describe('partial resources: query invalidations with multiple same-payload hooks', () => {
@@ -2202,5 +2261,82 @@ describe('partial resources: invalidations arriving while a hook is off-screen',
 
     expect(offScreenHook.result.current.status).toBe('success');
     expect(offScreenHook.result.current.data?.address).toBe('New Address 1');
+  });
+
+  test('an off-screen query instance still refetches its fields after an on-screen instance consumed the query invalidation', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Two components watch the same list with different field subsets; the
+    // address one later goes off-screen (e.g. a collapsed panel).
+    const nameHook = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['name'] }),
+    );
+    const addressHook = renderHook(
+      ({ isOffScreen }: { isOffScreen: boolean }) =>
+        env.apiStore.useListQuery(
+          { tableId: 'users' },
+          { fields: ['address'], isOffScreen },
+        ),
+      { initialProps: { isOffScreen: false } },
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    addressHook.rerender({ isOffScreen: true });
+
+    // The server data changes and the app invalidates the query while the
+    // address instance is off-screen.
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: { tableId: 'users' },
+        itemPayload: false,
+        type: 'highPriority',
+      });
+    });
+    await flushAllTimers();
+
+    // Only the on-screen instance refetches, with its own fields — off-screen
+    // instances must not fetch.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+    expect(addressHook.result.current.items[0]?.address).toBe('Address 1');
+
+    // Back on-screen: the instance's fields are still owed a refetch — the
+    // visible instance consuming the invalidation (clearing the query's
+    // shared `refetchOnMount`) must not have discarded this instance's
+    // obligation.
+    addressHook.rerender({ isOffScreen: false });
+    await flushAllTimers();
+
+    expect(addressHook.result.current.items[0]?.address).toBe('New Address 1');
+    // Exactly one extra fetch, scoped to the returning instance's fields.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'list'
+          payload:
+            fields: ['address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+    // The on-screen instance keeps its fresh value too.
+    expect(nameHook.result.current.items[0]?.name).toBe('New User 1');
   });
 });

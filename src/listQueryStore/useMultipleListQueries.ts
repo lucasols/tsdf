@@ -1186,6 +1186,15 @@ export function useMultipleListQueries<
     visibleStoreState,
   ]);
 
+  // Invalidations that arrived while an instance was off-screen, keyed by
+  // query key. The first visible instance handling an `invalidateQuery` event
+  // clears the query's shared `refetchOnMount`, so an off-screen instance's
+  // obligation must survive per hook instance — the auto-fetch effect
+  // consumes it when the instance returns on-screen.
+  const pendingOffScreenQueryInvalidations = useConst(
+    () => new Map<string, FetchType>(),
+  );
+
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {
     for (const {
       key,
@@ -1195,8 +1204,6 @@ export function useMultipleListQueries<
       isOffScreen,
       disableRefetches,
     } of fetchQueriesWithId) {
-      if (isOffScreen) continue;
-
       if (key !== event.queryKey) continue;
 
       const resolvedQuery = resolveEffectiveQuery(store.state, {
@@ -1205,6 +1212,18 @@ export function useMultipleListQueries<
         fields,
       });
       if (disableRefetches && resolvedQuery?.query.wasLoaded) continue;
+
+      if (isOffScreen) {
+        const existingPriority = pendingOffScreenQueryInvalidations.get(key);
+        if (
+          !existingPriority ||
+          fetchTypePriority[event.priority] >
+            fetchTypePriority[existingPriority]
+        ) {
+          pendingOffScreenQueryInvalidations.set(key, event.priority);
+        }
+        continue;
+      }
 
       if (!queryInvalidationWasTriggered.has(key)) {
         stickyDerivedQueryKeys.delete(key);
@@ -1443,6 +1462,24 @@ export function useMultipleListQueries<
           }
         }
 
+        // Consume an invalidation that arrived while this instance was
+        // off-screen: the visible instances consumed the event itself (and
+        // cleared the query's shared `refetchOnMount`), so this per-instance
+        // record is the only surviving signal that the instance's fields are
+        // still owed a refetch.
+        const offScreenInvalidationPriority =
+          pendingOffScreenQueryInvalidations.get(queryId);
+        if (offScreenInvalidationPriority !== undefined) {
+          pendingOffScreenQueryInvalidations.delete(queryId);
+          shouldFetch = true;
+          if (
+            fetchTypePriority[offScreenInvalidationPriority] >
+            fetchTypePriority[fetchType]
+          ) {
+            fetchType = offScreenInvalidationPriority;
+          }
+        }
+
         if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(queryId)) {
           continue;
         }
@@ -1481,6 +1518,7 @@ export function useMultipleListQueries<
     getQueryState,
     getDerivedPreloadPayloads,
     ignoreQueriesInRefetchOnMount,
+    pendingOffScreenQueryInvalidations,
     preloadDerivedQueryItems,
     preloadQueries,
     preloadQueriesBeforePaint,

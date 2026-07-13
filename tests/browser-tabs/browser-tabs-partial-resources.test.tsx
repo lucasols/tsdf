@@ -539,7 +539,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['name', 'age']`,
+    `fields: ['age', 'name']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
@@ -576,7 +576,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     .      | Alice:30      | rt-fetch-scheduled (delay: 100ms)
     4.72s  | Alice:30      | scheduled-rt-fetch-started
     4.73s  | Alice:30      | 🟠 [users||1] >fetch-started
-    5.53s  | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
+    5.53s  | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
     .      | Alicia:31     | [name-age-hook] ui-changed
     10.34s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
     "
@@ -676,7 +676,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['name', 'age']`,
+    `fields: ['age', 'name']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
@@ -693,7 +693,7 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     .      | Alice:30  | rt-fetch-scheduled (delay: 100ms)
     4.72s  | Alice:30  | scheduled-rt-fetch-started
     4.73s  | Alice:30  | 🟠 [users||1] >fetch-started
-    5.53s  | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"name":"Alicia","age":31})
+    5.53s  | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
     .      | Alicia:31 | [name-age] ui-changed
     10.34s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
     "
@@ -816,7 +816,7 @@ test('a full invalidation of a fully-loaded item is re-announced to a background
     envBFetchCountBeforeRTU + 1,
   );
   expect(pick(envAFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
-    `fields: ['name', 'age']`,
+    `fields: ['age', 'name']`,
   );
   expect(pick(envBFetchEntries.at(-1), ['fields'])).toMatchInlineSnapshot(
     `fields: ['city']`,
