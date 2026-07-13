@@ -442,6 +442,35 @@ export function createMutationApi<
   const itemInvalidationWasTriggered = new Set<string>();
   const itemFieldInvalidationPriorities = new Map<string, FetchType>();
 
+  /**
+   * The staleness baseline for invalidations: a field is invalidatable
+   * exactly when it is displayable, and hooks display the UNION of the
+   * tracked `itemLoadedFields` metadata and whatever `inferFields` currently
+   * vouches for (e.g. fields a mutation wrote beyond the tracked metadata).
+   * Collapses to '*' when either side is '*' — the displayable set is then
+   * not enumerable.
+   */
+  function getInvalidationBaselineFields(
+    itemKey: string,
+  ): ItemLoadedFields | undefined {
+    const trackedLoadedFields = store.state.itemLoadedFields[itemKey];
+    if (trackedLoadedFields === '*') return '*';
+
+    if (!partialResources) return trackedLoadedFields;
+
+    const itemState = store.state.items[itemKey];
+    if (!itemState) return trackedLoadedFields;
+
+    const inferredFields = partialResources.inferFields(itemState);
+    if (inferredFields === '*') return '*';
+
+    if (!trackedLoadedFields || trackedLoadedFields.length === 0) {
+      return inferredFields;
+    }
+
+    return Array.from(new Set([...trackedLoadedFields, ...inferredFields]));
+  }
+
   function invalidateQueryAndItems(args: InvalidateQueryAndItemsArgs) {
     const itemPayload: ItemPayload | ItemPayload[] | FilterItem | false =
       args.all ? GET_ALL : args.itemPayload;
@@ -490,21 +519,14 @@ export function createMutationApi<
           string,
           string[]
         >();
-        // Only fields with a displayable cached value can go stale: the ones
-        // tracked as loaded, or vouched by `inferFields` for metadata-free
-        // items (mirroring the full-invalidation path). A never-loaded field
-        // must not be recorded — it stays classified as genuinely missing so
-        // its first load runs immediately instead of waiting out a throttle.
+        // Only fields with a displayable cached value can go stale (see
+        // getInvalidationBaselineFields). A never-loaded field must not be
+        // recorded — it stays classified as genuinely missing so its first
+        // load runs immediately instead of waiting out a throttle.
         const staleInvalidateFieldsByItemKey = new Map<string, string[]>();
 
         for (const { itemKey } of itemsKey) {
-          let effectiveLoadedFields = store.state.itemLoadedFields[itemKey];
-          if (effectiveLoadedFields === undefined) {
-            const itemState = store.state.items[itemKey];
-            if (itemState) {
-              effectiveLoadedFields = partialResources.inferFields(itemState);
-            }
-          }
+          const effectiveLoadedFields = getInvalidationBaselineFields(itemKey);
 
           const staleInvalidateFields =
             effectiveLoadedFields === '*'
@@ -614,17 +636,7 @@ export function createMutationApi<
 
       if (!item) continue;
 
-      // Metadata-free items (manually added, offline rows, hydrated fallback
-      // snapshots) have no `itemLoadedFields` entry — their staleness baseline
-      // is whatever `inferFields` currently vouches for, otherwise the
-      // invalidation would leave no durable marker behind.
-      let effectiveLoadedFields = store.state.itemLoadedFields[itemKey];
-      if (partialResources && effectiveLoadedFields === undefined) {
-        const itemState = store.state.items[itemKey];
-        if (itemState) {
-          effectiveLoadedFields = partialResources.inferFields(itemState);
-        }
-      }
+      const effectiveLoadedFields = getInvalidationBaselineFields(itemKey);
 
       const itemWasFullyLoaded =
         partialResources && effectiveLoadedFields === '*';

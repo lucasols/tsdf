@@ -793,6 +793,44 @@ export function useMultipleItems<
     const firstQuery = matchingQueries[0];
     if (!firstQuery) return;
 
+    // The immediate fetch scheduled below replaces any pending scheduled
+    // fetch for this item (the scheduler cancels it), and that pending fetch
+    // may have been carrying other owed stale fields at a lower priority
+    // (e.g. a throttled realtime invalidation). Ride this instance's other
+    // owed stale fields along so the replaced fetch's obligation isn't lost.
+    if (fieldsToFetch) {
+      const hookFields = firstQuery.fields;
+      const loadedFields = store.state.itemLoadedFields[event.itemKey];
+      if (itemsPendingFullInvalidation.has(event.itemKey)) {
+        // After an unresolved full ('*') invalidation every field not yet
+        // reloaded is owed; for an unbounded hook that means a full fetch.
+        fieldsToFetch =
+          !hookFields || hookFields === '*' || hookFields.length === 0
+            ? undefined
+            : Array.from(
+                new Set([
+                  ...fieldsToFetch,
+                  ...excludeLoadedFields(loadedFields, hookFields),
+                ]),
+              ).sort();
+      } else {
+        const owedFields = new Set([
+          ...(store.state.itemFieldInvalidationFields[event.itemKey] ?? []),
+          ...excludeLoadedFields(
+            loadedFields,
+            itemPendingInvalidationFields.get(event.itemKey),
+          ),
+        ]);
+        const rideAlongFields =
+          !hookFields || hookFields === '*' || hookFields.length === 0
+            ? Array.from(owedFields)
+            : hookFields.filter((field) => owedFields.has(field));
+        fieldsToFetch = Array.from(
+          new Set([...fieldsToFetch, ...rideAlongFields]),
+        ).sort();
+      }
+    }
+
     store.produceState((draft) => {
       const query = draft.itemQueries[event.itemKey];
       if (!query?.refetchOnMount) return;

@@ -1465,6 +1465,123 @@ describe('partial resources: inferFields reporting a complete snapshot', () => {
   });
 });
 
+describe('partial resources: invalidating fields vouched beyond the tracked metadata', () => {
+  // Finding: the invalidation staleness baseline consulted `inferFields` only
+  // when the `itemLoadedFields` metadata entry was entirely absent. But hooks
+  // display any field `inferFields` vouches for — including fields a mutation
+  // wrote beyond the tracked metadata (see the "hooks trust fields written
+  // beyond the tracked metadata" test above). A field is invalidatable
+  // exactly when it is displayable, so the baseline must be the UNION of the
+  // tracked metadata and `inferFields`, or invalidations of vouched-only
+  // fields are silently dropped and hooks show the stale value forever.
+
+  test('invalidating a mutation-written field beyond the tracked metadata refetches it', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: starInferFieldsConfig,
+    });
+
+    // The item is partially fetched: metadata tracks only ['id', 'name'].
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: ['id', 'name'],
+    });
+    await flushAllTimers();
+    await preload;
+
+    // A client mutation fills in the remaining fields — only `inferFields`
+    // vouches for them, the tracked metadata is not updated.
+    act(() => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.address = 'Client Address 1';
+        draft.age = 10;
+        draft.country = 'Country 1';
+      });
+    });
+
+    // A hook displays the mutation-written field without fetching.
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['address'],
+      }),
+    );
+    await flushAllTimers();
+    expect(result.current.data?.address).toBe('Client Address 1');
+    expect(env.serverTable.getRequestHistory('item').length).toBe(1);
+
+    // The server has newer data and the app invalidates exactly that field.
+    env.serverTable.updateItem('users||1', { address: 'Server Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['address'],
+      });
+    });
+    await flushAllTimers();
+
+    // The hook must refetch the invalidated field even though it is not part
+    // of the tracked metadata — it is displayed, so it can be stale.
+    expect(result.current.status).toBe('success');
+    expect(result.current.data?.address).toBe('Server Address 1');
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+        - _type: 'item'
+          payload:
+            fields: ['address']
+            itemId: 'users||1'
+      `);
+  });
+
+  test('a full invalidation marks mutation-written fields stale for hooks that mount later', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // The item is partially fetched through a mounted hook: metadata tracks
+    // only ['name']. A client mutation then writes 'address' beyond it.
+    renderHook(() => env.apiStore.useItem('users||1', { fields: ['name'] }));
+    await flushAllTimers();
+    act(() => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft.address = 'Client Address 1';
+      });
+    });
+
+    // The server has newer data and a full invalidation fires. The mounted
+    // ['name'] hook consumes the invalidation event and refetches its own
+    // field right away.
+    env.serverTable.updateItem('users||1', { address: 'Server Address 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+      });
+    });
+    await flushAllTimers();
+
+    // A hook for the mutation-written field mounts only after the
+    // invalidation settled: the field must still be owed a refetch — the full
+    // invalidation covered everything displayable, not just the tracked
+    // metadata fields.
+    const lateHook = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['address'],
+      }),
+    );
+    await flushAllTimers();
+
+    expect(lateHook.result.current.status).toBe('success');
+    expect(lateHook.result.current.data?.address).toBe('Server Address 1');
+  });
+});
+
 describe('partial resources: realtime invalidations keep the scheduler throttle', () => {
   // Finding: a full realtime invalidation resets `itemLoadedFields` to `[]`
   // while the (stale) item data stays in state. The auto-fetch effect then
@@ -1728,6 +1845,73 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
     `);
 
     expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+  });
+
+  test('an explicit high-priority field invalidation escalates past a pending throttled full invalidation', async () => {
+    const env = createRealtimeEnv();
+
+    // Load an item through a mounted field hook so the item scheduler has a
+    // baseline fetch for the throttle.
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the item inside the
+    // throttle window — its refetch is scheduled at the throttle boundary.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // While that refetch is still waiting, the app explicitly invalidates one
+    // field at highPriority (e.g. a mutation response says 'name' changed).
+    await advanceTime(50);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    // The high-priority field must refetch immediately instead of being
+    // dropped and left to wait out the realtime throttle with the rest. The
+    // immediate fetch replaces (cancels) the pending throttled refetch that
+    // was carrying the other stale field ('address'), so it must carry that
+    // owed field along — a single fetch covering both.
+    await advanceTime(100);
+
+    await flushAllTimers();
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1","address":"New Address 1"})
+      .     | rt-fetch-scheduled (delay: 900ms)
+      970ms | rt-fetch-cancelled
+      .     | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"address":"New Address 1","name":"New User 1"})
+      "
+    `);
+    expect(env.serverTable.getRequestHistory('item').length).toBe(2);
+
+    // Both the escalated field and the field owed to the cancelled throttled
+    // refetch end up fresh.
+    expect(result.current.data).toMatchInlineSnapshot(`
+      address: 'New Address 1'
+      name: 'New User 1'
+    `);
   });
 });
 
