@@ -749,13 +749,38 @@ export function useMultipleItems<
       fieldsToFetch = Array.from(new Set(event.invalidateFields)).sort();
     }
 
+    // The item's other owed stale fields: the union of the state
+    // invalidation record and the pending invalidation fields not yet
+    // reloaded. The immediate fetch scheduled below replaces any pending
+    // scheduled fetch for this item (the scheduler cancels it), and that
+    // pending fetch may have been carrying these fields at a lower priority
+    // (e.g. a throttled realtime invalidation) — so for per-field events,
+    // instances whose fields only overlap the owed fields are affected too,
+    // and the owed fields must ride along with the new fetch or the replaced
+    // fetch's obligation is lost.
+    const hasUnresolvedFullInvalidation = itemsPendingFullInvalidation.has(
+      event.itemKey,
+    );
+    const loadedFields = store.state.itemLoadedFields[event.itemKey];
+    const owedStaleFields = new Set([
+      ...(store.state.itemFieldInvalidationFields[event.itemKey] ?? []),
+      ...excludeLoadedFields(
+        loadedFields,
+        itemPendingInvalidationFields.get(event.itemKey),
+      ),
+    ]);
+
     const affectedQueries = fieldsToFetch
       ? queriesForItem.filter(({ fields }) => {
           if (fields === '*') return true;
           if (!fields || fields.length === 0) return true;
-          return fields.some((field) =>
-            event.invalidateFields?.includes(field),
-          );
+          if (fields.some((field) => event.invalidateFields?.includes(field)))
+            return true;
+          // After an unresolved full ('*') invalidation every field not yet
+          // reloaded is owed.
+          return hasUnresolvedFullInvalidation
+            ? excludeLoadedFields(loadedFields, fields).length > 0
+            : fields.some((field) => owedStaleFields.has(field));
         })
       : queriesForItem;
 
@@ -778,8 +803,6 @@ export function useMultipleItems<
 
     if (matchingQueries.length === 0) return;
 
-    if (itemInvalidationWasTriggered.has(event.itemKey)) return;
-
     const allQueriesDisableRefetches = matchingQueries.every(
       (q) => q.disableRefetches,
     );
@@ -793,38 +816,52 @@ export function useMultipleItems<
     const firstQuery = matchingQueries[0];
     if (!firstQuery) return;
 
-    // The immediate fetch scheduled below replaces any pending scheduled
-    // fetch for this item (the scheduler cancels it), and that pending fetch
-    // may have been carrying other owed stale fields at a lower priority
-    // (e.g. a throttled realtime invalidation). Ride this instance's other
-    // owed stale fields along so the replaced fetch's obligation isn't lost.
+    const hookFields = firstQuery.fields;
+    const isUnboundedHook =
+      !hookFields || hookFields === '*' || hookFields.length === 0;
+
+    if (itemInvalidationWasTriggered.has(event.itemKey)) {
+      if (!fieldsToFetch) return;
+
+      // Another instance's handler already scheduled the immediate fetch for
+      // this event, carrying only that instance's fields. Contribute this
+      // instance's own owed stale fields so they merge into the same fetch
+      // via the scheduler's coalescing window instead of being dropped with
+      // the replaced pending fetch.
+      const contributionFields = hasUnresolvedFullInvalidation
+        ? isUnboundedHook
+          ? undefined
+          : excludeLoadedFields(loadedFields, hookFields)
+        : isUnboundedHook
+          ? Array.from(owedStaleFields)
+          : hookFields.filter((field) => owedStaleFields.has(field));
+
+      if (contributionFields && contributionFields.length === 0) return;
+
+      scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
+        fields: contributionFields,
+      });
+      return;
+    }
+
+    // Ride this instance's other owed stale fields along with the event's
+    // fields so the replaced pending fetch's obligation isn't lost.
     if (fieldsToFetch) {
-      const hookFields = firstQuery.fields;
-      const loadedFields = store.state.itemLoadedFields[event.itemKey];
-      if (itemsPendingFullInvalidation.has(event.itemKey)) {
+      if (hasUnresolvedFullInvalidation) {
         // After an unresolved full ('*') invalidation every field not yet
         // reloaded is owed; for an unbounded hook that means a full fetch.
-        fieldsToFetch =
-          !hookFields || hookFields === '*' || hookFields.length === 0
-            ? undefined
-            : Array.from(
-                new Set([
-                  ...fieldsToFetch,
-                  ...excludeLoadedFields(loadedFields, hookFields),
-                ]),
-              ).sort();
+        fieldsToFetch = isUnboundedHook
+          ? undefined
+          : Array.from(
+              new Set([
+                ...fieldsToFetch,
+                ...excludeLoadedFields(loadedFields, hookFields),
+              ]),
+            ).sort();
       } else {
-        const owedFields = new Set([
-          ...(store.state.itemFieldInvalidationFields[event.itemKey] ?? []),
-          ...excludeLoadedFields(
-            loadedFields,
-            itemPendingInvalidationFields.get(event.itemKey),
-          ),
-        ]);
-        const rideAlongFields =
-          !hookFields || hookFields === '*' || hookFields.length === 0
-            ? Array.from(owedFields)
-            : hookFields.filter((field) => owedFields.has(field));
+        const rideAlongFields = isUnboundedHook
+          ? Array.from(owedStaleFields)
+          : hookFields.filter((field) => owedStaleFields.has(field));
         fieldsToFetch = Array.from(
           new Set([...fieldsToFetch, ...rideAlongFields]),
         ).sort();

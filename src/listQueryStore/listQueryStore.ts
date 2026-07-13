@@ -2320,6 +2320,20 @@ export function createListQueryStore<
    * a repeat cycle requires a new pending fetch at snapshot arrival.
    */
   function emitRemainingInvalidationFieldsAfterSnapshot(itemKey: string): void {
+    const priority =
+      itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority';
+
+    // A surviving full-invalidation marker means every not-yet-reloaded
+    // field is still owed, not just the explicitly tracked field list (a
+    // per-field invalidation can coexist with an unresolved full one).
+    // Re-announce the full invalidation itself so hooks whose fields are
+    // owed only through the marker also re-schedule — downgrading it to the
+    // explicit field list would leave them stale forever.
+    if (itemsPendingFullInvalidation.has(itemKey)) {
+      events.emit('invalidateItem', { priority, itemKey });
+      return;
+    }
+
     const stateInvalidationFields =
       store.state.itemFieldInvalidationFields[itemKey];
     const remainingFields =
@@ -2330,23 +2344,10 @@ export function createListQueryStore<
             itemPendingInvalidationFields.get(itemKey),
           );
 
-    if (remainingFields.length === 0) {
-      // A full invalidation of a '*'-loaded item is tracked only by the
-      // full-invalidation marker — there is no field list to re-announce.
-      // Re-announce the full invalidation itself so hooks whose cancelled
-      // refetch was vouched by the snapshot re-schedule their own fields.
-      if (itemsPendingFullInvalidation.has(itemKey)) {
-        events.emit('invalidateItem', {
-          priority:
-            itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority',
-          itemKey,
-        });
-      }
-      return;
-    }
+    if (remainingFields.length === 0) return;
 
     events.emit('invalidateItem', {
-      priority: itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority',
+      priority,
       itemKey,
       invalidateFields: remainingFields,
     });

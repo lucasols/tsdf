@@ -1913,6 +1913,183 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
       name: 'New User 1'
     `);
   });
+
+  test('an escalated field invalidation does not strand stale fields owed to other mounted hooks', async () => {
+    const env = createRealtimeEnv();
+
+    // Two independent components display different fields of the same item.
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    const addressHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the item inside the
+    // throttle window — both hooks' stale fields ride on a single delayed
+    // refetch scheduled at the throttle boundary.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // While that refetch is still waiting, the app explicitly invalidates
+    // only 'name' at highPriority. The immediate escalated fetch replaces the
+    // delayed one — which was also carrying the address hook's stale field.
+    await advanceTime(50);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // The address hook's owed field must ride along on the escalated fetch —
+    // one immediate request covering both hooks' stale fields. Without this,
+    // the cancelled delayed fetch was the only carrier of 'address' and the
+    // address hook would show the stale value forever.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1","address":"New Address 1"})
+      .     | rt-fetch-scheduled (delay: 900ms)
+      970ms | rt-fetch-cancelled
+      .     | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"address":"New Address 1","name":"New User 1"})
+      "
+    `);
+    expect(nameHook.result.current.data?.name).toBe('New User 1');
+    expect(addressHook.result.current.data?.address).toBe('New Address 1');
+  });
+
+  test('stale fields owed to other hooks are preserved regardless of hook registration order', async () => {
+    const env = createRealtimeEnv();
+
+    // Same scenario as above, but the hook that does NOT match the escalated
+    // event's fields registers first — so its handler runs first and becomes
+    // the one scheduling the immediate fetch, while the name hook's handler
+    // contributes afterwards.
+    const addressHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['address'] }),
+    );
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // Full realtime invalidation inside the throttle window...
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // ...escalated by an explicit high-priority 'name' invalidation.
+    await advanceTime(50);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // Still a single immediate fetch covering both hooks' stale fields.
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1","address":"New Address 1"})
+      .     | rt-fetch-scheduled (delay: 900ms)
+      970ms | rt-fetch-cancelled
+      .     | 🟠 >fetch-started
+      1.77s | 🟠 <fetch-finished (value: {"address":"New Address 1","name":"New User 1"})
+      "
+    `);
+    expect(nameHook.result.current.data?.name).toBe('New User 1');
+    expect(addressHook.result.current.data?.address).toBe('New Address 1');
+  });
+});
+
+describe('partial resources: query invalidations with multiple same-payload hooks', () => {
+  // Finding: the `invalidateQuery` event handler dedups per query key, so
+  // with two hook instances watching the same query with different field
+  // subsets only the first instance's fields were scheduled on invalidation —
+  // the other instance's fields were never refetched and kept showing stale
+  // data forever.
+  test('a query invalidation refetches the fields of every mounted hook watching the query', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Two components watch the same list with different field subsets.
+    const nameHook = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['name'] }),
+    );
+    const addressHook = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['address'] }),
+    );
+    await flushAllTimers();
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // The server data changes and the app invalidates the query.
+    env.serverTable.updateItem('users||1', {
+      name: 'New User 1',
+      address: 'New Address 1',
+    });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: { tableId: 'users' },
+        itemPayload: false,
+        type: 'highPriority',
+      });
+    });
+    await flushAllTimers();
+
+    // A single coalesced refetch must cover both hooks' field subsets — the
+    // per-instance schedules merge in the scheduler's coalescing window.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['address', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+
+    // Both hooks must show the fresh values — with the buggy per-key dedup
+    // the second hook's fields were dropped and it kept the stale address
+    // forever.
+    expect(nameHook.result.current.items[0]?.name).toBe('New User 1');
+    expect(addressHook.result.current.items[0]?.address).toBe('New Address 1');
+  });
 });
 
 describe('partial resources: invalidations arriving while a hook is off-screen', () => {

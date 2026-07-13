@@ -1215,11 +1215,17 @@ export function useMultipleListQueries<
           query.refetchOnMount = false;
         });
 
-        scheduleAutomaticListQueryFetch(event.priority, payload, loadSize, {
-          fields,
-        });
         queryInvalidationWasTriggered.add(key);
       }
+
+      // Every instance schedules its own fields/loadSize — instances watching
+      // the same query with different field subsets each contribute theirs,
+      // and the scheduler's coalescing window merges the schedules into a
+      // single fetch. Deduping the schedule per query key would drop the
+      // other instances' fields, leaving them stale forever.
+      scheduleAutomaticListQueryFetch(event.priority, payload, loadSize, {
+        fields,
+      });
     }
   });
 
