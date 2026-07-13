@@ -139,6 +139,21 @@ type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
+/**
+ * A per-field invalidation that arrived for a field with no displayable
+ * cached value. It is deliberately not recorded as stale (the field must stay
+ * "genuinely missing" so its first load runs immediately instead of being
+ * throttled), but a fetch already in flight at `invalidatedAt` will commit a
+ * response produced before the invalidation — fetch-settle re-announces the
+ * invalidation when such a fetch ends up loading the field.
+ *
+ * @internal
+ */
+export type DroppedFieldInvalidation = {
+  invalidatedAt: number;
+  priority: FetchType;
+};
+
 /** @internal */
 export function createMutationApi<
   ItemState extends ValidStoreState,
@@ -256,6 +271,10 @@ export function createMutationApi<
     | undefined,
   itemPendingInvalidationFields: Map<string, string[]>,
   itemsPendingFullInvalidation: Set<string>,
+  itemDroppedFieldInvalidations: Map<
+    string,
+    Map<string, DroppedFieldInvalidation>
+  >,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -535,6 +554,33 @@ export function createMutationApi<
                   (field) => effectiveLoadedFields?.includes(field) ?? false,
                 );
 
+          // Fields dropped from the stale record (never loaded) would be lost
+          // to a fetch already in flight — its response predates this
+          // invalidation but will still commit the field as fresh. Remember
+          // when each dropped invalidation arrived so fetch-settle can
+          // re-announce it when such a fetch loads the field.
+          if (staleInvalidateFields.length < invalidateFields.length) {
+            let droppedForItem = itemDroppedFieldInvalidations.get(itemKey);
+            for (const field of invalidateFields) {
+              if (staleInvalidateFields.includes(field)) continue;
+
+              if (!droppedForItem) {
+                droppedForItem = new Map();
+                itemDroppedFieldInvalidations.set(itemKey, droppedForItem);
+              }
+              const existingDropped = droppedForItem.get(field);
+              droppedForItem.set(field, {
+                invalidatedAt: Date.now(),
+                priority:
+                  existingDropped &&
+                  fetchTypePriority[existingDropped.priority] >
+                    fetchTypePriority[priority]
+                    ? existingDropped.priority
+                    : priority,
+              });
+            }
+          }
+
           if (staleInvalidateFields.length === 0) continue;
 
           staleInvalidateFieldsByItemKey.set(itemKey, staleInvalidateFields);
@@ -717,6 +763,102 @@ export function createMutationApi<
           });
         }
       }
+    }
+  }
+
+  /**
+   * Called when a fetch settles for `itemKeys` (item fetches and list fetches
+   * that committed the items). Per-field invalidations of never-loaded fields
+   * are dropped at invalidation time (see `invalidateQueryAndItems`) — but a
+   * fetch that STARTED BEFORE such an invalidation commits a response
+   * produced before it, so the just-loaded value may already be stale.
+   * Re-announce those invalidations as a regular per-field invalidation (the
+   * field now has a displayable value). Fields loaded by a fetch started
+   * after the invalidation are fresh relative to it — their record is simply
+   * discarded.
+   */
+  function reannounceInvalidationsDroppedDuringFetch(
+    itemKeys: string[],
+    fetchStartedAt: number,
+  ): void {
+    for (const itemKey of itemKeys) {
+      const droppedForItem = itemDroppedFieldInvalidations.get(itemKey);
+      if (!droppedForItem) continue;
+
+      const loadedFields = store.state.itemLoadedFields[itemKey];
+      let staleFields: string[] | undefined;
+      let stalePriority: FetchType | undefined;
+
+      for (const [field, dropped] of droppedForItem) {
+        const fieldIsLoaded =
+          loadedFields === '*' || (loadedFields?.includes(field) ?? false);
+        // Still unloaded: nothing was committed for the field, keep waiting
+        // for a fetch that loads it.
+        if (!fieldIsLoaded) continue;
+
+        droppedForItem.delete(field);
+
+        if (dropped.invalidatedAt > fetchStartedAt) {
+          (staleFields ??= []).push(field);
+          if (
+            !stalePriority ||
+            fetchTypePriority[dropped.priority] >
+              fetchTypePriority[stalePriority]
+          ) {
+            stalePriority = dropped.priority;
+          }
+        }
+      }
+
+      if (droppedForItem.size === 0) {
+        itemDroppedFieldInvalidations.delete(itemKey);
+      }
+
+      if (!staleFields || !stalePriority) continue;
+
+      // Same transaction as the per-field path of `invalidateQueryAndItems`:
+      // record the pending fields, strip them from the loaded metadata, and
+      // re-emit the invalidation event.
+      const existingPriority = itemFieldInvalidationPriorities.get(itemKey);
+      const mergedPriority =
+        existingPriority &&
+        fetchTypePriority[existingPriority] > fetchTypePriority[stalePriority]
+          ? existingPriority
+          : stalePriority;
+      const existingPendingFields =
+        itemPendingInvalidationFields.get(itemKey) ?? [];
+      itemPendingInvalidationFields.set(
+        itemKey,
+        Array.from(new Set([...existingPendingFields, ...staleFields])).sort(),
+      );
+      itemFieldInvalidationPriorities.set(itemKey, mergedPriority);
+
+      const staleFieldsToApply = staleFields;
+      store.produceState(
+        (draft) => {
+          const draftLoadedFields = draft.itemLoadedFields[itemKey];
+          if (!draftLoadedFields) return;
+
+          if (draftLoadedFields !== '*') {
+            draft.itemLoadedFields[itemKey] = draftLoadedFields.filter(
+              (f) => !staleFieldsToApply.includes(f),
+            );
+          }
+          const existingInvalidationFields =
+            draft.itemFieldInvalidationFields[itemKey] ?? [];
+          draft.itemFieldInvalidationFields[itemKey] = Array.from(
+            new Set([...existingInvalidationFields, ...staleFieldsToApply]),
+          ).sort();
+        },
+        { action: 'invalidate-item-fields' },
+      );
+
+      itemInvalidationWasTriggered.delete(itemKey);
+      emitInvalidateItem({
+        priority: mergedPriority,
+        itemKey,
+        invalidateFields: staleFields,
+      });
     }
   }
 
@@ -1106,6 +1248,7 @@ export function createMutationApi<
       itemFieldInvalidationPriorities.delete(itemKey);
       itemPendingInvalidationFields.delete(itemKey);
       itemsPendingFullInvalidation.delete(itemKey);
+      itemDroppedFieldInvalidations.delete(itemKey);
       itemInvalidationWasTriggered.delete(itemKey);
       publishItemSnapshot(itemKey);
     }
@@ -1123,6 +1266,7 @@ export function createMutationApi<
     itemFieldInvalidationPriorities.clear();
     itemPendingInvalidationFields.clear();
     itemsPendingFullInvalidation.clear();
+    itemDroppedFieldInvalidations.clear();
   }
 
   type ListQueryMutationArgs<T> = {
@@ -1424,6 +1568,7 @@ export function createMutationApi<
     itemFieldInvalidationPriorities,
     invalidateQueryAndItems,
     invalidateItem,
+    reannounceInvalidationsDroppedDuringFetch,
     startItemMutation,
     updateItemState,
     addItemToState,

@@ -1420,41 +1420,76 @@ export function useMultipleListQueries<
               }
             }
           } else if (fields === '*') {
-            const hasAnyPartialItem = effectiveQueryState.items.some(
-              (itemKey) =>
-                !snapshotIsFullyLoadedAndFresh(
-                  itemKey,
-                  store.state.itemLoadedFields[itemKey],
-                  store.state.items[itemKey],
+            // Genuinely missing data (fields never loaded on some item) and
+            // stale-but-displayable data (a full invalidation whose snapshot
+            // is still present, or pending field invalidations) both require
+            // a fetch, but at different priorities — mirroring the array
+            // branch above and the item-side '*' branch: missing data
+            // justifies an immediate fetch, while stale-only data must keep
+            // the tracked invalidation priority so scheduler throttling
+            // (e.g. realtime updates) stays effective.
+            let hasStaleItemData = false;
+            let hasGenuinelyMissingItemData = false;
+            for (const itemKey of effectiveQueryState.items) {
+              const item = store.state.items[itemKey];
+              const loadedFields = store.state.itemLoadedFields[itemKey];
+              // A '*'-loaded item resolved its full invalidation even if the
+              // tracking marker hasn't been pruned yet.
+              const hasUnresolvedFullInvalidation =
+                itemsPendingFullInvalidation.has(itemKey) &&
+                !hasFullyLoadedFields(loadedFields);
+              // A fully invalidated item whose (now stale) snapshot is still
+              // present is a refetch of stale data, not a load of missing
+              // data.
+              const hasStaleFullInvalidation =
+                hasUnresolvedFullInvalidation && !!item;
+
+              if (
+                !hasStaleFullInvalidation &&
+                (!snapshotIsFullyLoaded(
+                  loadedFields,
+                  item,
                   partialResources.inferFields,
-                  itemsPendingFullInvalidation,
-                ),
-            );
-            const hasAnyFieldInvalidation = effectiveQueryState.items.some(
-              (itemKey) => {
-                return (
-                  getUnresolvedPendingInvalidationFields(itemKey).length > 0
-                );
-              },
-            );
+                ) ||
+                  hasUnresolvedFullInvalidation)
+              ) {
+                hasGenuinelyMissingItemData = true;
+                break;
+              }
+
+              if (
+                hasStaleFullInvalidation ||
+                getUnresolvedPendingInvalidationFields(itemKey).length > 0
+              ) {
+                hasStaleItemData = true;
+              }
+            }
 
             if (
-              (hasAnyPartialItem || hasAnyFieldInvalidation) &&
+              (hasGenuinelyMissingItemData || hasStaleItemData) &&
               !isQueryFetchInFlight
             ) {
               shouldFetch = true;
               requiredFetch = true;
 
-              const invalidationPriority =
-                getHighestPendingInvalidationPriority(
-                  effectiveQueryState.items,
-                  undefined,
-                );
+              const invalidationPriority = hasGenuinelyMissingItemData
+                ? undefined
+                : getHighestPendingInvalidationPriority(
+                    effectiveQueryState.items,
+                    undefined,
+                  );
 
-              if (
-                invalidationPriority &&
+              if (!invalidationPriority) {
+                // Genuinely missing data — or stale data with no tracked
+                // invalidation priority (e.g. invalidations adopted from
+                // another tab) — must fetch immediately; only lift low
+                // priority.
+                if (fetchType === 'lowPriority') {
+                  fetchType = 'highPriority';
+                }
+              } else if (
                 fetchTypePriority[invalidationPriority] >
-                  fetchTypePriority[fetchType]
+                fetchTypePriority[fetchType]
               ) {
                 fetchType = invalidationPriority;
               }
