@@ -8,7 +8,12 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick, range } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  pick,
+  range,
+} from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -674,6 +679,69 @@ describe('fetch query', () => {
         queryPayloads: []
         reason: 'cacheLimitEviction'
     `);
+  });
+
+  test('maxItems eviction works on list-only stores without a fetchItemFn', async () => {
+    const env = createListQueryStoreTestEnv(
+      {
+        users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+        orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+      },
+      // list-only store: items are populated only through list fetches,
+      // which is a valid setup since fetchItemFn is optional
+      { maxItems: 3, disableFetchItemFn: true },
+    );
+
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+    await flushAllTimers();
+
+    // exceeding maxItems triggers idle eviction, which checks whether each
+    // item has an active fetch or mutation — this check must not crash when
+    // the store has no fetchItemFn to create item schedulers with
+    env.scheduleFetch('highPriority', { tableId: 'orders' });
+    await flushAllTimers();
+
+    // the least recently used query and its items were evicted normally
+    expect(env.apiStore.getQueryState({ tableId: 'users' })).toBeUndefined();
+    expect(env.apiStore.getItemState('users||1')).toBeUndefined();
+
+    // the most recently used query stays fully cached
+    const remainingQuery = env.apiStore.getQueryState({ tableId: 'orders' });
+    expect(remainingQuery?.items).toHaveLength(3);
+    expect(
+      remainingQuery?.items.every((itemKey) => env.store.state.items[itemKey]),
+    ).toBe(true);
+  });
+
+  test('standalone item with a refetch in progress is protected from maxItems eviction', async () => {
+    const env = createListQueryStoreTestEnv(
+      { users: range(1, 2).map((id) => ({ id, name: `User ${id}` })) },
+      { maxItems: 1 },
+    );
+
+    // load a standalone item, staying at the limit (no eviction pressure yet)
+    env.scheduleItemFetch('highPriority', 'users||1');
+    await advanceTime(1000);
+
+    // start a slow refetch of the loaded item...
+    env.serverTable.setFetchDurations('users||1', 5000);
+    env.scheduleItemFetch('highPriority', 'users||1');
+    // ...and exceed maxItems while that refetch is still in flight
+    env.scheduleItemFetch('highPriority', 'users||2');
+
+    // enough time for the new item to load (800ms) and idle eviction to run,
+    // but not enough for the slow refetch to settle
+    await advanceTime(4000);
+
+    // users||1 is the eviction candidate (least recently loaded) but its
+    // in-flight refetch protects it, so users||2 was evicted instead
+    expect(env.apiStore.getItemState('users||1')).toBeDefined();
+    expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+
+    // the slow refetch settles normally afterwards without the item being lost
+    await flushAllTimers();
+    expect(env.getItemQueryState('users||1')?.status).toBe('success');
+    expect(env.apiStore.getItemState('users||1')).toBeDefined();
   });
 });
 

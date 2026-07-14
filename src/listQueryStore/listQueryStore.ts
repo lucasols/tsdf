@@ -2523,16 +2523,19 @@ export function createListQueryStore<
     itemQuery: TSDFItemQuery<ItemPayload>,
   ): boolean {
     if (itemCacheRuntime.isActive(itemKey)) return true;
-    const scheduler = getOrCreateItemScheduler(itemKey, itemQuery.payload);
+    // Only inspect an existing scheduler: creating one would throw on
+    // list-only stores without a fetchItemFn, and a store that can't have an
+    // item scheduler can't have an item fetch or mutation in progress either.
+    const scheduler = getKnownItemScheduler(itemKey);
     if (
       itemQuery.status === 'loading' ||
       itemQuery.status === 'refetching' ||
-      scheduler.getFetchIsInProgress()
+      scheduler?.getFetchIsInProgress()
     ) {
       return true;
     }
 
-    return scheduler.isMutationInProgress(itemKey);
+    return scheduler?.isMutationInProgress(itemKey) ?? false;
   }
 
   function mergeIncomingItemSnapshot(
