@@ -55,6 +55,19 @@ export function getSerializedStringSize(value: string): number {
   return value.length;
 }
 
+/**
+ * Detects browser storage quota errors thrown by `localStorage.setItem` and
+ * IndexedDB writes, covering the standard `QuotaExceededError` name plus the
+ * legacy Firefox name.
+ */
+export function isQuotaExceededError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === 'QuotaExceededError' ||
+      error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+  );
+}
+
 export function serializeJsonForStorage(value: unknown): {
   rawValue: string;
   sizeBytes: number;

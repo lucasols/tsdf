@@ -17,6 +17,7 @@ import {
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import {
   getManagedLocalStorageRuntimeConfig,
+  isLocalStorageQuotaWritesDisabled,
   isManagedLocalStorageEntryOfflineProtected,
   resetManagedLocalStorageState,
   setManagedLocalStorageEntryOfflineProtected,
@@ -730,6 +731,18 @@ export function createPersistentStorageHandle<T>(
         }
         return;
       }
+      if (isLocalStorageQuotaWritesDisabled()) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            withPersistentStorageDebugKey(debugContext, key),
+            'write',
+            'skipped',
+            startTime,
+            { reason: 'quota-writes-disabled' },
+          );
+        }
+        return;
+      }
       const timestamp = Date.now();
       const entry = createCompactLocalStorageEntry(
         localCodec.serialize(data),
@@ -1113,6 +1126,18 @@ export function createPersistentStorageNamespaceHandle<
             'skipped',
             startTime,
             { ...operationDetails, reason: 'inactive-session' },
+          );
+        }
+        return;
+      }
+      if (isLocalStorageQuotaWritesDisabled()) {
+        if (import.meta.env.DEV) {
+          logPersistentStorageOperation(
+            debugContext,
+            'commit',
+            'skipped',
+            startTime,
+            { ...operationDetails, reason: 'quota-writes-disabled' },
           );
         }
         return;

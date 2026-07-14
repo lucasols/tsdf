@@ -21,6 +21,7 @@ import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegi
 import { isOfflineModeStatusValue } from './offline/types';
 import {
   getSerializedStringSize,
+  isQuotaExceededError,
   keepEntriesWithinByteBudget,
   serializeJsonForStorage,
 } from './persistenceUtils';
@@ -2126,10 +2127,16 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   #writeMaintenanceState(state: AsyncStorageMaintenanceState): void {
-    localStorage.setItem(
-      ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
-      JSON.stringify({ lca: state.lastSuccessfulCleanupAt }),
-    );
+    try {
+      localStorage.setItem(
+        ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+        JSON.stringify({ lca: state.lastSuccessfulCleanupAt }),
+      );
+    } catch (error) {
+      // losing this tiny bookkeeping value only makes the next startup
+      // cleanup run earlier; a full localStorage must not break maintenance
+      if (!isQuotaExceededError(error)) throw error;
+    }
   }
 
   clearAllCachedReads(): void {
@@ -2363,7 +2370,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     const timeoutId = setTimeout(() => {
       pending.cancelFlush = null;
-      void this.flushPendingNamespaceCommit(pending.scope);
+      // commit waiters already receive the rejection through the flush
+      // promise chain; without this catch the fire-and-forget call would
+      // surface the same error again as an unhandled rejection
+      this.flushPendingNamespaceCommit(pending.scope).catch(() => {});
     }, ASYNC_STORAGE_COMMIT_DEBOUNCE_MS);
 
     pending.cancelFlush = () => clearTimeout(timeoutId);

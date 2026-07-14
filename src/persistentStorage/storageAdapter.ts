@@ -17,6 +17,7 @@ import {
   syncManagedLocalStorageSessionProtection,
   touchManagedLocalStorageNamespacePayload,
   touchManagedLocalStorageSinglePayload,
+  setManagedLocalStorageItemWithQuotaRecovery,
   unregisterManagedLocalStorageMaintenanceCallback,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
@@ -68,7 +69,13 @@ function createCachedManagedLocalStorageIo(): {
       if (value === null) {
         localStorage.removeItem(key);
       } else {
-        localStorage.setItem(key, value);
+        // runs from idle callbacks / deactivate, so it must not throw; a
+        // dropped manifest write self-heals via maintenance sweeps
+        try {
+          setManagedLocalStorageItemWithQuotaRecovery(key, value, io);
+        } catch (error) {
+          console.error(error);
+        }
       }
     }
 
@@ -84,70 +91,82 @@ function createCachedManagedLocalStorageIo(): {
     });
   }
 
+  const io: ManagedLocalStorageIo = {
+    getItem(key) {
+      if (!active) {
+        return localStorage.getItem(key);
+      }
+
+      if (cache.has(key)) {
+        const cachedValue = cache.get(key);
+        if (cachedValue !== VALUE_NOT_LOADED) {
+          return cachedValue ?? null;
+        }
+      }
+
+      const raw = localStorage.getItem(key);
+      cache.set(key, raw);
+      return raw;
+    },
+    setItem(key, value) {
+      const written = setManagedLocalStorageItemWithQuotaRecovery(
+        key,
+        value,
+        io,
+      );
+      // only cache values that actually reached localStorage, so a quota
+      // failure never leaves a phantom cached value
+      if (written && active) {
+        cache.set(key, value);
+      }
+    },
+    removeItem(key) {
+      if (active) {
+        cache.set(key, null);
+      }
+      localStorage.removeItem(key);
+    },
+    listKeys() {
+      if (!active) return directManagedLocalStorageIo.listKeys();
+
+      loadAllKeys();
+      const keys: string[] = [];
+
+      for (const [key, value] of cache.entries()) {
+        if (value !== null) {
+          keys.push(key);
+        }
+      }
+
+      return keys;
+    },
+    queueManifestWrite(key, value) {
+      if (!active) {
+        if (value === null) {
+          localStorage.removeItem(key);
+        } else {
+          setManagedLocalStorageItemWithQuotaRecovery(
+            key,
+            value,
+            directManagedLocalStorageIo,
+          );
+        }
+        return;
+      }
+
+      cache.set(key, value);
+      pendingManifestWrites.set(key, value);
+      schedulePendingManifestFlush();
+    },
+  };
+
   return {
     deactivate() {
       flushPendingManifestWrites();
       active = false;
       cache.clear();
     },
-    io: {
-      getItem(key) {
-        if (!active) {
-          return localStorage.getItem(key);
-        }
-
-        if (cache.has(key)) {
-          const cachedValue = cache.get(key);
-          if (cachedValue !== VALUE_NOT_LOADED) {
-            return cachedValue ?? null;
-          }
-        }
-
-        const raw = localStorage.getItem(key);
-        cache.set(key, raw);
-        return raw;
-      },
-      setItem(key, value) {
-        if (active) {
-          cache.set(key, value);
-        }
-        localStorage.setItem(key, value);
-      },
-      removeItem(key) {
-        if (active) {
-          cache.set(key, null);
-        }
-        localStorage.removeItem(key);
-      },
-      listKeys() {
-        if (!active) return directManagedLocalStorageIo.listKeys();
-
-        loadAllKeys();
-        const keys: string[] = [];
-
-        for (const [key, value] of cache.entries()) {
-          if (value !== null) {
-            keys.push(key);
-          }
-        }
-
-        return keys;
-      },
-      queueManifestWrite(key, value) {
-        if (!active) {
-          if (value === null) {
-            localStorage.removeItem(key);
-          } else {
-            localStorage.setItem(key, value);
-          }
-          return;
-        }
-
-        cache.set(key, value);
-        pendingManifestWrites.set(key, value);
-        schedulePendingManifestFlush();
-      },
-    },
+    io,
   };
 }
 

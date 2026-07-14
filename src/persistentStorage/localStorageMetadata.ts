@@ -17,6 +17,10 @@ import {
 import { parseCompactLocalStorageEntry } from './compactLocalStorageEntry';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import { isOfflineModeStatusValue } from './offline/types';
+import {
+  getSerializedStringSize,
+  isQuotaExceededError,
+} from './persistenceUtils';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
@@ -58,7 +62,11 @@ export const directManagedLocalStorageIo: ManagedLocalStorageIo = {
     return localStorage.getItem(key);
   },
   setItem(key, value) {
-    localStorage.setItem(key, value);
+    setManagedLocalStorageItemWithQuotaRecovery(
+      key,
+      value,
+      directManagedLocalStorageIo,
+    );
   },
   removeItem(key) {
     localStorage.removeItem(key);
@@ -76,6 +84,254 @@ export const directManagedLocalStorageIo: ManagedLocalStorageIo = {
     return keys;
   },
 };
+
+let managedLocalStorageQuotaWritesDisabled = false;
+let managedLocalStorageQuotaRecoveryActive = false;
+
+/**
+ * True after a `QuotaExceededError` recovery failed even with all unprotected
+ * TSDF entries evicted. Persistence writes are silently dropped for the rest
+ * of the page lifetime so a full origin quota does not produce an error on
+ * every subsequent flush.
+ */
+export function isLocalStorageQuotaWritesDisabled(): boolean {
+  return managedLocalStorageQuotaWritesDisabled;
+}
+
+/**
+ * Writes to `localStorage`, recovering from `QuotaExceededError` by evicting
+ * TSDF-managed entries: first the least recently used half of the evictable
+ * bytes, then everything unprotected. If the write still fails, persistence
+ * writes are disabled for the rest of the page lifetime and a descriptive
+ * error is thrown once so it reaches `onPersistentStorageError`.
+ *
+ * Returns whether the value was written (false when writes are disabled).
+ */
+export function setManagedLocalStorageItemWithQuotaRecovery(
+  key: string,
+  value: string,
+  io: ManagedLocalStorageIo,
+): boolean {
+  if (managedLocalStorageQuotaWritesDisabled) return false;
+
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    if (
+      !isQuotaExceededError(error) ||
+      managedLocalStorageQuotaRecoveryActive
+    ) {
+      throw error;
+    }
+
+    managedLocalStorageQuotaRecoveryActive = true;
+    try {
+      for (const evictAllUnprotected of [false, true]) {
+        runManagedLocalStorageQuotaEviction(io, evictAllUnprotected);
+
+        try {
+          localStorage.setItem(key, value);
+          return true;
+        } catch (retryError) {
+          if (!isQuotaExceededError(retryError)) throw retryError;
+        }
+      }
+
+      managedLocalStorageQuotaWritesDisabled = true;
+      throw new Error(
+        '[TSDF] localStorage quota exceeded and evicting stored entries did not free enough space; persistence writes are disabled until the next page load',
+        { cause: error },
+      );
+    } finally {
+      managedLocalStorageQuotaRecoveryActive = false;
+    }
+  }
+}
+
+function getRawSizeBytes(key: string, io: ManagedLocalStorageIo): number {
+  const raw = io.getItem(key);
+  return raw === null ? 0 : getSerializedStringSize(raw);
+}
+
+type QuotaEvictionCandidate = {
+  payloadKey: string;
+  lastAccessAt: number;
+  sizeBytes: number;
+  manifestKey: string | null;
+  entryKey: string | undefined;
+};
+
+/**
+ * Emergency cleanup for browser quota errors. Unlike the per-store `maxBytes`
+ * budgets (which only bound TSDF's own usage), this runs when the shared
+ * origin quota is exhausted, so it evicts across every TSDF session and store
+ * at once. Offline queue/upload data and offline-protected entries are never
+ * touched, and non-TSDF keys are left alone.
+ */
+function runManagedLocalStorageQuotaEviction(
+  io: ManagedLocalStorageIo,
+  evictAllUnprotected: boolean,
+): void {
+  const allKeys = io.listKeys();
+  const candidates: QuotaEvictionCandidate[] = [];
+  const manifestOwnedPayloadKeys = new Set<string>();
+  const compactListQueryKeys: string[] = [];
+  const manifestBackedPayloadKeys: string[] = [];
+
+  for (const key of allKeys) {
+    const classification = classifyTsdfLocalStorageKey(key);
+    if (classification === null) continue;
+
+    switch (classification.kind) {
+      case 'manifest': {
+        const manifestLocation = classification.manifestLocation;
+        const manifest = readParsedManifest(key, io);
+        if (!manifest) break;
+
+        const isOfflineOwned = isOfflineOwnedManifestLocation(manifestLocation);
+
+        for (const entry of manifest.entries.values()) {
+          const payloadKey = getPayloadKeyForManifestEntry(
+            manifestLocation,
+            entry.entryKey,
+          );
+          if (payloadKey === null) continue;
+
+          manifestOwnedPayloadKeys.add(payloadKey);
+
+          if (isOfflineOwned || isOfflineRelatedPayloadKey(payloadKey)) {
+            continue;
+          }
+          if (isManagedLocalStorageEntryOfflineProtected(entry.meta)) continue;
+
+          candidates.push({
+            payloadKey,
+            lastAccessAt: entry.lastAccessAt,
+            sizeBytes: entry.sizeBytes ?? getRawSizeBytes(payloadKey, io),
+            manifestKey: key,
+            entryKey: entry.entryKey,
+          });
+        }
+        break;
+      }
+      case 'compact-list-query': {
+        compactListQueryKeys.push(key);
+        break;
+      }
+      case 'manifest-backed-payload': {
+        manifestBackedPayloadKeys.push(key);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  for (const key of compactListQueryKeys) {
+    if (manifestOwnedPayloadKeys.has(key) || isOfflineRelatedPayloadKey(key)) {
+      continue;
+    }
+
+    const entry = readCompactListQueryEntry(key, io);
+    if (entry?.offlineProtected === true) continue;
+
+    candidates.push({
+      payloadKey: key,
+      // unparseable entries are stale garbage: evict them first
+      lastAccessAt: entry?.lastAccessAt ?? 0,
+      sizeBytes: getRawSizeBytes(key, io),
+      manifestKey: null,
+      entryKey: undefined,
+    });
+  }
+
+  for (const key of manifestBackedPayloadKeys) {
+    if (manifestOwnedPayloadKeys.has(key) || isOfflineRelatedPayloadKey(key)) {
+      continue;
+    }
+
+    // payloads not tracked by any manifest are orphans: evict them first
+    candidates.push({
+      payloadKey: key,
+      lastAccessAt: 0,
+      sizeBytes: getRawSizeBytes(key, io),
+      manifestKey: null,
+      entryKey: undefined,
+    });
+  }
+
+  if (candidates.length === 0) return;
+
+  candidates.sort((a, b) => a.lastAccessAt - b.lastAccessAt);
+
+  let totalBytes = 0;
+  for (const candidate of candidates) {
+    totalBytes += candidate.sizeBytes;
+  }
+
+  const targetBytes = evictAllUnprotected ? totalBytes : totalBytes / 2;
+  const removedEntryKeysByManifest = new Map<string, Set<string | undefined>>();
+  let freedBytes = 0;
+
+  for (const candidate of candidates) {
+    if (!evictAllUnprotected && freedBytes >= targetBytes) break;
+
+    io.removeItem(candidate.payloadKey);
+    freedBytes += candidate.sizeBytes;
+
+    if (candidate.manifestKey !== null) {
+      let removedEntryKeys = removedEntryKeysByManifest.get(
+        candidate.manifestKey,
+      );
+      if (!removedEntryKeys) {
+        removedEntryKeys = new Set();
+        removedEntryKeysByManifest.set(candidate.manifestKey, removedEntryKeys);
+      }
+      removedEntryKeys.add(candidate.entryKey);
+    }
+  }
+
+  // Rewrite affected manifests only after the payload removals freed quota,
+  // so the manifest writes themselves have room to succeed.
+  for (const [manifestKey, removedEntryKeys] of removedEntryKeysByManifest) {
+    const manifest = readParsedManifest(manifestKey, io);
+    if (!manifest) continue;
+
+    const nextEntries = new Map(manifest.entries);
+    for (const entryKey of removedEntryKeys) {
+      nextEntries.delete(entryKey);
+    }
+    try {
+      writeManifest(manifestKey, { entries: nextEntries }, io);
+    } catch (error) {
+      // a stale manifest self-heals via maintenance sweeps; keep evicting
+      if (!isQuotaExceededError(error)) throw error;
+    }
+  }
+}
+
+type ManagedLocalStorageManifestLocation =
+  | { kind: 'single'; manifestKey: string; payloadKey: string }
+  | { kind: 'namespace'; manifestKey: string; storagePrefix: string };
+
+function isOfflineOwnedManifestLocation(
+  manifestLocation: ManagedLocalStorageManifestLocation,
+): boolean {
+  if (manifestLocation.kind === 'single') {
+    return manifestLocation.payloadKey.includes('._o_.');
+  }
+
+  return (
+    manifestLocation.storagePrefix.endsWith('.oq.') ||
+    manifestLocation.storagePrefix.endsWith('.oc.') ||
+    manifestLocation.storagePrefix.endsWith('.oe.')
+  );
+}
+
+function isOfflineRelatedPayloadKey(payloadKey: string): boolean {
+  return payloadKey.includes('._o_.');
+}
 
 export function getManagedLocalStorageRuntimeConfig(): ManagedLocalStorageRuntimeConfig {
   return managedLocalStorageRuntimeConfig;
@@ -215,10 +471,6 @@ export function getManagedLocalStorageManifestKeyForPrefix(
 ): string {
   return `${NAMESPACE_MANIFEST_KEY_PREFIX}${compactNamespaceRootIdentityValue(storagePrefix)}${MANIFEST_KEY_SUFFIX}`;
 }
-
-type ManagedLocalStorageManifestLocation =
-  | { kind: 'single'; manifestKey: string; payloadKey: string }
-  | { kind: 'namespace'; manifestKey: string; storagePrefix: string };
 
 function parseManagedLocalStorageManifestKey(
   manifestKey: string,
@@ -1288,6 +1540,8 @@ export async function runManagedLocalStorageMaintenance(
 
 export function resetManagedLocalStorageState(): void {
   maintenanceCallbacks.clear();
+  managedLocalStorageQuotaWritesDisabled = false;
+  managedLocalStorageQuotaRecoveryActive = false;
   managedLocalStorageRuntimeConfig = {
     ...defaultManagedLocalStorageRuntimeConfig,
   };
