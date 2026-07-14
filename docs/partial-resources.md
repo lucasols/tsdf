@@ -130,6 +130,8 @@ userStore.invalidateQueryAndItems({
 
 This removes the specified fields from `itemLoadedFields`, causing hooks that request those fields to trigger a refetch — but only for those fields.
 
+Invalidation priorities are tracked per field: each field keeps the highest priority it was invalidated with since it was last reloaded, and hooks adopt priorities only from the fields they actually request. A leftover obligation on a field no mounted hook displays (e.g. after a full high-priority invalidation followed by a narrower refetch) never escalates unrelated refetches, so scheduler throttling — such as `dynamicRealtimeThrottleMs` for realtime updates — keeps working.
+
 ## Loading Behavior
 
 When a hook requests fields that are partially loaded:

@@ -35,6 +35,7 @@ import {
 } from '../utils/payloadDebounce';
 import {
   fetchTypePriority,
+  higherFetchType,
   isStrictItemKeyPrefix,
   type PayloadDebounce,
   ValidPayload,
@@ -161,9 +162,8 @@ export function useMultipleListQueries<
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   queryInvalidationWasTriggered: Set<string>,
-  itemFieldInvalidationPriorities: Map<string, FetchType>,
-  itemPendingInvalidationFields: Map<string, string[]>,
-  itemsPendingFullInvalidation: Set<string>,
+  itemPendingInvalidationFields: Map<string, Map<string, FetchType | null>>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
   derivedQueries:
@@ -407,9 +407,10 @@ export function useMultipleListQueries<
       const itemLoadedFields = state
         ? state.itemLoadedFields
         : store.state.itemLoadedFields;
+      const pendingFields = itemPendingInvalidationFields.get(itemKey);
       return excludeLoadedFields(
         itemLoadedFields[itemKey],
-        itemPendingInvalidationFields.get(itemKey),
+        pendingFields && Array.from(pendingFields.keys()),
       );
     },
     [itemPendingInvalidationFields, store],
@@ -425,35 +426,58 @@ export function useMultipleListQueries<
       for (const itemKey of itemKeys) {
         const unresolvedInvalidationFields =
           getUnresolvedPendingInvalidationFields(itemKey);
+        const loadedFields = store.state.itemLoadedFields[itemKey];
         // A fully invalidated ('*'-loaded) item has no field list to
-        // enumerate — the pending-full marker alone proves every field
-        // (requested ones included) is awaiting the re-fetch.
-        const hasUnresolvedFullInvalidation =
-          itemsPendingFullInvalidation.has(itemKey) &&
-          !hasFullyLoadedFields(store.state.itemLoadedFields[itemKey]);
+        // enumerate — the pending-full marker alone proves every
+        // not-yet-reloaded field (requested ones included) is awaiting the
+        // re-fetch.
+        const fullInvalidationPriority =
+          loadedFields === '*'
+            ? undefined
+            : itemsPendingFullInvalidation.get(itemKey);
         if (
           unresolvedInvalidationFields.length === 0 &&
-          !hasUnresolvedFullInvalidation
-        ) {
-          continue;
-        }
-        if (
-          !hasUnresolvedFullInvalidation &&
-          requestedFields &&
-          !requestedFields.some((field) =>
-            unresolvedInvalidationFields.includes(field),
-          )
+          fullInvalidationPriority === undefined
         ) {
           continue;
         }
 
-        const itemPriority = itemFieldInvalidationPriorities.get(itemKey);
-        if (!itemPriority) continue;
-        if (
-          !highestPriority ||
-          fetchTypePriority[itemPriority] > fetchTypePriority[highestPriority]
-        ) {
-          highestPriority = itemPriority;
+        const pendingFieldPriorities =
+          itemPendingInvalidationFields.get(itemKey);
+
+        // Adopt only the priorities owed to the fields this hook actually
+        // requests — a leftover obligation on an undisplayed field must not
+        // escalate this hook's refetch. Fields without a tracked priority
+        // (e.g. adopted from another tab) contribute nothing; callers treat
+        // an undefined result as an immediate refetch.
+        const fieldsToCheck = requestedFields
+          ? requestedFields.filter((field) =>
+              unresolvedInvalidationFields.includes(field),
+            )
+          : unresolvedInvalidationFields;
+        for (const field of fieldsToCheck) {
+          const fieldPriority = pendingFieldPriorities?.get(field);
+          if (fieldPriority) {
+            highestPriority = higherFetchType(highestPriority, fieldPriority);
+          }
+        }
+
+        if (fullInvalidationPriority !== undefined) {
+          // The marker owes every field not reloaded since the full
+          // invalidation and without its own (superseding) field entry.
+          const owedByMarker = requestedFields
+            ? requestedFields.some(
+                (field) =>
+                  !(loadedFields?.includes(field) ?? false) &&
+                  !pendingFieldPriorities?.has(field),
+              )
+            : true;
+          if (owedByMarker) {
+            highestPriority = higherFetchType(
+              highestPriority,
+              fullInvalidationPriority,
+            );
+          }
         }
       }
 
@@ -461,7 +485,7 @@ export function useMultipleListQueries<
     },
     [
       getUnresolvedPendingInvalidationFields,
-      itemFieldInvalidationPriorities,
+      itemPendingInvalidationFields,
       itemsPendingFullInvalidation,
       store,
     ],
@@ -1626,7 +1650,6 @@ export function useMultipleListQueries<
     partialResources,
     autoFetchSignals,
     automaticRetryState,
-    itemFieldInvalidationPriorities,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
     getHighestPendingInvalidationPriority,

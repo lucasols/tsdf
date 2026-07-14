@@ -1,3 +1,4 @@
+import type { FetchType } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import type { ValidStoreState } from '../utils/storeShared';
 import type { ItemLoadedFields, PartialResourcesConfig } from './types';
@@ -39,7 +40,7 @@ export function snapshotIsFullyLoadedAndFresh<
   loadedFields: ItemLoadedFields | undefined,
   item: ItemState | null | undefined,
   inferFields: (item: ItemState) => ItemLoadedFields,
-  itemsPendingFullInvalidation: Set<string>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
 ): boolean {
   if (loadedFields !== '*' && itemsPendingFullInvalidation.has(itemKey)) {
     return false;
@@ -61,7 +62,7 @@ export function getStaleOrMissingRequestedFields<
   item: ItemState | null | undefined,
   requestedFields: readonly string[],
   inferFields: (item: ItemState) => ItemLoadedFields,
-  itemsPendingFullInvalidation: Set<string>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   pendingInvalidationFields: readonly string[],
 ): string[] {
   // Requested fields awaiting an invalidation re-fetch are stale even when
@@ -179,7 +180,7 @@ export function getGenuinelyMissingRequestedFields<
     | undefined,
   requestedFields: readonly string[],
   inferFields: (item: ItemState) => ItemLoadedFields,
-  itemsPendingFullInvalidation: Set<string>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   unresolvedPendingInvalidationFields: readonly string[],
 ): string[] {
   const fallbackMissingFields = getFallbackMissingRequestedFields(

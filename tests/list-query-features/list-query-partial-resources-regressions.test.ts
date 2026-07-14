@@ -2094,6 +2094,148 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
     expect(nameHook.result.current.data?.name).toBe('New User 1');
     expect(addressHook.result.current.data?.address).toBe('New Address 1');
   });
+
+  test("a full high-priority invalidation of a '*'-loaded item does not disable throttling of later realtime invalidations", async () => {
+    const env = createRealtimeEnv();
+
+    // A detail view loaded the full item at some point (fields: '*'), then
+    // closed — no '*' hook stays mounted afterwards.
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+    await preload;
+
+    // A list grid stays mounted with a fixed set of fields.
+    renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address'] },
+      ),
+    );
+    await flushAllTimers();
+
+    // Idle long enough for the realtime throttle window to pass.
+    await advanceTime(2_000);
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // After a mutation the app fully invalidates the mutated record at
+    // highPriority — the list refetches immediately, which is expected.
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+      });
+    });
+    // The refetch (800ms) settles; we are now 200ms after it — well inside
+    // the realtime throttle window of that fetch.
+    await advanceTime(1_000);
+    expect(env.serverTable.getRequestHistory('list').length).toBe(1);
+
+    env.addTimelineComments('beforeNextAction', ['realtime event arrives']);
+
+    // A realtime record-change event arrives shortly after (e.g. an
+    // automation side effect). The high-priority refetch only reloaded the
+    // list's fields, so the item's '*' full-invalidation marker is still
+    // unresolved — that leftover obligation must NOT escalate this realtime
+    // invalidation to an immediate high-priority refetch.
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: () => true,
+        itemPayload: () => true,
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // The refetch must stay delayed until the throttle boundary — no
+    // cancellation of the scheduled realtime fetch, no immediate fetch.
+    await flushAllTimers();
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      3.62s | -- timeline-cleared
+      3.63s | 🟡 >list-fetch-started
+      4.43s | 🟡 <list-fetch-finished (value: {"count":5})
+      4.62s | -- realtime event arrives
+      .     | rt-fetch-scheduled (delay: 810ms)
+      5.43s | scheduled-rt-fetch-started
+      5.44s | 🟢 >list-fetch-started
+      6.24s | 🟢 <list-fetch-finished (value: {"count":5})
+      "
+    `);
+  });
+
+  test('leftover stale fields from a wider-loaded item do not disable throttling of later realtime invalidations', async () => {
+    const env = createRealtimeEnv();
+
+    // The item was loaded with MORE named fields than the list displays
+    // (e.g. an expanded row view), then that view closed.
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: ['name', 'address', 'age', 'country'],
+    });
+    await flushAllTimers();
+    await preload;
+
+    // A list grid stays mounted with a narrower set of fields.
+    renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'address'] },
+      ),
+    );
+    await flushAllTimers();
+
+    // Idle long enough for the realtime throttle window to pass.
+    await advanceTime(2_000);
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // Full high-priority invalidation of the record: every loaded field goes
+    // stale, but the immediate list refetch only reloads the list's fields —
+    // 'age' and 'country' remain pending at highPriority with no mounted
+    // hook to ever refetch them.
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+      });
+    });
+    await advanceTime(1_000);
+    expect(env.serverTable.getRequestHistory('list').length).toBe(1);
+
+    env.addTimelineComments('beforeNextAction', ['realtime event arrives']);
+
+    // A realtime record-change event arrives inside the throttle window. The
+    // leftover high-priority fields ('age'/'country') are not displayed by
+    // any hook — they must not escalate the list's realtime refetch.
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: () => true,
+        itemPayload: () => true,
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // The refetch must stay delayed until the throttle boundary — no
+    // cancellation of the scheduled realtime fetch, no immediate fetch.
+    await flushAllTimers();
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      3.62s | -- timeline-cleared
+      3.63s | 🟡 >list-fetch-started
+      4.43s | 🟡 <list-fetch-finished (value: {"count":5})
+      4.62s | -- realtime event arrives
+      .     | rt-fetch-scheduled (delay: 810ms)
+      5.43s | scheduled-rt-fetch-started
+      5.44s | 🟢 >list-fetch-started
+      6.24s | 🟢 <list-fetch-finished (value: {"count":5})
+      "
+    `);
+  });
 });
 
 describe('partial resources: query invalidations with multiple same-payload hooks', () => {

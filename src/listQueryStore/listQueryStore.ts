@@ -88,6 +88,7 @@ import {
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   DEFAULT_BATCH_KEY,
+  higherFetchType,
   resolveManagerFallback,
   StoreFetchError,
   StoreMutationError,
@@ -1897,14 +1898,25 @@ export function createListQueryStore<
   // Invalidation obligations that outlive the state-level
   // `itemFieldInvalidationFields` record (which is consumed when a re-fetch
   // starts). Shared by the fetch api (require-fresh imperative reads), the
-  // mutation api (which records invalidations) and the hooks.
-  const itemPendingInvalidationFields = new Map<string, string[]>();
-  // Items whose entire ('*') snapshot was invalidated. A fully-loaded ('*')
-  // item has no enumerable field list to store in `itemPendingInvalidationFields`,
-  // so this set is the durable "everything is stale" marker that survives partial
-  // refetches. It keeps other mounted hooks from trusting the stale snapshot via
-  // `inferFields` until the item is fully reloaded (`loadedFields === '*'` again).
-  const itemsPendingFullInvalidation = new Set<string>();
+  // mutation api (which records invalidations) and the hooks. Each field maps
+  // to the highest priority it was invalidated with since it was last
+  // reloaded — hooks adopt the max over THEIR requested fields only, so a
+  // leftover high-priority obligation on an undisplayed field cannot escalate
+  // unrelated refetches. `null` means the obligation was adopted without a
+  // known priority (e.g. synced from another tab); hooks treat it as an
+  // immediate refetch.
+  const itemPendingInvalidationFields = new Map<
+    string,
+    Map<string, FetchType | null>
+  >();
+  // Items whose entire ('*') snapshot was invalidated, mapped to the highest
+  // priority of those invalidations. A fully-loaded ('*') item has no
+  // enumerable field list to store in `itemPendingInvalidationFields`, so this
+  // map is the durable "everything is stale" marker that survives partial
+  // refetches. It keeps other mounted hooks from trusting the stale snapshot
+  // via `inferFields` until the item is fully reloaded (`loadedFields === '*'`
+  // again).
+  const itemsPendingFullInvalidation = new Map<string, FetchType>();
   // Per-field invalidations of never-loaded fields, dropped from the stale
   // record so the field's first load stays immediate — kept here so a fetch
   // that was already in flight when the invalidation arrived (and whose
@@ -2072,7 +2084,6 @@ export function createListQueryStore<
     storeEvents,
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
-    itemFieldInvalidationPriorities,
     invalidateQueryAndItems,
     invalidateItem,
     reannounceInvalidationsDroppedDuringFetch,
@@ -2336,20 +2347,22 @@ export function createListQueryStore<
    * a repeat cycle requires a new pending fetch at snapshot arrival.
    */
   function emitRemainingInvalidationFieldsAfterSnapshot(itemKey: string): void {
-    const priority =
-      itemFieldInvalidationPriorities.get(itemKey) ?? 'highPriority';
-
     // A surviving full-invalidation marker means every not-yet-reloaded
     // field is still owed, not just the explicitly tracked field list (a
     // per-field invalidation can coexist with an unresolved full one).
     // Re-announce the full invalidation itself so hooks whose fields are
     // owed only through the marker also re-schedule — downgrading it to the
     // explicit field list would leave them stale forever.
-    if (itemsPendingFullInvalidation.has(itemKey)) {
-      events.emit('invalidateItem', { priority, itemKey });
+    const fullInvalidationPriority = itemsPendingFullInvalidation.get(itemKey);
+    if (fullInvalidationPriority !== undefined) {
+      events.emit('invalidateItem', {
+        priority: fullInvalidationPriority,
+        itemKey,
+      });
       return;
     }
 
+    const pendingFields = itemPendingInvalidationFields.get(itemKey);
     const stateInvalidationFields =
       store.state.itemFieldInvalidationFields[itemKey];
     const remainingFields =
@@ -2357,13 +2370,23 @@ export function createListQueryStore<
         ? stateInvalidationFields
         : excludeLoadedFields(
             store.state.itemLoadedFields[itemKey],
-            itemPendingInvalidationFields.get(itemKey),
+            pendingFields && Array.from(pendingFields.keys()),
           );
 
     if (remainingFields.length === 0) return;
 
+    // Re-announce at the highest priority still owed to the remaining
+    // fields; fields without a tracked priority refetch immediately.
+    let priority: FetchType | undefined;
+    for (const field of remainingFields) {
+      priority = higherFetchType(
+        priority,
+        pendingFields?.get(field) ?? 'highPriority',
+      );
+    }
+
     events.emit('invalidateItem', {
-      priority,
+      priority: priority ?? 'highPriority',
       itemKey,
       invalidateFields: remainingFields,
     });
@@ -2371,28 +2394,31 @@ export function createListQueryStore<
 
   function pruneItemInvalidationTracking(): void {
     for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
-      // Fields still owed from earlier invalidations: the ones not yet
-      // reloaded, plus any per-field invalidations still recorded in state —
-      // the state record must never *replace* the tracked pending fields, or
-      // fields owed from an earlier (e.g. full) invalidation would be dropped.
-      const remainingFields = excludeLoadedFields(
-        store.state.itemLoadedFields[itemKey],
-        pendingFields,
-      );
-
+      const loadedFields = store.state.itemLoadedFields[itemKey];
       const stateInvalidationFields =
         store.state.itemFieldInvalidationFields[itemKey];
-      if (stateInvalidationFields && stateInvalidationFields.length > 0) {
-        const mergedFields = Array.from(
-          new Set([...stateInvalidationFields, ...remainingFields]),
-        ).sort();
-        itemPendingInvalidationFields.set(itemKey, mergedFields);
-        continue;
+
+      // Fields reloaded since their invalidation are resolved — unless the
+      // state record still lists them as stale (a per-field invalidation on
+      // a '*'-loaded item keeps them in `loadedFields`).
+      for (const field of pendingFields.keys()) {
+        if (stateInvalidationFields?.includes(field)) continue;
+        if (loadedFields === '*' || (loadedFields?.includes(field) ?? false)) {
+          pendingFields.delete(field);
+        }
       }
 
-      if (remainingFields.length > 0) {
-        itemPendingInvalidationFields.set(itemKey, remainingFields);
-      } else {
+      // Per-field invalidations recorded only in state (e.g. adopted from
+      // another tab) must also be tracked so the obligation survives the
+      // record's consumption at fetch start. Their priority is unknown —
+      // hooks treat them as an immediate refetch.
+      if (stateInvalidationFields) {
+        for (const field of stateInvalidationFields) {
+          if (!pendingFields.has(field)) pendingFields.set(field, null);
+        }
+      }
+
+      if (pendingFields.size === 0) {
         itemPendingInvalidationFields.delete(itemKey);
       }
     }
@@ -2400,32 +2426,14 @@ export function createListQueryStore<
     // A full-invalidation marker is resolved once the item is fully reloaded
     // ('*' again); until then it stays so late-mounting hooks keep refetching
     // their own not-yet-reloaded fields.
-    for (const itemKey of itemsPendingFullInvalidation) {
+    for (const itemKey of itemsPendingFullInvalidation.keys()) {
       if (store.state.itemLoadedFields[itemKey] === '*') {
         itemsPendingFullInvalidation.delete(itemKey);
-      }
-    }
-
-    for (const itemKey of itemFieldInvalidationPriorities.keys()) {
-      const hasPendingStateInvalidation =
-        !!store.state.itemFieldInvalidationFields[itemKey];
-      const hasPendingTrackedInvalidation =
-        (itemPendingInvalidationFields.get(itemKey)?.length ?? 0) > 0;
-      const hasPendingFullInvalidation =
-        itemsPendingFullInvalidation.has(itemKey);
-
-      if (
-        !hasPendingStateInvalidation &&
-        !hasPendingTrackedInvalidation &&
-        !hasPendingFullInvalidation
-      ) {
-        itemFieldInvalidationPriorities.delete(itemKey);
       }
     }
   }
 
   function cleanupItemStateMetadata(itemKey: string): void {
-    itemFieldInvalidationPriorities.delete(itemKey);
     itemPendingInvalidationFields.delete(itemKey);
     itemsPendingFullInvalidation.delete(itemKey);
     itemDroppedFieldInvalidations.delete(itemKey);
@@ -2994,7 +3002,6 @@ export function createListQueryStore<
       persistence?.readHydratedItem,
       scheduleAutomaticListQueryFetch,
       queryInvalidationWasTriggered,
-      itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,
       itemsPendingFullInvalidation,
       globalDisableRefetchOnMount,
@@ -3082,7 +3089,6 @@ export function createListQueryStore<
       !!persistence && !persistence.hasAsyncPreload,
       persistence?.readHydratedItem,
       itemInvalidationWasTriggered,
-      itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,
       itemsPendingFullInvalidation,
       globalDisableRefetchOnMount,
