@@ -1101,6 +1101,50 @@ export function useMultipleItems<
           }
         }
 
+        // A fetch owed via `refetchOnMount` inherits the tracked invalidation
+        // priority, which the scheduler may delay (e.g. `realtimeUpdate` with
+        // `dynamicRealtimeThrottleMs`). Waiting is only acceptable when the
+        // requested data is stale-but-displayable — genuinely missing data
+        // has nothing to show, so its fetch must run immediately.
+        if (itemState?.refetchOnMount && fetchType !== 'highPriority') {
+          let hasMissingRequestedData = requiredFetch;
+
+          if (!hasMissingRequestedData && partialResources) {
+            const loadedFields = store.state.itemLoadedFields[itemKey];
+            const item = store.state.items[itemKey];
+
+            if (Array.isArray(fields) && fields.length > 0) {
+              hasMissingRequestedData =
+                getGenuinelyMissingRequestedFields(
+                  itemKey,
+                  { item, loadedFields },
+                  fields,
+                  partialResources.inferFields,
+                  itemsPendingFullInvalidation,
+                  getUnresolvedPendingInvalidationFields(itemKey),
+                ).length > 0;
+            } else if (fields === '*') {
+              // A fully invalidated item whose (stale) snapshot is still
+              // present is stale data, not missing data.
+              const hasStaleFullInvalidation =
+                itemsPendingFullInvalidation.has(itemKey) &&
+                !hasFullyLoadedFields(loadedFields) &&
+                !!item;
+              hasMissingRequestedData =
+                !hasStaleFullInvalidation &&
+                !snapshotIsFullyLoaded(
+                  loadedFields,
+                  item,
+                  partialResources.inferFields,
+                );
+            }
+          }
+
+          if (hasMissingRequestedData) {
+            fetchType = 'highPriority';
+          }
+        }
+
         if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
           continue;
         }

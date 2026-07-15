@@ -1497,6 +1497,68 @@ export function useMultipleListQueries<
           }
         }
 
+        // A fetch owed via `refetchOnMount` inherits the tracked invalidation
+        // priority, which the scheduler may delay (e.g. `realtimeUpdate` with
+        // `dynamicRealtimeThrottleMs`). Waiting is only acceptable when the
+        // requested data is stale-but-displayable — genuinely missing data
+        // has nothing to show, so its fetch must run immediately.
+        if (queryState?.refetchOnMount && fetchType !== 'highPriority') {
+          let hasMissingRequestedData = requiredFetch;
+
+          if (
+            !hasMissingRequestedData &&
+            partialResources &&
+            effectiveQueryState
+          ) {
+            if (Array.isArray(fields) && fields.length > 0) {
+              for (const itemKey of effectiveQueryState.items) {
+                if (
+                  getGenuinelyMissingRequestedFields(
+                    itemKey,
+                    {
+                      item: store.state.items[itemKey],
+                      loadedFields: store.state.itemLoadedFields[itemKey],
+                    },
+                    fields,
+                    partialResources.inferFields,
+                    itemsPendingFullInvalidation,
+                    getUnresolvedPendingInvalidationFields(itemKey),
+                  ).length > 0
+                ) {
+                  hasMissingRequestedData = true;
+                  break;
+                }
+              }
+            } else if (fields === '*') {
+              for (const itemKey of effectiveQueryState.items) {
+                const item = store.state.items[itemKey];
+                const loadedFields = store.state.itemLoadedFields[itemKey];
+                // A fully invalidated item whose (stale) snapshot is still
+                // present is stale data, not missing data.
+                const hasStaleFullInvalidation =
+                  itemsPendingFullInvalidation.has(itemKey) &&
+                  !hasFullyLoadedFields(loadedFields) &&
+                  !!item;
+                if (
+                  !hasStaleFullInvalidation &&
+                  !snapshotIsFullyLoaded(
+                    loadedFields,
+                    item,
+                    partialResources.inferFields,
+                  )
+                ) {
+                  hasMissingRequestedData = true;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (hasMissingRequestedData) {
+            fetchType = 'highPriority';
+          }
+        }
+
         // Consume an invalidation that arrived while this instance was
         // off-screen: the visible instances consumed the event itself (and
         // cleared the query's shared `refetchOnMount`), so this per-instance

@@ -2519,3 +2519,230 @@ describe("partial resources: a fields:'*' query mounting over genuinely missing 
       `);
   });
 });
+
+describe('partial resources: a hook mounting after a realtime invalidation must not throttle missing data', () => {
+  // Finding: a full invalidation arriving while no hook is mounted records
+  // its priority in `refetchOnMount`. A hook mounting later consumed that
+  // record as its fetch priority even when it requested fields that were
+  // NEVER loaded — so a first load of missing data (nothing displayable)
+  // waited out the realtime throttle as if it were a refetch of stale data.
+  // Real-world shape: a kanban card loads a narrow field selection, a
+  // websocket record-change event invalidates the item at `realtimeUpdate`
+  // priority, then the user opens an edit form needing more fields — the
+  // form hung on the throttle (potentially minutes) with no data to show.
+
+  function createRealtimeEnv() {
+    return createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+  }
+
+  test('never-loaded fields requested by a late-mounting hook fetch immediately', async () => {
+    const env = createRealtimeEnv();
+
+    // A narrow hook (e.g. a kanban card) loads a subset of the item's
+    // fields, then unmounts.
+    const narrowHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['id', 'name'] }),
+    );
+    await flushAllTimers();
+    narrowHook.unmount();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the item while no
+    // hook is mounted — the obligation is recorded in `refetchOnMount` at
+    // `realtimeUpdate` priority.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // A wider hook mounts (e.g. an edit form): 'address' was never loaded —
+    // genuinely missing data with nothing to display.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['id', 'name', 'address'] }),
+    );
+
+    // Enough time for an immediate fetch to finish (~816ms), but before the
+    // throttled alternative (throttle boundary ~1.81s) would even have
+    // started fetching.
+    await advanceTime(850);
+    expect(result.current.data?.address).toBe('Address 1');
+
+    await flushAllTimers();
+
+    // One immediate fetch covers the missing field and the stale invalidated
+    // fields together — no separate throttled refetch remains.
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name', 'address']
+            itemId: 'users||1'
+      `);
+  });
+
+  test("a '*' hook mounting over a partially loaded invalidated item fetches immediately", async () => {
+    const env = createRealtimeEnv();
+
+    // Only a subset of the item's fields was ever loaded.
+    const narrowHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['id', 'name'] }),
+    );
+    await flushAllTimers();
+    narrowHook.unmount();
+    env.clearTimeline();
+
+    // A realtime full invalidation arrives while no hook is mounted.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // A full-resource hook mounts: most fields were never loaded, so this is
+    // a first load of missing data — it must not wait out the throttle.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: '*' }),
+    );
+
+    // Same timing contract as the array-fields case: an immediate fetch has
+    // finished by now, the throttled alternative would not even have started.
+    await advanceTime(850);
+    expect(result.current.data?.country).toBe('Country 1');
+
+    await flushAllTimers();
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+  });
+
+  test('a hook remounting with only previously loaded fields stays throttled', async () => {
+    const env = createRealtimeEnv();
+
+    // Load the fields the hook will request again later, then unmount.
+    const firstMount = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+    await flushAllTimers();
+    firstMount.unmount();
+    env.clearTimeline();
+
+    // The record changes on the server and a realtime full invalidation
+    // arrives while no hook is mounted.
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { name: 'New User 1' });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // The hook remounts requesting only fields it already has stale data
+    // for: this is a refetch of displayable stale data, so the realtime
+    // throttle must stay effective (no immediate promotion to highPriority).
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name', 'address'] }),
+    );
+
+    // The stale value stays visible while the throttled refetch is pending.
+    expect(result.current.data?.name).toBe('User 1');
+
+    await flushAllTimers();
+
+    // The refetch fired at the throttle boundary and picked up the change.
+    expect(result.current.data?.name).toBe('New User 1');
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | -- timeline-cleared
+      910ms | server-data-changed (value: {"name":"New User 1"})
+      960ms | rt-fetch-scheduled (delay: 850ms)
+      1.81s | scheduled-rt-fetch-started
+      1.82s | 🟠 >fetch-started
+      2.62s | 🟠 <fetch-finished (value: {"name":"New User 1","address":"Address 1"})
+      "
+    `);
+  });
+
+  test('a query hook mounting with never-loaded fields after a realtime invalidation fetches immediately', async () => {
+    const env = createRealtimeEnv();
+
+    // A narrow list (e.g. a kanban) loads a subset of fields, then unmounts.
+    const narrowHook = renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name'] },
+      ),
+    );
+    await flushAllTimers();
+    narrowHook.unmount();
+    env.clearTimeline();
+
+    // A realtime record-change event fully invalidates the query and its
+    // items while nothing is mounted — recorded in the query's
+    // `refetchOnMount` at `realtimeUpdate` priority.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: { tableId: 'users' },
+        itemPayload: (itemKey) => itemKey.startsWith('users||'),
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // A wider query hook mounts: 'age' was never loaded — missing data that
+    // must fetch immediately instead of inheriting the throttled priority.
+    await advanceTime(50);
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id', 'name', 'age'] },
+      ),
+    );
+
+    // An immediate fetch has finished by now; the throttled alternative
+    // would not even have started.
+    await advanceTime(850);
+    expect(result.current.items[0]?.age).toBe(10);
+
+    await flushAllTimers();
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name', 'age']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+      `);
+  });
+});

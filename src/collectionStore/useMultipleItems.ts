@@ -445,8 +445,17 @@ export function useMultipleItems<
 
         if (itemId) {
           const itemState = getItemState(payload);
-          const fetchType = itemState?.refetchOnMount || 'lowPriority';
           const requiredFetch = !itemState?.wasLoaded;
+          // A fetch owed via `refetchOnMount` inherits the tracked
+          // invalidation priority, which the scheduler may delay (e.g.
+          // `realtimeUpdate` with `dynamicRealtimeThrottleMs`). Waiting is
+          // only acceptable when stale data is still displayable — an item
+          // that was never loaded has nothing to show, so its fetch must run
+          // immediately.
+          const fetchType =
+            itemState?.refetchOnMount && requiredFetch
+              ? 'highPriority'
+              : itemState?.refetchOnMount || 'lowPriority';
 
           if (itemState === null) {
             // Deleted items should stay deleted until a caller explicitly refetches them.
