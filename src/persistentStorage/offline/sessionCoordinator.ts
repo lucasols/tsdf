@@ -34,6 +34,10 @@ import {
   readProtectedStorageKeys,
   type PersistentStorageHandle,
 } from '../persistentStorageManager';
+import {
+  getOfflineSessionStatusStorageKey,
+  OFFLINE_SESSION_STATUS_STORE_NAME,
+} from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import {
   clearSessionProtectedKeysSnapshot,
@@ -157,10 +161,6 @@ export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   };
 }
 
-function getOfflineStatusStorageKey(sessionKey: string): string {
-  return `tsdf.${sessionKey}._o_.s`;
-}
-
 function normalizeCompactModeState(value: { e?: 1; a?: 1 } | undefined): {
   enabled: boolean;
   active: boolean;
@@ -239,7 +239,7 @@ function readPersistedLocalSessionSnapshot(
 
   try {
     const entry = parseCompactLocalStorageEntry(
-      localStorage.getItem(getOfflineStatusStorageKey(sessionKey)),
+      localStorage.getItem(getOfflineSessionStatusStorageKey(sessionKey)),
     );
     if (!entry) return null;
 
@@ -534,7 +534,7 @@ function createSessionPersistenceHandle(
 
   return createPersistentStorageHandle<PersistedLocalSessionSnapshot>(
     {
-      storeName: '_o_.s',
+      storeName: OFFLINE_SESSION_STATUS_STORE_NAME,
       adapter: 'local-sync',
       getSessionKey: () => sessionKey,
       onPersistentStorageError,

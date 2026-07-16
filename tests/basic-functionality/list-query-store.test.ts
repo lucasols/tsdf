@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { GET_ALL } from '../../src/main';
 import { StoreFetchError } from '../../src/utils/storeShared';
@@ -742,6 +742,52 @@ describe('fetch query', () => {
     await flushAllTimers();
     expect(env.getItemQueryState('users||1')?.status).toBe('success');
     expect(env.apiStore.getItemState('users||1')).toBeDefined();
+  });
+
+  test('standalone item with a mutation in progress is protected from maxItems eviction on list-only stores', async () => {
+    const env = createListQueryStoreTestEnv(
+      {
+        users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+        orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+      },
+      // list-only store: without a fetchItemFn there is no item scheduler, so
+      // an in-flight mutation is the only signal protecting a standalone item
+      { maxItems: 3, disableFetchItemFn: true },
+    );
+
+    // create a standalone item that is not referenced by any query — it will
+    // be the eviction candidate under item pressure
+    act(() => {
+      env.apiStore.addItemToState('orders||1', { id: 1, name: 'Order 1' });
+    });
+
+    // start a slow mutation targeting the standalone item (with an optimistic
+    // update so the store reflects the new value)...
+    const mutation = env.performClientItemUpdateAction(
+      'orders||1',
+      { name: 'Order 1 updated' },
+      { duration: 5000, withOptimisticUpdate: true },
+    );
+
+    // ...and exceed maxItems while the mutation is still in flight: the list
+    // fetch loads 3 items, pushing the total to 4
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+
+    // enough time for the list fetch to settle and idle eviction to run, but
+    // not enough for the slow mutation to settle
+    await advanceTime(4000);
+
+    // orders||1 is the standalone eviction candidate but its in-flight
+    // mutation protects it from being evicted (which would silently discard
+    // the optimistic update and the mutation result)
+    expect(env.apiStore.getItemState('orders||1')).toBeDefined();
+
+    // the mutation settles normally without the item being lost
+    await flushAllTimers();
+    await mutation;
+    expect(env.apiStore.getItemState('orders||1')?.name).toBe(
+      'Order 1 updated',
+    );
   });
 });
 

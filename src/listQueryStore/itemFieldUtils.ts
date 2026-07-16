@@ -212,7 +212,8 @@ export function getGenuinelyMissingRequestedFields<
  * `undefined` and callers treat the refetch as untracked (ungated, immediate).
  * The full-invalidation marker owes a requested field only when that field is
  * neither reloaded nor covered by a per-field entry (an entry supersedes the
- * marker for its field).
+ * marker for its field). A `'*'`-loaded item has already resolved the marker
+ * (it only awaits pruning), so the marker contributes nothing then.
  */
 export function getPendingInvalidationPriorityOfFields(
   requestedFields: readonly string[] | undefined,
@@ -235,7 +236,11 @@ export function getPendingInvalidationPriorityOfFields(
     }
   }
 
-  if (fullInvalidationPriority !== undefined) {
+  // When `loadedFields` is '*' the item was fully reloaded after the marker
+  // was set — the marker is resolved and only awaits pruning, so it owes
+  // nothing. Skipping it here also avoids the `'*'.includes(field)` substring
+  // trap below (`loadedFields` would be the string '*', not an array).
+  if (fullInvalidationPriority !== undefined && loadedFields !== '*') {
     const owedByMarker = requestedFields
       ? requestedFields.some(
           (field) =>

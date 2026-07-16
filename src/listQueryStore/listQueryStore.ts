@@ -1903,8 +1903,12 @@ export function createListQueryStore<
   // reloaded — hooks adopt the max over THEIR requested fields only, so a
   // leftover high-priority obligation on an undisplayed field cannot escalate
   // unrelated refetches. `null` means the obligation was adopted without a
-  // known priority (e.g. synced from another tab); hooks treat it as an
-  // immediate refetch.
+  // known priority (e.g. synced from another tab); later invalidations never
+  // downgrade a `null` entry to a known priority. When `null` entries are the
+  // only pending information for a hook's requested fields, the refetch is
+  // treated as untracked (ungated, immediate); when they are mixed with
+  // tracked-priority fields, the max over the KNOWN priorities wins — the
+  // unknown-priority fields simply ride along with that refetch.
   const itemPendingInvalidationFields = new Map<
     string,
     Map<string, FetchType | null>
@@ -1926,6 +1930,12 @@ export function createListQueryStore<
     string,
     Map<string, DroppedFieldInvalidation>
   >();
+  // In-flight mutation refcounts for items on stores without a `fetchItemFn`
+  // (which have no item scheduler to track mutations). Used only to protect
+  // standalone items — items not referenced by any query — from cache eviction
+  // while a mutation targeting them is in flight. Entries self-clean when the
+  // last overlapping mutation on the item settles.
+  const itemMutationCountsWithoutScheduler = new Map<string, number>();
 
   const {
     getQueryState,
@@ -2131,6 +2141,7 @@ export function createListQueryStore<
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
     itemDroppedFieldInvalidations,
+    itemMutationCountsWithoutScheduler,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2532,8 +2543,9 @@ export function createListQueryStore<
   ): boolean {
     if (itemCacheRuntime.isActive(itemKey)) return true;
     // Only inspect an existing scheduler: creating one would throw on
-    // list-only stores without a fetchItemFn, and a store that can't have an
-    // item scheduler can't have an item fetch or mutation in progress either.
+    // list-only stores without a fetchItemFn. Those stores can't have an item
+    // fetch in progress, but mutations can still target their items — those
+    // are tracked in `itemMutationCountsWithoutScheduler` instead.
     const scheduler = getKnownItemScheduler(itemKey);
     if (
       itemQuery.status === 'loading' ||
@@ -2543,7 +2555,10 @@ export function createListQueryStore<
       return true;
     }
 
-    return scheduler?.isMutationInProgress(itemKey) ?? false;
+    return (
+      (scheduler?.isMutationInProgress(itemKey) ?? false) ||
+      itemMutationCountsWithoutScheduler.has(itemKey)
+    );
   }
 
   function mergeIncomingItemSnapshot(

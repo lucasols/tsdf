@@ -17,10 +17,12 @@ import {
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from './documentEntryKey';
 import {
   getManagedLocalStorageRuntimeConfig,
+  handleManagedLocalStorageBackgroundError,
   isLocalStorageQuotaWritesDisabled,
   isManagedLocalStorageEntryOfflineProtected,
   resetManagedLocalStorageState,
   setManagedLocalStorageEntryOfflineProtected,
+  takePendingQuotaWritesDisabledError,
 } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type { OfflineNetworkModeConfig } from './offline/types';
@@ -34,6 +36,7 @@ import {
   localPersistentStorage,
   type LocalStorageMetadataOptions,
 } from './storageAdapter';
+import { OFFLINE_SESSION_STATUS_STORE_NAME } from './storageEntryPrefixes';
 import type {
   AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
@@ -41,6 +44,7 @@ import type {
   AsyncStorageNamespaceStaticPolicy,
   AsyncStorageTouchMode,
   PersistentStorageBaseConfig,
+  PersistentStorageErrorHandler,
   StorageAdapter,
   StorageCacheEntry,
 } from './types';
@@ -273,6 +277,21 @@ async function runLocalStorageMutation<T>(
   return localPersistentStorage.runLocked(callback);
 }
 
+/**
+ * Delivers the terminal quota-disable error to the app when it was raised on
+ * a background code path with no error handler (e.g. a deferred manifest
+ * flush). Only consumes the stashed error when a handler exists, so the
+ * first store with an `onPersistentStorageError` reports it exactly once.
+ */
+function deliverPendingQuotaWritesDisabledError(
+  onPersistentStorageError: PersistentStorageErrorHandler | null | undefined,
+): void {
+  if (!onPersistentStorageError) return;
+
+  const pendingError = takePendingQuotaWritesDisabledError();
+  if (pendingError !== null) onPersistentStorageError(pendingError);
+}
+
 export function recordLocalStorageTouch(key: string, timestamp: number): void {
   localStorageTouchTimestamps.set(key, timestamp);
 }
@@ -334,9 +353,9 @@ export function scheduleLocalStorageRemoval(
   options: LocalStorageMetadataOptions | undefined,
 ): void {
   scheduleIdleCleanup(() => {
-    void runLocalStorageMutation(() => {
+    runLocalStorageMutation(() => {
       localPersistentStorage.remove(key, options);
-    });
+    }).catch(handleManagedLocalStorageBackgroundError);
   });
 }
 
@@ -732,6 +751,7 @@ export function createPersistentStorageHandle<T>(
         return;
       }
       if (isLocalStorageQuotaWritesDisabled()) {
+        deliverPendingQuotaWritesDisabledError(onPersistentStorageError);
         if (import.meta.env.DEV) {
           logPersistentStorageOperation(
             withPersistentStorageDebugKey(debugContext, key),
@@ -1131,6 +1151,23 @@ export function createPersistentStorageNamespaceHandle<
         return;
       }
       if (isLocalStorageQuotaWritesDisabled()) {
+        deliverPendingQuotaWritesDisabledError(onPersistentStorageError);
+
+        // removals must still go through: they free space instead of
+        // consuming quota, and skipping them would resurrect deleted items
+        // from stale persisted entries on the next load
+        const removes = args.removes ?? [];
+        if (removes.length > 0) {
+          await runLocalStorageMutation(() => {
+            for (const entryKey of removes) {
+              localPersistentStorage.remove(`${prefix}${entryKey}`, {
+                metadata: 'namespace',
+                namespacePrefix: prefix,
+              });
+            }
+          });
+        }
+
         if (import.meta.env.DEV) {
           logPersistentStorageOperation(
             debugContext,
@@ -2207,7 +2244,10 @@ export async function clearSessionStorage(
   } else {
     await adapter.clearSession(sessionKey);
     await runLocalStorageMutation(() => {
-      const sessionOfflineStatusKey = getStorageKey(sessionKey, '_o_.s');
+      const sessionOfflineStatusKey = getStorageKey(
+        sessionKey,
+        OFFLINE_SESSION_STATUS_STORE_NAME,
+      );
       localPersistentStorage.clearManifest(
         localPersistentStorage.getManifestKeyForSingle(sessionOfflineStatusKey),
       );

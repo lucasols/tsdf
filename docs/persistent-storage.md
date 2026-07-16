@@ -137,7 +137,7 @@ TSDF does not choose a persistence adapter automatically. Pass one of the built-
 - Can hydrate synchronously during initial state creation for `DocumentStore`.
 - `CollectionStore` and `ListQueryStore` use lazy hydration for unknown entries from initial keys scan.
 - Writes are debounced and may be dropped if serialization errors occur.
-- When a write hits the browser `QuotaExceededError` (the shared origin quota is full, e.g. because other parts of the app filled `localStorage`), TSDF automatically evicts its own least recently used entries — across all TSDF stores and sessions — and retries, escalating to all non-offline-protected entries if needed. Offline data and non-TSDF keys are never touched. If even that cannot free enough space, a single descriptive error is reported through `onPersistentStorageError` and persistence writes are silently skipped until the next page load.
+- When a write hits the browser `QuotaExceededError` (the shared origin quota is full, e.g. because other parts of the app filled `localStorage`), TSDF automatically evicts its own least recently used entries — across all TSDF stores and sessions — and retries, escalating to all non-offline-protected entries if needed. Offline data and non-TSDF keys are never touched. If even that cannot free enough space, a single descriptive error is reported through `onPersistentStorageError` and persistence writes are silently skipped until the next page load. Removals of persisted entries (e.g. after deleting an item) still go through while writes are disabled, so deleted data never resurrects on the next load.
 
 Use it with:
 

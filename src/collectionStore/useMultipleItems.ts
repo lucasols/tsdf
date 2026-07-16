@@ -397,7 +397,18 @@ export function useMultipleItems<
           item.refetchOnMount = false;
         });
 
-        scheduleAutomaticFetch(event.priority, payload);
+        // The refetch inherits the invalidation's priority, which the
+        // scheduler may delay (e.g. `realtimeUpdate` with
+        // `dynamicRealtimeThrottleMs`). Waiting is only acceptable when stale
+        // data is still displayable — an item that was never loaded has
+        // nothing to show, so its fetch must run immediately (mirrors the
+        // mount path).
+        const fetchPriority: FetchType =
+          event.priority !== 'highPriority' && !store.state[itemKey]?.wasLoaded
+            ? 'highPriority'
+            : event.priority;
+
+        scheduleAutomaticFetch(fetchPriority, payload);
         invalidationWasTriggered.add(itemKey);
       }
     }

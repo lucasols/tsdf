@@ -1236,6 +1236,59 @@ test('an item that never loaded fetches immediately on remount after a realtime 
   expect(remount.result.current.data?.value.title).toBe('updated todo');
 });
 
+test('a mounted item that never loaded fetches immediately on a realtime invalidation', async () => {
+  // Same scenario as the remount test above, but the hook STAYS mounted: the
+  // invalidation is handled by the mounted hook's invalidation event handler
+  // instead of the mount effect. Batch fetch mode shares one scheduler — and
+  // therefore one realtime throttle timing — across all items of a batch key,
+  // so a successful fetch of one item can throttle realtime-priority fetches
+  // of a different, never-loaded item.
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': { title: 'todo 2', completed: false } },
+    {
+      useBatchFetch: true,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs() {
+        return 5000;
+      },
+    },
+  );
+
+  // Item 1 loads successfully, giving the shared batch scheduler the fetch
+  // history that activates the realtime throttle.
+  const item1 = renderHook(() => env.apiStore.useItem('1'));
+  await flushAllTimers();
+  expect(item1.result.current.status).toBe('success');
+
+  // Item 2's first-ever fetch fails, leaving its (still mounted) hook in an
+  // error state with nothing displayable.
+  env.serverTable.setNextFetchError('2', 'network error');
+  const item2 = renderHook(() => env.apiStore.useItem('2'));
+  // Advance just past the fetch duration (~800ms) — `flushAllTimers` would
+  // also run pending retry timers and mask the error state.
+  await advanceTime(900);
+  expect(item2.result.current.status).toBe('error');
+
+  // A realtime record-change event invalidates item 2 while its hook is
+  // still mounted — the mounted-hook invalidation handler schedules the
+  // refetch at the event's `realtimeUpdate` priority.
+  await advanceTime(100);
+  act(() => {
+    env.serverTable.setItem(
+      '2',
+      { title: 'updated todo', completed: true },
+      { triggerRTUEvent: true },
+    );
+  });
+
+  // Item 2 never loaded, so there is nothing to show — the fetch must run
+  // immediately instead of waiting out the realtime throttle (5s) attached
+  // to the invalidation's priority.
+  await advanceTime(1000);
+  expect(item2.result.current.status).toBe('success');
+  expect(item2.result.current.data?.value.title).toBe('updated todo');
+});
+
 test('fetch error then mount component without error', async () => {
   const env = createCollectionStoreTestEnv<Todo>({
     '1': defaultTodo,

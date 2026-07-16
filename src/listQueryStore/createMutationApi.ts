@@ -276,6 +276,7 @@ export function createMutationApi<
     string,
     Map<string, DroppedFieldInvalidation>
   >,
+  itemMutationCountsWithoutScheduler: Map<string, number>,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -607,10 +608,12 @@ export function createMutationApi<
           const loadedFields = store.state.itemLoadedFields[itemKey];
 
           for (const field of staleInvalidateFields) {
-            let fieldPriority = higherFetchType(
-              pendingFields.get(field),
-              priority,
-            );
+            const existingPriority = pendingFields.get(field);
+            // `null` entries keep their stronger unknown-priority (immediate
+            // refetch) semantics — a known lower priority must not downgrade
+            // them.
+            if (existingPriority === null) continue;
+            let fieldPriority = higherFetchType(existingPriority, priority);
             // A field not reloaded since an unresolved full invalidation is
             // still owed at the marker's priority — absorb it into the field
             // entry, which supersedes the marker for this field from now on.
@@ -746,6 +749,27 @@ export function createMutationApi<
             }
           }
         }
+        // The baseline can be '*' via `inferFields` vouching while the
+        // tracked `itemLoadedFields` is still an enumerable array (e.g. a
+        // narrow refetch after an earlier full invalidation). Those tracked
+        // fields were reloaded since any surviving marker, so the marker no
+        // longer owes them — record them as per-field entries at the
+        // incoming priority (superseding the marker) BEFORE the state update
+        // clears the loaded metadata, or they would fall back to the
+        // marker's possibly higher priority and escalate their refetch.
+        const trackedLoadedFields = store.state.itemLoadedFields[itemKey];
+        if (trackedLoadedFields && trackedLoadedFields !== '*') {
+          const pendingFields =
+            existingPendingFields ?? new Map<string, FetchType | null>();
+          for (const field of trackedLoadedFields) {
+            // Existing entries were already escalated above; `null` entries
+            // keep their stronger unknown-priority (immediate) semantics.
+            if (!pendingFields.has(field)) pendingFields.set(field, priority);
+          }
+          if (pendingFields.size > 0) {
+            itemPendingInvalidationFields.set(itemKey, pendingFields);
+          }
+        }
       } else if (trackedInvalidationFields.length > 0) {
         const markerPriority = itemsPendingFullInvalidation.get(itemKey);
         const loadedFields = store.state.itemLoadedFields[itemKey];
@@ -753,10 +777,12 @@ export function createMutationApi<
           existingPendingFields ?? new Map<string, FetchType | null>();
 
         for (const field of trackedInvalidationFields) {
-          let fieldPriority = higherFetchType(
-            pendingFields.get(field),
-            priority,
-          );
+          const existingPriority = pendingFields.get(field);
+          // `null` entries keep their stronger unknown-priority (immediate
+          // refetch) semantics — a known lower priority must not downgrade
+          // them.
+          if (existingPriority === null) continue;
+          let fieldPriority = higherFetchType(existingPriority, priority);
           // A field not reloaded since an unresolved full invalidation is
           // still owed at the marker's priority — absorb it into the field
           // entry, which supersedes the marker for this field from now on.
@@ -858,9 +884,14 @@ export function createMutationApi<
         itemPendingInvalidationFields.set(itemKey, pendingFields);
       }
       for (const [field, fieldPriority] of staleFieldPriorities) {
+        const existingPriority = pendingFields.get(field);
+        // `null` entries keep their stronger unknown-priority (immediate
+        // refetch) semantics — a known lower priority must not downgrade
+        // them.
+        if (existingPriority === null) continue;
         pendingFields.set(
           field,
-          higherFetchType(pendingFields.get(field), fieldPriority),
+          higherFetchType(existingPriority, fieldPriority),
         );
       }
 
@@ -904,6 +935,27 @@ export function createMutationApi<
       if (fetchItemFn) {
         const itemScheduler = getOrCreateItemScheduler(itemKey, payload);
         endMutations.push(itemScheduler.startMutation(itemKey));
+      } else {
+        // List-only stores have no item scheduler to track the mutation, but
+        // a standalone item (not referenced by any query) still needs cache
+        // eviction protection while a mutation targets it. Refcounted so
+        // overlapping mutations on the same item keep the protection until
+        // the last one ends.
+        itemMutationCountsWithoutScheduler.set(
+          itemKey,
+          (itemMutationCountsWithoutScheduler.get(itemKey) ?? 0) + 1,
+        );
+        let ended = false;
+        endMutations.push(() => {
+          // Idempotent: `performMutation` may call the ender more than once
+          // (e.g. on both settle and error paths).
+          if (ended) return false;
+          ended = true;
+          const count = itemMutationCountsWithoutScheduler.get(itemKey) ?? 0;
+          if (count <= 1) itemMutationCountsWithoutScheduler.delete(itemKey);
+          else itemMutationCountsWithoutScheduler.set(itemKey, count - 1);
+          return true;
+        });
       }
 
       for (const [queryKey, query] of Object.entries(store.state.queries)) {

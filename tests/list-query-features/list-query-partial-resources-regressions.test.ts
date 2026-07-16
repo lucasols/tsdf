@@ -2320,6 +2320,88 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
       "
     `);
   });
+
+  test("fields reloaded since a high-priority '*'-vouched marker stay throttled on a later realtime full invalidation", async () => {
+    // Same failure mode as the tests above, but with an `inferFields` that
+    // vouches '*' once the item snapshot is complete (the docs' shape for
+    // manually inserted / persisted rows). With a complete snapshot in state,
+    // EVERY full invalidation takes the '*' marker path — including ones on
+    // an item whose tracked `itemLoadedFields` is a narrow array. Fields
+    // reloaded since a high-priority marker are owed only at the incoming
+    // priority, and must not fall back to the marker's high priority once
+    // `itemLoadedFields` is cleared.
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: starInferFieldsConfig,
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 1000,
+    });
+
+    // The item is fully loaded ('*') via a detail view, then that view
+    // closes.
+    const preload = env.apiStore.getItemFromStateOrFetch('users||1', {
+      fields: '*',
+    });
+    await flushAllTimers();
+    await preload;
+
+    // A narrow hook (e.g. a kanban card) stays mounted.
+    renderHook(() => env.apiStore.useItem('users||1', { fields: ['name'] }));
+    await flushAllTimers();
+
+    // Idle long enough for the realtime throttle window to pass.
+    await advanceTime(2_000);
+    env.clearTimeline();
+    env.serverTable.clearFetchHistory();
+
+    // A full high-priority invalidation records the '*' marker; the mounted
+    // hook refetches 'name' immediately, which is expected. 'name' is now
+    // reloaded SINCE the high marker, but the marker itself survives (the
+    // item never returns to '*'-loaded).
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+      });
+    });
+    // The refetch (800ms) settles; we are now 200ms after it — well inside
+    // the realtime throttle window of that fetch.
+    await advanceTime(1_000);
+    expect(env.serverTable.getRequestHistory('item').length).toBe(1);
+
+    env.addTimelineComments('beforeNextAction', ['realtime event arrives']);
+
+    // A realtime record-change event arrives inside the throttle window. The
+    // snapshot is still complete, so this full invalidation also takes the
+    // '*' marker path. 'name' is owed only at `realtimeUpdate` — the
+    // leftover high-priority marker must not escalate its refetch to an
+    // immediate high-priority fetch.
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+      });
+    });
+
+    // The refetch must stay delayed until the throttle boundary — no
+    // cancellation of the scheduled realtime fetch, no immediate fetch.
+    await flushAllTimers();
+    expect(env.timelineString).not.toContain('rt-fetch-cancelled');
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      2.81s | -- timeline-cleared
+      2.82s | 🟠 >fetch-started
+      3.62s | 🟠 <fetch-finished (value: {"name":"User 1"})
+      3.81s | -- realtime event arrives
+      .     | rt-fetch-scheduled (delay: 810ms)
+      4.62s | scheduled-rt-fetch-started
+      4.63s | 🟡 >fetch-started
+      5.43s | 🟡 <fetch-finished (value: {"name":"User 1"})
+      "
+    `);
+  });
 });
 
 describe('partial resources: query invalidations with multiple same-payload hooks', () => {

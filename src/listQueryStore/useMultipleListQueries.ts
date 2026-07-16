@@ -1186,6 +1186,69 @@ export function useMultipleListQueries<
     () => new Map<string, FetchType>(),
   );
 
+  // Whether the data a hook instance requests for the query's items is
+  // genuinely missing (never loaded, not vouched by `inferFields`, not merely
+  // stale). Missing data has nothing to show, so its fetch must not inherit a
+  // throttleable invalidation priority — stale-but-displayable data must keep
+  // it so scheduler throttling (e.g. realtime updates) stays effective.
+  const queryItemsHaveMissingRequestedData = useCallback(
+    (itemKeys: string[], fields: FieldsInput | undefined): boolean => {
+      if (!partialResources) return false;
+
+      if (Array.isArray(fields) && fields.length > 0) {
+        for (const itemKey of itemKeys) {
+          if (
+            getGenuinelyMissingRequestedFields(
+              itemKey,
+              {
+                item: store.state.items[itemKey],
+                loadedFields: store.state.itemLoadedFields[itemKey],
+              },
+              fields,
+              partialResources.inferFields,
+              itemsPendingFullInvalidation,
+              getUnresolvedPendingInvalidationFields(itemKey),
+            ).length > 0
+          ) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      if (fields === '*') {
+        for (const itemKey of itemKeys) {
+          const item = store.state.items[itemKey];
+          const loadedFields = store.state.itemLoadedFields[itemKey];
+          // A fully invalidated item whose (stale) snapshot is still present
+          // is stale data, not missing data.
+          const hasStaleFullInvalidation =
+            itemsPendingFullInvalidation.has(itemKey) &&
+            !hasFullyLoadedFields(loadedFields) &&
+            !!item;
+          if (
+            !hasStaleFullInvalidation &&
+            !snapshotIsFullyLoaded(
+              loadedFields,
+              item,
+              partialResources.inferFields,
+            )
+          ) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    },
+    [
+      getUnresolvedPendingInvalidationFields,
+      itemsPendingFullInvalidation,
+      partialResources,
+      store,
+    ],
+  );
+
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {
     for (const {
       key,
@@ -1228,12 +1291,28 @@ export function useMultipleListQueries<
         queryInvalidationWasTriggered.add(key);
       }
 
+      // The refetch inherits the invalidation's priority, which the scheduler
+      // may delay (e.g. `realtimeUpdate` with `dynamicRealtimeThrottleMs`).
+      // Waiting is only acceptable when the requested data is
+      // stale-but-displayable — a query that never loaded (or items whose
+      // requested data is genuinely missing) has nothing to show, so its
+      // fetch must run immediately (mirrors the mount path). Derived queries
+      // borrow their source query's data, so they are displayable even
+      // without own loaded data.
+      const fetchPriority: FetchType =
+        event.priority !== 'highPriority' &&
+        (!resolvedQuery ||
+          (!resolvedQuery.query.wasLoaded && !resolvedQuery.isDerived) ||
+          queryItemsHaveMissingRequestedData(resolvedQuery.query.items, fields))
+          ? 'highPriority'
+          : event.priority;
+
       // Every instance schedules its own fields/loadSize — instances watching
       // the same query with different field subsets each contribute theirs,
       // and the scheduler's coalescing window merges the schedules into a
       // single fetch. Deduping the schedule per query key would drop the
       // other instances' fields, leaving them stale forever.
-      scheduleAutomaticListQueryFetch(event.priority, payload, loadSize, {
+      scheduleAutomaticListQueryFetch(fetchPriority, payload, loadSize, {
         fields,
       });
     }
@@ -1493,61 +1572,17 @@ export function useMultipleListQueries<
         // `dynamicRealtimeThrottleMs`). Waiting is only acceptable when the
         // requested data is stale-but-displayable — genuinely missing data
         // has nothing to show, so its fetch must run immediately.
-        if (queryState?.refetchOnMount && fetchType !== 'highPriority') {
-          let hasMissingRequestedData = requiredFetch;
-
-          if (
-            !hasMissingRequestedData &&
-            partialResources &&
-            effectiveQueryState
-          ) {
-            if (Array.isArray(fields) && fields.length > 0) {
-              for (const itemKey of effectiveQueryState.items) {
-                if (
-                  getGenuinelyMissingRequestedFields(
-                    itemKey,
-                    {
-                      item: store.state.items[itemKey],
-                      loadedFields: store.state.itemLoadedFields[itemKey],
-                    },
-                    fields,
-                    partialResources.inferFields,
-                    itemsPendingFullInvalidation,
-                    getUnresolvedPendingInvalidationFields(itemKey),
-                  ).length > 0
-                ) {
-                  hasMissingRequestedData = true;
-                  break;
-                }
-              }
-            } else if (fields === '*') {
-              for (const itemKey of effectiveQueryState.items) {
-                const item = store.state.items[itemKey];
-                const loadedFields = store.state.itemLoadedFields[itemKey];
-                // A fully invalidated item whose (stale) snapshot is still
-                // present is stale data, not missing data.
-                const hasStaleFullInvalidation =
-                  itemsPendingFullInvalidation.has(itemKey) &&
-                  !hasFullyLoadedFields(loadedFields) &&
-                  !!item;
-                if (
-                  !hasStaleFullInvalidation &&
-                  !snapshotIsFullyLoaded(
-                    loadedFields,
-                    item,
-                    partialResources.inferFields,
-                  )
-                ) {
-                  hasMissingRequestedData = true;
-                  break;
-                }
-              }
-            }
-          }
-
-          if (hasMissingRequestedData) {
-            fetchType = 'highPriority';
-          }
+        if (
+          queryState?.refetchOnMount &&
+          fetchType !== 'highPriority' &&
+          (requiredFetch ||
+            (effectiveQueryState &&
+              queryItemsHaveMissingRequestedData(
+                effectiveQueryState.items,
+                fields,
+              )))
+        ) {
+          fetchType = 'highPriority';
         }
 
         // `refetchOnMount` carries only the priority of the LAST invalidation
@@ -1646,6 +1681,7 @@ export function useMultipleListQueries<
     itemsPendingFullInvalidation,
     getHighestPendingInvalidationPriority,
     getUnresolvedPendingInvalidationFields,
+    queryItemsHaveMissingRequestedData,
     stickyDerivedQueryKeys,
   ]);
 

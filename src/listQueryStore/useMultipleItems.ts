@@ -738,6 +738,62 @@ export function useMultipleItems<
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
+  // Whether the data a hook instance requests for the item is genuinely
+  // missing (never loaded, not vouched by `inferFields`, not merely stale).
+  // Missing data has nothing to show, so its fetch must not inherit a
+  // throttleable invalidation priority — stale-but-displayable data must keep
+  // it so scheduler throttling (e.g. realtime updates) stays effective.
+  const itemHasMissingRequestedData = useCallback(
+    (itemKey: string, fields: FieldsInput | undefined): boolean => {
+      const itemState = store.state.itemQueries[itemKey];
+      // Deleted items should stay deleted until explicitly fetched/invalidated.
+      if (itemState === null) return false;
+      if (!itemState?.wasLoaded) return true;
+      if (!partialResources) return false;
+
+      const loadedFields = store.state.itemLoadedFields[itemKey];
+      const item = store.state.items[itemKey];
+
+      if (Array.isArray(fields) && fields.length > 0) {
+        return (
+          getGenuinelyMissingRequestedFields(
+            itemKey,
+            { item, loadedFields },
+            fields,
+            partialResources.inferFields,
+            itemsPendingFullInvalidation,
+            getUnresolvedPendingInvalidationFields(itemKey),
+          ).length > 0
+        );
+      }
+
+      if (fields === '*') {
+        // A fully invalidated item whose (stale) snapshot is still present is
+        // stale data, not missing data.
+        const hasStaleFullInvalidation =
+          itemsPendingFullInvalidation.has(itemKey) &&
+          !hasFullyLoadedFields(loadedFields) &&
+          !!item;
+        return (
+          !hasStaleFullInvalidation &&
+          !snapshotIsFullyLoaded(
+            loadedFields,
+            item,
+            partialResources.inferFields,
+          )
+        );
+      }
+
+      return false;
+    },
+    [
+      getUnresolvedPendingInvalidationFields,
+      itemsPendingFullInvalidation,
+      partialResources,
+      store,
+    ],
+  );
+
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
@@ -824,6 +880,17 @@ export function useMultipleItems<
     const isUnboundedHook =
       !hookFields || hookFields === '*' || hookFields.length === 0;
 
+    // The refetch inherits the invalidation's priority, which the scheduler
+    // may delay (e.g. `realtimeUpdate` with `dynamicRealtimeThrottleMs`).
+    // Waiting is only acceptable when the requested data is
+    // stale-but-displayable — genuinely missing data has nothing to show, so
+    // its fetch must run immediately (mirrors the mount path).
+    const fetchPriority: FetchType =
+      event.priority !== 'highPriority' &&
+      itemHasMissingRequestedData(event.itemKey, hookFields)
+        ? 'highPriority'
+        : event.priority;
+
     if (itemInvalidationWasTriggered.has(event.itemKey)) {
       if (!fieldsToFetch) return;
 
@@ -842,7 +909,7 @@ export function useMultipleItems<
 
       if (contributionFields && contributionFields.length === 0) return;
 
-      scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
+      scheduleAutomaticItemFetch(fetchPriority, firstQuery.payload, {
         fields: contributionFields,
       });
       return;
@@ -879,7 +946,7 @@ export function useMultipleItems<
       query.refetchOnMount = false;
     });
 
-    scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
+    scheduleAutomaticItemFetch(fetchPriority, firstQuery.payload, {
       fields: fieldsToFetch ?? firstQuery.fields,
     });
     itemInvalidationWasTriggered.add(event.itemKey);
@@ -1119,43 +1186,12 @@ export function useMultipleItems<
         // `dynamicRealtimeThrottleMs`). Waiting is only acceptable when the
         // requested data is stale-but-displayable — genuinely missing data
         // has nothing to show, so its fetch must run immediately.
-        if (itemState?.refetchOnMount && fetchType !== 'highPriority') {
-          let hasMissingRequestedData = requiredFetch;
-
-          if (!hasMissingRequestedData && partialResources) {
-            const loadedFields = store.state.itemLoadedFields[itemKey];
-            const item = store.state.items[itemKey];
-
-            if (Array.isArray(fields) && fields.length > 0) {
-              hasMissingRequestedData =
-                getGenuinelyMissingRequestedFields(
-                  itemKey,
-                  { item, loadedFields },
-                  fields,
-                  partialResources.inferFields,
-                  itemsPendingFullInvalidation,
-                  getUnresolvedPendingInvalidationFields(itemKey),
-                ).length > 0;
-            } else if (fields === '*') {
-              // A fully invalidated item whose (stale) snapshot is still
-              // present is stale data, not missing data.
-              const hasStaleFullInvalidation =
-                itemsPendingFullInvalidation.has(itemKey) &&
-                !hasFullyLoadedFields(loadedFields) &&
-                !!item;
-              hasMissingRequestedData =
-                !hasStaleFullInvalidation &&
-                !snapshotIsFullyLoaded(
-                  loadedFields,
-                  item,
-                  partialResources.inferFields,
-                );
-            }
-          }
-
-          if (hasMissingRequestedData) {
-            fetchType = 'highPriority';
-          }
+        if (
+          itemState?.refetchOnMount &&
+          fetchType !== 'highPriority' &&
+          itemHasMissingRequestedData(itemKey, fields)
+        ) {
+          fetchType = 'highPriority';
         }
 
         // `refetchOnMount` carries only the priority of the LAST invalidation
@@ -1228,6 +1264,7 @@ export function useMultipleItems<
     fetchQueriesWithId,
     getUnresolvedPendingInvalidationFields,
     ignoreItemsInRefetchOnMount,
+    itemHasMissingRequestedData,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
     loadFromStateOnly,
