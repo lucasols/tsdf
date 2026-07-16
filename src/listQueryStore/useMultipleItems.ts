@@ -34,7 +34,6 @@ import {
 } from '../utils/payloadDebounce';
 import {
   fetchTypePriority,
-  higherFetchType,
   type PayloadDebounce,
   ValidPayload,
   ValidStoreState,
@@ -43,6 +42,7 @@ import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
   getGenuinelyMissingRequestedFields,
+  getPendingInvalidationPriorityOfFields,
   getStaleOrMissingRequestedFields,
   hasFullyLoadedFields,
   snapshotIsFullyLoaded,
@@ -966,46 +966,15 @@ export function useMultipleItems<
           // adopted from another tab via state sync) contribute nothing, so
           // an all-unknown result stays undefined and the code below treats
           // the refetch as untracked (ungated, lifted to immediate).
-          const pendingFieldPriorities =
-            itemPendingInvalidationFields.get(itemKey);
-          const fullInvalidationPriority = hasUnresolvedFullInvalidation
-            ? itemsPendingFullInvalidation.get(itemKey)
-            : undefined;
-          let invalidationPriority: FetchType | undefined;
-          const requestedFieldList =
-            Array.isArray(fields) && fields.length > 0 ? fields : undefined;
-          const fieldsToCheckPriority = requestedFieldList
-            ? requestedFieldList.filter((field) =>
-                unresolvedPendingInvalidationFields.includes(field),
-              )
-            : unresolvedPendingInvalidationFields;
-          for (const field of fieldsToCheckPriority) {
-            const fieldPriority = pendingFieldPriorities?.get(field);
-            if (fieldPriority) {
-              invalidationPriority = higherFetchType(
-                invalidationPriority,
-                fieldPriority,
-              );
-            }
-          }
-          if (fullInvalidationPriority !== undefined) {
-            // The full-invalidation marker owes a requested field only when
-            // that field is neither reloaded nor covered by a per-field
-            // entry (an entry supersedes the marker for its field).
-            const owedByMarker = requestedFieldList
-              ? requestedFieldList.some(
-                  (field) =>
-                    !loadedFields.includes(field) &&
-                    !pendingFieldPriorities?.has(field),
-                )
-              : true;
-            if (owedByMarker) {
-              invalidationPriority = higherFetchType(
-                invalidationPriority,
-                fullInvalidationPriority,
-              );
-            }
-          }
+          const invalidationPriority = getPendingInvalidationPriorityOfFields(
+            Array.isArray(fields) && fields.length > 0 ? fields : undefined,
+            loadedFields,
+            unresolvedPendingInvalidationFields,
+            itemPendingInvalidationFields.get(itemKey),
+            hasUnresolvedFullInvalidation
+              ? itemsPendingFullInvalidation.get(itemKey)
+              : undefined,
+          );
 
           if (Array.isArray(fields) && fields.length > 0) {
             // Per-field stale-or-missing check: `inferFields` keeps vouching
@@ -1186,6 +1155,36 @@ export function useMultipleItems<
 
           if (hasMissingRequestedData) {
             fetchType = 'highPriority';
+          }
+        }
+
+        // `refetchOnMount` carries only the priority of the LAST invalidation
+        // that set it — fields this hook requests may still be owed at a
+        // higher tracked priority from an earlier invalidation (e.g. a
+        // high-priority per-field invalidation recorded before a later
+        // realtime full invalidation). Adopt the highest priority owed to the
+        // requested fields so the mount fetch is not under-prioritized.
+        if (
+          partialResources &&
+          itemState?.refetchOnMount &&
+          fetchType !== 'highPriority'
+        ) {
+          const loadedFields = store.state.itemLoadedFields[itemKey];
+          const invalidationPriority = getPendingInvalidationPriorityOfFields(
+            Array.isArray(fields) && fields.length > 0 ? fields : undefined,
+            loadedFields,
+            getUnresolvedPendingInvalidationFields(itemKey),
+            itemPendingInvalidationFields.get(itemKey),
+            hasFullyLoadedFields(loadedFields)
+              ? undefined
+              : itemsPendingFullInvalidation.get(itemKey),
+          );
+          if (
+            invalidationPriority &&
+            fetchTypePriority[invalidationPriority] >
+              fetchTypePriority[fetchType]
+          ) {
+            fetchType = invalidationPriority;
           }
         }
 

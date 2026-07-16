@@ -303,6 +303,10 @@ export function createMutationApi<
     loadedFields: ItemLoadedFields | undefined;
     invalidationFields: string[] | undefined;
     pendingInvalidationFields: Map<string, FetchType | null> | undefined;
+    pendingFullInvalidation: FetchType | undefined;
+    droppedFieldInvalidations:
+      | Map<string, DroppedFieldInvalidation>
+      | undefined;
     invalidationWasTriggered: boolean;
   };
   type MutationQueryRollbackSnapshot = {
@@ -395,6 +399,24 @@ export function createMutationApi<
           itemPendingInvalidationFields.set(
             snapshot.itemKey,
             new Map(snapshot.pendingInvalidationFields),
+          );
+        }
+
+        if (snapshot.pendingFullInvalidation === undefined) {
+          itemsPendingFullInvalidation.delete(snapshot.itemKey);
+        } else {
+          itemsPendingFullInvalidation.set(
+            snapshot.itemKey,
+            snapshot.pendingFullInvalidation,
+          );
+        }
+
+        if (snapshot.droppedFieldInvalidations === undefined) {
+          itemDroppedFieldInvalidations.delete(snapshot.itemKey);
+        } else {
+          itemDroppedFieldInvalidations.set(
+            snapshot.itemKey,
+            new Map(snapshot.droppedFieldInvalidations),
           );
         }
 
@@ -702,20 +724,28 @@ export function createMutationApi<
       if (itemWasFullyLoaded) {
         // No enumerable field list for a '*' item — record the durable
         // full-invalidation marker so catch-up hooks refetch their own fields
-        // instead of trusting the stale snapshot. The marker keeps the
-        // highest priority it was invalidated with; per-field entries fold
-        // into it since the marker now owes every field until a '*' reload.
-        let markerPriority = higherFetchType(
-          itemsPendingFullInvalidation.get(itemKey),
-          priority,
+        // instead of trusting the stale snapshot. The marker keeps only the
+        // highest priority IT was invalidated with; existing per-field
+        // entries stay and supersede the marker for their fields, so a
+        // leftover obligation on an undisplayed field cannot escalate the
+        // whole item. Each entry is escalated to at least the incoming
+        // priority (the full invalidation owes every field that much), while
+        // `null` entries keep their stronger unknown-priority (immediate
+        // refetch) semantics.
+        itemsPendingFullInvalidation.set(
+          itemKey,
+          higherFetchType(itemsPendingFullInvalidation.get(itemKey), priority),
         );
         if (existingPendingFields) {
-          for (const fieldPriority of existingPendingFields.values()) {
-            markerPriority = higherFetchType(fieldPriority, markerPriority);
+          for (const [field, fieldPriority] of existingPendingFields) {
+            if (fieldPriority !== null) {
+              existingPendingFields.set(
+                field,
+                higherFetchType(fieldPriority, priority),
+              );
+            }
           }
         }
-        itemsPendingFullInvalidation.set(itemKey, markerPriority);
-        itemPendingInvalidationFields.delete(itemKey);
       } else if (trackedInvalidationFields.length > 0) {
         const markerPriority = itemsPendingFullInvalidation.get(itemKey);
         const loadedFields = store.state.itemLoadedFields[itemKey];
@@ -1414,6 +1444,8 @@ export function createMutationApi<
       itemRollbackSnapshots = affectedItemEntries.map(({ itemKey }) => {
         const pendingInvalidationFields =
           itemPendingInvalidationFields.get(itemKey);
+        const droppedFieldInvalidations =
+          itemDroppedFieldInvalidations.get(itemKey);
         return {
           itemKey,
           item: klona(store.state.items[itemKey]),
@@ -1424,6 +1456,9 @@ export function createMutationApi<
           ),
           pendingInvalidationFields:
             pendingInvalidationFields && new Map(pendingInvalidationFields),
+          pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
+          droppedFieldInvalidations:
+            droppedFieldInvalidations && new Map(droppedFieldInvalidations),
           invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
         };
       });

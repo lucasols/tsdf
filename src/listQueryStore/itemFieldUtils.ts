@@ -1,5 +1,6 @@
 import type { FetchType } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
+import { higherFetchType } from '../utils/storeShared';
 import type { ValidStoreState } from '../utils/storeShared';
 import type { ItemLoadedFields, PartialResourcesConfig } from './types';
 
@@ -201,6 +202,56 @@ export function getGenuinelyMissingRequestedFields<
   return fallbackMissingFields.filter(
     (field) => !unresolvedPendingInvalidationFields.includes(field),
   );
+}
+
+/**
+ * Highest tracked invalidation priority owed to `requestedFields` (or to any
+ * unresolved field when `requestedFields` is `undefined` — an unbounded hook).
+ * Fields without a tracked priority (e.g. invalidations adopted from another
+ * tab via state sync) contribute nothing, so an all-unknown result stays
+ * `undefined` and callers treat the refetch as untracked (ungated, immediate).
+ * The full-invalidation marker owes a requested field only when that field is
+ * neither reloaded nor covered by a per-field entry (an entry supersedes the
+ * marker for its field).
+ */
+export function getPendingInvalidationPriorityOfFields(
+  requestedFields: readonly string[] | undefined,
+  loadedFields: ItemLoadedFields | undefined,
+  unresolvedPendingInvalidationFields: readonly string[],
+  pendingFieldPriorities: Map<string, FetchType | null> | undefined,
+  fullInvalidationPriority: FetchType | undefined,
+): FetchType | undefined {
+  let highestPriority: FetchType | undefined;
+
+  const fieldsToCheck = requestedFields
+    ? requestedFields.filter((field) =>
+        unresolvedPendingInvalidationFields.includes(field),
+      )
+    : unresolvedPendingInvalidationFields;
+  for (const field of fieldsToCheck) {
+    const fieldPriority = pendingFieldPriorities?.get(field);
+    if (fieldPriority) {
+      highestPriority = higherFetchType(highestPriority, fieldPriority);
+    }
+  }
+
+  if (fullInvalidationPriority !== undefined) {
+    const owedByMarker = requestedFields
+      ? requestedFields.some(
+          (field) =>
+            !(loadedFields?.includes(field) ?? false) &&
+            !pendingFieldPriorities?.has(field),
+        )
+      : true;
+    if (owedByMarker) {
+      highestPriority = higherFetchType(
+        highestPriority,
+        fullInvalidationPriority,
+      );
+    }
+  }
+
+  return highestPriority;
 }
 
 /**

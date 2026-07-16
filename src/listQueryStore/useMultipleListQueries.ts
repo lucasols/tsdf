@@ -45,6 +45,7 @@ import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
   getGenuinelyMissingRequestedFields,
+  getPendingInvalidationPriorityOfFields,
   getStaleOrMissingRequestedFields,
   hasFullyLoadedFields,
   snapshotIsFullyLoaded,
@@ -424,60 +425,26 @@ export function useMultipleListQueries<
       let highestPriority: FetchType | undefined;
 
       for (const itemKey of itemKeys) {
-        const unresolvedInvalidationFields =
-          getUnresolvedPendingInvalidationFields(itemKey);
         const loadedFields = store.state.itemLoadedFields[itemKey];
-        // A fully invalidated ('*'-loaded) item has no field list to
-        // enumerate — the pending-full marker alone proves every
-        // not-yet-reloaded field (requested ones included) is awaiting the
-        // re-fetch.
-        const fullInvalidationPriority =
-          loadedFields === '*'
-            ? undefined
-            : itemsPendingFullInvalidation.get(itemKey);
-        if (
-          unresolvedInvalidationFields.length === 0 &&
-          fullInvalidationPriority === undefined
-        ) {
-          continue;
-        }
-
-        const pendingFieldPriorities =
-          itemPendingInvalidationFields.get(itemKey);
-
         // Adopt only the priorities owed to the fields this hook actually
         // requests — a leftover obligation on an undisplayed field must not
         // escalate this hook's refetch. Fields without a tracked priority
         // (e.g. adopted from another tab) contribute nothing; callers treat
-        // an undefined result as an immediate refetch.
-        const fieldsToCheck = requestedFields
-          ? requestedFields.filter((field) =>
-              unresolvedInvalidationFields.includes(field),
-            )
-          : unresolvedInvalidationFields;
-        for (const field of fieldsToCheck) {
-          const fieldPriority = pendingFieldPriorities?.get(field);
-          if (fieldPriority) {
-            highestPriority = higherFetchType(highestPriority, fieldPriority);
-          }
-        }
-
-        if (fullInvalidationPriority !== undefined) {
-          // The marker owes every field not reloaded since the full
-          // invalidation and without its own (superseding) field entry.
-          const owedByMarker = requestedFields
-            ? requestedFields.some(
-                (field) =>
-                  !(loadedFields?.includes(field) ?? false) &&
-                  !pendingFieldPriorities?.has(field),
-              )
-            : true;
-          if (owedByMarker) {
-            highestPriority = higherFetchType(
-              highestPriority,
-              fullInvalidationPriority,
-            );
-          }
+        // an undefined result as an immediate refetch. A fully invalidated
+        // ('*'-loaded) item has no field list to enumerate — the pending-full
+        // marker alone proves every not-yet-reloaded field (requested ones
+        // included) is awaiting the re-fetch.
+        const itemPriority = getPendingInvalidationPriorityOfFields(
+          requestedFields,
+          loadedFields,
+          getUnresolvedPendingInvalidationFields(itemKey),
+          itemPendingInvalidationFields.get(itemKey),
+          loadedFields === '*'
+            ? undefined
+            : itemsPendingFullInvalidation.get(itemKey),
+        );
+        if (itemPriority) {
+          highestPriority = higherFetchType(highestPriority, itemPriority);
         }
       }
 
@@ -1580,6 +1547,31 @@ export function useMultipleListQueries<
 
           if (hasMissingRequestedData) {
             fetchType = 'highPriority';
+          }
+        }
+
+        // `refetchOnMount` carries only the priority of the LAST invalidation
+        // that set it — fields this hook displays may still be owed at a
+        // higher tracked priority from an earlier invalidation (e.g. a
+        // high-priority per-field invalidation recorded before a later
+        // realtime full invalidation). Adopt the highest priority owed to the
+        // displayed fields so the mount fetch is not under-prioritized.
+        if (
+          partialResources &&
+          queryState?.refetchOnMount &&
+          fetchType !== 'highPriority' &&
+          effectiveQueryState
+        ) {
+          const invalidationPriority = getHighestPendingInvalidationPriority(
+            effectiveQueryState.items,
+            Array.isArray(fields) && fields.length > 0 ? fields : undefined,
+          );
+          if (
+            invalidationPriority &&
+            fetchTypePriority[invalidationPriority] >
+              fetchTypePriority[fetchType]
+          ) {
+            fetchType = invalidationPriority;
           }
         }
 
