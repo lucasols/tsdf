@@ -42,6 +42,7 @@ import {
   excludeLoadedFields,
   fallbackItemHasRequestedFields,
   getGenuinelyMissingRequestedFields,
+  getPendingInvalidationPriorityOfFields,
   getStaleOrMissingRequestedFields,
   hasFullyLoadedFields,
   snapshotIsFullyLoaded,
@@ -142,9 +143,8 @@ export function useMultipleItems<
         | undefined)
     | undefined,
   itemInvalidationWasTriggered: Set<string>,
-  itemFieldInvalidationPriorities: Map<string, FetchType>,
-  itemPendingInvalidationFields: Map<string, string[]>,
-  itemsPendingFullInvalidation: Set<string>,
+  itemPendingInvalidationFields: Map<string, Map<string, FetchType | null>>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
@@ -252,9 +252,10 @@ export function useMultipleItems<
       const itemLoadedFields = state
         ? state.itemLoadedFields
         : store.state.itemLoadedFields;
+      const pendingFields = itemPendingInvalidationFields.get(itemKey);
       return excludeLoadedFields(
         itemLoadedFields[itemKey],
-        itemPendingInvalidationFields.get(itemKey),
+        pendingFields && Array.from(pendingFields.keys()),
       );
     },
     [itemPendingInvalidationFields, store],
@@ -737,6 +738,62 @@ export function useMultipleItems<
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
+  // Whether the data a hook instance requests for the item is genuinely
+  // missing (never loaded, not vouched by `inferFields`, not merely stale).
+  // Missing data has nothing to show, so its fetch must not inherit a
+  // throttleable invalidation priority — stale-but-displayable data must keep
+  // it so scheduler throttling (e.g. realtime updates) stays effective.
+  const itemHasMissingRequestedData = useCallback(
+    (itemKey: string, fields: FieldsInput | undefined): boolean => {
+      const itemState = store.state.itemQueries[itemKey];
+      // Deleted items should stay deleted until explicitly fetched/invalidated.
+      if (itemState === null) return false;
+      if (!itemState?.wasLoaded) return true;
+      if (!partialResources) return false;
+
+      const loadedFields = store.state.itemLoadedFields[itemKey];
+      const item = store.state.items[itemKey];
+
+      if (Array.isArray(fields) && fields.length > 0) {
+        return (
+          getGenuinelyMissingRequestedFields(
+            itemKey,
+            { item, loadedFields },
+            fields,
+            partialResources.inferFields,
+            itemsPendingFullInvalidation,
+            getUnresolvedPendingInvalidationFields(itemKey),
+          ).length > 0
+        );
+      }
+
+      if (fields === '*') {
+        // A fully invalidated item whose (stale) snapshot is still present is
+        // stale data, not missing data.
+        const hasStaleFullInvalidation =
+          itemsPendingFullInvalidation.has(itemKey) &&
+          !hasFullyLoadedFields(loadedFields) &&
+          !!item;
+        return (
+          !hasStaleFullInvalidation &&
+          !snapshotIsFullyLoaded(
+            loadedFields,
+            item,
+            partialResources.inferFields,
+          )
+        );
+      }
+
+      return false;
+    },
+    [
+      getUnresolvedPendingInvalidationFields,
+      itemsPendingFullInvalidation,
+      partialResources,
+      store,
+    ],
+  );
+
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
@@ -762,11 +819,14 @@ export function useMultipleItems<
       event.itemKey,
     );
     const loadedFields = store.state.itemLoadedFields[event.itemKey];
+    const eventItemPendingFields = itemPendingInvalidationFields.get(
+      event.itemKey,
+    );
     const owedStaleFields = new Set([
       ...(store.state.itemFieldInvalidationFields[event.itemKey] ?? []),
       ...excludeLoadedFields(
         loadedFields,
-        itemPendingInvalidationFields.get(event.itemKey),
+        eventItemPendingFields && Array.from(eventItemPendingFields.keys()),
       ),
     ]);
 
@@ -820,6 +880,17 @@ export function useMultipleItems<
     const isUnboundedHook =
       !hookFields || hookFields === '*' || hookFields.length === 0;
 
+    // The refetch inherits the invalidation's priority, which the scheduler
+    // may delay (e.g. `realtimeUpdate` with `dynamicRealtimeThrottleMs`).
+    // Waiting is only acceptable when the requested data is
+    // stale-but-displayable — genuinely missing data has nothing to show, so
+    // its fetch must run immediately (mirrors the mount path).
+    const fetchPriority: FetchType =
+      event.priority !== 'highPriority' &&
+      itemHasMissingRequestedData(event.itemKey, hookFields)
+        ? 'highPriority'
+        : event.priority;
+
     if (itemInvalidationWasTriggered.has(event.itemKey)) {
       if (!fieldsToFetch) return;
 
@@ -838,7 +909,7 @@ export function useMultipleItems<
 
       if (contributionFields && contributionFields.length === 0) return;
 
-      scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
+      scheduleAutomaticItemFetch(fetchPriority, firstQuery.payload, {
         fields: contributionFields,
       });
       return;
@@ -875,7 +946,7 @@ export function useMultipleItems<
       query.refetchOnMount = false;
     });
 
-    scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
+    scheduleAutomaticItemFetch(fetchPriority, firstQuery.payload, {
       fields: fieldsToFetch ?? firstQuery.fields,
     });
     itemInvalidationWasTriggered.add(event.itemKey);
@@ -957,11 +1028,20 @@ export function useMultipleItems<
           const hasUnresolvedFullInvalidation =
             itemsPendingFullInvalidation.has(itemKey) &&
             !hasFullyLoadedFields(loadedFields);
-          const invalidationPriority =
-            unresolvedPendingInvalidationFields.length > 0 ||
+          // Highest tracked priority among the fields this hook instance
+          // still owes. Fields whose invalidation priority is unknown (e.g.
+          // adopted from another tab via state sync) contribute nothing, so
+          // an all-unknown result stays undefined and the code below treats
+          // the refetch as untracked (ungated, lifted to immediate).
+          const invalidationPriority = getPendingInvalidationPriorityOfFields(
+            Array.isArray(fields) && fields.length > 0 ? fields : undefined,
+            loadedFields,
+            unresolvedPendingInvalidationFields,
+            itemPendingInvalidationFields.get(itemKey),
             hasUnresolvedFullInvalidation
-              ? itemFieldInvalidationPriorities.get(itemKey)
-              : undefined;
+              ? itemsPendingFullInvalidation.get(itemKey)
+              : undefined,
+          );
 
           if (Array.isArray(fields) && fields.length > 0) {
             // Per-field stale-or-missing check: `inferFields` keeps vouching
@@ -1106,42 +1186,41 @@ export function useMultipleItems<
         // `dynamicRealtimeThrottleMs`). Waiting is only acceptable when the
         // requested data is stale-but-displayable — genuinely missing data
         // has nothing to show, so its fetch must run immediately.
-        if (itemState?.refetchOnMount && fetchType !== 'highPriority') {
-          let hasMissingRequestedData = requiredFetch;
+        if (
+          itemState?.refetchOnMount &&
+          fetchType !== 'highPriority' &&
+          itemHasMissingRequestedData(itemKey, fields)
+        ) {
+          fetchType = 'highPriority';
+        }
 
-          if (!hasMissingRequestedData && partialResources) {
-            const loadedFields = store.state.itemLoadedFields[itemKey];
-            const item = store.state.items[itemKey];
-
-            if (Array.isArray(fields) && fields.length > 0) {
-              hasMissingRequestedData =
-                getGenuinelyMissingRequestedFields(
-                  itemKey,
-                  { item, loadedFields },
-                  fields,
-                  partialResources.inferFields,
-                  itemsPendingFullInvalidation,
-                  getUnresolvedPendingInvalidationFields(itemKey),
-                ).length > 0;
-            } else if (fields === '*') {
-              // A fully invalidated item whose (stale) snapshot is still
-              // present is stale data, not missing data.
-              const hasStaleFullInvalidation =
-                itemsPendingFullInvalidation.has(itemKey) &&
-                !hasFullyLoadedFields(loadedFields) &&
-                !!item;
-              hasMissingRequestedData =
-                !hasStaleFullInvalidation &&
-                !snapshotIsFullyLoaded(
-                  loadedFields,
-                  item,
-                  partialResources.inferFields,
-                );
-            }
-          }
-
-          if (hasMissingRequestedData) {
-            fetchType = 'highPriority';
+        // `refetchOnMount` carries only the priority of the LAST invalidation
+        // that set it — fields this hook requests may still be owed at a
+        // higher tracked priority from an earlier invalidation (e.g. a
+        // high-priority per-field invalidation recorded before a later
+        // realtime full invalidation). Adopt the highest priority owed to the
+        // requested fields so the mount fetch is not under-prioritized.
+        if (
+          partialResources &&
+          itemState?.refetchOnMount &&
+          fetchType !== 'highPriority'
+        ) {
+          const loadedFields = store.state.itemLoadedFields[itemKey];
+          const invalidationPriority = getPendingInvalidationPriorityOfFields(
+            Array.isArray(fields) && fields.length > 0 ? fields : undefined,
+            loadedFields,
+            getUnresolvedPendingInvalidationFields(itemKey),
+            itemPendingInvalidationFields.get(itemKey),
+            hasFullyLoadedFields(loadedFields)
+              ? undefined
+              : itemsPendingFullInvalidation.get(itemKey),
+          );
+          if (
+            invalidationPriority &&
+            fetchTypePriority[invalidationPriority] >
+              fetchTypePriority[fetchType]
+          ) {
+            fetchType = invalidationPriority;
           }
         }
 
@@ -1185,7 +1264,7 @@ export function useMultipleItems<
     fetchQueriesWithId,
     getUnresolvedPendingInvalidationFields,
     ignoreItemsInRefetchOnMount,
-    itemFieldInvalidationPriorities,
+    itemHasMissingRequestedData,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,
     loadFromStateOnly,

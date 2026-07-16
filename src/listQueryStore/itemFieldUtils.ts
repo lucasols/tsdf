@@ -1,4 +1,6 @@
+import type { FetchType } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
+import { higherFetchType } from '../utils/storeShared';
 import type { ValidStoreState } from '../utils/storeShared';
 import type { ItemLoadedFields, PartialResourcesConfig } from './types';
 
@@ -39,7 +41,7 @@ export function snapshotIsFullyLoadedAndFresh<
   loadedFields: ItemLoadedFields | undefined,
   item: ItemState | null | undefined,
   inferFields: (item: ItemState) => ItemLoadedFields,
-  itemsPendingFullInvalidation: Set<string>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
 ): boolean {
   if (loadedFields !== '*' && itemsPendingFullInvalidation.has(itemKey)) {
     return false;
@@ -61,7 +63,7 @@ export function getStaleOrMissingRequestedFields<
   item: ItemState | null | undefined,
   requestedFields: readonly string[],
   inferFields: (item: ItemState) => ItemLoadedFields,
-  itemsPendingFullInvalidation: Set<string>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   pendingInvalidationFields: readonly string[],
 ): string[] {
   // Requested fields awaiting an invalidation re-fetch are stale even when
@@ -179,7 +181,7 @@ export function getGenuinelyMissingRequestedFields<
     | undefined,
   requestedFields: readonly string[],
   inferFields: (item: ItemState) => ItemLoadedFields,
-  itemsPendingFullInvalidation: Set<string>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   unresolvedPendingInvalidationFields: readonly string[],
 ): string[] {
   const fallbackMissingFields = getFallbackMissingRequestedFields(
@@ -200,6 +202,61 @@ export function getGenuinelyMissingRequestedFields<
   return fallbackMissingFields.filter(
     (field) => !unresolvedPendingInvalidationFields.includes(field),
   );
+}
+
+/**
+ * Highest tracked invalidation priority owed to `requestedFields` (or to any
+ * unresolved field when `requestedFields` is `undefined` — an unbounded hook).
+ * Fields without a tracked priority (e.g. invalidations adopted from another
+ * tab via state sync) contribute nothing, so an all-unknown result stays
+ * `undefined` and callers treat the refetch as untracked (ungated, immediate).
+ * The full-invalidation marker owes a requested field only when that field is
+ * neither reloaded nor covered by a per-field entry (an entry supersedes the
+ * marker for its field). A `'*'`-loaded item has already resolved the marker
+ * (it only awaits pruning), so the marker contributes nothing then.
+ */
+export function getPendingInvalidationPriorityOfFields(
+  requestedFields: readonly string[] | undefined,
+  loadedFields: ItemLoadedFields | undefined,
+  unresolvedPendingInvalidationFields: readonly string[],
+  pendingFieldPriorities: Map<string, FetchType | null> | undefined,
+  fullInvalidationPriority: FetchType | undefined,
+): FetchType | undefined {
+  let highestPriority: FetchType | undefined;
+
+  const fieldsToCheck = requestedFields
+    ? requestedFields.filter((field) =>
+        unresolvedPendingInvalidationFields.includes(field),
+      )
+    : unresolvedPendingInvalidationFields;
+  for (const field of fieldsToCheck) {
+    const fieldPriority = pendingFieldPriorities?.get(field);
+    if (fieldPriority) {
+      highestPriority = higherFetchType(highestPriority, fieldPriority);
+    }
+  }
+
+  // When `loadedFields` is '*' the item was fully reloaded after the marker
+  // was set — the marker is resolved and only awaits pruning, so it owes
+  // nothing. Skipping it here also avoids the `'*'.includes(field)` substring
+  // trap below (`loadedFields` would be the string '*', not an array).
+  if (fullInvalidationPriority !== undefined && loadedFields !== '*') {
+    const owedByMarker = requestedFields
+      ? requestedFields.some(
+          (field) =>
+            !(loadedFields?.includes(field) ?? false) &&
+            !pendingFieldPriorities?.has(field),
+        )
+      : true;
+    if (owedByMarker) {
+      highestPriority = higherFetchType(
+        highestPriority,
+        fullInvalidationPriority,
+      );
+    }
+  }
+
+  return highestPriority;
 }
 
 /**

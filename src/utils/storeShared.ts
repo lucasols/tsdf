@@ -111,6 +111,14 @@ export const fetchTypePriority: Record<FetchType, number> = {
   highPriority: 3,
 };
 
+/** Returns the higher-priority fetch type, treating a missing `a` as lower. */
+export function higherFetchType(
+  a: FetchType | null | undefined,
+  b: FetchType,
+): FetchType {
+  return a && fetchTypePriority[a] > fetchTypePriority[b] ? a : b;
+}
+
 /** Result error returned when a debounced or canceled mutation never runs. */
 export type MutationSkipped = {
   /** Stable discriminator for skipped mutations. */

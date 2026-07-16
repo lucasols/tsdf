@@ -1487,7 +1487,7 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
   });
 
-  test('per-field invalidation keeps the highest emitted priority for mounted full-resource hooks', async () => {
+  test('per-field invalidation events carry the incoming priority; earlier invalidations do not escalate them', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
     });
@@ -1525,8 +1525,13 @@ describe('invalidateQueryAndItems with fields', () => {
     await flushAllTimers();
     stopListening();
 
+    // The second (lowPriority) invalidation targets a different field, so it
+    // must NOT be escalated by the earlier highPriority invalidation of
+    // 'age' — escalating unrelated later invalidations is what used to break
+    // scheduler throttling (e.g. realtime updates). The 'age' obligation
+    // keeps its own high priority in the per-field tracking.
     expect(emittedPriorities).toMatchInlineSnapshot(
-      `['highPriority', 'highPriority']`,
+      `['highPriority', 'lowPriority']`,
     );
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
       - _type: 'item'
@@ -1622,6 +1627,9 @@ describe('invalidateQueryAndItems with fields', () => {
     });
 
     const itemKey = env.getStoreItemKeyFromRaw('users||1');
+    // refetchOnMount carries the incoming (lowPriority) full invalidation;
+    // the earlier highPriority obligation for 'age' stays tracked per-field
+    // and is adopted by hooks that actually request 'age'.
     expect({
       itemLoadedFields: env.store.state.itemLoadedFields[itemKey],
       itemFieldInvalidationFields:
@@ -1629,7 +1637,7 @@ describe('invalidateQueryAndItems with fields', () => {
       refetchOnMount: env.store.state.itemQueries[itemKey]?.refetchOnMount,
     }).toMatchInlineSnapshot(`
       itemLoadedFields: []
-      refetchOnMount: 'highPriority'
+      refetchOnMount: 'lowPriority'
     `);
 
     const nameHookRenders = createLoggerStore();

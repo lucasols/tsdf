@@ -257,8 +257,8 @@ export function createFetchApi<
     ItemPayload
   >['onItemFetchSettled'],
   offlineController: OfflineAwareFetchController | null | undefined,
-  itemPendingInvalidationFields: Map<string, string[]>,
-  itemsPendingFullInvalidation: Set<string>,
+  itemPendingInvalidationFields: Map<string, Map<string, FetchType | null>>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
 ) {
   type Query = TSFDListQuery<QueryPayload>;
 
@@ -1146,9 +1146,10 @@ export function createFetchApi<
       return stateInvalidationFields;
     }
 
+    const pendingFields = itemPendingInvalidationFields.get(itemKey);
     return excludeLoadedFields(
       store.state.itemLoadedFields[itemKey],
-      itemPendingInvalidationFields.get(itemKey),
+      pendingFields && Array.from(pendingFields.keys()),
     );
   }
 

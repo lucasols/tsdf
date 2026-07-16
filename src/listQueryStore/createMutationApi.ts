@@ -23,6 +23,7 @@ import {
 } from '../utils/performMutation';
 import {
   fetchTypePriority,
+  higherFetchType,
   mutationSkipped,
   type MutationSkipped,
   type StoreError,
@@ -269,12 +270,13 @@ export function createMutationApi<
   onOfflineTimelineEvent:
     | ((event: TestOfflineTimelineEvent) => void)
     | undefined,
-  itemPendingInvalidationFields: Map<string, string[]>,
-  itemsPendingFullInvalidation: Set<string>,
+  itemPendingInvalidationFields: Map<string, Map<string, FetchType | null>>,
+  itemsPendingFullInvalidation: Map<string, FetchType>,
   itemDroppedFieldInvalidations: Map<
     string,
     Map<string, DroppedFieldInvalidation>
   >,
+  itemMutationCountsWithoutScheduler: Map<string, number>,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -301,8 +303,11 @@ export function createMutationApi<
     itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
     loadedFields: ItemLoadedFields | undefined;
     invalidationFields: string[] | undefined;
-    invalidationPriority: FetchType | undefined;
-    pendingInvalidationFields: string[] | undefined;
+    pendingInvalidationFields: Map<string, FetchType | null> | undefined;
+    pendingFullInvalidation: FetchType | undefined;
+    droppedFieldInvalidations:
+      | Map<string, DroppedFieldInvalidation>
+      | undefined;
     invalidationWasTriggered: boolean;
   };
   type MutationQueryRollbackSnapshot = {
@@ -389,21 +394,30 @@ export function createMutationApi<
       );
 
       for (const snapshot of itemSnapshots) {
-        if (snapshot.invalidationPriority === undefined) {
-          itemFieldInvalidationPriorities.delete(snapshot.itemKey);
-        } else {
-          itemFieldInvalidationPriorities.set(
-            snapshot.itemKey,
-            snapshot.invalidationPriority,
-          );
-        }
-
         if (snapshot.pendingInvalidationFields === undefined) {
           itemPendingInvalidationFields.delete(snapshot.itemKey);
         } else {
           itemPendingInvalidationFields.set(
             snapshot.itemKey,
-            snapshot.pendingInvalidationFields,
+            new Map(snapshot.pendingInvalidationFields),
+          );
+        }
+
+        if (snapshot.pendingFullInvalidation === undefined) {
+          itemsPendingFullInvalidation.delete(snapshot.itemKey);
+        } else {
+          itemsPendingFullInvalidation.set(
+            snapshot.itemKey,
+            snapshot.pendingFullInvalidation,
+          );
+        }
+
+        if (snapshot.droppedFieldInvalidations === undefined) {
+          itemDroppedFieldInvalidations.delete(snapshot.itemKey);
+        } else {
+          itemDroppedFieldInvalidations.set(
+            snapshot.itemKey,
+            new Map(snapshot.droppedFieldInvalidations),
           );
         }
 
@@ -459,7 +473,6 @@ export function createMutationApi<
 
   const queryInvalidationWasTriggered = new Set<string>();
   const itemInvalidationWasTriggered = new Set<string>();
-  const itemFieldInvalidationPriorities = new Map<string, FetchType>();
 
   /**
    * The staleness baseline for invalidations: a field is invalidatable
@@ -533,11 +546,6 @@ export function createMutationApi<
       if (partialResources && invalidateFields) {
         // Per-field invalidation: remove specified fields from itemLoadedFields
         const itemsKey = getItemsKeyArray(itemPayload);
-        const nextInvalidationPriorityByItemKey = new Map<string, FetchType>();
-        const nextPendingInvalidationFieldsByItemKey = new Map<
-          string,
-          string[]
-        >();
         // Only fields with a displayable cached value can go stale (see
         // getInvalidationBaselineFields). A never-loaded field must not be
         // recorded — it stays classified as genuinely missing so its first
@@ -571,12 +579,7 @@ export function createMutationApi<
               const existingDropped = droppedForItem.get(field);
               droppedForItem.set(field, {
                 invalidatedAt: Date.now(),
-                priority:
-                  existingDropped &&
-                  fetchTypePriority[existingDropped.priority] >
-                    fetchTypePriority[priority]
-                    ? existingDropped.priority
-                    : priority,
+                priority: higherFetchType(existingDropped?.priority, priority),
               });
             }
           }
@@ -584,39 +587,48 @@ export function createMutationApi<
           if (staleInvalidateFields.length === 0) continue;
 
           staleInvalidateFieldsByItemKey.set(itemKey, staleInvalidateFields);
-
-          const existingPriority = itemFieldInvalidationPriorities.get(itemKey);
-          const existingPendingFields =
-            itemPendingInvalidationFields.get(itemKey) ?? [];
-          nextPendingInvalidationFieldsByItemKey.set(
-            itemKey,
-            Array.from(
-              new Set([...existingPendingFields, ...staleInvalidateFields]),
-            ).sort(),
-          );
-
-          nextInvalidationPriorityByItemKey.set(
-            itemKey,
-            existingPriority &&
-              fetchTypePriority[existingPriority] > fetchTypePriority[priority]
-              ? existingPriority
-              : priority,
-          );
         }
 
         // Keep map-based tracking in sync before the state update so selectors
-        // that read these maps see the same invalidation transaction.
+        // that read these maps see the same invalidation transaction. Each
+        // field keeps the highest priority it has been invalidated with since
+        // it was last reloaded.
         for (const [
           itemKey,
-          itemPriority,
-        ] of nextInvalidationPriorityByItemKey) {
-          itemFieldInvalidationPriorities.set(itemKey, itemPriority);
-        }
-        for (const [
-          itemKey,
-          invalidationFields,
-        ] of nextPendingInvalidationFieldsByItemKey) {
-          itemPendingInvalidationFields.set(itemKey, invalidationFields);
+          staleInvalidateFields,
+        ] of staleInvalidateFieldsByItemKey) {
+          let pendingFields = itemPendingInvalidationFields.get(itemKey);
+          if (!pendingFields) {
+            pendingFields = new Map();
+            itemPendingInvalidationFields.set(itemKey, pendingFields);
+          }
+
+          const fullInvalidationPriority =
+            itemsPendingFullInvalidation.get(itemKey);
+          const loadedFields = store.state.itemLoadedFields[itemKey];
+
+          for (const field of staleInvalidateFields) {
+            const existingPriority = pendingFields.get(field);
+            // `null` entries keep their stronger unknown-priority (immediate
+            // refetch) semantics — a known lower priority must not downgrade
+            // them.
+            if (existingPriority === null) continue;
+            let fieldPriority = higherFetchType(existingPriority, priority);
+            // A field not reloaded since an unresolved full invalidation is
+            // still owed at the marker's priority — absorb it into the field
+            // entry, which supersedes the marker for this field from now on.
+            if (
+              fullInvalidationPriority !== undefined &&
+              loadedFields !== '*' &&
+              !(loadedFields?.includes(field) ?? false)
+            ) {
+              fieldPriority = higherFetchType(
+                fullInvalidationPriority,
+                fieldPriority,
+              );
+            }
+            pendingFields.set(field, fieldPriority);
+          }
         }
 
         store.produceState(
@@ -650,15 +662,17 @@ export function createMutationApi<
         // Items where no invalidated field was loaded have nothing stale to
         // re-announce; hooks requesting such fields already treat them as
         // missing and fetch immediately on their own.
+        // The event carries the INCOMING priority only: fields owed to
+        // earlier invalidations keep their own tracked per-field priorities,
+        // and merging them into the event would escalate unrelated
+        // lower-priority refetches (e.g. break the realtime throttle).
         for (const [
           itemKey,
           staleInvalidateFields,
         ] of staleInvalidateFieldsByItemKey) {
           itemInvalidationWasTriggered.delete(itemKey);
-          const itemPriority =
-            nextInvalidationPriorityByItemKey.get(itemKey) ?? priority;
           emitInvalidateItem({
-            priority: itemPriority,
+            priority,
             itemKey,
             invalidateFields: staleInvalidateFields,
           });
@@ -686,6 +700,7 @@ export function createMutationApi<
 
       const itemWasFullyLoaded =
         partialResources && effectiveLoadedFields === '*';
+      const existingPendingFields = itemPendingInvalidationFields.get(itemKey);
       const trackedInvalidationFields =
         partialResources && !itemWasFullyLoaded
           ? Array.from(
@@ -693,44 +708,96 @@ export function createMutationApi<
                 ...(effectiveLoadedFields === '*'
                   ? []
                   : (effectiveLoadedFields ?? [])),
-                ...(itemPendingInvalidationFields.get(itemKey) ?? []),
+                ...(existingPendingFields?.keys() ?? []),
               ]),
             ).sort()
           : [];
-      const trackedInvalidationPriority =
-        trackedInvalidationFields.length > 0 ||
-        itemsPendingFullInvalidation.has(itemKey)
-          ? itemFieldInvalidationPriorities.get(itemKey)
-          : undefined;
-      const nextInvalidationPriority =
-        trackedInvalidationPriority &&
-        fetchTypePriority[trackedInvalidationPriority] >
-          fetchTypePriority[priority]
-          ? trackedInvalidationPriority
-          : priority;
       const currentInvalidationPriority = item.refetchOnMount
         ? fetchTypePriority[item.refetchOnMount]
         : -1;
-      const newInvalidationPriority =
-        fetchTypePriority[nextInvalidationPriority];
 
-      if (currentInvalidationPriority >= newInvalidationPriority) continue;
+      if (currentInvalidationPriority >= fetchTypePriority[priority]) continue;
 
       // Update the invalidation tracking maps before the state change so
       // subscribers notified by it see the same invalidation transaction.
+      // This invalidation itself only propagates at the INCOMING priority;
+      // fields owed to earlier invalidations keep their own tracked
+      // priorities instead of escalating the whole item (which would e.g.
+      // break the realtime throttle for every later realtime invalidation).
       if (itemWasFullyLoaded) {
         // No enumerable field list for a '*' item — record the durable
         // full-invalidation marker so catch-up hooks refetch their own fields
-        // instead of trusting the stale snapshot.
-        itemsPendingFullInvalidation.add(itemKey);
-        itemPendingInvalidationFields.delete(itemKey);
-        itemFieldInvalidationPriorities.set(itemKey, nextInvalidationPriority);
+        // instead of trusting the stale snapshot. The marker keeps only the
+        // highest priority IT was invalidated with; existing per-field
+        // entries stay and supersede the marker for their fields, so a
+        // leftover obligation on an undisplayed field cannot escalate the
+        // whole item. Each entry is escalated to at least the incoming
+        // priority (the full invalidation owes every field that much), while
+        // `null` entries keep their stronger unknown-priority (immediate
+        // refetch) semantics.
+        itemsPendingFullInvalidation.set(
+          itemKey,
+          higherFetchType(itemsPendingFullInvalidation.get(itemKey), priority),
+        );
+        if (existingPendingFields) {
+          for (const [field, fieldPriority] of existingPendingFields) {
+            if (fieldPriority !== null) {
+              existingPendingFields.set(
+                field,
+                higherFetchType(fieldPriority, priority),
+              );
+            }
+          }
+        }
+        // The baseline can be '*' via `inferFields` vouching while the
+        // tracked `itemLoadedFields` is still an enumerable array (e.g. a
+        // narrow refetch after an earlier full invalidation). Those tracked
+        // fields were reloaded since any surviving marker, so the marker no
+        // longer owes them — record them as per-field entries at the
+        // incoming priority (superseding the marker) BEFORE the state update
+        // clears the loaded metadata, or they would fall back to the
+        // marker's possibly higher priority and escalate their refetch.
+        const trackedLoadedFields = store.state.itemLoadedFields[itemKey];
+        if (trackedLoadedFields && trackedLoadedFields !== '*') {
+          const pendingFields =
+            existingPendingFields ?? new Map<string, FetchType | null>();
+          for (const field of trackedLoadedFields) {
+            // Existing entries were already escalated above; `null` entries
+            // keep their stronger unknown-priority (immediate) semantics.
+            if (!pendingFields.has(field)) pendingFields.set(field, priority);
+          }
+          if (pendingFields.size > 0) {
+            itemPendingInvalidationFields.set(itemKey, pendingFields);
+          }
+        }
       } else if (trackedInvalidationFields.length > 0) {
-        itemPendingInvalidationFields.set(itemKey, trackedInvalidationFields);
-        itemFieldInvalidationPriorities.set(itemKey, nextInvalidationPriority);
+        const markerPriority = itemsPendingFullInvalidation.get(itemKey);
+        const loadedFields = store.state.itemLoadedFields[itemKey];
+        const pendingFields =
+          existingPendingFields ?? new Map<string, FetchType | null>();
+
+        for (const field of trackedInvalidationFields) {
+          const existingPriority = pendingFields.get(field);
+          // `null` entries keep their stronger unknown-priority (immediate
+          // refetch) semantics — a known lower priority must not downgrade
+          // them.
+          if (existingPriority === null) continue;
+          let fieldPriority = higherFetchType(existingPriority, priority);
+          // A field not reloaded since an unresolved full invalidation is
+          // still owed at the marker's priority — absorb it into the field
+          // entry, which supersedes the marker for this field from now on.
+          if (
+            markerPriority !== undefined &&
+            loadedFields !== '*' &&
+            !(loadedFields?.includes(field) ?? false)
+          ) {
+            fieldPriority = higherFetchType(markerPriority, fieldPriority);
+          }
+          pendingFields.set(field, fieldPriority);
+        }
+        itemPendingInvalidationFields.set(itemKey, pendingFields);
       } else {
         itemPendingInvalidationFields.delete(itemKey);
-        itemFieldInvalidationPriorities.delete(itemKey);
       }
       itemInvalidationWasTriggered.delete(itemKey);
 
@@ -739,7 +806,7 @@ export function createMutationApi<
           const query = draft.itemQueries[itemKey];
           if (!query) return;
 
-          query.refetchOnMount = nextInvalidationPriority;
+          query.refetchOnMount = priority;
 
           // Clear loaded fields so all hooks refetch their fields
           if (partialResources) {
@@ -750,17 +817,13 @@ export function createMutationApi<
         { action: 'invalidate-item' },
       );
 
-      emitInvalidateItem({ priority: nextInvalidationPriority, itemKey });
+      emitInvalidateItem({ priority, itemKey });
 
       if (onInvalidateItem) {
         const itemState = store.state.items[itemKey];
 
         if (itemState) {
-          onInvalidateItem({
-            priority: nextInvalidationPriority,
-            itemState,
-            payload,
-          });
+          onInvalidateItem({ priority, itemState, payload });
         }
       }
     }
@@ -786,7 +849,7 @@ export function createMutationApi<
       if (!droppedForItem) continue;
 
       const loadedFields = store.state.itemLoadedFields[itemKey];
-      let staleFields: string[] | undefined;
+      let staleFieldPriorities: Map<string, FetchType> | undefined;
       let stalePriority: FetchType | undefined;
 
       for (const [field, dropped] of droppedForItem) {
@@ -799,14 +862,8 @@ export function createMutationApi<
         droppedForItem.delete(field);
 
         if (dropped.invalidatedAt > fetchStartedAt) {
-          (staleFields ??= []).push(field);
-          if (
-            !stalePriority ||
-            fetchTypePriority[dropped.priority] >
-              fetchTypePriority[stalePriority]
-          ) {
-            stalePriority = dropped.priority;
-          }
+          (staleFieldPriorities ??= new Map()).set(field, dropped.priority);
+          stalePriority = higherFetchType(stalePriority, dropped.priority);
         }
       }
 
@@ -814,24 +871,29 @@ export function createMutationApi<
         itemDroppedFieldInvalidations.delete(itemKey);
       }
 
-      if (!staleFields || !stalePriority) continue;
+      if (!staleFieldPriorities || !stalePriority) continue;
+
+      const staleFields = Array.from(staleFieldPriorities.keys());
 
       // Same transaction as the per-field path of `invalidateQueryAndItems`:
       // record the pending fields, strip them from the loaded metadata, and
       // re-emit the invalidation event.
-      const existingPriority = itemFieldInvalidationPriorities.get(itemKey);
-      const mergedPriority =
-        existingPriority &&
-        fetchTypePriority[existingPriority] > fetchTypePriority[stalePriority]
-          ? existingPriority
-          : stalePriority;
-      const existingPendingFields =
-        itemPendingInvalidationFields.get(itemKey) ?? [];
-      itemPendingInvalidationFields.set(
-        itemKey,
-        Array.from(new Set([...existingPendingFields, ...staleFields])).sort(),
-      );
-      itemFieldInvalidationPriorities.set(itemKey, mergedPriority);
+      let pendingFields = itemPendingInvalidationFields.get(itemKey);
+      if (!pendingFields) {
+        pendingFields = new Map();
+        itemPendingInvalidationFields.set(itemKey, pendingFields);
+      }
+      for (const [field, fieldPriority] of staleFieldPriorities) {
+        const existingPriority = pendingFields.get(field);
+        // `null` entries keep their stronger unknown-priority (immediate
+        // refetch) semantics — a known lower priority must not downgrade
+        // them.
+        if (existingPriority === null) continue;
+        pendingFields.set(
+          field,
+          higherFetchType(existingPriority, fieldPriority),
+        );
+      }
 
       const staleFieldsToApply = staleFields;
       store.produceState(
@@ -855,7 +917,7 @@ export function createMutationApi<
 
       itemInvalidationWasTriggered.delete(itemKey);
       emitInvalidateItem({
-        priority: mergedPriority,
+        priority: stalePriority,
         itemKey,
         invalidateFields: staleFields,
       });
@@ -873,6 +935,27 @@ export function createMutationApi<
       if (fetchItemFn) {
         const itemScheduler = getOrCreateItemScheduler(itemKey, payload);
         endMutations.push(itemScheduler.startMutation(itemKey));
+      } else {
+        // List-only stores have no item scheduler to track the mutation, but
+        // a standalone item (not referenced by any query) still needs cache
+        // eviction protection while a mutation targets it. Refcounted so
+        // overlapping mutations on the same item keep the protection until
+        // the last one ends.
+        itemMutationCountsWithoutScheduler.set(
+          itemKey,
+          (itemMutationCountsWithoutScheduler.get(itemKey) ?? 0) + 1,
+        );
+        let ended = false;
+        endMutations.push(() => {
+          // Idempotent: `performMutation` may call the ender more than once
+          // (e.g. on both settle and error paths).
+          if (ended) return false;
+          ended = true;
+          const count = itemMutationCountsWithoutScheduler.get(itemKey) ?? 0;
+          if (count <= 1) itemMutationCountsWithoutScheduler.delete(itemKey);
+          else itemMutationCountsWithoutScheduler.set(itemKey, count - 1);
+          return true;
+        });
       }
 
       for (const [queryKey, query] of Object.entries(store.state.queries)) {
@@ -1245,7 +1328,6 @@ export function createMutationApi<
     );
 
     for (const { itemKey } of itemsId) {
-      itemFieldInvalidationPriorities.delete(itemKey);
       itemPendingInvalidationFields.delete(itemKey);
       itemsPendingFullInvalidation.delete(itemKey);
       itemDroppedFieldInvalidations.delete(itemKey);
@@ -1263,7 +1345,6 @@ export function createMutationApi<
   function resetInvalidationTracking() {
     queryInvalidationWasTriggered.clear();
     itemInvalidationWasTriggered.clear();
-    itemFieldInvalidationPriorities.clear();
     itemPendingInvalidationFields.clear();
     itemsPendingFullInvalidation.clear();
     itemDroppedFieldInvalidations.clear();
@@ -1412,20 +1493,27 @@ export function createMutationApi<
     };
 
     if (affectedItemEntries) {
-      itemRollbackSnapshots = affectedItemEntries.map(({ itemKey }) => ({
-        itemKey,
-        item: klona(store.state.items[itemKey]),
-        itemQuery: klona(store.state.itemQueries[itemKey]),
-        loadedFields: klona(store.state.itemLoadedFields[itemKey]),
-        invalidationFields: klona(
-          store.state.itemFieldInvalidationFields[itemKey],
-        ),
-        invalidationPriority: itemFieldInvalidationPriorities.get(itemKey),
-        pendingInvalidationFields: klona(
-          itemPendingInvalidationFields.get(itemKey),
-        ),
-        invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
-      }));
+      itemRollbackSnapshots = affectedItemEntries.map(({ itemKey }) => {
+        const pendingInvalidationFields =
+          itemPendingInvalidationFields.get(itemKey);
+        const droppedFieldInvalidations =
+          itemDroppedFieldInvalidations.get(itemKey);
+        return {
+          itemKey,
+          item: klona(store.state.items[itemKey]),
+          itemQuery: klona(store.state.itemQueries[itemKey]),
+          loadedFields: klona(store.state.itemLoadedFields[itemKey]),
+          invalidationFields: klona(
+            store.state.itemFieldInvalidationFields[itemKey],
+          ),
+          pendingInvalidationFields:
+            pendingInvalidationFields && new Map(pendingInvalidationFields),
+          pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
+          droppedFieldInvalidations:
+            droppedFieldInvalidations && new Map(droppedFieldInvalidations),
+          invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+        };
+      });
     }
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
@@ -1565,7 +1653,6 @@ export function createMutationApi<
     storeEvents,
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
-    itemFieldInvalidationPriorities,
     invalidateQueryAndItems,
     invalidateItem,
     reannounceInvalidationsDroppedDuringFetch,

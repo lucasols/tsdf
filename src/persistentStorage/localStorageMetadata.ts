@@ -21,6 +21,17 @@ import {
   getSerializedStringSize,
   isQuotaExceededError,
 } from './persistenceUtils';
+import {
+  COLLECTION_STORAGE_ENTRY_PREFIX,
+  getOfflineSessionStatusStorageKey,
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ROOT_STORE_NAME,
+  OFFLINE_SESSION_STATUS_STORE_NAME,
+} from './storageEntryPrefixes';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
@@ -99,6 +110,66 @@ export function isLocalStorageQuotaWritesDisabled(): boolean {
 }
 
 /**
+ * Keys written by the currently running locked mutation. When a later write
+ * of the same mutation hits the quota, these keys must not be evicted by the
+ * recovery: a fresh payload is not referenced by any manifest until the
+ * (possibly deferred) manifest write lands, so the orphan-eviction pass would
+ * otherwise delete the very data the mutation just persisted.
+ */
+const inFlightMutationWrittenKeys = new Set<string>();
+let inFlightMutationDepth = 0;
+
+/**
+ * Runs a locked `localStorage` mutation while tracking every key it writes,
+ * so a quota recovery triggered mid-mutation never evicts them.
+ */
+export async function trackManagedLocalStorageMutationWrites<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  inFlightMutationDepth++;
+  try {
+    return await callback();
+  } finally {
+    inFlightMutationDepth--;
+    if (inFlightMutationDepth === 0) inFlightMutationWrittenKeys.clear();
+  }
+}
+
+/**
+ * Terminal quota-disable error raised on a code path with no
+ * `onPersistentStorageError` to report it to (e.g. a deferred manifest
+ * flush). It is stashed here and delivered by the next persistence operation
+ * that hits the quota-writes-disabled guard, preserving the "exactly one
+ * error reaches the app" invariant.
+ */
+let pendingQuotaWritesDisabledError: unknown = null;
+
+export function takePendingQuotaWritesDisabledError(): unknown {
+  const error = pendingQuotaWritesDisabledError;
+  pendingQuotaWritesDisabledError = null;
+  return error;
+}
+
+/**
+ * Error sink for background persistence work (idle flushes, scheduled
+ * removals) that has no caller to propagate errors to. The terminal
+ * quota-disable error is stashed for later delivery through
+ * `onPersistentStorageError`; anything else is only logged, since a dropped
+ * background write self-heals via maintenance sweeps.
+ */
+export function handleManagedLocalStorageBackgroundError(error: unknown): void {
+  // while writes are disabled, `setManagedLocalStorageItemWithQuotaRecovery`
+  // returns false without throwing, so an error caught with the flag set can
+  // only be the terminal disable error itself
+  if (managedLocalStorageQuotaWritesDisabled) {
+    pendingQuotaWritesDisabledError = error;
+    return;
+  }
+
+  console.error(error);
+}
+
+/**
  * Writes to `localStorage`, recovering from `QuotaExceededError` by evicting
  * TSDF-managed entries: first the least recently used half of the evictable
  * bytes, then everything unprotected. If the write still fails, persistence
@@ -116,6 +187,7 @@ export function setManagedLocalStorageItemWithQuotaRecovery(
 
   try {
     localStorage.setItem(key, value);
+    if (inFlightMutationDepth > 0) inFlightMutationWrittenKeys.add(key);
     return true;
   } catch (error) {
     if (
@@ -132,6 +204,7 @@ export function setManagedLocalStorageItemWithQuotaRecovery(
 
         try {
           localStorage.setItem(key, value);
+          if (inFlightMutationDepth > 0) inFlightMutationWrittenKeys.add(key);
           return true;
         } catch (retryError) {
           if (!isQuotaExceededError(retryError)) throw retryError;
@@ -204,6 +277,8 @@ function runManagedLocalStorageQuotaEviction(
             continue;
           }
           if (isManagedLocalStorageEntryOfflineProtected(entry.meta)) continue;
+          // never evict what the current mutation just wrote
+          if (inFlightMutationWrittenKeys.has(payloadKey)) continue;
 
           candidates.push({
             payloadKey,
@@ -232,6 +307,8 @@ function runManagedLocalStorageQuotaEviction(
     if (manifestOwnedPayloadKeys.has(key) || isOfflineRelatedPayloadKey(key)) {
       continue;
     }
+    // never evict what the current mutation just wrote
+    if (inFlightMutationWrittenKeys.has(key)) continue;
 
     const entry = readCompactListQueryEntry(key, io);
     if (entry?.offlineProtected === true) continue;
@@ -250,6 +327,10 @@ function runManagedLocalStorageQuotaEviction(
     if (manifestOwnedPayloadKeys.has(key) || isOfflineRelatedPayloadKey(key)) {
       continue;
     }
+    // a freshly written payload looks like an orphan until its (possibly
+    // deferred) manifest write lands — never evict the in-flight mutation's
+    // own writes
+    if (inFlightMutationWrittenKeys.has(key)) continue;
 
     // payloads not tracked by any manifest are orphans: evict them first
     candidates.push({
@@ -311,6 +392,22 @@ function runManagedLocalStorageQuotaEviction(
   }
 }
 
+/** Matches every payload key under the reserved `tsdf.<sessionKey>._o_.*` root. */
+const OFFLINE_ROOT_KEY_INFIX = `.${OFFLINE_ROOT_STORE_NAME}.`;
+const OFFLINE_SESSION_STATUS_KEY_SUFFIX = `.${OFFLINE_SESSION_STATUS_STORE_NAME}`;
+
+const OFFLINE_NAMESPACE_STORAGE_PREFIX_SUFFIXES = [
+  `.${OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX}.`,
+  `.${OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX}.`,
+  `.${OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX}.`,
+];
+
+function isOfflineNamespaceStoragePrefix(storagePrefix: string): boolean {
+  return OFFLINE_NAMESPACE_STORAGE_PREFIX_SUFFIXES.some((suffix) =>
+    storagePrefix.endsWith(suffix),
+  );
+}
+
 type ManagedLocalStorageManifestLocation =
   | { kind: 'single'; manifestKey: string; payloadKey: string }
   | { kind: 'namespace'; manifestKey: string; storagePrefix: string };
@@ -319,18 +416,14 @@ function isOfflineOwnedManifestLocation(
   manifestLocation: ManagedLocalStorageManifestLocation,
 ): boolean {
   if (manifestLocation.kind === 'single') {
-    return manifestLocation.payloadKey.includes('._o_.');
+    return manifestLocation.payloadKey.includes(OFFLINE_ROOT_KEY_INFIX);
   }
 
-  return (
-    manifestLocation.storagePrefix.endsWith('.oq.') ||
-    manifestLocation.storagePrefix.endsWith('.oc.') ||
-    manifestLocation.storagePrefix.endsWith('.oe.')
-  );
+  return isOfflineNamespaceStoragePrefix(manifestLocation.storagePrefix);
 }
 
 function isOfflineRelatedPayloadKey(payloadKey: string): boolean {
-  return payloadKey.includes('._o_.');
+  return payloadKey.includes(OFFLINE_ROOT_KEY_INFIX);
 }
 
 export function getManagedLocalStorageRuntimeConfig(): ManagedLocalStorageRuntimeConfig {
@@ -430,13 +523,13 @@ function normalizeRootIdentityValue(value: string): string {
 }
 
 const COMPRESSED_NAMESPACE_ROOT_SUFFIXES = [
-  ['.ci.', '.ci'],
-  ['.li.', '.li'],
-  ['.lq.', '.lq'],
-  ['.oq.', '.oq'],
-  ['.oc.', '.oc'],
-  ['.oe.', '.oe'],
-] as const;
+  COLLECTION_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+].map((prefix) => [`.${prefix}.`, `.${prefix}`] as const);
 
 function compactNamespaceRootIdentityValue(storagePrefix: string): string {
   const normalized = normalizeRootIdentityValue(storagePrefix);
@@ -1237,7 +1330,7 @@ function isSessionOfflineDuringManagedCleanup(
   io: ManagedLocalStorageIo,
 ): boolean {
   const statusEntry = parseCompactLocalStorageEntry(
-    io.getItem(`tsdf.${sessionKey}._o_.s`),
+    io.getItem(getOfflineSessionStatusStorageKey(sessionKey)),
   );
   const rawStatus: unknown = statusEntry?.value;
   const status =
@@ -1403,17 +1496,14 @@ function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
     const manifestLocation = parseManagedLocalStorageManifestKey(key);
     if (
       manifestLocation?.kind === 'single' &&
-      manifestLocation.payloadKey.includes('._o_.') &&
-      !manifestLocation.payloadKey.endsWith('._o_.s')
+      isOfflinePayloadKey(manifestLocation.payloadKey)
     ) {
       return false;
     }
 
     if (
       manifestLocation?.kind === 'namespace' &&
-      (manifestLocation.storagePrefix.endsWith('.oq.') ||
-        manifestLocation.storagePrefix.endsWith('.oc.') ||
-        manifestLocation.storagePrefix.endsWith('.oe.'))
+      isOfflineNamespaceStoragePrefix(manifestLocation.storagePrefix)
     ) {
       return false;
     }
@@ -1425,8 +1515,15 @@ function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
   return { manifestKeys, knownKeys };
 }
 
+/**
+ * Offline-owned payload keys, excluding the session status entry (which is
+ * cleaned up like regular data so stale sessions do not pin it forever).
+ */
 function isOfflinePayloadKey(payloadKey: string): boolean {
-  return payloadKey.includes('._o_.') && !payloadKey.endsWith('._o_.s');
+  return (
+    payloadKey.includes(OFFLINE_ROOT_KEY_INFIX) &&
+    !payloadKey.endsWith(OFFLINE_SESSION_STATUS_KEY_SUFFIX)
+  );
 }
 
 function runGenericCleanupForManifest(
@@ -1452,7 +1549,7 @@ function runGenericCleanupForManifest(
   const now = Date.now();
   const sessionKey = getSessionKeyForManifestLocation(manifestLocation);
   const offlineStatusKey =
-    sessionKey === null ? null : `tsdf.${sessionKey}._o_.s`;
+    sessionKey === null ? null : getOfflineSessionStatusStorageKey(sessionKey);
   const skipExpiration =
     sessionKey !== null &&
     offlineStatusKey !== null &&
@@ -1542,6 +1639,9 @@ export function resetManagedLocalStorageState(): void {
   maintenanceCallbacks.clear();
   managedLocalStorageQuotaWritesDisabled = false;
   managedLocalStorageQuotaRecoveryActive = false;
+  pendingQuotaWritesDisabledError = null;
+  inFlightMutationWrittenKeys.clear();
+  inFlightMutationDepth = 0;
   managedLocalStorageRuntimeConfig = {
     ...defaultManagedLocalStorageRuntimeConfig,
   };

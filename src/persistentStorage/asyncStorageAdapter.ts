@@ -28,6 +28,7 @@ import {
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
 import { logPersistentStorageQuotaCleanup } from './quotaDebug';
 import { scheduleInitialMaintenanceCleanup } from './scheduleIdleCleanup';
+import { getOfflineSessionStatusStorageKey } from './storageEntryPrefixes';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,
@@ -99,7 +100,7 @@ function isSessionOfflineInLocalStorage(sessionKey: string): boolean {
 
   try {
     const statusEntry = parseCompactLocalStorageEntry(
-      localStorage.getItem(`tsdf.${sessionKey}._o_.s`),
+      localStorage.getItem(getOfflineSessionStatusStorageKey(sessionKey)),
     );
     const rawStatus = statusEntry?.value.d ?? null;
     return isOfflineModeStatusValue(rawStatus);

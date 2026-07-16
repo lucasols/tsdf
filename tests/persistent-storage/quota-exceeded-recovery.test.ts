@@ -1,4 +1,3 @@
-import { rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -12,120 +11,19 @@ import {
   resetManagedLocalStorageState,
   syncManagedLocalStorageSessionProtection,
 } from '../../src/persistentStorage/localStorageMetadata';
-import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
-
-const wrappedItemSchema = rc_object({
-  value: rc_object({ id: rc_string, name: rc_string }),
-});
-const persistentStore = createLocalStoragePersistentTestStore();
-
-const HOUR = 60 * 60 * 1000;
-
-type ItemState = { id: string; name: string };
-
-function createEnv(options: {
-  storeName: string;
-  sessionKey?: string;
-  onPersistentStorageError?: (error: unknown) => void;
-}) {
-  return createCollectionStoreTestEnv<ItemState>(
-    {},
-    {
-      id: options.storeName,
-      getSessionKey: () => options.sessionKey ?? 'sess1',
-      persistentStorage: {
-        adapter: 'local-sync',
-        schema: wrappedItemSchema,
-        payloadSchema: rc_string,
-        onPersistentStorageError: options.onPersistentStorageError,
-      },
-    },
-  );
-}
-
-/** Seeds a cached item persisted `ageMs` in the past (older = evicted first). */
-function seedCachedItem(
-  storeName: string,
-  sessionKey: string,
-  payload: string,
-  name: string,
-  ageMs: number,
-): string {
-  return persistentStore
-    .scope(storeName, sessionKey)
-    .collection.seedItem(
-      payload,
-      { value: { id: payload, name } },
-      { timestamp: Date.now() - ageMs },
-    );
-}
-
-function getLocalStorageUsedChars(): number {
-  let total = 0;
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (key === null) continue;
-    total += key.length + (localStorage.getItem(key)?.length ?? 0);
-  }
-  return total;
-}
-
-/**
- * Simulates the browser origin quota: while a budget is set, any `setItem`
- * that would push the total stored chars above it throws a
- * `QuotaExceededError` DOMException, exactly like real browsers do when
- * localStorage is full (e.g. because other parts of the app filled it).
- */
-let quotaBudgetChars: number | null = null;
-
-function simulateLocalStorageQuota(budgetChars: number): void {
-  quotaBudgetChars = budgetChars;
-}
-
-function installQuotaEnforcingSetItem(): void {
-  const originalSetItem = Storage.prototype.setItem.bind(localStorage);
-
-  // spying on the instance instead of Storage.prototype is required for the
-  // spy to reliably intercept happy-dom's localStorage method lookups; the
-  // spy is installed once for the whole file because mock restoration does
-  // not reliably detach from happy-dom's localStorage proxy between tests
-  vi.spyOn(localStorage, 'setItem').mockImplementation(
-    (key: string, value: string) => {
-      if (quotaBudgetChars !== null) {
-        const existingValue = localStorage.getItem(key);
-        const usedCharsDelta =
-          existingValue === null
-            ? key.length + value.length
-            : value.length - existingValue.length;
-
-        if (getLocalStorageUsedChars() + usedCharsDelta > quotaBudgetChars) {
-          throw new DOMException(
-            `Failed to execute 'setItem' on 'Storage': Setting the value of '${key}' exceeded the quota.`,
-            'QuotaExceededError',
-          );
-        }
-      }
-
-      originalSetItem(key, value);
-    },
-  );
-}
-
-/** Returns which of the given seeded payloads are still present in storage. */
-function listSurvivingPayloads(
-  storeName: string,
-  sessionKey: string,
-  payloads: string[],
-): string[] {
-  const scope = persistentStore.scope(storeName, sessionKey);
-  return payloads.filter(
-    (payload) =>
-      localStorage.getItem(scope.collection.itemStorageKey(payload)) !== null,
-  );
-}
+import {
+  clearSimulatedLocalStorageQuota,
+  createEnv,
+  getLocalStorageUsedChars,
+  HOUR,
+  installQuotaEnforcingSetItem,
+  listSurvivingPayloads,
+  persistentStore,
+  seedCachedItem,
+  simulateLocalStorageQuota,
+} from './quotaRecoveryTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -137,7 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  quotaBudgetChars = null;
+  clearSimulatedLocalStorageQuota();
   vi.runOnlyPendingTimers();
   localStorage.clear();
   // clears the quota circuit breaker so tests stay isolated
@@ -356,5 +254,65 @@ describe('localStorage quota exceeded recovery', () => {
         .scope('quota-col', 'sess1')
         .collection.readItemData('later'),
     ).toBeNull();
+  });
+
+  test('deleting an item while quota writes are disabled still removes it from storage', async () => {
+    const errors: unknown[] = [];
+
+    const env = createEnv({
+      storeName: 'quota-col',
+      onPersistentStorageError: (error) => errors.push(error),
+    });
+
+    // persist an item normally while the quota is still fine
+    env.apiStore.addItemToState('keep', {
+      value: { id: 'keep', name: 'Keep' },
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const keepStorageKey = persistentStore
+      .scope('quota-col', 'sess1')
+      .collection.itemStorageKey('keep');
+    // protect the item so the escalated eviction below cannot remove it —
+    // offline-protected data is exactly what survives a failed recovery and
+    // could therefore resurrect after being deleted
+    syncManagedLocalStorageSessionProtection('sess1', [keepStorageKey]);
+
+    // non-tsdf data fills the quota so the next flush cannot free enough
+    // space even after evicting everything unprotected
+    localStorage.setItem('other-app-data', 'z'.repeat(3000));
+    simulateLocalStorageQuota(getLocalStorageUsedChars() + 10);
+
+    env.apiStore.addItemToState('big', {
+      value: { id: 'big', name: 'n'.repeat(600) },
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // circuit breaker tripped with a single reported error, and the
+    // protected item survived the escalated eviction
+    expect(errors.length).toBe(1);
+    expect(
+      persistentStore
+        .scope('quota-col', 'sess1')
+        .collection.readItemData('keep'),
+    ).not.toBeNull();
+
+    // deleting the item must still remove its persisted entry even though
+    // writes are disabled: removals free space instead of consuming quota,
+    // and skipping them would resurrect the deleted item on the next load
+    env.apiStore.deleteItemState('keep');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      persistentStore
+        .scope('quota-col', 'sess1')
+        .collection.readItemData('keep'),
+    ).toBeNull();
+
+    // the removal itself cannot hit the quota, so no new error was reported
+    expect(errors.length).toBe(1);
   });
 });

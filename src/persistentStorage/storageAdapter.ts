@@ -3,6 +3,9 @@ import {
   clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
   directManagedLocalStorageIo,
+  handleManagedLocalStorageBackgroundError,
+  isLocalStorageQuotaWritesDisabled,
+  trackManagedLocalStorageMutationWrites,
   getManagedLocalStorageManifestKeyForPrefix,
   getManagedLocalStorageManifestKeyForSingle,
   listManagedLocalStorageKeysSync,
@@ -72,9 +75,17 @@ function createCachedManagedLocalStorageIo(): {
         // runs from idle callbacks / deactivate, so it must not throw; a
         // dropped manifest write self-heals via maintenance sweeps
         try {
-          setManagedLocalStorageItemWithQuotaRecovery(key, value, io);
+          const written = setManagedLocalStorageItemWithQuotaRecovery(
+            key,
+            value,
+            io,
+          );
+          // a dropped write must not leave a phantom cached value that later
+          // reads in the same locked scope would mistake for stored data
+          if (!written) cache.delete(key);
         } catch (error) {
-          console.error(error);
+          cache.delete(key);
+          handleManagedLocalStorageBackgroundError(error);
         }
       }
     }
@@ -154,6 +165,11 @@ function createCachedManagedLocalStorageIo(): {
         return;
       }
 
+      // while quota writes are disabled the deferred flush would drop the
+      // write anyway, so don't queue it (or cache a phantom value); removals
+      // still go through since they free space instead of consuming quota
+      if (value !== null && isLocalStorageQuotaWritesDisabled()) return;
+
       cache.set(key, value);
       pendingManifestWrites.set(key, value);
       schedulePendingManifestFlush();
@@ -208,11 +224,13 @@ async function runWithManagedLocalStorageLock<T>(
 
   if (lockManager === null) {
     warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
-    return await callback();
+    return await trackManagedLocalStorageMutationWrites(callback);
   }
 
   return lockManager.request(MANAGED_LOCAL_STORAGE_LOCK_NAME, () =>
-    withManagedLocalStorageIoCache(callback),
+    trackManagedLocalStorageMutationWrites(() =>
+      withManagedLocalStorageIoCache(callback),
+    ),
   );
 }
 
