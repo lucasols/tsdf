@@ -801,7 +801,7 @@ export function useMultipleItems<
       ({ itemKey }) => itemKey === event.itemKey,
     );
 
-    let fieldsToFetch: string[] | undefined;
+    let fieldsToFetch: FieldsInput | undefined;
     if (event.invalidateFields && event.invalidateFields.length > 0) {
       fieldsToFetch = Array.from(new Set(event.invalidateFields)).sort();
     }
@@ -901,13 +901,13 @@ export function useMultipleItems<
       // the replaced pending fetch.
       const contributionFields = hasUnresolvedFullInvalidation
         ? isUnboundedHook
-          ? undefined
+          ? '*'
           : excludeLoadedFields(loadedFields, hookFields)
         : isUnboundedHook
           ? Array.from(owedStaleFields)
           : hookFields.filter((field) => owedStaleFields.has(field));
 
-      if (contributionFields && contributionFields.length === 0) return;
+      if (contributionFields.length === 0) return;
 
       scheduleAutomaticItemFetch(fetchPriority, firstQuery.payload, {
         fields: contributionFields,
@@ -922,7 +922,7 @@ export function useMultipleItems<
         // After an unresolved full ('*') invalidation every field not yet
         // reloaded is owed; for an unbounded hook that means a full fetch.
         fieldsToFetch = isUnboundedHook
-          ? undefined
+          ? '*'
           : Array.from(
               new Set([
                 ...fieldsToFetch,
