@@ -91,6 +91,54 @@ afterAll(() => {
 });
 
 describe('partial resources: full invalidation of a fully-loaded item', () => {
+  test("multiple fields:'*' subscribers refetch successfully when a field invalidation follows a full invalidation", async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: listInferFieldsConfig,
+    });
+
+    // Two independent full-item consumers are mounted, matching multiple
+    // components that subscribe to the same record in a real application.
+    renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        fields: '*',
+        returnRefetchingStatus: true,
+      }),
+    );
+    renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        fields: '*',
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushAllTimers();
+    env.serverTable.clearFetchHistory();
+
+    // The field invalidation arrives before the full invalidation's refetch
+    // runs. Both hooks must contribute a full fetch without converting the
+    // public '*' sentinel into a missing fields option.
+    expect(() => {
+      act(() => {
+        env.apiStore.invalidateItem('users||1');
+        env.apiStore.invalidateQueryAndItems({
+          queryPayload: false,
+          itemPayload: 'users||1',
+          fields: ['name'],
+          type: 'highPriority',
+        });
+      });
+    }).not.toThrow();
+
+    await flushAllTimers();
+
+    // The coalesced request remains a deliberate full fetch. The test env
+    // omits `fields` from its request history when TSDF normalizes '*'.
+    expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+      `);
+  });
+
   // Finding 1 (P1): a full `invalidateItem` on a `'*'`-loaded item must keep
   // *every* mounted field hook obligated to refetch. Only one hook actually
   // schedules the refetch (deduplicated via the shared invalidation trigger
