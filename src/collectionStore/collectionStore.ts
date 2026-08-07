@@ -76,6 +76,7 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  getStoreManagerAppVersion,
   getOrCreateStoreManagerBrowserTabsPresence,
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
@@ -1667,6 +1668,7 @@ export function createCollectionStore<
     testOptions?.browserTabsTransportFactory,
     import.meta.env.DEV ? storeManager.debugLogger : undefined,
     browserTabsTabId,
+    getStoreManagerAppVersion(storeManager),
   );
 
   async function executeBatchFetch(

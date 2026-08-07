@@ -116,6 +116,7 @@ type SessionRegistration = {
 
 type SessionCoordinatorOptions = {
   sessionKey: string;
+  appVersion?: string;
   adapter?: StorageAdapter;
   onPersistentStorageError?: (error: unknown) => void;
   debugLogger?: TSDFDebugLogger;
@@ -143,6 +144,10 @@ const registry = new Map<string, SessionOfflineCoordinator>();
 const uploadsConfigByOfflineSession = new WeakMap<
   OfflineSession,
   OfflineSessionUploadsConfig | undefined
+>();
+const appVersionByOfflineSession = new WeakMap<
+  OfflineSession,
+  string | undefined
 >();
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -698,6 +703,8 @@ class SessionOfflineCoordinator {
         () => !isWindowAvailable() || !document.hidden,
         undefined,
         undefined,
+        undefined,
+        options.appVersion,
       );
 
     this.#refreshLeadership();
@@ -2275,6 +2282,9 @@ export function getOrCreateSessionOfflineCoordinator(
 
   const created = new SessionOfflineCoordinator({
     sessionKey,
+    ...(options.appVersion !== undefined
+      ? { appVersion: options.appVersion }
+      : undefined),
     adapter: options.adapter,
     onPersistentStorageError: options.onPersistentStorageError,
     ...(import.meta.env.DEV ? { debugLogger: options.debugLogger } : undefined),
@@ -2353,11 +2363,18 @@ export function getOfflineSessionUploadsConfig<TUploadRef extends ValidPayload>(
   >(uploadsConfigByOfflineSession.get(eraseOfflineSession(session)));
 }
 
+export function getOfflineSessionAppVersion(
+  session: OfflineSession,
+): string | undefined {
+  return appVersionByOfflineSession.get(session);
+}
+
 export function createOfflineSession<
   TUploadRef extends ValidPayload = ValidPayload,
 >(args: {
   config: OfflineSessionConfig<TUploadRef>;
   getSessionKey?: () => string | false;
+  appVersion?: string;
   debugLogger?: TSDFDebugLogger;
 }): OfflineSession<TUploadRef> {
   const getSessionKey = args.getSessionKey ?? (() => false);
@@ -2381,6 +2398,9 @@ export function createOfflineSession<
 
     return getOrCreateSessionOfflineCoordinator(sessionKey, {
       config,
+      ...(args.appVersion !== undefined
+        ? { appVersion: args.appVersion }
+        : undefined),
       ...(import.meta.env.DEV ? { debugLogger: args.debugLogger } : undefined),
       uploads: eraseUploadsConfig(uploads),
       bootstrapStatusFromLocalStorage,
@@ -2397,6 +2417,7 @@ export function createOfflineSession<
       eraseUploadsConfig(activeSessionKey === false ? undefined : uploads),
       activeSessionKey !== false,
       import.meta.env.DEV ? args.debugLogger : undefined,
+      args.appVersion,
     );
   }
 
@@ -2545,6 +2566,7 @@ export function createOfflineSession<
     eraseOfflineSession(session),
     eraseUploadsConfig(uploads),
   );
+  appVersionByOfflineSession.set(eraseOfflineSession(session), args.appVersion);
 
   return session;
 }
@@ -2569,16 +2591,25 @@ function useConfiguredSessionOfflineCoordinator(
   uploads: OfflineSessionUploadsConfig | undefined,
   bootstrapStatusFromLocalStorage = false,
   debugLogger?: TSDFDebugLogger,
+  appVersion?: string,
 ): SessionOfflineCoordinator {
   return useMemo(
     () =>
       getOrCreateSessionOfflineCoordinator(sessionKey, {
         config,
+        ...(appVersion !== undefined ? { appVersion } : undefined),
         ...(import.meta.env.DEV ? { debugLogger } : undefined),
         uploads,
         bootstrapStatusFromLocalStorage,
       }),
-    [bootstrapStatusFromLocalStorage, config, debugLogger, sessionKey, uploads],
+    [
+      appVersion,
+      bootstrapStatusFromLocalStorage,
+      config,
+      debugLogger,
+      sessionKey,
+      uploads,
+    ],
   );
 }
 

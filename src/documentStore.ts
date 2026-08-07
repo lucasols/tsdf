@@ -79,6 +79,7 @@ import {
   ScheduleFetchResults,
 } from './requestScheduler';
 import {
+  getStoreManagerAppVersion,
   getOrCreateStoreManagerBrowserTabsPresence,
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
@@ -990,6 +991,7 @@ export function createDocumentStore<
     testOptions?.browserTabsTransportFactory,
     import.meta.env.DEV ? storeManager.debugLogger : undefined,
     browserTabsTabId,
+    getStoreManagerAppVersion(storeManager),
   );
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {

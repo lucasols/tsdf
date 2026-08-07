@@ -158,6 +158,7 @@ type RegisteredStore = {
 };
 
 type StoreManagerRegistry = {
+  appVersion: string | undefined;
   browserTabsPresence: BrowserTabsPresencePriority | undefined;
   nextStoreRegistrationId: number;
   stores: Map<number, RegisteredStore>;
@@ -253,6 +254,12 @@ export type CreateStoreManagerOptions<
    * behavior while no account is loaded.
    */
   getSessionKey: () => string | false;
+  /**
+   * Returns the stable app build version used to isolate browser-tab sync
+   * across deployments. The callback is evaluated once when the manager is
+   * created.
+   */
+  getAppVersion?: () => string;
   /** Normalizes raw exceptions into the shared StoreError shape. */
   errorNormalizer: (exception: Error) => StoreError;
   /** Default minimum interval between low-priority fetches for attached stores. Defaults to 40 minutes. */
@@ -282,6 +289,7 @@ export type CreateStoreManagerOptions<
 export function createStoreManager<
   TUploadRef extends ValidPayload = ValidPayload,
 >(options: CreateStoreManagerOptions<TUploadRef>): StoreManager<TUploadRef> {
+  const appVersion = options.getAppVersion?.();
   const debugLogger = import.meta.env.DEV
     ? resolveTSDFLogger(options.debugLogger)
     : undefined;
@@ -293,6 +301,7 @@ export function createStoreManager<
     >[0] = {
       config: options.offlineSession,
       getSessionKey: options.getSessionKey,
+      ...(appVersion !== undefined ? { appVersion } : undefined),
     };
     if (debugLogger !== undefined) {
       createOfflineSessionOptions.debugLogger = debugLogger;
@@ -357,6 +366,7 @@ export function createStoreManager<
     : createDisabledStoreManagerOfflineApi<TUploadRef>(options.getSessionKey);
 
   const registry: StoreManagerRegistry = {
+    appVersion,
     browserTabsPresence: undefined,
     nextStoreRegistrationId: 0,
     stores: new Map(),
@@ -448,6 +458,12 @@ export function registerStoreWithManager(
   };
 }
 
+export function getStoreManagerAppVersion(
+  storeManager: StoreManager,
+): string | undefined {
+  return getRegistryOrThrow(storeManager).appVersion;
+}
+
 export function getOrCreateStoreManagerBrowserTabsPresence(
   storeManager: StoreManager,
   options: {
@@ -465,6 +481,9 @@ export function getOrCreateStoreManagerBrowserTabsPresence(
   const presence = (registry.browserTabsPresence ??=
     createBrowserTabsPresencePriority({
       getSessionKey: storeManager.getSessionKey,
+      ...(registry.appVersion !== undefined
+        ? { appVersion: registry.appVersion }
+        : undefined),
       getWindowIsFocused: options.getWindowIsFocused,
       onWindowFocusChange: options.onWindowFocusChange,
       transportFactory: options.transportFactory,

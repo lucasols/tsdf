@@ -69,6 +69,7 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  getStoreManagerAppVersion,
   getOrCreateStoreManagerBrowserTabsPresence,
   registerStoreWithManager,
   resolveStoreManagerOfflineSession,
@@ -1723,6 +1724,7 @@ export function createListQueryStore<
     testOptions?.browserTabsTransportFactory,
     import.meta.env.DEV ? storeManager.debugLogger : undefined,
     browserTabsTabId,
+    getStoreManagerAppVersion(storeManager),
   );
 
   function getQueryTargetKey(queryKey: string): string {

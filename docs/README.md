@@ -45,6 +45,7 @@ import { createDocumentStore, createStoreManager } from 'tsdf';
 
 const storeManager = createStoreManager({
   getSessionKey: () => (auth.userId ? `tenant:${auth.tenantId}` : false),
+  getAppVersion: () => BUILD_VERSION,
   errorNormalizer: (err) => ({
     code: 500,
     id: 'fetch-error',

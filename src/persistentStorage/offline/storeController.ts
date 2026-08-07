@@ -29,6 +29,7 @@ import type { StorageAdapter } from '../types';
 import { parseWithSchema, validateWithSchema } from '../validateWithSchema';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import {
+  getOfflineSessionAppVersion,
   getOfflineSessionUploadsConfig,
   getOrCreateSessionOfflineCoordinator,
 } from './sessionCoordinator';
@@ -488,6 +489,7 @@ export function createOfflineStoreController<
   operations: TOperations,
 ): OfflineStoreController<TOperations> {
   const sessionConfig = offlineSession.getConfig();
+  const appVersion = getOfflineSessionAppVersion(offlineSession);
   const activeDebugLogger = import.meta.env.DEV ? debugLogger : undefined;
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
   let isDisposed = false;
@@ -743,6 +745,7 @@ export function createOfflineStoreController<
     teardownActiveSession();
 
     const session = getOrCreateSessionOfflineCoordinator(targetSessionKey, {
+      ...(appVersion !== undefined ? { appVersion } : undefined),
       adapter,
       onPersistentStorageError,
       ...(import.meta.env.DEV ? { debugLogger: activeDebugLogger } : undefined),

@@ -11,6 +11,7 @@ import { createStoreManager } from 'tsdf';
 
 const storeManager = createStoreManager({
   getSessionKey: () => currentTenantId ?? false,
+  getAppVersion: () => BUILD_VERSION,
   errorNormalizer: (error) => ({
     code: 500,
     id: 'unknown-error',
@@ -38,6 +39,7 @@ Options:
 | Option                        | Required | Description                                                                                                                                                        |
 | ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `getSessionKey`               | Yes      | Returns the active tenant/account key. Return `false` while no session is ready.                                                                                   |
+| `getAppVersion`               | No       | Returns a stable build/release version that namespaces browser-tab sync so different deployments cannot exchange fetch activity or snapshots.                      |
 | `errorNormalizer`             | Yes      | Converts thrown `Error` values into TSDF's shared `StoreError` shape.                                                                                              |
 | `lowPriorityThrottleMs`       | No       | Default minimum interval between low-priority fetches for attached stores. Defaults to 40 minutes (`2_400_000ms`).                                                 |
 | `baseCoalescingWindowMs`      | No       | Default window to group fetch requests for attached stores. Defaults to `16ms`.                                                                                    |
@@ -52,6 +54,8 @@ Options:
 | `offlineSession`              | No       | Shared offline config used by stores with `persistentStorage.offline`.                                                                                             |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
+
+For apps that can have tabs from different deployments open at the same time, provide `getAppVersion` and return the same stable build version used by your error tracking or release tooling. TSDF evaluates it once when the manager is created and includes the result in every browser-tab sync channel, including manager presence and offline-session coordination. Tabs on different versions then fetch independently and cannot apply each other's snapshots. This option does not version persistent storage; continue using each store's `persistentStorage.version` when its persisted data shape changes.
 
 Stores inherit the manager's `lowPriorityThrottleMs`, `baseCoalescingWindowMs`, and `dynamicRealtimeThrottleMs` unless they provide their own store-level overrides. `backgroundCoalescingDelayMs` and `blockWindowClose` are manager-only so browser-tab background coordination and window-close mutation protection stay consistent across attached stores. The built-in `dynamicRealtimeThrottleMs` default returns `100ms` while focused and `1000ms` while the window is in the background.
 

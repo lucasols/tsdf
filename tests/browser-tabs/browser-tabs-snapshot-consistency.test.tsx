@@ -1,5 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test } from 'vitest';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createInMemoryBrowserTabsTransportFactory,
   createInspectableInMemoryBrowserTabsTransportFactory,
@@ -13,7 +14,10 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
-import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
+import {
+  normalizeError,
+  setDefaultLowPriorityThrottleMs,
+} from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
@@ -168,6 +172,116 @@ test('a fresh collection tab reuses the sibling snapshot without a first local f
     810ms | -       | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-initialized
     "
+  `);
+});
+
+test('tabs on different app versions fetch independently instead of applying sibling snapshots', async () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('collection-app-version-isolation');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
+
+  // Both releases use the same account and logical store id. Only the build
+  // version distinguishes their otherwise incompatible browser-tab state.
+  const previousReleaseManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    getAppVersion: () => '920.0.0',
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 10_000,
+  });
+  const currentReleaseManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    getAppVersion: () => '921.0.0',
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 10_000,
+  });
+  const previousReleaseTab = createCollectionStoreTestEnv(
+    createCollectionItems(),
+    {
+      id,
+      storeManager: previousReleaseManager,
+      sharedServerTableState,
+      browserTabsTransportFactory: transport.transportFactory,
+      testScenario: 'loaded',
+      useBatchFetch: true,
+    },
+  );
+  const currentReleaseTab = createCollectionStoreTestEnv(
+    createCollectionItems(),
+    {
+      id,
+      storeManager: currentReleaseManager,
+      sharedServerTableState,
+      browserTabsTransportFactory: transport.transportFactory,
+      testScenario: 'idle',
+      useBatchFetch: true,
+    },
+  );
+
+  // The old bundle publishes a newer snapshot. A current bundle must never
+  // ingest it because its runtime type contract may have changed.
+  previousReleaseTab.serverTable.setItem('item1', { name: 'Updated' });
+  previousReleaseTab.scheduleFetch('highPriority', 'item1');
+  await flushAllTimers();
+
+  // Opening the item in the new bundle must perform its own fetch instead of
+  // treating the incompatible sibling snapshot as its initial data.
+  renderHook(() => {
+    const item = currentReleaseTab.apiStore.useItem('item1');
+    currentReleaseTab.trackItemUI('item1', item.data?.value.name);
+  });
+  await flushAllTimers();
+
+  // Both versions fetched from their own runtime, proving the prior release's
+  // snapshot did not become the current release's initial data.
+  expect({
+    currentRelease: currentReleaseTab.serverTable.getRequestHistory('all'),
+    previousRelease: previousReleaseTab.serverTable.getRequestHistory('all'),
+  }).toMatchInlineSnapshot(`
+    currentRelease:
+      - _type: 'item'
+        payload: { itemId: 'item1' }
+        time: '820ms -> 1.62s | duration: 800ms'
+    previousRelease:
+      - _type: 'item'
+        payload: { itemId: 'item1' }
+        time: '10ms -> 810ms | duration: 800ms'
+  `);
+  expect(currentReleaseTab.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1   |
+    810ms | ···     | ui-initialized
+    820ms | ···     | 🔴 >fetch-started
+    1.62s | ···     | 🔴 <fetch-finished (value: {"name":"Updated"})
+    .     | Updated | ui-changed
+    "
+  `);
+  expect(previousReleaseTab.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | server-data-changed (value: {"name":"Updated"})
+    .     | scheduled-fetch-triggered
+    10ms  | 🔴 >fetch-started
+    810ms | 🔴 <fetch-finished (value: {"name":"Updated"})
+    "
+  `);
+
+  // Presence and collection traffic are both namespaced, so future message
+  // kinds added to either channel inherit the same cross-release isolation.
+  expect(
+    Array.from(
+      new Set(
+        transport
+          .getMessages()
+          .map(({ channelName }) => channelName.replace(id, '<store-id>')),
+      ),
+    ).sort(),
+  ).toMatchInlineSnapshot(`
+    - 'tsdf:app:920.0.0:collection:<store-id>'
+    - 'tsdf:app:920.0.0:presence:manager'
+    - 'tsdf:app:921.0.0:collection:<store-id>'
+    - 'tsdf:app:921.0.0:presence:manager'
   `);
 });
 

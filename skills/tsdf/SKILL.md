@@ -30,6 +30,7 @@ import { createStoreManager, createDocumentStore } from 'tsdf';
 
 const storeManager = createStoreManager({
   getSessionKey: () => (auth.userId ? `tenant:${auth.tenantId}` : false),
+  getAppVersion: () => BUILD_VERSION, // optional; isolates tab sync across deployments
   errorNormalizer: (err) => ({
     code: 500,
     id: 'fetch-error',
@@ -57,7 +58,7 @@ const userStore = createDocumentStore<User>({
 });
 ```
 
-`getSessionKey` returning `false` disables persistence and tab sync until a session is ready. Stores with the same `id` and different session keys are isolated.
+`getSessionKey` returning `false` disables persistence and tab sync until a session is ready. Stores with the same `id` and different session keys are isolated. Deployed apps should provide a stable `getAppVersion` build identifier so tabs running different bundles cannot exchange fetch activity or snapshots; this is separate from per-store `persistentStorage.version`.
 
 Docs: `docs/store-manager.md`, `docs/README.md` (full options matrix).
 
@@ -264,7 +265,7 @@ Docs: `docs/real-time-updates.md`.
 
 ## Browser tab sync
 
-Automatic when all tabs share the same store `id` and the same `getSessionKey()`. Tabs deduplicate `fetch-start`/`fetch-success` activity and apply confirmed snapshots in version order over `BroadcastChannel`. Background tabs get an extended coalescing window so duplicate background work is dropped.
+Automatic when all tabs share the same store `id`, `getSessionKey()`, and (when configured) `getAppVersion()`. Tabs deduplicate `fetch-start`/`fetch-success` activity and apply confirmed snapshots in version order over `BroadcastChannel`. Background tabs get an extended coalescing window so duplicate background work is dropped. Use a build-specific `getAppVersion` in deployed apps to isolate incompatible bundles.
 
 Docs: `docs/browser-tabs-sync.md`.
 

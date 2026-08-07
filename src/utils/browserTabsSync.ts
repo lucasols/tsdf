@@ -47,6 +47,17 @@ type BrowserTabsCoordinator<Message extends { kind: string }> = {
 const PROTOCOL_VERSION = 1 as const;
 const CHANNEL_PREFIX = 'tsdf';
 
+function createBrowserTabsChannelName(
+  storeType: BrowserTabsStoreType,
+  storeKey: string,
+  appVersion: string | undefined,
+): string {
+  const appNamespace =
+    appVersion === undefined ? '' : `:app:${encodeURIComponent(appVersion)}`;
+
+  return `${CHANNEL_PREFIX}${appNamespace}:${storeType}:${storeKey}`;
+}
+
 type RawBrowserTabsMessage = BrowserTabsMessageMeta & { kind: string };
 
 const rawBrowserTabsMessageSchema = rc_object({
@@ -111,11 +122,16 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>(
   transportFactory: BrowserTabsTransportFactory | undefined,
   debugLoggerInput: TSDFDebugLogger | undefined,
   tabId = createBrowserTabsTabId(),
+  appVersion?: string,
 ): BrowserTabsCoordinator<Message> {
   const resolvedTransportFactory =
     transportFactory ?? getDefaultTransportFactory();
   const debugLogger = import.meta.env.DEV ? debugLoggerInput : undefined;
-  const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
+  const channelName = createBrowserTabsChannelName(
+    storeType,
+    storeKey,
+    appVersion,
+  );
   let seq = 0;
 
   const lastSeenSeqByTab = new Map<string, number>();
@@ -339,9 +355,14 @@ export function createBrowserTabsCoordinatorWithPriority<
   onWindowFocusChange: ((handler: () => void) => () => void) | undefined,
   priorityTimings: BrowserTabsPriorityTimings | undefined,
   tabId?: string,
+  appVersion?: string,
 ): BrowserTabsCoordinatorWithPriority<Message> {
   const debugLogger = import.meta.env.DEV ? debugLoggerInput : undefined;
-  const channelName = `${CHANNEL_PREFIX}:${storeType}:${storeKey}`;
+  const channelName = createBrowserTabsChannelName(
+    storeType,
+    storeKey,
+    appVersion,
+  );
   const priorityRef: { current: BrowserTabsPriority | null } = {
     current: null,
   };
@@ -360,6 +381,7 @@ export function createBrowserTabsCoordinatorWithPriority<
     transportFactory,
     debugLoggerInput,
     tabId,
+    appVersion,
   );
 
   const priority = createBrowserTabsPriority(
@@ -412,6 +434,7 @@ export type BrowserTabsPresencePriority = {
 /** @internal */
 export function createBrowserTabsPresencePriority(options: {
   getSessionKey: () => BrowserTabsSessionKey;
+  appVersion?: string;
   getWindowIsFocused: () => boolean;
   onWindowFocusChange?: (handler: () => void) => () => void;
   transportFactory?: BrowserTabsTransportFactory;
@@ -436,6 +459,8 @@ export function createBrowserTabsPresencePriority(options: {
     options.getWindowIsFocused,
     options.onWindowFocusChange,
     options.priorityTimings,
+    undefined,
+    options.appVersion,
   );
   priorityRef.current = priority;
 

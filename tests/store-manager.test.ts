@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { rc_number, rc_object } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createStoreManager } from '../src/storeManager';
+import type { BrowserTabsTransportFactory } from '../src/utils/browserTabsSync';
 import {
   createFocusChangeCoordinator,
   getMessageKinds,
@@ -177,6 +178,111 @@ test('mixed stores share one manager-level browser-tab presence channel', () => 
   documentEnv.apiStore.dispose();
   collectionEnv.apiStore.dispose();
   listQueryEnv.apiStore.dispose();
+});
+
+test('app versions namespace every store and presence browser-tab channel', () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const openedChannelNames = new Set<string>();
+  const transportFactory: BrowserTabsTransportFactory = (options) => {
+    openedChannelNames.add(options.channelName);
+    return transport.transportFactory(options);
+  };
+  const tabs = createFocusChangeCoordinator(['app'], 'app');
+  const bindFocusController = tabs.bind('app');
+  const getAppVersion = vi.fn(() => '921.0.0');
+  const storeManager = createStoreManager({
+    getSessionKey: () => 'shared-session',
+    getAppVersion,
+    errorNormalizer: normalizeError,
+  });
+  const idPrefix = getNextStoreId('manager-app-version');
+
+  // Exercise every data-store channel through its public test environment;
+  // all three stores intentionally share one versioned manager and presence channel.
+  const documentEnv = createDocumentStoreTestEnv(1, {
+    id: `${idPrefix}-document`,
+    storeManager,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController,
+  });
+  const collectionEnv = createCollectionStoreTestEnv(
+    { '1': { title: 'Todo', completed: false } },
+    {
+      id: `${idPrefix}-collection`,
+      storeManager,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController,
+    },
+  );
+  const listQueryEnv = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: `${idPrefix}-list`,
+      storeManager,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController,
+    },
+  );
+
+  // Exact channel names catch a missing manager version on any sibling store
+  // path, while replacing generated ids keeps the snapshot deterministic.
+  expect(
+    Array.from(openedChannelNames, (channelName) =>
+      channelName.replace(idPrefix, '<store-id>'),
+    ).sort(),
+  ).toMatchInlineSnapshot(`
+    - 'tsdf:app:921.0.0:collection:<store-id>-collection'
+    - 'tsdf:app:921.0.0:document:<store-id>-document'
+    - 'tsdf:app:921.0.0:listQuery:<store-id>-list'
+    - 'tsdf:app:921.0.0:presence:manager'
+  `);
+
+  // The manager captures one stable build value instead of letting later
+  // store creation drift onto different channel namespaces.
+  expect(getAppVersion).toHaveBeenCalledOnce();
+
+  documentEnv.apiStore.dispose();
+  collectionEnv.apiStore.dispose();
+  listQueryEnv.apiStore.dispose();
+});
+
+test('app versions namespace the manager offline-session browser-tab channel', () => {
+  const openedChannelNames: string[] = [];
+
+  // Offline coordination uses the real BroadcastChannel boundary rather than
+  // the store-level injectable transport, so record only the opened names here.
+  class InspectableBroadcastChannel extends EventTarget {
+    readonly name: string;
+
+    constructor(name: string) {
+      super();
+      this.name = name;
+      openedChannelNames.push(name);
+    }
+
+    postMessage() {}
+    close() {}
+  }
+
+  vi.stubGlobal('BroadcastChannel', InspectableBroadcastChannel);
+  try {
+    const storeManager = createStoreManager({
+      getSessionKey: () => 'manager-versioned-offline-session',
+      getAppVersion: () => '921.0.0',
+      errorNormalizer: normalizeError,
+      offlineSession: { network: { enabled: false } },
+    });
+
+    // Reading manager offline state lazily opens the session coordinator and
+    // must apply the same build boundary as normal store sync.
+    storeManager.getOfflineStatus();
+
+    expect(openedChannelNames).toMatchInlineSnapshot(`
+      ['tsdf:app:921.0.0:offline:session:manager-versioned-offline-session']
+    `);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 test('browser-tab presence stays alive until the last store is disposed', async () => {
