@@ -298,6 +298,7 @@ export function listStoredKeys(prefix: string): string[] {
 export function createListQueryEnv(options: {
   storeName: string;
   sessionKey?: string;
+  getSessionKey?: () => string | false;
   maxItemBytes?: number;
   maxQueryBytes?: number;
   maxQuerySize?: number;
@@ -307,7 +308,8 @@ export function createListQueryEnv(options: {
 }) {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
-    getSessionKey: () => options.sessionKey ?? 'session1',
+    getSessionKey:
+      options.getSessionKey ?? (() => options.sessionKey ?? 'session1'),
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {

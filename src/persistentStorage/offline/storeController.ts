@@ -1485,17 +1485,9 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     entities: GlobalOfflineEntity[],
   ): Promise<void> {
-    const existingKeys = await current.entityNamespace.listKeys();
-    const nextKeys = new Set(entities.map((entity) => entity.entityKey));
-
-    await Promise.all([
-      ...entities.map((entity) =>
-        current.entityNamespace.save(entity.entityKey, entity),
-      ),
-      ...existingKeys
-        .filter((key) => !nextKeys.has(key))
-        .map((key) => current.entityNamespace.remove(key)),
-    ]);
+    await current.entityNamespace.replaceAll(
+      entities.map((entity) => ({ data: entity, key: entity.entityKey })),
+    );
   }
 
   function getSortedEntries(): OfflineQueueEntry[] {

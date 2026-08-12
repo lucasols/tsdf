@@ -1,5 +1,5 @@
 import { rc_number, rc_object } from 'runcheck';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
@@ -7,7 +7,11 @@ import {
   getManagedLocalStorageManifestKeyForPrefix,
   getManagedLocalStorageManifestKeyForSingle,
 } from '../../../src/persistentStorage/localStorageMetadata';
-import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
+import {
+  resetExpirationScanTracking,
+  scheduleLocalStorageMaintenance,
+} from '../../../src/persistentStorage/persistentStorageManager';
+import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { normalizeError } from '../../mocks/testEnvUtils';
@@ -28,6 +32,10 @@ import {
 
 setupSyncStorageEfficiencyTestSuite();
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 type ProtectedDocumentOfflineOperations = {
   markProtected: DocumentOfflineOperationDefinition<
     { value: { name: string; value: number } },
@@ -36,6 +44,138 @@ type ProtectedDocumentOfflineOperations = {
 };
 
 describe('sync storage efficiency: maintenance', () => {
+  test('expiration observes a session that became offline after the key snapshot', async () => {
+    const sessionKey = 'offline-during-maintenance';
+    const expiredDoc = persistentStore.scope('expired-doc', sessionKey);
+    const expiredStorageKey = expiredDoc.document.seed(
+      { value: { name: 'preserve offline', value: 1 } },
+      { timestamp: Date.now() - 8 * 24 * 60 * 60 * 1000 },
+    );
+    const idleCallbacks: IdleRequestCallback[] = [];
+    let lockRequestCount = 0;
+    let offlineStatusWritten = false;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        idleCallbacks.push(callback);
+        return idleCallbacks.length;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', () => {});
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      configurable: true,
+      value: {
+        async request<T>(
+          _name: string,
+          callback: () => T | Promise<T>,
+        ): Promise<T> {
+          const result = await callback();
+          lockRequestCount++;
+
+          // The global sweep has captured its known-key set when another tab
+          // persists the session's newly-active offline status.
+          if (lockRequestCount === 2) {
+            localStorage.setItem(
+              `tsdf.${sessionKey}._o_.s`,
+              JSON.stringify({ d: { n: { a: 1 } } }),
+            );
+            offlineStatusWritten = true;
+          }
+
+          return result;
+        },
+      },
+      writable: true,
+    });
+
+    scheduleLocalStorageMaintenance();
+    const callback = idleCallbacks.shift();
+    if (callback === undefined) {
+      throw new Error('Expected a scheduled idle maintenance callback.');
+    }
+    callback({ didTimeout: false, timeRemaining: () => 50 });
+    for (let pass = 0; pass < 200; pass++) await Promise.resolve();
+
+    expect({
+      expiredEntryExists: localStorage.getItem(expiredStorageKey) !== null,
+      offlineStatusWritten,
+    }).toMatchInlineSnapshot(`
+      expiredEntryExists: '✅'
+      offlineStatusWritten: '✅'
+    `);
+  });
+
+  test('orphan cleanup preserves a specially keyed payload adopted after scanning', async () => {
+    const storeName = 'adopted-special-key';
+    const sessionKey = 'sess1';
+    const payload = 'orphan.ci.item';
+    const scope = persistentStore.scope(storeName, sessionKey);
+    const payloadStorageKey = scope.collection.seedItem(payload, {
+      value: { id: payload, name: 'Initial orphan' },
+    });
+    const storagePrefix = `tsdf.${sessionKey}.${storeName}.ci.`;
+    localStorage.removeItem(
+      localPersistentStorage.getManifestKeyForPrefix(storagePrefix),
+    );
+
+    const idleCallbacks: IdleRequestCallback[] = [];
+    let lockRequestCount = 0;
+    let payloadAdopted = false;
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        idleCallbacks.push(callback);
+        return idleCallbacks.length;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', () => {});
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      configurable: true,
+      value: {
+        async request<T>(
+          _name: string,
+          callback: () => T | Promise<T>,
+        ): Promise<T> {
+          const result = await callback();
+          lockRequestCount++;
+
+          // The payload was an orphan in the sweep snapshot, but another tab
+          // adopts the same key before the live ownership recheck.
+          if (lockRequestCount === 3) {
+            scope.collection.seedItem(payload, {
+              value: { id: payload, name: 'Adopted in another tab' },
+            });
+            payloadAdopted = true;
+          }
+
+          return result;
+        },
+      },
+      writable: true,
+    });
+
+    scheduleLocalStorageMaintenance();
+    const callback = idleCallbacks.shift();
+    if (callback === undefined) {
+      throw new Error('Expected a scheduled idle maintenance callback.');
+    }
+    callback({ didTimeout: false, timeRemaining: () => 50 });
+    for (let pass = 0; pass < 200; pass++) await Promise.resolve();
+
+    expect({
+      adoptedData: scope.collection.readItemData(payload),
+      payloadAdopted,
+      payloadExists: localStorage.getItem(payloadStorageKey) !== null,
+    }).toMatchInlineSnapshot(`
+      adoptedData:
+        value: { id: 'orphan.ci.item', name: 'Adopted in another tab' }
+
+      payloadAdopted: '✅'
+      payloadExists: '✅'
+    `);
+  });
+
   test('expiration cleanup removes expired entries and snapshots the full manifest scan history', async () => {
     const oneWeekAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const expiredDoc = persistentStore.scope('expired-doc', 'sess1');
@@ -82,10 +222,11 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[4] #6 ✅ external-cache
       .    | 🔑[5] #7 ✅ feature-flag
       .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.06 kb
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #8 ❌ tsdf.sess1._o_.s (entry data)
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
-      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.06 kb
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
 
@@ -208,13 +349,15 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[4] #6 ✅ tsdf.sess2.fresh-doc (entry data)
       .    | 🔑[5] #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index)
       .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.06 kb
-      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.06 kb
-      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #8 ❌ tsdf.sess1._o_.s (entry data)
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
-      .    | 🗑️ #4 ✅->❌ tsdf.sess2.expired-doc (entry data)
-      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.06 kb
+      .    | 📖 #9 ❌ tsdf.sess2._o_.s (entry data)
+      .    | 🗑️ #4 ✅->❌ tsdf.sess2.expired-doc (entry data)
       .    | 🗑️ #5 ✅->❌ tsdf._m.r.s:sess2.expired-doc.m (namespace index)
+      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.06 kb
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
   });
@@ -265,8 +408,8 @@ describe('sync storage efficiency: maintenance', () => {
 
     expect(removedKeys).toMatchInlineSnapshot(`
       - 'tsdf._m.g'
-      - 'tsdf._m.r.s:sess1.bad-manifest.m'
       - 'tsdf.sess1.bad-query.lq.{tableId:"users"}'
+      - 'tsdf._m.r.s:sess1.bad-manifest.m'
       - 'tsdf.sess1.stray-doc'
       - 'tsdf.sess1.stray-store.li."users||99'
     `);
@@ -361,6 +504,8 @@ describe('sync storage efficiency: maintenance', () => {
            |    └ (entry data, <"orphan-user>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.orphan-collection.ci.m
            |    └ (namespace index) | 0.11 kb
+      .    | 📖 #5 ❌ tsdf._m.r.s:sess1.orphan-collection.ci."orphan-user.m
+           |    └ (namespace index)
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.orphan-collection.ci."orphan-user
            |    └ (entry data, <"orphan-user>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
@@ -508,9 +653,9 @@ describe('sync storage efficiency: maintenance', () => {
              |    └ (namespace index)
       .      | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
              |    └ (entry data, <document>)
-      .      | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .      | 🔑[10] #11 ✅ tsdf.user@example.com.invalid-stray (entry data)
+      .      | 🔑[11] #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
              |    └ (namespace index)
-      .      | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
       .      | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
       .      | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
              |    └ (namespace index)
@@ -518,16 +663,18 @@ describe('sync storage efficiency: maintenance', () => {
              |    └ (namespace index) | 0.08 kb
       .      | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
              |    └ (namespace index) | 0.06 kb
+      .      | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
       .      | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
              |    └ (namespace index) | 0.06 kb
       .      | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
              |    └ (namespace index) | 0.14 kb
-      .      | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .      | 📖 #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
              |    └ (namespace index) | 0.09 kb
       .      | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
              |    └ (namespace index) | 0.06 kb
-      .      | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
-      .      | 📖 #6 ✅ tsdf.user@example.com._o_.s (entry data) | 0.08 kb
+      .      | 📖 #15 ❌ tsdf._m.r.s:user@example.com.invalid-stray.m
+             |    └ (namespace index)
+      .      | 🗑️ #11 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
       .      | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
@@ -636,8 +783,6 @@ describe('sync storage efficiency: maintenance', () => {
            |    └ (namespace index) | 0.09 kb
       .    | ✍️ #4 ✅->✅ tsdf.offline-session-write-skip.protected-doc.oe.document
            |    └ (entry data, <document>) | 0.16 kb -> 0.16 kb
-      .    | 📖 #3 ✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
-           |    └ (namespace index) | 0.09 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:offline-session-write-skip.protected-doc.oe.m
            |    └ (namespace index) | 0.09 kb -> 0.09 kb ⚠️ UNCHANGED
       "

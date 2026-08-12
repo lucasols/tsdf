@@ -1,5 +1,6 @@
 /* eslint-disable @ls-stack/no-reexport -- keeps async adapters tree-shakable from the local-sync adapter module */
 import {
+  addManagedLocalStorageMutationListener,
   clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
   directManagedLocalStorageIo,
@@ -13,6 +14,7 @@ import {
   readManagedLocalStorageNamespaceEntryByPayload,
   readManagedLocalStorageProtectedKeys,
   readManagedLocalStorageSingleEntryByPayload,
+  removeManagedLocalStorageNamespaceEntriesIfUnchanged,
   removeManagedLocalStorageNamespacePayload,
   registerManagedLocalStorageMaintenanceCallback,
   removeManagedLocalStorageSinglePayload,
@@ -25,22 +27,77 @@ import {
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
   type ManagedLocalStorageIo,
+  type ManagedLocalStorageNamespaceRemovalCandidate,
+  type ManagedLocalStorageNamespaceRemovalResult,
 } from './localStorageMetadata';
 import {
   getNavigatorLockManager,
   warnIfNavigatorLockUnavailable,
 } from './navigatorLocks';
 import { serializeJsonForStorage } from './persistenceUtils';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import {
+  scheduleIdleCleanup,
+  type IdleCleanupContext,
+} from './scheduleIdleCleanup';
 
 const MANAGED_LOCAL_STORAGE_LOCK_NAME = 'tsdf-local-storage-metadata';
 const MANAGED_LOCAL_STORAGE_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; localPersistentStorage is using unlocked localStorage coordination.';
 const managedLocalStorageIoStack: ManagedLocalStorageIo[] = [];
 
+// Sync hydration can read several entries from one namespace in the same
+// microtask. Share its manifest read, but never retain it past that microtask;
+// observed local and cross-tab mutations invalidate it even sooner.
+const sharedManifestRawCache = new Map<string, string | null>();
+let sharedManifestCacheClearScheduled = false;
+
+function isManagedLocalStorageManifestCacheKey(key: string): boolean {
+  return key.startsWith('tsdf._m.r.');
+}
+
+function rememberSharedManifestRaw(key: string, raw: string | null): void {
+  sharedManifestRawCache.set(key, raw);
+  if (sharedManifestCacheClearScheduled) return;
+
+  sharedManifestCacheClearScheduled = true;
+  queueMicrotask(() => {
+    sharedManifestCacheClearScheduled = false;
+    sharedManifestRawCache.clear();
+  });
+}
+
+const sharedDirectManagedLocalStorageIo: ManagedLocalStorageIo = {
+  getItem(key) {
+    if (!isManagedLocalStorageManifestCacheKey(key)) {
+      return directManagedLocalStorageIo.getItem(key);
+    }
+
+    ensureManagedStorageInvalidationListener();
+    if (sharedManifestRawCache.has(key)) {
+      return sharedManifestRawCache.get(key) ?? null;
+    }
+
+    const raw = directManagedLocalStorageIo.getItem(key);
+    rememberSharedManifestRaw(key, raw);
+    return raw;
+  },
+  setItem(key, value) {
+    directManagedLocalStorageIo.setItem(key, value);
+  },
+  removeItem(key) {
+    directManagedLocalStorageIo.removeItem(key);
+  },
+  listKeys() {
+    return directManagedLocalStorageIo.listKeys();
+  },
+};
+
 function createCachedManagedLocalStorageIo(): {
   deactivate: () => void;
+  flush: () => void;
+  invalidateAll: () => void;
   io: ManagedLocalStorageIo;
+  reset: () => void;
 } {
   const VALUE_NOT_LOADED = Symbol('VALUE_NOT_LOADED');
   const cache = new Map<string, string | null | typeof VALUE_NOT_LOADED>();
@@ -103,6 +160,10 @@ function createCachedManagedLocalStorageIo(): {
   }
 
   const io: ManagedLocalStorageIo = {
+    invalidate(key) {
+      cache.delete(key);
+      allKeysLoaded = false;
+    },
     getItem(key) {
       if (!active) {
         return localStorage.getItem(key);
@@ -115,7 +176,7 @@ function createCachedManagedLocalStorageIo(): {
         }
       }
 
-      const raw = localStorage.getItem(key);
+      const raw = sharedDirectManagedLocalStorageIo.getItem(key);
       cache.set(key, raw);
       return raw;
     },
@@ -130,12 +191,14 @@ function createCachedManagedLocalStorageIo(): {
       if (written && active) {
         cache.set(key, value);
       }
+      if (written) invalidateManagedStorageCachesAfterMutation(key, io);
     },
     removeItem(key) {
       if (active) {
         cache.set(key, null);
       }
       localStorage.removeItem(key);
+      invalidateManagedStorageCachesAfterMutation(key, io);
     },
     listKeys() {
       if (!active) return directManagedLocalStorageIo.listKeys();
@@ -172,6 +235,7 @@ function createCachedManagedLocalStorageIo(): {
 
       cache.set(key, value);
       pendingManifestWrites.set(key, value);
+      invalidateManagedStorageCachesAfterMutation(key, io);
       schedulePendingManifestFlush();
     },
   };
@@ -182,8 +246,85 @@ function createCachedManagedLocalStorageIo(): {
       active = false;
       cache.clear();
     },
+    flush: flushPendingManifestWrites,
+    invalidateAll() {
+      cache.clear();
+      allKeysLoaded = false;
+    },
     io,
+    reset() {
+      flushPendingManifestWrites();
+      cache.clear();
+      allKeysLoaded = false;
+    },
   };
+}
+
+type CachedManagedLocalStorageIo = ReturnType<
+  typeof createCachedManagedLocalStorageIo
+>;
+
+const activeMaintenanceCaches = new Set<CachedManagedLocalStorageIo>();
+let managedStorageInvalidationListenerReady = false;
+
+function invalidateManagedStorageCachesAfterMutation(
+  key: string,
+  source: ManagedLocalStorageIo,
+): void {
+  sharedManifestRawCache.delete(key);
+  for (const cache of activeMaintenanceCaches) {
+    if (cache.io !== source) cache.io.invalidate?.(key);
+  }
+}
+
+function ensureManagedStorageInvalidationListener(): void {
+  if (managedStorageInvalidationListenerReady) return;
+
+  addManagedLocalStorageMutationListener((key) => {
+    invalidateManagedStorageCachesAfterMutation(
+      key,
+      directManagedLocalStorageIo,
+    );
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (event.storageArea !== null && event.storageArea !== localStorage)
+      return;
+
+    if (event.key === null) {
+      sharedManifestRawCache.clear();
+    } else {
+      sharedManifestRawCache.delete(event.key);
+    }
+
+    for (const cache of activeMaintenanceCaches) {
+      if (event.key === null) {
+        cache.invalidateAll();
+      } else {
+        cache.io.invalidate?.(event.key);
+      }
+    }
+  });
+  managedStorageInvalidationListenerReady = true;
+}
+
+const maintenanceIoCaches = new WeakMap<
+  IdleCleanupContext,
+  { cache: CachedManagedLocalStorageIo; continuationCount: number }
+>();
+
+async function withExistingManagedLocalStorageIoCache<T>(
+  cachedIo: CachedManagedLocalStorageIo,
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  managedLocalStorageIoStack.push(cachedIo.io);
+
+  try {
+    return await callback();
+  } finally {
+    cachedIo.flush();
+    managedLocalStorageIoStack.pop();
+  }
 }
 
 async function withManagedLocalStorageIoCache<T>(
@@ -205,7 +346,7 @@ function getManagedLocalStorageIo(): ManagedLocalStorageIo | undefined {
 }
 
 function getActiveManagedLocalStorageIo(): ManagedLocalStorageIo {
-  return getManagedLocalStorageIo() ?? directManagedLocalStorageIo;
+  return getManagedLocalStorageIo() ?? sharedDirectManagedLocalStorageIo;
 }
 
 function getManagedLocalStorageIoWithWarning(): ManagedLocalStorageIo {
@@ -215,6 +356,7 @@ function getManagedLocalStorageIoWithWarning(): ManagedLocalStorageIo {
 
 async function runWithManagedLocalStorageLock<T>(
   callback: () => T | Promise<T>,
+  existingCachedIo?: CachedManagedLocalStorageIo,
 ): Promise<T> {
   if (getManagedLocalStorageIo() !== undefined) {
     return await callback();
@@ -224,12 +366,18 @@ async function runWithManagedLocalStorageLock<T>(
 
   if (lockManager === null) {
     warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
-    return await trackManagedLocalStorageMutationWrites(callback);
+    return await trackManagedLocalStorageMutationWrites(() =>
+      existingCachedIo === undefined
+        ? callback()
+        : withExistingManagedLocalStorageIoCache(existingCachedIo, callback),
+    );
   }
 
   return lockManager.request(MANAGED_LOCAL_STORAGE_LOCK_NAME, () =>
     trackManagedLocalStorageMutationWrites(() =>
-      withManagedLocalStorageIoCache(callback),
+      existingCachedIo === undefined
+        ? withManagedLocalStorageIoCache(callback)
+        : withExistingManagedLocalStorageIoCache(existingCachedIo, callback),
     ),
   );
 }
@@ -241,6 +389,10 @@ export type LocalStorageMetadataOptions =
 type LocalPersistentStorage = {
   kind: 'local-sync';
   runLocked<T>(callback: () => T | Promise<T>): Promise<T>;
+  runMaintenanceLocked<T>(
+    context: IdleCleanupContext,
+    callback: () => T | Promise<T>,
+  ): Promise<T>;
   readRaw(key: string): string | null;
   write<T>(key: string, value: T): { rawValue: string; sizeBytes: number };
   remove(key: string, options?: LocalStorageMetadataOptions): void;
@@ -267,14 +419,23 @@ type LocalPersistentStorage = {
   ): string;
   touchSingleEntry(payloadKey: string): boolean;
   touchNamespaceEntry(payloadKey: string, namespacePrefix: string): boolean;
+  removeNamespaceEntriesIfUnchanged(
+    storagePrefix: string,
+    candidates: ManagedLocalStorageNamespaceRemovalCandidate[],
+    candidateIndex: number,
+    shouldYield: () => boolean,
+  ): ManagedLocalStorageNamespaceRemovalResult;
   clearManifest(manifestKey: string): void;
   clearSession(sessionKey: string): void;
   registerMaintenanceCallback(
     manifestKey: string,
-    callback: () => Promise<void>,
+    callback: (context?: IdleCleanupContext) => Promise<void>,
   ): void;
   unregisterMaintenanceCallback(manifestKey: string): void;
-  runMaintenance(forceManifestKeys?: Iterable<string>): Promise<void>;
+  runMaintenance(
+    forceManifestKeys: Iterable<string> | undefined,
+    context: IdleCleanupContext,
+  ): Promise<void>;
   readProtectedStorageKeys(sessionKey: string): Set<string>;
   syncSessionProtectedKeys(
     sessionKey: string,
@@ -287,6 +448,23 @@ export const localPersistentStorage: LocalPersistentStorage = {
   kind: 'local-sync' as const,
   runLocked<T>(callback: () => T | Promise<T>): Promise<T> {
     return runWithManagedLocalStorageLock(callback);
+  },
+  runMaintenanceLocked<T>(
+    context: IdleCleanupContext,
+    callback: () => T | Promise<T>,
+  ): Promise<T> {
+    const maintenanceIo = maintenanceIoCaches.get(context);
+    if (maintenanceIo === undefined) {
+      return runWithManagedLocalStorageLock(callback);
+    }
+
+    const continuationCount = context.getContinuationCount();
+    if (continuationCount !== maintenanceIo.continuationCount) {
+      maintenanceIo.cache.reset();
+      maintenanceIo.continuationCount = continuationCount;
+    }
+
+    return runWithManagedLocalStorageLock(callback, maintenanceIo.cache);
   },
   readRaw(key: string): string | null {
     return getManagedLocalStorageIoWithWarning().getItem(key);
@@ -399,6 +577,20 @@ export const localPersistentStorage: LocalPersistentStorage = {
       getManagedLocalStorageIoWithWarning(),
     );
   },
+  removeNamespaceEntriesIfUnchanged(
+    storagePrefix: string,
+    candidates: ManagedLocalStorageNamespaceRemovalCandidate[],
+    candidateIndex: number,
+    shouldYield: () => boolean,
+  ): ManagedLocalStorageNamespaceRemovalResult {
+    return removeManagedLocalStorageNamespaceEntriesIfUnchanged(
+      storagePrefix,
+      candidates,
+      candidateIndex,
+      shouldYield,
+      getManagedLocalStorageIoWithWarning(),
+    );
+  },
   clearManifest(manifestKey: string): void {
     clearManagedLocalStorageManifest(
       manifestKey,
@@ -413,7 +605,7 @@ export const localPersistentStorage: LocalPersistentStorage = {
   },
   registerMaintenanceCallback(
     manifestKey: string,
-    callback: () => Promise<void>,
+    callback: (context?: IdleCleanupContext) => Promise<void>,
   ): void {
     warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
     registerManagedLocalStorageMaintenanceCallback(manifestKey, callback);
@@ -422,12 +614,30 @@ export const localPersistentStorage: LocalPersistentStorage = {
     warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
     unregisterManagedLocalStorageMaintenanceCallback(manifestKey);
   },
-  runMaintenance(forceManifestKeys?: Iterable<string>): Promise<void> {
-    return runWithManagedLocalStorageLock(() =>
-      runManagedLocalStorageMaintenance(getManagedLocalStorageIoWithWarning(), {
-        forceManifestKeys,
-      }),
-    );
+  runMaintenance(
+    forceManifestKeys: Iterable<string> | undefined,
+    context: IdleCleanupContext,
+  ): Promise<void> {
+    const cache = createCachedManagedLocalStorageIo();
+    ensureManagedStorageInvalidationListener();
+    activeMaintenanceCaches.add(cache);
+    maintenanceIoCaches.set(context, {
+      cache,
+      continuationCount: context.getContinuationCount(),
+    });
+
+    return runManagedLocalStorageMaintenance({
+      context,
+      forceManifestKeys,
+      runLocked: (callback) =>
+        localPersistentStorage.runMaintenanceLocked(context, () =>
+          callback(getManagedLocalStorageIoWithWarning()),
+        ),
+    }).finally(() => {
+      maintenanceIoCaches.delete(context);
+      activeMaintenanceCaches.delete(cache);
+      cache.deactivate();
+    });
   },
   readProtectedStorageKeys(sessionKey: string): Set<string> {
     return readManagedLocalStorageProtectedKeys(

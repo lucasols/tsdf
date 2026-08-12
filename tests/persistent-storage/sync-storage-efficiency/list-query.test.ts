@@ -1,8 +1,9 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
+import { scheduleLocalStorageMaintenance } from '../../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
@@ -32,7 +33,322 @@ import {
 
 setupSyncStorageEfficiencyTestSuite();
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('sync storage efficiency: list-query', () => {
+  test('maintenance aborts when the active session changes between query and item scans', async () => {
+    const storeName = 'list-query-session-switch-maintenance';
+    let activeSessionKey = 'session-a';
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleCallbackId = 1;
+    let lockRequestCount = 0;
+    let sessionSwitched = false;
+
+    for (const sessionKey of ['session-a', 'session-b']) {
+      setCachedItem(storeName, sessionKey, 'users', 1, {
+        id: 1,
+        name: `${sessionKey} oldest user`,
+      });
+      vi.setSystemTime(Date.now() + 1);
+      setCachedItem(storeName, sessionKey, 'users', 2, {
+        id: 2,
+        name: `${sessionKey} newest user`,
+      });
+      setCachedQuery(
+        storeName,
+        sessionKey,
+        { tableId: 'users' },
+        [storeItemKey('users', 1), storeItemKey('users', 2)],
+        sessionKey === 'session-b',
+      );
+      vi.setSystemTime(Date.now() + 1);
+    }
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        const callbackId = nextIdleCallbackId++;
+        idleCallbacks.set(callbackId, callback);
+        return callbackId;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', (callbackId: number) => {
+      idleCallbacks.delete(callbackId);
+    });
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      configurable: true,
+      value: {
+        async request<T>(
+          _name: string,
+          callback: () => T | Promise<T>,
+        ): Promise<T> {
+          const result = await callback();
+          lockRequestCount++;
+
+          // The query snapshot belongs to session A. Before item cleanup can
+          // begin, login state changes and the same store now points at B.
+          if (lockRequestCount === 3) {
+            activeSessionKey = 'session-b';
+            sessionSwitched = true;
+          }
+
+          return result;
+        },
+      },
+      writable: true,
+    });
+
+    createListQueryEnv({
+      storeName,
+      getSessionKey: () => activeSessionKey,
+      maxItemBytes: getLocalListItemEntrySizeBytes(rawItemPayload('users', 2), {
+        id: 2,
+        name: 'session-b newest user',
+      }),
+    });
+    const sessionAItemPrefix = `tsdf.session-a.${storeName}.li.`;
+    scheduleLocalStorageMaintenance([
+      localPersistentStorage.getManifestKeyForPrefix(sessionAItemPrefix),
+    ]);
+
+    const nextCallbackEntry = idleCallbacks.entries().next().value;
+    if (nextCallbackEntry === undefined) {
+      throw new Error('Expected a scheduled idle maintenance callback.');
+    }
+    const [callbackId, callback] = nextCallbackEntry;
+    idleCallbacks.delete(callbackId);
+    callback({ didTimeout: false, timeRemaining: () => 50 });
+    for (let pass = 0; pass < 200; pass++) await Promise.resolve();
+
+    expect({
+      sessionBItems: [1, 2].map((id) =>
+        persistentStore
+          .scope(storeName, 'session-b')
+          .listQuery.readItemData('users', id),
+      ),
+      sessionSwitched,
+    }).toMatchInlineSnapshot(`
+      sessionBItems:
+        - { id: 1, name: 'session-b oldest user' }
+        - { id: 2, name: 'session-b newest user' }
+      sessionSwitched: '✅'
+    `);
+  });
+
+  test('item maintenance does not overwrite a query changed while cleanup is yielding', async () => {
+    const storeName = 'list-query-interrupted-maintenance';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const oldestItemStorageKey = setCachedItem(
+      storeName,
+      sessionKey,
+      'users',
+      1,
+      { id: 1, name: 'Oldest user' },
+    );
+    vi.setSystemTime(Date.now() + 1);
+    setCachedItem(storeName, sessionKey, 'users', 2, {
+      id: 2,
+      name: 'Newest user',
+    });
+    const queryStorageKey = setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+      storeItemKey('users', 2),
+    ]);
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleCallbackId = 1;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        const callbackId = nextIdleCallbackId++;
+        idleCallbacks.set(callbackId, callback);
+        return callbackId;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
+      idleCallbacks.delete(callbackId);
+    });
+
+    createListQueryEnv({
+      storeName,
+      sessionKey,
+      maxItemBytes: sumPersistedEntryBytes(
+        getLocalListItemEntrySizeBytes(rawItemPayload('users', 2), {
+          id: 2,
+          name: 'Newest user',
+        }),
+      ),
+    });
+
+    const itemPrefix = `tsdf.${sessionKey}.${storeName}.li.`;
+    scheduleLocalStorageMaintenance([
+      localPersistentStorage.getManifestKeyForPrefix(itemPrefix),
+    ]);
+
+    async function runNextIdleCallback(
+      timeRemaining: () => number,
+    ): Promise<void> {
+      const nextCallbackEntry = idleCallbacks.entries().next().value;
+      if (nextCallbackEntry === undefined) {
+        throw new Error('Expected a scheduled idle maintenance callback.');
+      }
+
+      const [callbackId, callback] = nextCallbackEntry;
+      idleCallbacks.delete(callbackId);
+      callback({ didTimeout: false, timeRemaining });
+
+      for (let pass = 0; pass < 100; pass++) {
+        await Promise.resolve();
+      }
+    }
+
+    // End the first slice immediately after it evicts the oldest item, before
+    // it can rewrite the query that referenced that item.
+    await runNextIdleCallback(() =>
+      localStorage.getItem(oldestItemStorageKey) === null ? 0 : 50,
+    );
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      oldestItemExists: localStorage.getItem(oldestItemStorageKey) !== null,
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 1
+      oldestItemExists: '❌'
+    `);
+
+    // Another tab refreshes the query while maintenance is suspended. It
+    // changes the query but still references the item that maintenance just
+    // removed, so the continuation must compare against its old snapshot and
+    // the retry must reconcile the refreshed query against stored items.
+    setCachedQuery(
+      storeName,
+      sessionKey,
+      usersQuery,
+      [storeItemKey('users', 1), storeItemKey('users', 2)],
+      true,
+    );
+    await runNextIdleCallback(() => 50);
+
+    expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
+      a: 1735689600001
+      h: '✅'
+      i: ['"users||1', '"users||2']
+      p: { tableId: 'users' }
+    `);
+
+    // The stale comparison schedules a fresh pass. That pass must remove the
+    // dangling item reference even though the item was evicted by the prior
+    // pass rather than the retry itself.
+    expect(idleCallbacks.size).toBe(1);
+    await runNextIdleCallback(() => 50);
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      query: getParsedLocalStorageValue(queryStorageKey),
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 0
+      query:
+        a: 1735689600001
+        h: '✅'
+        i: ['"users||2']
+        p: { tableId: 'users' }
+    `);
+  });
+
+  test('item maintenance retries query reconciliation after a storage write fails', async () => {
+    const storeName = 'list-query-reconciliation-write-failure';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const oldestItemStorageKey = setCachedItem(
+      storeName,
+      sessionKey,
+      'users',
+      1,
+      { id: 1, name: 'Oldest user' },
+    );
+    vi.setSystemTime(Date.now() + 1);
+    setCachedItem(storeName, sessionKey, 'users', 2, {
+      id: 2,
+      name: 'Newest user',
+    });
+    const queryStorageKey = setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+      storeItemKey('users', 2),
+    ]);
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleCallbackId = 1;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        const callbackId = nextIdleCallbackId++;
+        idleCallbacks.set(callbackId, callback);
+        return callbackId;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', (callbackId: number) => {
+      idleCallbacks.delete(callbackId);
+    });
+
+    createListQueryEnv({
+      storeName,
+      sessionKey,
+      maxItemBytes: getLocalListItemEntrySizeBytes(rawItemPayload('users', 2), {
+        id: 2,
+        name: 'Newest user',
+      }),
+    });
+    const itemPrefix = `tsdf.${sessionKey}.${storeName}.li.`;
+    scheduleLocalStorageMaintenance([
+      localPersistentStorage.getManifestKeyForPrefix(itemPrefix),
+    ]);
+
+    async function runNextIdleCallback(
+      timeRemaining: () => number,
+    ): Promise<void> {
+      const nextCallbackEntry = idleCallbacks.entries().next().value;
+      if (nextCallbackEntry === undefined) {
+        throw new Error('Expected a scheduled idle maintenance callback.');
+      }
+      const [callbackId, callback] = nextCallbackEntry;
+      idleCallbacks.delete(callbackId);
+      callback({ didTimeout: false, timeRemaining });
+      for (let pass = 0; pass < 100; pass++) await Promise.resolve();
+    }
+
+    // Pause after the payload is removed but before its query is rewritten.
+    await runNextIdleCallback(() =>
+      localStorage.getItem(oldestItemStorageKey) === null ? 0 : 50,
+    );
+
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    let failQueryWrite = true;
+    const setItemSpy = vi
+      .spyOn(localStorage, 'setItem')
+      .mockImplementation((key, value) => {
+        if (key === queryStorageKey && failQueryWrite) {
+          failQueryWrite = false;
+          throw new Error('simulated query write failure');
+        }
+        originalSetItem(key, value);
+      });
+
+    await runNextIdleCallback(() => 50);
+    setItemSpy.mockRestore();
+
+    // A failed CAS write is incomplete work, so maintenance must retry after
+    // the transient storage failure clears.
+    expect(idleCallbacks.size).toBe(1);
+    await runNextIdleCallback(() => 50);
+
+    expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
+      a: 1735689600001
+      i: ['"users||2']
+      p: { tableId: 'users' }
+    `);
+  });
+
   test('expiration cleanup removes expired queries and items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const storeName = 'list-query-expiration';
@@ -100,19 +416,20 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (item data, <"fresh-users||2>)
       .    | 🔑[4] #6 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
            |    └ (query data, <{tableId:"fresh-users"}>)
-      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
-           |    └ (items index) | 0.28 kb
       .    | 📖 #4 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
            |    └ (query data, <{tableId:"expired-users"}>) | 0.15 kb
       .    | 📖 #6 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
            |    └ (query data, <{tableId:"fresh-users"}>) | 0.14 kb
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
+           |    └ (items index) | 0.28 kb
+      .    | 📖 #7 ❌ tsdf.sess1._o_.s (entry data)
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1
            |    └ (item data, <"expired-users||1>)
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
+           |    └ (items index) | 0.28 kb -> 0.14 kb
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
            |    └ (query data, <{tableId:"expired-users"}>)
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
-           |    └ (items index) | 0.28 kb -> 0.14 kb
       "
     `);
 
@@ -694,8 +1011,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.23 kb
       .    | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3
            |    └ (item data, <"users||3>) | ❌ -> 0.09 kb
-      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
-           |    └ (items index) | 0.23 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.23 kb -> 0.34 kb
            ·
@@ -715,10 +1030,10 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (query data, <{tableId:"users"}>) | 0.15 kb
       .    | 🗑️ #3 ✅->❌ tsdf.sess1.lq-item-metadata.li."users||1
            |    └ (item data, <"users||1>)
-      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.34 kb -> 0.23 kb
+      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
       "
     `);
   });
@@ -846,21 +1161,21 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>)
       .    | 🔑[6] #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>)
-      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
-           |    └ (items index) | 0.44 kb
       .    | 📖 #7 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb
       .    | 📖 #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+           |    └ (items index) | 0.44 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-shared-item-cleanup.li."users||1
            |    └ (item data, <"users||1>)
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+           |    └ (items index) | 0.44 kb -> 0.34 kb
       .    | ✍️ #7 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb -> 0.23 kb
       .    | ✍️ #8 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb -> 0.22 kb
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
-           |    └ (items index) | 0.44 kb -> 0.34 kb
       "
     `);
   });
@@ -1721,8 +2036,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (items index)
       .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-remount-no-cache.li."users||1
             |    └ (item data, <"users||1>) | ❌ -> 0.10 kb
-      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
-            |    └ (items index)
       .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index) | ❌ -> 0.12 kb
       "
@@ -1774,8 +2087,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (items index) | 0.23 kb
       .    | 📖 #2 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
-      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
-           |    └ (items index) | 0.23 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #3 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.10 kb
       "
@@ -1839,8 +2150,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (item data, <"users||1>) | 0.10 kb
       .    | 📖 #4 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
            |    └ (query data, <{tableId:"projects"}>) | 0.13 kb
-      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
-           |    └ (items index) | 0.24 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #5 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
            |    └ (item data, <"projects||1>) | 0.11 kb
       "

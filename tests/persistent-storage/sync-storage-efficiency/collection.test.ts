@@ -1,8 +1,9 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
+import { scheduleLocalStorageMaintenance } from '../../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
@@ -27,7 +28,341 @@ import {
 
 setupSyncStorageEfficiencyTestSuite();
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('sync storage efficiency: collection', () => {
+  test('maintenance rechecks refreshed items after reacquiring its lock in the same idle deadline', async () => {
+    const storeName = 'collection-same-deadline-refresh';
+    const sessionKey = 'sess1';
+    const idleCallbacks: IdleRequestCallback[] = [];
+    let lockRequestCount = 0;
+    let refreshedOldestItem = false;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        idleCallbacks.push(callback);
+        return idleCallbacks.length;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', () => {});
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      configurable: true,
+      value: {
+        async request<T>(
+          _name: string,
+          callback: () => T | Promise<T>,
+        ): Promise<T> {
+          const result = await callback();
+          lockRequestCount++;
+
+          // The store scan and removal use distinct navigator-lock scopes. A
+          // second tab refreshes the planned eviction after the scan lock is
+          // released but before maintenance acquires the removal lock.
+          if (lockRequestCount === 2) {
+            vi.setSystemTime(Date.now() + 1);
+            const storageKey = scope.collection.itemStorageKey('a');
+            const manifestKey = localPersistentStorage.getManifestKeyForPrefix(
+              `tsdf.${sessionKey}.${storeName}.ci.`,
+            );
+            const currentPayload =
+              getParsedLocalStorageValue<Record<string, unknown>>(storageKey);
+            const currentManifest = getParsedLocalStorageValue<{
+              e: Record<string, Record<string, unknown>>;
+            }>(manifestKey);
+            const entryKey = scope.collection.itemKey('a');
+            if (currentPayload === null || currentManifest === null) {
+              throw new Error('Expected the planned collection eviction.');
+            }
+            const currentEntry = currentManifest.e[entryKey];
+            if (currentEntry === undefined) {
+              throw new Error('Expected the planned collection eviction.');
+            }
+
+            const writeFromAnotherTab = (key: string, value: string): void => {
+              const oldValue = localStorage.getItem(key);
+              localStorage.setItem(key, value);
+              window.dispatchEvent(
+                new StorageEvent('storage', {
+                  key,
+                  newValue: value,
+                  oldValue,
+                  storageArea: localStorage,
+                }),
+              );
+            };
+
+            writeFromAnotherTab(
+              storageKey,
+              JSON.stringify({
+                ...currentPayload,
+                d: { value: { id: 'a', name: 'Refreshed in another tab' } },
+              }),
+            );
+            writeFromAnotherTab(
+              manifestKey,
+              JSON.stringify({
+                ...currentManifest,
+                e: {
+                  ...currentManifest.e,
+                  [entryKey]: { ...currentEntry, a: Date.now() },
+                },
+              }),
+            );
+            refreshedOldestItem = true;
+          }
+
+          return result;
+        },
+      },
+      writable: true,
+    });
+
+    const scope = persistentStore.scope(storeName, sessionKey);
+    setCachedCollectionItem(storeName, sessionKey, 'a', {
+      value: { id: 'a', name: 'Oldest item' },
+    });
+    vi.setSystemTime(Date.now() + 1);
+    setCachedCollectionItem(storeName, sessionKey, 'b', {
+      value: { id: 'b', name: 'Previously newest item' },
+    });
+
+    createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: getLocalCollectionEntrySizeBytes('a', {
+        value: { id: 'a', name: 'Refreshed in another tab' },
+      }),
+    });
+
+    const itemPrefix = `tsdf.${sessionKey}.${storeName}.ci.`;
+    scheduleLocalStorageMaintenance([
+      localPersistentStorage.getManifestKeyForPrefix(itemPrefix),
+    ]);
+
+    async function runNextIdleCallback(): Promise<void> {
+      const callback = idleCallbacks.shift();
+      if (callback === undefined) {
+        throw new Error('Expected a scheduled idle maintenance callback.');
+      }
+      callback({ didTimeout: false, timeRemaining: () => 50 });
+      for (let pass = 0; pass < 100; pass++) await Promise.resolve();
+    }
+
+    await runNextIdleCallback();
+    expect(refreshedOldestItem).toBe(true);
+    expect(idleCallbacks).toHaveLength(1);
+    await runNextIdleCallback();
+
+    expect({
+      previouslyNewest: scope.collection.readItemData('b'),
+      refreshed: scope.collection.readItemData('a'),
+    }).toMatchInlineSnapshot(`
+      previouslyNewest: null
+      refreshed:
+        value: { id: 'a', name: 'Refreshed in another tab' }
+    `);
+  });
+
+  test('maintenance preserves an item protected after eviction planning', async () => {
+    const storeName = 'collection-newly-offline-protected';
+    const sessionKey = 'sess1';
+    const idleCallbacks: IdleRequestCallback[] = [];
+    let lockRequestCount = 0;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        idleCallbacks.push(callback);
+        return idleCallbacks.length;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', () => {});
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      configurable: true,
+      value: {
+        async request<T>(
+          _name: string,
+          callback: () => T | Promise<T>,
+        ): Promise<T> {
+          const result = await callback();
+          lockRequestCount++;
+
+          // Offline coordination can protect an entry without changing its
+          // access timestamp after the store scan planned it for eviction.
+          if (lockRequestCount === 2) {
+            const oldestStorageKey = scope.collection.itemStorageKey('a');
+            localPersistentStorage.syncSessionProtectedKeys(sessionKey, [
+              oldestStorageKey,
+            ]);
+          }
+
+          return result;
+        },
+      },
+      writable: true,
+    });
+
+    const scope = persistentStore.scope(storeName, sessionKey);
+    setCachedCollectionItem(storeName, sessionKey, 'a', {
+      value: { id: 'a', name: 'Needed while offline' },
+    });
+    vi.setSystemTime(Date.now() + 1);
+    setCachedCollectionItem(storeName, sessionKey, 'b', {
+      value: { id: 'b', name: 'Regular cached item' },
+    });
+
+    createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: getLocalCollectionEntrySizeBytes('b', {
+        value: { id: 'b', name: 'Regular cached item' },
+      }),
+    });
+    const itemPrefix = `tsdf.${sessionKey}.${storeName}.ci.`;
+    scheduleLocalStorageMaintenance([
+      localPersistentStorage.getManifestKeyForPrefix(itemPrefix),
+    ]);
+
+    async function runNextIdleCallback(): Promise<void> {
+      const callback = idleCallbacks.shift();
+      if (callback === undefined) {
+        throw new Error('Expected a scheduled idle maintenance callback.');
+      }
+      callback({ didTimeout: false, timeRemaining: () => 50 });
+      for (let pass = 0; pass < 100; pass++) await Promise.resolve();
+    }
+
+    await runNextIdleCallback();
+    expect(idleCallbacks).toHaveLength(1);
+    await runNextIdleCallback();
+
+    expect({
+      protectedItem: scope.collection.readItemData('a'),
+      regularItem: scope.collection.readItemData('b'),
+    }).toMatchInlineSnapshot(`
+      protectedItem:
+        value: { id: 'a', name: 'Needed while offline' }
+
+      regularItem:
+        value: { id: 'b', name: 'Regular cached item' }
+    `);
+  });
+
+  test('quota maintenance yields at its idle deadline and keeps each partial eviction consistent', async () => {
+    const storeName = 'collection-deadline-maintenance';
+    const sessionKey = 'sess1';
+    const itemIds = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleCallbackId = 1;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        const callbackId = nextIdleCallbackId++;
+        idleCallbacks.set(callbackId, callback);
+        return callbackId;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
+      idleCallbacks.delete(callbackId);
+    });
+
+    for (const itemId of itemIds) {
+      setCachedCollectionItem(storeName, sessionKey, itemId, {
+        value: { id: itemId, name: 'Cached item' },
+      });
+      vi.setSystemTime(Date.now() + 1);
+    }
+
+    createCollectionEnv({
+      storeName,
+      sessionKey,
+      maxBytes: sumPersistedEntryBytes(
+        getLocalCollectionEntrySizeBytes('e', {
+          value: { id: 'e', name: 'Cached item' },
+        }),
+        getLocalCollectionEntrySizeBytes('f', {
+          value: { id: 'f', name: 'Cached item' },
+        }),
+      ),
+    });
+
+    const itemPrefix = `tsdf.${sessionKey}.${storeName}.ci.`;
+    const manifestKey =
+      localPersistentStorage.getManifestKeyForPrefix(itemPrefix);
+    scheduleLocalStorageMaintenance([manifestKey]);
+
+    async function runNextIdleCallback(
+      timeRemaining: () => number,
+      didTimeout = false,
+    ): Promise<void> {
+      const nextCallbackEntry = idleCallbacks.entries().next().value;
+      if (nextCallbackEntry === undefined) {
+        throw new Error('Expected a scheduled idle maintenance callback.');
+      }
+
+      const [callbackId, callback] = nextCallbackEntry;
+      idleCallbacks.delete(callbackId);
+      callback({ didTimeout, timeRemaining });
+
+      // Maintenance crosses the navigator-lock promise boundary before it can
+      // either finish or schedule its next idle continuation.
+      for (let pass = 0; pass < 100; pass++) {
+        await Promise.resolve();
+      }
+    }
+
+    // Exhaust the first deadline after two payload removals. The pass must
+    // stop there instead of deleting every overflowing entry in one task.
+    await runNextIdleCallback(() =>
+      listStoredCollectionItemPayloads(storeName, sessionKey).length > 4
+        ? 10
+        : 0,
+    );
+
+    const payloadsAfterFirstSlice = listStoredCollectionItemPayloads(
+      storeName,
+      sessionKey,
+    ).sort();
+    const manifestEntriesAfterFirstSlice = localPersistentStorage
+      .listManifestEntries(itemPrefix)
+      .map((entry) => entry.entryKey)
+      .sort();
+
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      manifestEntriesAfterFirstSlice,
+      payloadsAfterFirstSlice,
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 1
+      manifestEntriesAfterFirstSlice: ['"c', '"d', '"e', '"f']
+      payloadsAfterFirstSlice: ['c', 'd', 'e', 'f']
+    `);
+
+    // A timeout-fired continuation has no usable native deadline. Its
+    // synthetic budget should still make progress and complete this small
+    // remainder, despite the browser deadline reporting zero time.
+    const performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
+    await runNextIdleCallback(() => 0, true);
+    performanceNowSpy.mockRestore();
+
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      manifestEntries: localPersistentStorage
+        .listManifestEntries(itemPrefix)
+        .map((entry) => entry.entryKey)
+        .sort(),
+      payloads: listStoredCollectionItemPayloads(storeName, sessionKey).sort(),
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 0
+      manifestEntries: ['"e', '"f']
+      payloads: ['e', 'f']
+    `);
+  });
+
   test('expiration cleanup removes expired items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const storeName = 'collection-expiration';
@@ -85,13 +420,14 @@ describe('sync storage efficiency: collection', () => {
            |    └ (entry data, <"fresh-user>)
       .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
            |    └ (namespace index) | 0.38 kb
+      .    | 📖 #6 ❌ tsdf.sess1._o_.s (entry data)
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user
            |    └ (entry data, <"expired-user>)
       .    | 🗑️ #4 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2
            |    └ (entry data, <"expired-user-2>)
-      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
            |    └ (namespace index) | 0.38 kb -> 0.13 kb
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
 
@@ -174,9 +510,9 @@ describe('sync storage efficiency: collection', () => {
            |    └ (namespace index) | 0.25 kb
       .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-startup-max-items.ci."a
            |    └ (entry data, <"a>)
-      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
            |    └ (namespace index) | 0.25 kb -> 0.17 kb
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
     expect(
@@ -954,8 +1290,6 @@ describe('sync storage efficiency: collection', () => {
            |    └ (namespace index) | 0.17 kb
       .    | 📖 #2 ✅ tsdf.sess1.col-multi-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
-      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.17 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 #3 ✅ tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (entry data, <"2>) | 0.11 kb
       "

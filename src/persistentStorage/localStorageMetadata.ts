@@ -21,6 +21,7 @@ import {
   getSerializedStringSize,
   isQuotaExceededError,
 } from './persistenceUtils';
+import type { IdleCleanupContext } from './scheduleIdleCleanup';
 import {
   COLLECTION_STORAGE_ENTRY_PREFIX,
   getOfflineSessionStatusStorageKey,
@@ -42,8 +43,16 @@ const NAMESPACE_MANIFEST_KEY_PREFIX = `${MANIFEST_KEY_PREFIX}n:`;
 
 const DEFAULT_LOCAL_STORAGE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MANAGED_LOCAL_STORAGE_MAINTENANCE_CHUNK_SIZE = 25;
 
-const maintenanceCallbacks = new Map<string, () => Promise<void>>();
+type ManagedLocalStorageMaintenanceCallback = (
+  context?: IdleCleanupContext,
+) => Promise<void>;
+
+const maintenanceCallbacks = new Map<
+  string,
+  ManagedLocalStorageMaintenanceCallback
+>();
 
 type ManagedLocalStorageRuntimeConfig = {
   cleanupIntervalMs: number;
@@ -60,7 +69,21 @@ let managedLocalStorageRuntimeConfig = {
   ...defaultManagedLocalStorageRuntimeConfig,
 };
 
+const managedLocalStorageMutationListeners = new Set<(key: string) => void>();
+
+export function addManagedLocalStorageMutationListener(
+  listener: (key: string) => void,
+): () => void {
+  managedLocalStorageMutationListeners.add(listener);
+  return () => managedLocalStorageMutationListeners.delete(listener);
+}
+
+function notifyManagedLocalStorageMutation(key: string): void {
+  for (const listener of managedLocalStorageMutationListeners) listener(key);
+}
+
 export type ManagedLocalStorageIo = {
+  invalidate?(key: string): void;
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
@@ -73,14 +96,19 @@ export const directManagedLocalStorageIo: ManagedLocalStorageIo = {
     return localStorage.getItem(key);
   },
   setItem(key, value) {
-    setManagedLocalStorageItemWithQuotaRecovery(
-      key,
-      value,
-      directManagedLocalStorageIo,
-    );
+    if (
+      setManagedLocalStorageItemWithQuotaRecovery(
+        key,
+        value,
+        directManagedLocalStorageIo,
+      )
+    ) {
+      notifyManagedLocalStorageMutation(key);
+    }
   },
   removeItem(key) {
     localStorage.removeItem(key);
+    notifyManagedLocalStorageMutation(key);
   },
   listKeys() {
     const keys: string[] = [];
@@ -1238,6 +1266,76 @@ export function removeManagedLocalStorageNamespacePayload(
   return true;
 }
 
+export type ManagedLocalStorageNamespaceRemovalCandidate = {
+  entryKey: string;
+  lastAccessAt: number;
+  offlineProtected: boolean;
+};
+
+export type ManagedLocalStorageNamespaceRemovalResult = {
+  processedCount: number;
+  removedEntryKeys: string[];
+  staleEntryKeys: string[];
+};
+
+/**
+ * Removes a deadline-bounded batch from one namespace and rewrites its
+ * manifest once. The access timestamp is an optimistic concurrency token: a
+ * payload refreshed between maintenance slices is left untouched and can be
+ * reconsidered by a later pass.
+ */
+export function removeManagedLocalStorageNamespaceEntriesIfUnchanged(
+  storagePrefix: string,
+  candidates: ManagedLocalStorageNamespaceRemovalCandidate[],
+  candidateIndex: number,
+  shouldYield: () => boolean,
+  io: ManagedLocalStorageIo = directManagedLocalStorageIo,
+): ManagedLocalStorageNamespaceRemovalResult {
+  const manifestKey = getManagedLocalStorageManifestKeyForPrefix(storagePrefix);
+  const manifest = readParsedManifest(manifestKey, io);
+  if (manifest === null) {
+    return {
+      processedCount: candidates.length - candidateIndex,
+      removedEntryKeys: [],
+      staleEntryKeys: candidates
+        .slice(candidateIndex)
+        .map((candidate) => candidate.entryKey),
+    };
+  }
+
+  const nextEntries = new Map(manifest.entries);
+  const removedEntryKeys: string[] = [];
+  const staleEntryKeys: string[] = [];
+  let processedCount = 0;
+
+  for (let index = candidateIndex; index < candidates.length; index++) {
+    if (processedCount > 0 && shouldYield()) break;
+
+    processedCount++;
+    const candidate = candidates[index];
+    if (candidate === undefined) continue;
+    const currentEntry = nextEntries.get(candidate.entryKey);
+    if (
+      currentEntry?.lastAccessAt !== candidate.lastAccessAt ||
+      isManagedLocalStorageEntryOfflineProtected(currentEntry.meta) !==
+        candidate.offlineProtected
+    ) {
+      staleEntryKeys.push(candidate.entryKey);
+      continue;
+    }
+
+    io.removeItem(`${storagePrefix}${candidate.entryKey}`);
+    nextEntries.delete(candidate.entryKey);
+    removedEntryKeys.push(candidate.entryKey);
+  }
+
+  if (removedEntryKeys.length > 0) {
+    writeManifest(manifestKey, { entries: nextEntries }, io);
+  }
+
+  return { processedCount, removedEntryKeys, staleEntryKeys };
+}
+
 export function removeManagedLocalStorageSinglePayload(
   payloadKey: string,
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
@@ -1312,19 +1410,6 @@ function getSessionKeyForManifestLocation(
   );
 }
 
-function getCachedOfflineStatus(
-  sessionKey: string,
-  io: ManagedLocalStorageIo,
-  cache: Map<string, boolean>,
-): boolean {
-  const cached = cache.get(sessionKey);
-  if (cached !== undefined) return cached;
-
-  const result = isSessionOfflineDuringManagedCleanup(sessionKey, io);
-  cache.set(sessionKey, result);
-  return result;
-}
-
 function isSessionOfflineDuringManagedCleanup(
   sessionKey: string,
   io: ManagedLocalStorageIo,
@@ -1339,6 +1424,13 @@ function isSessionOfflineDuringManagedCleanup(
       : (rawStatus ?? null);
 
   return isOfflineModeStatusValue(status);
+}
+
+function readOfflineStatus(
+  sessionKey: string,
+  io: ManagedLocalStorageIo,
+): boolean {
+  return isSessionOfflineDuringManagedCleanup(sessionKey, io);
 }
 
 export function clearManagedLocalStorageSession(
@@ -1362,7 +1454,7 @@ export function clearManagedLocalStorageSession(
 
 export function registerManagedLocalStorageMaintenanceCallback(
   manifestKey: string,
-  callback: () => Promise<void>,
+  callback: ManagedLocalStorageMaintenanceCallback,
 ): void {
   maintenanceCallbacks.set(manifestKey, callback);
 }
@@ -1409,110 +1501,212 @@ function isMaintenanceDue(
   );
 }
 
-function runStrictTsdfLocalStorageCleanup(io: ManagedLocalStorageIo): void {
-  const tsdfKeys = io.listKeys().filter((key) => key.startsWith('tsdf.'));
-  const manifestOwnedPayloadKeys = new Set<string>();
-  const manifestBackedPayloadKeys: string[] = [];
+const MANIFEST_NAMESPACE_ENTRY_PREFIXES = [
+  COLLECTION_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+];
 
-  for (const key of tsdfKeys) {
-    const classification = classifyTsdfLocalStorageKey(key);
-    if (classification === null) continue;
+function isManifestBackedPayloadCurrentlyOwned(
+  payloadKey: string,
+  io: ManagedLocalStorageIo,
+): boolean {
+  for (const entryPrefix of MANIFEST_NAMESPACE_ENTRY_PREFIXES) {
+    const namespaceMarker = `.${entryPrefix}.`;
+    let markerIndex = payloadKey.indexOf(namespaceMarker);
 
-    switch (classification.kind) {
-      case 'global-maintenance': {
-        if (
-          readParsedMetadataJson(
-            key,
-            managedLocalStorageGlobalMaintenanceSchema,
-            io,
-          ) === null
-        ) {
-          removeMetadataJson(key, io);
-        }
-        break;
-      }
-      case 'async-global-maintenance': {
-        if (
-          readParsedMetadataJson(
-            key,
-            managedLocalStorageGlobalMaintenanceSchema,
-            io,
-          ) === null
-        ) {
-          removeMetadataJson(key, io);
-        }
-        break;
-      }
-      case 'manifest': {
-        const manifest = readParsedManifest(key, io);
-        if (manifest === null) {
-          removeMetadataJson(key, io);
-          break;
-        }
+    while (markerIndex !== -1) {
+      const storagePrefix = payloadKey.slice(
+        0,
+        markerIndex + namespaceMarker.length,
+      );
+      const entryKey = payloadKey.slice(storagePrefix.length);
+      const manifestKey =
+        getManagedLocalStorageManifestKeyForPrefix(storagePrefix);
+      const manifest = readParsedManifest(manifestKey, io);
+      if (manifest?.entries.has(entryKey) === true) return true;
 
-        for (const entry of manifest.entries.values()) {
-          const payloadKey = getPayloadKeyForManifestEntry(
-            classification.manifestLocation,
-            entry.entryKey,
-          );
-          if (payloadKey !== null) {
-            manifestOwnedPayloadKeys.add(payloadKey);
-          }
-        }
-        break;
-      }
-      case 'compact-list-query': {
-        if (readCompactListQueryEntry(key, io) === null) {
-          io.removeItem(key);
-        }
-        break;
-      }
-      case 'manifest-backed-payload': {
-        manifestBackedPayloadKeys.push(key);
-        break;
-      }
-      case 'unknown-tsdf': {
-        io.removeItem(key);
-        break;
-      }
+      markerIndex = payloadKey.indexOf(namespaceMarker, markerIndex + 1);
     }
   }
 
-  for (const payloadKey of manifestBackedPayloadKeys) {
-    if (!manifestOwnedPayloadKeys.has(payloadKey)) {
-      io.removeItem(payloadKey);
-    }
-  }
+  const singleManifestKey =
+    getManagedLocalStorageManifestKeyForSingle(payloadKey);
+  const singleManifest = readParsedManifest(singleManifestKey, io);
+  return singleManifest?.entries.has(undefined) === true;
 }
 
-function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
-  manifestKeys: string[];
-  knownKeys: Set<string>;
-} {
-  const allKeys = io.listKeys();
-  const manifestKeys = allKeys.filter((key) => {
-    if (!isManagedLocalStorageManifestKey(key)) return false;
+function shouldRunGenericCleanupForManifestLocation(
+  location: ManagedLocalStorageManifestLocation,
+): boolean {
+  if (location.kind === 'single') {
+    return !isOfflinePayloadKey(location.payloadKey);
+  }
 
-    const manifestLocation = parseManagedLocalStorageManifestKey(key);
-    if (
-      manifestLocation?.kind === 'single' &&
-      isOfflinePayloadKey(manifestLocation.payloadKey)
-    ) {
-      return false;
-    }
+  return !isOfflineNamespaceStoragePrefix(location.storagePrefix);
+}
 
-    if (
-      manifestLocation?.kind === 'namespace' &&
-      isOfflineNamespaceStoragePrefix(manifestLocation.storagePrefix)
-    ) {
-      return false;
-    }
+type RunManagedLocalStorageLocked = <T>(
+  callback: (io: ManagedLocalStorageIo) => T | Promise<T>,
+) => Promise<T>;
 
-    return true;
-  });
+async function runGlobalTsdfLocalStorageCleanup(
+  runLocked: RunManagedLocalStorageLocked,
+  context: IdleCleanupContext,
+): Promise<{ manifestKeys: string[] } | null> {
+  // Classify keys first, but defer manifest parsing to the generic cleanup
+  // traversal below. Validation, expiration, and the ownership snapshot then
+  // share one authoritative read for each manifest lock slice.
+  const allKeys = await runLocked((io) => io.listKeys());
+  const tsdfKeys = allKeys.filter((key) => key.startsWith('tsdf.'));
   const knownKeys = new Set(allKeys);
+  const manifestOwnedPayloadKeys = new Set<string>();
+  const removedPayloadKeys = new Set<string>();
+  const manifestBackedPayloadKeys: string[] = [];
+  const manifestTargets: Array<{ cleanEntries: boolean; manifestKey: string }> =
+    [];
+  const manifestOwnershipSnapshots: Array<{
+    entryKeys: Array<string | undefined>;
+    location: ManagedLocalStorageManifestLocation;
+  }> = [];
+  let keyIndex = 0;
 
-  return { manifestKeys, knownKeys };
+  while (keyIndex < tsdfKeys.length) {
+    if (!(await context.yieldIfNeeded())) return null;
+
+    await runLocked((io) => {
+      let processedCount = 0;
+
+      while (keyIndex < tsdfKeys.length) {
+        if (processedCount > 0 && context.shouldYield()) break;
+
+        const key = tsdfKeys[keyIndex];
+        keyIndex++;
+        processedCount++;
+        if (key === undefined) continue;
+
+        const classification = classifyTsdfLocalStorageKey(key);
+        if (classification === null) continue;
+
+        switch (classification.kind) {
+          case 'global-maintenance': {
+            if (
+              readParsedMetadataJson(
+                key,
+                managedLocalStorageGlobalMaintenanceSchema,
+                io,
+              ) === null
+            ) {
+              removeMetadataJson(key, io);
+            }
+            break;
+          }
+          case 'async-global-maintenance': {
+            if (
+              readParsedMetadataJson(
+                key,
+                managedLocalStorageGlobalMaintenanceSchema,
+                io,
+              ) === null
+            ) {
+              removeMetadataJson(key, io);
+            }
+            break;
+          }
+          case 'manifest': {
+            manifestTargets.push({
+              cleanEntries: shouldRunGenericCleanupForManifestLocation(
+                classification.manifestLocation,
+              ),
+              manifestKey: key,
+            });
+            break;
+          }
+          case 'compact-list-query': {
+            if (readCompactListQueryEntry(key, io) === null) {
+              io.removeItem(key);
+            }
+            break;
+          }
+          case 'manifest-backed-payload': {
+            manifestBackedPayloadKeys.push(key);
+            break;
+          }
+          case 'unknown-tsdf': {
+            io.removeItem(key);
+            break;
+          }
+        }
+      }
+    });
+  }
+
+  const manifestKeys: string[] = [];
+  for (const { cleanEntries, manifestKey } of manifestTargets) {
+    const completed = await runGenericCleanupForManifest(
+      manifestKey,
+      knownKeys,
+      runLocked,
+      context,
+      cleanEntries,
+      removedPayloadKeys,
+      (location, entryKeys) => {
+        manifestOwnershipSnapshots.push({ entryKeys, location });
+        if (cleanEntries) manifestKeys.push(manifestKey);
+      },
+    );
+    if (!completed) return null;
+  }
+
+  for (const snapshot of manifestOwnershipSnapshots) {
+    for (const [entryIndex, entryKey] of snapshot.entryKeys.entries()) {
+      if (
+        entryIndex % MANAGED_LOCAL_STORAGE_MAINTENANCE_CHUNK_SIZE === 0 &&
+        !(await context.yieldIfNeeded())
+      ) {
+        return null;
+      }
+
+      const payloadKey = getPayloadKeyForManifestEntry(
+        snapshot.location,
+        entryKey,
+      );
+      if (payloadKey !== null) {
+        manifestOwnedPayloadKeys.add(payloadKey);
+      }
+    }
+  }
+
+  let orphanIndex = 0;
+  while (orphanIndex < manifestBackedPayloadKeys.length) {
+    if (!(await context.yieldIfNeeded())) return null;
+
+    await runLocked((io) => {
+      let processedCount = 0;
+
+      while (orphanIndex < manifestBackedPayloadKeys.length) {
+        if (processedCount > 0 && context.shouldYield()) break;
+
+        const payloadKey = manifestBackedPayloadKeys[orphanIndex];
+        orphanIndex++;
+        processedCount++;
+        if (payloadKey === undefined) continue;
+        if (manifestOwnedPayloadKeys.has(payloadKey)) continue;
+        if (removedPayloadKeys.has(payloadKey)) continue;
+
+        // Recheck ownership under the slice lock. A payload and its manifest
+        // may have been written after the initial key snapshot.
+        if (!isManifestBackedPayloadCurrentlyOwned(payloadKey, io)) {
+          io.removeItem(payloadKey);
+        }
+      }
+    });
+  }
+
+  return { manifestKeys };
 }
 
 /**
@@ -1526,101 +1720,162 @@ function isOfflinePayloadKey(payloadKey: string): boolean {
   );
 }
 
-function runGenericCleanupForManifest(
+async function runGenericCleanupForManifest(
   manifestKey: string,
   knownKeys: Set<string> | null,
-  io: ManagedLocalStorageIo,
-  offlineSessionCache: Map<string, boolean>,
-): void {
+  runLocked: RunManagedLocalStorageLocked,
+  context: IdleCleanupContext,
+  cleanEntries = true,
+  removedPayloadKeys?: Set<string>,
+  onManifestCleaned?: (
+    location: ManagedLocalStorageManifestLocation,
+    entryKeys: Array<string | undefined>,
+  ) => void,
+): Promise<boolean> {
   const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
   if (!manifestLocation) {
-    removeMetadataJson(manifestKey, io);
-    return;
+    await runLocked((io) => removeMetadataJson(manifestKey, io));
+    return true;
   }
 
-  const manifest = readParsedManifest(manifestKey, io);
-  if (!manifest) {
-    if (io.getItem(manifestKey) !== null) {
-      removeMetadataJson(manifestKey, io);
-    }
-    return;
-  }
-
-  const now = Date.now();
   const sessionKey = getSessionKeyForManifestLocation(manifestLocation);
-  const offlineStatusKey =
-    sessionKey === null ? null : getOfflineSessionStatusStorageKey(sessionKey);
-  const skipExpiration =
-    sessionKey !== null &&
-    offlineStatusKey !== null &&
-    knownKeys !== null &&
-    knownKeys.has(offlineStatusKey) &&
-    getCachedOfflineStatus(sessionKey, io, offlineSessionCache);
-  const nextEntries = new Map<
-    string | undefined,
-    StoredManagedLocalStorageManifestEntry
-  >();
+  const manifestUsesOfflineStorageRoot =
+    isOfflineOwnedManifestLocation(manifestLocation);
+  let entryKeys: Array<string | undefined> = [];
+  let manifestInitialized = false;
+  let entryIndex = 0;
 
-  for (const entry of manifest.entries.values()) {
-    const payloadKey = getPayloadKeyForManifestEntry(
-      manifestLocation,
-      entry.entryKey,
-    );
-    if (payloadKey === null) continue;
+  do {
+    if (!(await context.yieldIfNeeded())) return false;
 
-    if (knownKeys !== null && !knownKeys.has(payloadKey)) continue;
+    await runLocked((io) => {
+      const manifest = readParsedManifest(manifestKey, io);
+      if (manifest === null) {
+        if (io.getItem(manifestKey) !== null) {
+          removeMetadataJson(manifestKey, io);
+        }
+        manifestInitialized = true;
+        entryIndex = entryKeys.length;
+        return;
+      }
+      if (!manifestInitialized) {
+        entryKeys = [...manifest.entries.keys()];
+        manifestInitialized = true;
+      }
+      if (!cleanEntries) {
+        entryIndex = entryKeys.length;
+        onManifestCleaned?.(manifestLocation, entryKeys);
+        return;
+      }
 
-    if (
-      !isOfflinePayloadKey(payloadKey) &&
-      !isManagedLocalStorageEntryOfflineProtected(entry.meta) &&
-      !skipExpiration &&
-      now - entry.lastAccessAt > managedLocalStorageRuntimeConfig.maxAgeMs
-    ) {
-      io.removeItem(payloadKey);
-      continue;
-    }
+      const nextEntries = new Map(manifest.entries);
+      let skipExpiration: boolean | undefined;
+      let manifestChanged = false;
+      let processedCount = 0;
 
-    nextEntries.set(entry.entryKey, entry);
-  }
+      while (entryIndex < entryKeys.length) {
+        if (processedCount > 0 && context.shouldYield()) break;
 
-  if (nextEntries.size === manifest.entries.size) return;
+        const entryKey = entryKeys[entryIndex];
+        entryIndex++;
+        processedCount++;
+        const entry = nextEntries.get(entryKey);
+        if (entry === undefined) continue;
 
-  writeManifest(manifestKey, { entries: nextEntries }, io);
+        const payloadKey = getPayloadKeyForManifestEntry(
+          manifestLocation,
+          entry.entryKey,
+        );
+        if (payloadKey === null) {
+          nextEntries.delete(entryKey);
+          manifestChanged = true;
+          continue;
+        }
+
+        const payloadMissing =
+          knownKeys !== null &&
+          !knownKeys.has(payloadKey) &&
+          io.getItem(payloadKey) === null;
+        const expirationCandidate =
+          !payloadMissing &&
+          !isOfflinePayloadKey(payloadKey) &&
+          !isManagedLocalStorageEntryOfflineProtected(entry.meta) &&
+          Date.now() - entry.lastAccessAt >
+            managedLocalStorageRuntimeConfig.maxAgeMs;
+        const expired =
+          expirationCandidate &&
+          !(skipExpiration ??=
+            knownKeys !== null &&
+            sessionKey !== null &&
+            !manifestUsesOfflineStorageRoot &&
+            readOfflineStatus(sessionKey, io));
+        if (!payloadMissing && !expired) continue;
+
+        if (expired) {
+          io.removeItem(payloadKey);
+          removedPayloadKeys?.add(payloadKey);
+        }
+        nextEntries.delete(entryKey);
+        manifestChanged = true;
+      }
+
+      if (manifestChanged) {
+        writeManifest(manifestKey, { entries: nextEntries }, io);
+      }
+      if (entryIndex >= entryKeys.length) {
+        onManifestCleaned?.(manifestLocation, [...nextEntries.keys()]);
+      }
+    });
+  } while (entryIndex < entryKeys.length);
+
+  return true;
 }
 
-export async function runManagedLocalStorageMaintenance(
-  io: ManagedLocalStorageIo = directManagedLocalStorageIo,
-  { forceManifestKeys = [] }: { forceManifestKeys?: Iterable<string> } = {},
-): Promise<void> {
+export async function runManagedLocalStorageMaintenance({
+  context,
+  forceManifestKeys = [],
+  runLocked,
+}: {
+  context: IdleCleanupContext;
+  forceManifestKeys?: Iterable<string>;
+  runLocked: RunManagedLocalStorageLocked;
+}): Promise<void> {
   const forcedManifestKeys = new Set(forceManifestKeys);
   const runGlobalSweep = forcedManifestKeys.size === 0;
-  if (runGlobalSweep && !isMaintenanceDue(readGlobalMaintenanceState(io))) {
-    return;
-  }
-
   if (runGlobalSweep) {
-    runStrictTsdfLocalStorageCleanup(io);
+    const maintenanceDue = await runLocked((io) =>
+      isMaintenanceDue(readGlobalMaintenanceState(io)),
+    );
+    if (!maintenanceDue) return;
   }
 
-  const { manifestKeys, knownKeys } = runGlobalSweep
-    ? collectManagedLocalStorageSweepTargets(io)
-    : { manifestKeys: [...forcedManifestKeys], knownKeys: null };
-  const invokedCallbacks = new Set<() => Promise<void>>();
-  const offlineSessionCache = new Map<string, boolean>();
+  const globalCleanupResult = runGlobalSweep
+    ? await runGlobalTsdfLocalStorageCleanup(runLocked, context)
+    : null;
+  if (runGlobalSweep && globalCleanupResult === null) return;
+
+  const manifestKeys = runGlobalSweep
+    ? (globalCleanupResult?.manifestKeys ?? [])
+    : [...forcedManifestKeys];
+  const invokedCallbacks = new Set<ManagedLocalStorageMaintenanceCallback>();
 
   for (const manifestKey of manifestKeys) {
-    runGenericCleanupForManifest(
-      manifestKey,
-      knownKeys,
-      io,
-      offlineSessionCache,
-    );
+    if (!runGlobalSweep) {
+      const completed = await runGenericCleanupForManifest(
+        manifestKey,
+        null,
+        runLocked,
+        context,
+      );
+      if (!completed) return;
+    }
 
     const callback = maintenanceCallbacks.get(manifestKey);
     if (!callback || invokedCallbacks.has(callback)) continue;
 
     invokedCallbacks.add(callback);
-    await callback();
+    await callback(context);
+    if (context.isCanceled()) return;
   }
 
   if (runGlobalSweep) {
@@ -1628,10 +1883,13 @@ export async function runManagedLocalStorageMaintenance(
       if (invokedCallbacks.has(callback)) continue;
 
       invokedCallbacks.add(callback);
-      await callback();
+      await callback(context);
+      if (context.isCanceled()) return;
     }
 
-    writeGlobalMaintenanceState({ lastCleanupAt: Date.now() }, io);
+    await runLocked((io) => {
+      writeGlobalMaintenanceState({ lastCleanupAt: Date.now() }, io);
+    });
   }
 }
 

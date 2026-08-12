@@ -1275,12 +1275,8 @@ test('offline derived query hydration only loads the requested group from persis
          |    └ (items index) | 0.69 kb
     .    | 📖 #3 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||1
          |    └ (item data, <"users||1>) | 0.10 kb
-    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.69 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #4 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||2
          |    └ (item data, <"users||2>) | 0.10 kb
-    .    | 📖 #2 ✅ tsdf._m.r.n:derived-queries-persisted-groups.derived-queries-persisted-groups-store.li.m
-         |    └ (items index) | 0.69 kb ⚠️ REPEATED READ <10ms UNCHANGED
     .    | 📖 #5 ✅ tsdf.derived-queries-persisted-groups.derived-queries-persisted-groups-store.li."users||3
          |    └ (item data, <"users||3>) | 0.10 kb
     "

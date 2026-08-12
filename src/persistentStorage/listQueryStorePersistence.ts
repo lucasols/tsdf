@@ -55,6 +55,7 @@ import {
   createTimedKeySet,
   getSerializedStringSize,
   keepEntriesWithinByteBudget,
+  keepEntriesWithinByteBudgetDuringIdle,
   serializeJsonForStorage,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
@@ -82,7 +83,10 @@ import {
   logPersistentStorageQuotaCleanup,
   type QuotaCleanupPhase,
 } from './quotaDebug';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import {
+  scheduleIdleCleanup,
+  type IdleCleanupContext,
+} from './scheduleIdleCleanup';
 import {
   LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
   LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
@@ -98,6 +102,7 @@ import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_QUERY_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 1000;
+const MAINTENANCE_SCAN_CHUNK_SIZE = 25;
 
 type ListQueryPersistenceOfflineOperations<
   ItemState extends ValidStoreState,
@@ -117,6 +122,12 @@ type ListQueryPersistenceOfflineOperations<
         : unknown))
   | null;
 
+type LocalStorageMaintenanceScope = {
+  itemPrefix: string;
+  queryPrefix: string;
+  sessionKey: string;
+};
+
 type ManagedQueryEntry = {
   hasMore: boolean;
   items: string[];
@@ -124,10 +135,18 @@ type ManagedQueryEntry = {
   offlineProtected: boolean;
   payload: unknown;
   queryKey: string;
+  rawValue: string;
   sizeBytes: number;
 };
 
 type ManagedQueryEntriesByKey = Map<string, ManagedQueryEntry>;
+
+type StoredQueryEvictionResult = {
+  completed: boolean;
+  keptQueryKeys: Set<string>;
+  managedQueryEntriesByKey: ManagedQueryEntriesByKey | null;
+};
+
 type EntryNamespaceMetadata = { h?: true; p?: unknown };
 type ItemEntryNamespaceMetadata = EntryNamespaceMetadata & {
   f?: ItemLoadedFields;
@@ -588,6 +607,7 @@ export function setupListQueryPersistence<
   let knownPersistedItemKeys: Set<string> | null = null;
   let knownPersistedQueryKeys: Set<string> | null = null;
   let maintenanceCallbackKey: string | null = null;
+  const pendingLocalQueryReconciliationSessions = new Set<string>();
 
   function isOfflineNetworkActive(): boolean {
     return isOfflineNetworkModeActiveSync(
@@ -631,6 +651,31 @@ export function setupListQueryPersistence<
     return `${prefix}${queryKey}`;
   }
 
+  function getLocalStorageMaintenanceScope(): LocalStorageMaintenanceScope | null {
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return null;
+
+    return {
+      sessionKey,
+      itemPrefix: getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+      ),
+      queryPrefix: getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+      ),
+    };
+  }
+
+  function isLocalStorageMaintenanceScopeCurrent(
+    scope: LocalStorageMaintenanceScope,
+  ): boolean {
+    return config.getSessionKey() === scope.sessionKey;
+  }
+
   function getLocalStorageItemEntrySizeBytes(
     value: PersistedListQueryItemData<unknown>,
   ): number {
@@ -650,25 +695,25 @@ export function setupListQueryPersistence<
 
   function readLocalStorageQueryEntry(
     queryKey: string,
+    knownStorageKey?: string,
   ): ManagedQueryEntry | undefined {
     if (localStorageAdapter === null) return undefined;
 
-    const storageKey = getLocalStorageQueryStorageKey(queryKey);
+    const storageKey =
+      knownStorageKey ?? getLocalStorageQueryStorageKey(queryKey);
     if (storageKey === false) return undefined;
 
     const rawEntry = localStorageAdapter.readRaw(storageKey);
+    if (rawEntry === null) return undefined;
     const entry = parseCompactListQueryLocalStorageEntry(rawEntry);
     if (entry === null || entry.version !== version) {
       return undefined;
     }
 
-    const sizeBytes =
-      rawEntry === null
-        ? 0
-        : rememberQueryMetadataSize(
-            queryKey,
-            getSerializedStringSize(rawEntry),
-          );
+    const sizeBytes = rememberQueryMetadataSize(
+      queryKey,
+      getSerializedStringSize(rawEntry),
+    );
 
     return {
       queryKey,
@@ -677,13 +722,14 @@ export function setupListQueryPersistence<
       hasMore: entry.hasMore,
       lastAccessAt: entry.lastAccessAt,
       offlineProtected: entry.offlineProtected,
+      rawValue: rawEntry,
       sizeBytes,
     };
   }
 
   function scanLocalStorageQueryEntries(): {
     entriesByKey: ManagedQueryEntriesByKey;
-    invalidQueryKeys: string[];
+    invalidQueryEntries: Array<{ queryKey: string; rawValue: string | null }>;
   } | null {
     if (localStorageAdapter === null) return null;
 
@@ -691,25 +737,81 @@ export function setupListQueryPersistence<
     if (queryPrefix === false) return null;
 
     const entriesByKey: ManagedQueryEntriesByKey = new Map();
-    const invalidQueryKeys: string[] = [];
+    const invalidQueryEntries: Array<{
+      queryKey: string;
+      rawValue: string | null;
+    }> = [];
 
     for (const storageKey of localStorageAdapter.listRawKeys(queryPrefix)) {
       const queryKey = storageKey.slice(queryPrefix.length);
       const entry = readLocalStorageQueryEntry(queryKey);
       if (!entry) {
-        invalidQueryKeys.push(queryKey);
+        invalidQueryEntries.push({
+          queryKey,
+          rawValue: localStorageAdapter.readRaw(storageKey),
+        });
         continue;
       }
 
       entriesByKey.set(queryKey, entry);
     }
 
-    return { entriesByKey, invalidQueryKeys };
+    return { entriesByKey, invalidQueryEntries };
+  }
+
+  async function scanLocalStorageQueryEntriesDuringMaintenance(
+    idleContext: IdleCleanupContext,
+    scope: LocalStorageMaintenanceScope,
+  ): Promise<ReturnType<typeof scanLocalStorageQueryEntries>> {
+    if (localStorageAdapter === null) return null;
+    if (!isLocalStorageMaintenanceScopeCurrent(scope)) return null;
+
+    const storageKeys = await localStorageAdapter.runMaintenanceLocked(
+      idleContext,
+      () => localStorageAdapter.listRawKeys(scope.queryPrefix),
+    );
+    const entriesByKey: ManagedQueryEntriesByKey = new Map();
+    const invalidQueryEntries: Array<{
+      queryKey: string;
+      rawValue: string | null;
+    }> = [];
+    let storageKeyIndex = 0;
+
+    while (storageKeyIndex < storageKeys.length) {
+      if (!(await idleContext.yieldIfNeeded())) return null;
+      if (!isLocalStorageMaintenanceScopeCurrent(scope)) return null;
+
+      await localStorageAdapter.runMaintenanceLocked(idleContext, () => {
+        let processedCount = 0;
+        while (storageKeyIndex < storageKeys.length) {
+          if (processedCount > 0 && idleContext.shouldYield()) break;
+
+          const storageKey = storageKeys[storageKeyIndex];
+          storageKeyIndex++;
+          processedCount++;
+          if (storageKey === undefined) continue;
+
+          const queryKey = storageKey.slice(scope.queryPrefix.length);
+          const entry = readLocalStorageQueryEntry(queryKey, storageKey);
+          if (entry === undefined) {
+            invalidQueryEntries.push({
+              queryKey,
+              rawValue: localStorageAdapter.readRaw(storageKey),
+            });
+          } else {
+            entriesByKey.set(queryKey, entry);
+          }
+        }
+      });
+    }
+
+    return { entriesByKey, invalidQueryEntries };
   }
 
   async function saveLocalStorageQueryEntry(
     queryKey: string,
     data: PersistedListQueryData,
+    idleContext?: IdleCleanupContext,
   ): Promise<void> {
     if (localStorageAdapter === null) {
       await queryNamespace.save(queryKey, data);
@@ -723,37 +825,95 @@ export function setupListQueryPersistence<
     const timestamp = Date.now();
 
     try {
-      await localStorageAdapter.runLocked(() => {
-        const existingOfflineProtected =
-          parseCompactListQueryLocalStorageEntry(
-            localStorageAdapter.readRaw(storageKey),
-          )?.offlineProtected === true;
-        const offlineProtected = mergeLocalStorageOfflineProtection(
+      const saveEntry = () =>
+        writeLocalStorageQueryEntry(
           sessionKey,
           storageKey,
-          existingOfflineProtected,
+          queryKey,
+          data,
+          timestamp,
         );
-
-        const { sizeBytes } = localStorageAdapter.write(
-          storageKey,
-          createCompactListQueryLocalStorageEntry({
-            lastAccessAt: timestamp,
-            offlineProtected,
-            payload: data.payload,
-            items: data.items,
-            hasMore: data.hasMore,
-            version,
-          }),
-        );
-        rememberQueryMetadataSize(queryKey, sizeBytes);
-        recordLocalStorageTouch(storageKey, timestamp);
-      });
+      await (idleContext === undefined
+        ? localStorageAdapter.runLocked(saveEntry)
+        : localStorageAdapter.runMaintenanceLocked(idleContext, saveEntry));
     } catch (error) {
       config.onPersistentStorageError?.(error);
     }
   }
 
-  async function removeLocalStorageQueryEntry(queryKey: string): Promise<void> {
+  function writeLocalStorageQueryEntry(
+    sessionKey: string,
+    storageKey: string,
+    queryKey: string,
+    data: PersistedListQueryData,
+    timestamp: number,
+  ): void {
+    if (localStorageAdapter === null) return;
+
+    const existingOfflineProtected =
+      parseCompactListQueryLocalStorageEntry(
+        localStorageAdapter.readRaw(storageKey),
+      )?.offlineProtected === true;
+    const offlineProtected = mergeLocalStorageOfflineProtection(
+      sessionKey,
+      storageKey,
+      existingOfflineProtected,
+    );
+
+    const { sizeBytes } = localStorageAdapter.write(
+      storageKey,
+      createCompactListQueryLocalStorageEntry({
+        lastAccessAt: timestamp,
+        offlineProtected,
+        payload: data.payload,
+        items: data.items,
+        hasMore: data.hasMore,
+        version,
+      }),
+    );
+    rememberQueryMetadataSize(queryKey, sizeBytes);
+    recordLocalStorageTouch(storageKey, timestamp);
+  }
+
+  async function saveLocalStorageQueryEntryIfUnchanged(
+    queryData: ManagedQueryEntry,
+    data: PersistedListQueryData,
+    idleContext: IdleCleanupContext,
+    scope: LocalStorageMaintenanceScope,
+  ): Promise<boolean> {
+    if (
+      localStorageAdapter === null ||
+      !isLocalStorageMaintenanceScopeCurrent(scope)
+    ) {
+      return false;
+    }
+    const storageKey = `${scope.queryPrefix}${queryData.queryKey}`;
+
+    try {
+      return await localStorageAdapter.runMaintenanceLocked(idleContext, () => {
+        if (!isLocalStorageMaintenanceScopeCurrent(scope)) return false;
+        const currentRawValue = localStorageAdapter.readRaw(storageKey);
+        if (currentRawValue !== queryData.rawValue) return false;
+
+        writeLocalStorageQueryEntry(
+          scope.sessionKey,
+          storageKey,
+          queryData.queryKey,
+          data,
+          Date.now(),
+        );
+        return true;
+      });
+    } catch (error) {
+      config.onPersistentStorageError?.(error);
+      return false;
+    }
+  }
+
+  async function removeLocalStorageQueryEntry(
+    queryKey: string,
+    idleContext?: IdleCleanupContext,
+  ): Promise<void> {
     if (localStorageAdapter === null) {
       await queryNamespace.remove(queryKey);
       return;
@@ -763,12 +923,64 @@ export function setupListQueryPersistence<
     if (storageKey === false) return;
 
     try {
-      await localStorageAdapter.runLocked(() => {
-        localStorageAdapter.remove(storageKey);
-      });
+      const removeEntry = () => localStorageAdapter.remove(storageKey);
+      await (idleContext === undefined
+        ? localStorageAdapter.runLocked(removeEntry)
+        : localStorageAdapter.runMaintenanceLocked(idleContext, removeEntry));
     } catch (error) {
       config.onPersistentStorageError?.(error);
     }
+  }
+
+  async function removeLocalStorageQueriesIfUnchanged(
+    candidates: Array<{ queryKey: string; rawValue: string | null }>,
+    idleContext: IdleCleanupContext,
+    scope: LocalStorageMaintenanceScope,
+  ): Promise<{
+    completed: boolean;
+    removedQueryKeys: Set<string>;
+    staleQueryKeys: Set<string>;
+  }> {
+    const removedQueryKeys = new Set<string>();
+    const staleQueryKeys = new Set<string>();
+    if (localStorageAdapter === null) {
+      return { completed: false, removedQueryKeys, staleQueryKeys };
+    }
+
+    let candidateIndex = 0;
+    while (candidateIndex < candidates.length) {
+      if (!(await idleContext.yieldIfNeeded())) {
+        return { completed: false, removedQueryKeys, staleQueryKeys };
+      }
+      if (!isLocalStorageMaintenanceScopeCurrent(scope)) {
+        return { completed: false, removedQueryKeys, staleQueryKeys };
+      }
+
+      await localStorageAdapter.runMaintenanceLocked(idleContext, () => {
+        let processedCount = 0;
+        while (candidateIndex < candidates.length) {
+          if (processedCount > 0 && idleContext.shouldYield()) break;
+
+          const candidate = candidates[candidateIndex];
+          candidateIndex++;
+          processedCount++;
+          if (candidate === undefined) continue;
+
+          if (!isLocalStorageMaintenanceScopeCurrent(scope)) break;
+          const storageKey = `${scope.queryPrefix}${candidate.queryKey}`;
+
+          if (localStorageAdapter.readRaw(storageKey) !== candidate.rawValue) {
+            staleQueryKeys.add(candidate.queryKey);
+            continue;
+          }
+
+          localStorageAdapter.remove(storageKey);
+          removedQueryKeys.add(candidate.queryKey);
+        }
+      });
+    }
+
+    return { completed: true, removedQueryKeys, staleQueryKeys };
   }
 
   async function clearLocalStorageQueries(): Promise<void> {
@@ -818,10 +1030,32 @@ export function setupListQueryPersistence<
     });
   }
 
-  async function runMaintenance(): Promise<void> {
-    const { keptQueryKeys, managedQueryEntriesByKey } =
-      await evictStoredQueries();
-    await evictStoredItems(keptQueryKeys, managedQueryEntriesByKey);
+  async function runMaintenance(
+    idleContext?: IdleCleanupContext,
+  ): Promise<void> {
+    const localMaintenanceScope =
+      localStorageAdapter !== null && idleContext !== undefined
+        ? getLocalStorageMaintenanceScope()
+        : undefined;
+    if (localMaintenanceScope === null) return;
+
+    const { completed, keptQueryKeys, managedQueryEntriesByKey } =
+      await evictStoredQueries(idleContext, localMaintenanceScope);
+    if (!completed || idleContext?.isCanceled()) return;
+    if (
+      localMaintenanceScope !== undefined &&
+      !isLocalStorageMaintenanceScopeCurrent(localMaintenanceScope)
+    ) {
+      knownPersistedItemKeys = null;
+      knownPersistedQueryKeys = null;
+      return;
+    }
+    await evictStoredItems(
+      keptQueryKeys,
+      managedQueryEntriesByKey,
+      idleContext,
+      localMaintenanceScope,
+    );
   }
 
   async function planAsyncStartupCleanup(args: {
@@ -1890,63 +2124,88 @@ export function setupListQueryPersistence<
     return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
   }
 
-  async function evictStoredQueries(): Promise<{
-    keptQueryKeys: Set<string>;
-    managedQueryEntriesByKey: ManagedQueryEntriesByKey | null;
-  }> {
+  async function evictStoredQueries(
+    idleContext?: IdleCleanupContext,
+    localMaintenanceScope?: LocalStorageMaintenanceScope,
+  ): Promise<StoredQueryEvictionResult> {
     syncMaintenanceRegistration();
     const scannedQueryEntries =
-      localStorageAdapter !== null ? scanLocalStorageQueryEntries() : null;
+      localStorageAdapter === null
+        ? null
+        : idleContext === undefined
+          ? await localStorageAdapter.runLocked(scanLocalStorageQueryEntries)
+          : localMaintenanceScope === undefined
+            ? null
+            : await scanLocalStorageQueryEntriesDuringMaintenance(
+                idleContext,
+                localMaintenanceScope,
+              );
     const managedQueryEntriesByKey = scannedQueryEntries?.entriesByKey ?? null;
+
+    if (
+      localStorageAdapter !== null &&
+      idleContext !== undefined &&
+      scannedQueryEntries === null
+    ) {
+      knownPersistedQueryKeys = null;
+      return {
+        completed: false,
+        keptQueryKeys: new Set(),
+        managedQueryEntriesByKey,
+      };
+    }
 
     if (localStorageAdapter !== null && scannedQueryEntries !== null) {
       const managedQueryEntries = scannedQueryEntries.entriesByKey;
-      const invalidQueryKeys = scannedQueryEntries.invalidQueryKeys;
       const skipOfflineExpirationMaintenance = isOfflineNetworkActive();
-      const expiredQueryKeys = filterAndMap(
-        [...managedQueryEntries.values()],
-        ({ queryKey, lastAccessAt, offlineProtected }) => {
-          if (skipOfflineExpirationMaintenance) return false;
-          if (offlineProtected) return false;
+      const expiredQueryKeys = new Set(
+        filterAndMap(
+          [...managedQueryEntries.values()],
+          ({ queryKey, lastAccessAt, offlineProtected }) => {
+            if (skipOfflineExpirationMaintenance) return false;
+            if (offlineProtected) return false;
 
-          return Date.now() - lastAccessAt > getLocalStorageMaxAgeMs()
-            ? { queryKey }
-            : false;
-        },
+            return Date.now() - lastAccessAt > getLocalStorageMaxAgeMs()
+              ? queryKey
+              : false;
+          },
+        ),
       );
-      if (invalidQueryKeys.length > 0) {
-        await Promise.all(
-          invalidQueryKeys.map((queryKey) =>
-            removeLocalStorageQueryEntry(queryKey),
-          ),
-        );
-      }
-      if (expiredQueryKeys.length > 0) {
-        await Promise.all(
-          expiredQueryKeys.map(({ queryKey }) =>
-            removeLocalStorageQueryEntry(queryKey),
-          ),
-        );
-        for (const { queryKey } of expiredQueryKeys) {
-          managedQueryEntries.delete(queryKey);
-        }
-      }
 
-      const invalidPayloadQueryKeys: string[] = [];
-      const filteredEntries = filterAndMap(
-        [...managedQueryEntries.values()],
-        (entry) => {
-          const payload = validateWithSchema(
-            config.queryPayloadSchema,
-            entry.payload,
-          );
-
-          if (payload === null) {
-            invalidPayloadQueryKeys.push(entry.queryKey);
-            return false;
-          }
-
+      const invalidPayloadQueryKeys = new Set<string>();
+      const filteredEntries: Array<{
+        hasMore: boolean;
+        items: string[];
+        lastAccessAt: number;
+        offlineProtected: boolean;
+        payload: QueryPayload;
+        queryKey: string;
+        sizeBytes: number;
+      }> = [];
+      for (const [entryIndex, entry] of [
+        ...managedQueryEntries.values(),
+      ].entries()) {
+        if (
+          idleContext !== undefined &&
+          entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+          !(await idleContext.yieldIfNeeded())
+        ) {
           return {
+            completed: false,
+            keptQueryKeys: new Set(),
+            managedQueryEntriesByKey,
+          };
+        }
+        if (expiredQueryKeys.has(entry.queryKey)) continue;
+
+        const payload = validateWithSchema(
+          config.queryPayloadSchema,
+          entry.payload,
+        );
+        if (payload === null) {
+          invalidPayloadQueryKeys.add(entry.queryKey);
+        } else {
+          filteredEntries.push({
             queryKey: entry.queryKey,
             payload,
             items: entry.items,
@@ -1954,42 +2213,91 @@ export function setupListQueryPersistence<
             lastAccessAt: entry.lastAccessAt,
             offlineProtected: entry.offlineProtected,
             sizeBytes: entry.sizeBytes,
-          };
-        },
-      );
-      if (invalidPayloadQueryKeys.length > 0) {
-        await Promise.all(
-          invalidPayloadQueryKeys.map((queryKey) =>
-            removeLocalStorageQueryEntry(queryKey),
-          ),
-        );
+          });
+        }
       }
 
-      const { keptKeys: keptQueryKeys, unprotectedBytes } =
-        keepEntriesWithinByteBudget(
-          filteredEntries,
-          (entry) => entry.queryKey,
-          (entry) => entry.lastAccessAt,
-          (entry) => entry.sizeBytes,
-          (entry) => pinnedQueryKeys.has(entry.queryKey),
-          (entry) => entry.offlineProtected,
-          maxQueryBytes,
-        );
-      logQueryByteBudgetCleanup(
-        'maintenance',
-        filteredEntries.length,
-        keptQueryKeys,
-        unprotectedBytes,
+      const queryByteBudgetResult =
+        idleContext === undefined
+          ? keepEntriesWithinByteBudget(
+              filteredEntries,
+              (entry) => entry.queryKey,
+              (entry) => entry.lastAccessAt,
+              (entry) => entry.sizeBytes,
+              (entry) => pinnedQueryKeys.has(entry.queryKey),
+              (entry) => entry.offlineProtected,
+              maxQueryBytes,
+            )
+          : await keepEntriesWithinByteBudgetDuringIdle(
+              filteredEntries,
+              (entry) => entry.queryKey,
+              (entry) => entry.lastAccessAt,
+              (entry) => entry.sizeBytes,
+              (entry) => pinnedQueryKeys.has(entry.queryKey),
+              (entry) => entry.offlineProtected,
+              maxQueryBytes,
+              idleContext,
+            );
+      if (queryByteBudgetResult === null) {
+        return {
+          completed: false,
+          keptQueryKeys: new Set(),
+          managedQueryEntriesByKey,
+        };
+      }
+      const { keptKeys: plannedKeptQueryKeys, unprotectedBytes } =
+        queryByteBudgetResult;
+      const plannedBudgetEvictedQueryKeys = new Set(
+        filteredEntries.flatMap(({ queryKey }) =>
+          plannedKeptQueryKeys.has(queryKey) ? [] : [queryKey],
+        ),
       );
-
-      await Promise.all(
-        filteredEntries
-          .filter(({ queryKey }) => !keptQueryKeys.has(queryKey))
-          .map(({ queryKey }) => removeLocalStorageQueryEntry(queryKey)),
-      );
+      const plannedRemovalQueryKeys = new Set([
+        ...expiredQueryKeys,
+        ...invalidPayloadQueryKeys,
+        ...plannedBudgetEvictedQueryKeys,
+      ]);
+      const removalCandidates = [
+        ...scannedQueryEntries.invalidQueryEntries,
+        ...[...managedQueryEntries.values()].flatMap((entry) =>
+          plannedRemovalQueryKeys.has(entry.queryKey)
+            ? [{ queryKey: entry.queryKey, rawValue: entry.rawValue }]
+            : [],
+        ),
+      ];
+      const removalResult =
+        idleContext === undefined
+          ? await (async () => {
+              await Promise.all(
+                removalCandidates.map(({ queryKey }) =>
+                  removeLocalStorageQueryEntry(queryKey),
+                ),
+              );
+              return {
+                completed: true,
+                removedQueryKeys: new Set(
+                  removalCandidates.map(({ queryKey }) => queryKey),
+                ),
+                staleQueryKeys: new Set<string>(),
+              };
+            })()
+          : localMaintenanceScope === undefined
+            ? {
+                completed: false,
+                removedQueryKeys: new Set<string>(),
+                staleQueryKeys: new Set<string>(),
+              }
+            : await removeLocalStorageQueriesIfUnchanged(
+                removalCandidates,
+                idleContext,
+                localMaintenanceScope,
+              );
 
       for (const { queryKey, lastAccessAt } of filteredEntries) {
-        if (!keptQueryKeys.has(queryKey)) {
+        if (
+          removalResult.removedQueryKeys.has(queryKey) &&
+          plannedBudgetEvictedQueryKeys.has(queryKey)
+        ) {
           rememberBudgetEvictedEntry(
             budgetEvictedQueryRecency,
             queryKey,
@@ -2001,10 +2309,46 @@ export function setupListQueryPersistence<
           forgetPersistedQuery(queryKey);
         }
       }
+      for (const queryKey of removalResult.removedQueryKeys) {
+        managedQueryEntries.delete(queryKey);
+      }
 
-      knownPersistedQueryKeys = keptQueryKeys;
+      if (!removalResult.completed) {
+        knownPersistedQueryKeys = null;
+        return {
+          completed: false,
+          keptQueryKeys: new Set(),
+          managedQueryEntriesByKey,
+        };
+      }
 
-      return { keptQueryKeys, managedQueryEntriesByKey };
+      const keptQueryKeys = new Set(
+        filteredEntries.flatMap(({ queryKey }) =>
+          removalResult.removedQueryKeys.has(queryKey) ? [] : [queryKey],
+        ),
+      );
+
+      knownPersistedQueryKeys =
+        removalResult.staleQueryKeys.size > 0 ? null : keptQueryKeys;
+      if (
+        removalResult.staleQueryKeys.size > 0 &&
+        maintenanceCallbackKey !== null
+      ) {
+        scheduleLocalStorageMaintenance([maintenanceCallbackKey]);
+      }
+      if (removalResult.staleQueryKeys.size > 0) {
+        return { completed: false, keptQueryKeys, managedQueryEntriesByKey };
+      }
+      if (removalResult.staleQueryKeys.size === 0) {
+        logQueryByteBudgetCleanup(
+          'maintenance',
+          filteredEntries.length,
+          keptQueryKeys,
+          unprotectedBytes,
+        );
+      }
+
+      return { completed: true, keptQueryKeys, managedQueryEntriesByKey };
     }
 
     const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
@@ -2084,56 +2428,87 @@ export function setupListQueryPersistence<
 
     knownPersistedQueryKeys = keptQueryKeys;
 
-    return { keptQueryKeys, managedQueryEntriesByKey: null };
+    return { completed: true, keptQueryKeys, managedQueryEntriesByKey: null };
   }
 
   async function evictStoredItems(
     keptQueryKeys: Set<string>,
     managedQueryEntriesByKey: ManagedQueryEntriesByKey | null,
+    idleContext?: IdleCleanupContext,
+    localMaintenanceScope?: LocalStorageMaintenanceScope,
   ): Promise<void> {
     syncMaintenanceRegistration();
-    const sessionKey = config.getSessionKey();
+    if (
+      localMaintenanceScope !== undefined &&
+      !isLocalStorageMaintenanceScopeCurrent(localMaintenanceScope)
+    ) {
+      knownPersistedItemKeys = null;
+      knownPersistedQueryKeys = null;
+      return;
+    }
+    const sessionKey =
+      localMaintenanceScope?.sessionKey ?? config.getSessionKey();
     const itemPrefix =
-      sessionKey === false
+      localMaintenanceScope?.itemPrefix ??
+      (sessionKey === false
         ? null
         : getStoragePrefixForStoreNamespace(
             sessionKey,
             config.storeName,
             LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
-          );
+          ));
 
     if (localStorageAdapter !== null && itemPrefix !== null) {
-      const metadataEntries =
-        localStorageAdapter.listManifestEntries(itemPrefix);
-      const protectedItemKeys = new Set(
-        metadataEntries.flatMap((entry) =>
-          isManagedLocalStorageEntryOfflineProtected(entry.meta)
-            ? [entry.entryKey]
-            : [],
-        ),
-      );
-      const metadataEntriesWithPayload = metadataEntries.map((entry) => ({
-        itemKey: entry.entryKey,
-        lastAccessAt: entry.lastAccessAt,
-        sizeBytes: rememberItemMetadataSize(entry.entryKey, entry.sizeBytes),
-        payload: validateWithSchema(
-          config.itemPayloadSchema,
-          readManifestPayloadMeta(entry.meta),
-        ),
-      }));
+      const metadataEntries = await (idleContext === undefined
+        ? localStorageAdapter.runLocked(() =>
+            localStorageAdapter.listManifestEntries(itemPrefix),
+          )
+        : localStorageAdapter.runMaintenanceLocked(idleContext, () =>
+            localStorageAdapter.listManifestEntries(itemPrefix),
+          ));
+      const protectedItemKeys = new Set<string>();
+      const metadataEntriesWithPayload: Array<{
+        itemKey: string;
+        lastAccessAt: number;
+        payload: ItemPayload | null;
+        sizeBytes: number;
+      }> = [];
+
+      for (const [entryIndex, entry] of metadataEntries.entries()) {
+        if (
+          idleContext !== undefined &&
+          entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+          !(await idleContext.yieldIfNeeded())
+        ) {
+          return;
+        }
+        if (
+          localMaintenanceScope !== undefined &&
+          !isLocalStorageMaintenanceScopeCurrent(localMaintenanceScope)
+        ) {
+          knownPersistedItemKeys = null;
+          knownPersistedQueryKeys = null;
+          return;
+        }
+
+        if (isManagedLocalStorageEntryOfflineProtected(entry.meta)) {
+          protectedItemKeys.add(entry.entryKey);
+        }
+        metadataEntriesWithPayload.push({
+          itemKey: entry.entryKey,
+          lastAccessAt: entry.lastAccessAt,
+          sizeBytes: rememberItemMetadataSize(entry.entryKey, entry.sizeBytes),
+          payload: validateWithSchema(
+            config.itemPayloadSchema,
+            readManifestPayloadMeta(entry.meta),
+          ),
+        });
+      }
 
       const invalidItemEntries = filterAndMap(
         metadataEntriesWithPayload,
         ({ itemKey, payload }) => (payload === null ? { itemKey } : false),
       );
-
-      if (invalidItemEntries.length > 0) {
-        await Promise.all(
-          invalidItemEntries.map(({ itemKey }) =>
-            itemNamespace.remove(itemKey),
-          ),
-        );
-      }
 
       const hydratedItemEntries = filterAndMap(
         metadataEntriesWithPayload,
@@ -2147,49 +2522,94 @@ export function setupListQueryPersistence<
         shouldIgnoreItem(payload),
       );
 
-      if (ignoredItemEntries.length > 0) {
-        await Promise.all(
-          ignoredItemEntries.map(({ itemKey }) =>
-            itemNamespace.remove(itemKey),
-          ),
-        );
-        for (const { itemKey } of ignoredItemEntries) {
-          forgetPersistedItem(itemKey);
-        }
-      }
-
       const persistedItemEntries = hydratedItemEntries.filter(
         ({ payload }) => !shouldIgnoreItem(payload),
       );
 
-      const { keptKeys: keptItemKeys, unprotectedBytes } =
-        keepEntriesWithinByteBudget(
-          persistedItemEntries,
-          (entry) => entry.itemKey,
-          (entry) => entry.lastAccessAt,
-          (entry) => entry.sizeBytes,
-          (entry) => pinnedItemKeys.has(entry.itemKey),
-          (entry) => protectedItemKeys.has(entry.itemKey),
-          maxItemBytes,
-        );
-      logItemByteBudgetCleanup(
-        'maintenance',
-        persistedItemEntries.length,
-        keptItemKeys,
-        unprotectedBytes,
+      const itemByteBudgetResult =
+        idleContext === undefined
+          ? keepEntriesWithinByteBudget(
+              persistedItemEntries,
+              (entry) => entry.itemKey,
+              (entry) => entry.lastAccessAt,
+              (entry) => entry.sizeBytes,
+              (entry) => pinnedItemKeys.has(entry.itemKey),
+              (entry) => protectedItemKeys.has(entry.itemKey),
+              maxItemBytes,
+            )
+          : await keepEntriesWithinByteBudgetDuringIdle(
+              persistedItemEntries,
+              (entry) => entry.itemKey,
+              (entry) => entry.lastAccessAt,
+              (entry) => entry.sizeBytes,
+              (entry) => pinnedItemKeys.has(entry.itemKey),
+              (entry) => protectedItemKeys.has(entry.itemKey),
+              maxItemBytes,
+              idleContext,
+            );
+      if (itemByteBudgetResult === null) return;
+      if (
+        localMaintenanceScope !== undefined &&
+        !isLocalStorageMaintenanceScopeCurrent(localMaintenanceScope)
+      ) {
+        knownPersistedItemKeys = null;
+        knownPersistedQueryKeys = null;
+        return;
+      }
+      const { keptKeys: plannedKeptItemKeys, unprotectedBytes } =
+        itemByteBudgetResult;
+      const ignoredItemKeys = new Set(
+        ignoredItemEntries.map(({ itemKey }) => itemKey),
       );
-      const evictedItemKeys = new Set<string>();
+      const plannedBudgetEvictedItemKeys = new Set(
+        persistedItemEntries.flatMap(({ itemKey }) =>
+          plannedKeptItemKeys.has(itemKey) ? [] : [itemKey],
+        ),
+      );
+      const removalItemKeys = new Set([
+        ...invalidItemEntries.map(({ itemKey }) => itemKey),
+        ...ignoredItemKeys,
+        ...plannedBudgetEvictedItemKeys,
+      ]);
+      const removalEntries = metadataEntriesWithPayload.flatMap((entry) =>
+        removalItemKeys.has(entry.itemKey)
+          ? [
+              {
+                key: entry.itemKey,
+                lastAccessAt: entry.lastAccessAt,
+                offlineProtected: protectedItemKeys.has(entry.itemKey),
+              },
+            ]
+          : [],
+      );
+      const removalResult =
+        idleContext === undefined
+          ? await (async () => {
+              await itemNamespace.commit({
+                removes: removalEntries.map(({ key }) => key),
+              });
+              return {
+                completed: true,
+                removedKeys: removalItemKeys,
+                staleKeys: new Set<string>(),
+              };
+            })()
+          : await itemNamespace.removeLocalEntriesIfUnchanged(
+              removalEntries,
+              idleContext,
+              localMaintenanceScope === undefined
+                ? undefined
+                : () =>
+                    isLocalStorageMaintenanceScopeCurrent(
+                      localMaintenanceScope,
+                    ),
+            );
 
-      await Promise.all(
-        persistedItemEntries
-          .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
-          .map(({ itemKey }) => {
-            evictedItemKeys.add(itemKey);
-            return itemNamespace.remove(itemKey);
-          }),
-      );
       for (const { itemKey, lastAccessAt } of persistedItemEntries) {
-        if (!keptItemKeys.has(itemKey)) {
+        if (
+          removalResult.removedKeys.has(itemKey) &&
+          plannedBudgetEvictedItemKeys.has(itemKey)
+        ) {
           rememberBudgetEvictedEntry(
             budgetEvictedItemRecency,
             itemKey,
@@ -2200,17 +2620,85 @@ export function setupListQueryPersistence<
           forgetPersistedItem(itemKey);
         }
       }
+      for (const itemKey of ignoredItemKeys) {
+        if (removalResult.removedKeys.has(itemKey)) {
+          forgetPersistedItem(itemKey);
+        }
+      }
 
-      knownPersistedItemKeys = keptItemKeys;
+      const evictedItemKeys = new Set(
+        [...plannedBudgetEvictedItemKeys].filter((itemKey) =>
+          removalResult.removedKeys.has(itemKey),
+        ),
+      );
+      if (localMaintenanceScope !== undefined && evictedItemKeys.size > 0) {
+        // A partial removal or session switch can happen before query repair.
+        // Retain this obligation so the next maintenance pass still removes
+        // references to items that have already disappeared.
+        pendingLocalQueryReconciliationSessions.add(
+          localMaintenanceScope.sessionKey,
+        );
+      }
 
-      if (evictedItemKeys.size === 0 || keptQueryKeys.size === 0) return;
+      if (!removalResult.completed) {
+        knownPersistedItemKeys = null;
+        return;
+      }
+      if (
+        localMaintenanceScope !== undefined &&
+        !isLocalStorageMaintenanceScopeCurrent(localMaintenanceScope)
+      ) {
+        knownPersistedItemKeys = null;
+        knownPersistedQueryKeys = null;
+        return;
+      }
+
+      const keptItemKeys = new Set(
+        persistedItemEntries.flatMap(({ itemKey }) =>
+          removalResult.removedKeys.has(itemKey) ? [] : [itemKey],
+        ),
+      );
+
+      knownPersistedItemKeys =
+        removalResult.staleKeys.size > 0 ? null : keptItemKeys;
+      if (removalResult.staleKeys.size > 0 && maintenanceCallbackKey !== null) {
+        scheduleLocalStorageMaintenance([maintenanceCallbackKey]);
+      }
+      if (removalResult.staleKeys.size === 0) {
+        logItemByteBudgetCleanup(
+          'maintenance',
+          persistedItemEntries.length,
+          keptItemKeys,
+          unprotectedBytes,
+        );
+      }
+
+      const queryReconciliationPending =
+        localMaintenanceScope === undefined
+          ? evictedItemKeys.size > 0
+          : pendingLocalQueryReconciliationSessions.has(
+              localMaintenanceScope.sessionKey,
+            );
+      if (!queryReconciliationPending || keptQueryKeys.size === 0) {
+        if (keptQueryKeys.size === 0 && localMaintenanceScope !== undefined) {
+          pendingLocalQueryReconciliationSessions.delete(
+            localMaintenanceScope.sessionKey,
+          );
+        }
+        return;
+      }
 
       const queryEntries: ManagedQueryEntry[] = managedQueryEntriesByKey
         ? [...managedQueryEntriesByKey.values()].filter(({ queryKey }) =>
             keptQueryKeys.has(queryKey),
           )
         : filterAndMap([...keptQueryKeys], (queryKey) => {
-            const entry = readLocalStorageQueryEntry(queryKey);
+            const entry = readLocalStorageQueryEntry(
+              queryKey,
+              localMaintenanceScope === undefined
+                ? undefined
+                : `${localMaintenanceScope.queryPrefix}${queryKey}`,
+            );
             if (!entry) {
               forgetPersistedQuery(queryKey);
               keptQueryKeys.delete(queryKey);
@@ -2220,31 +2708,66 @@ export function setupListQueryPersistence<
             return entry;
           });
 
-      await Promise.all(
-        queryEntries.map(async (queryData) => {
-          const filteredItems = queryData.items.filter((itemKey) =>
-            keptItemKeys.has(itemKey),
-          );
-          const limitedQuery = limitPersistedQueryItems(
-            filteredItems,
-            queryData.hasMore,
-            maxQuerySize,
-          );
+      let staleQueryFound = false;
+      for (const queryData of queryEntries) {
+        if (idleContext !== undefined && !(await idleContext.yieldIfNeeded())) {
+          return;
+        }
+        if (
+          localMaintenanceScope !== undefined &&
+          !isLocalStorageMaintenanceScopeCurrent(localMaintenanceScope)
+        ) {
+          knownPersistedQueryKeys = null;
+          return;
+        }
 
-          if (
-            limitedQuery.itemKeys.length === queryData.items.length &&
-            limitedQuery.hasMore === queryData.hasMore
-          ) {
-            return;
-          }
+        const filteredItems = queryData.items.filter((itemKey) =>
+          keptItemKeys.has(itemKey),
+        );
+        const limitedQuery = limitPersistedQueryItems(
+          filteredItems,
+          queryData.hasMore,
+          maxQuerySize,
+        );
 
-          await saveLocalStorageQueryEntry(queryData.queryKey, {
-            payload: queryData.payload,
-            items: limitedQuery.itemKeys,
-            hasMore: limitedQuery.hasMore,
-          });
-        }),
-      );
+        if (
+          limitedQuery.itemKeys.length === queryData.items.length &&
+          limitedQuery.hasMore === queryData.hasMore
+        ) {
+          continue;
+        }
+
+        const nextQueryData = {
+          payload: queryData.payload,
+          items: limitedQuery.itemKeys,
+          hasMore: limitedQuery.hasMore,
+        };
+        let saved = true;
+        if (idleContext === undefined) {
+          await saveLocalStorageQueryEntry(queryData.queryKey, nextQueryData);
+        } else if (localMaintenanceScope !== undefined) {
+          saved = await saveLocalStorageQueryEntryIfUnchanged(
+            queryData,
+            nextQueryData,
+            idleContext,
+            localMaintenanceScope,
+          );
+        } else {
+          saved = false;
+        }
+        if (!saved) staleQueryFound = true;
+      }
+
+      if (staleQueryFound) {
+        knownPersistedQueryKeys = null;
+        if (maintenanceCallbackKey !== null) {
+          scheduleLocalStorageMaintenance([maintenanceCallbackKey]);
+        }
+      } else if (localMaintenanceScope !== undefined) {
+        pendingLocalQueryReconciliationSessions.delete(
+          localMaintenanceScope.sessionKey,
+        );
+      }
       return;
     }
 

@@ -1,4 +1,8 @@
 import type { ValidPayload } from '../utils/storeShared';
+import type { IdleCleanupContext } from './scheduleIdleCleanup';
+
+const MAINTENANCE_SORT_CHUNK_SIZE = 100;
+const MAINTENANCE_LOOP_CHUNK_SIZE = 25;
 
 /**
  * Creates a key set that auto-clears entries after a microtask.
@@ -122,6 +126,148 @@ export function keepEntriesWithinByteBudget<T>(
   let keptUnprotectedBytes = 0;
 
   for (const entry of sortedEntries) {
+    const key = getKey(entry);
+    if (isProtected(entry)) {
+      keptKeys.add(key);
+      continue;
+    }
+
+    const sizeBytes = getSizeBytes(entry);
+    if (isPinned(entry)) {
+      keptKeys.add(key);
+      keptUnprotectedBytes += sizeBytes;
+      continue;
+    }
+
+    if (keptUnprotectedBytes + sizeBytes <= maxBytes) {
+      keptKeys.add(key);
+      keptUnprotectedBytes += sizeBytes;
+    }
+  }
+
+  return { keptKeys, unprotectedBytes };
+}
+
+/** Deadline-aware variant used by synchronous localStorage maintenance. */
+export async function keepEntriesWithinByteBudgetDuringIdle<T>(
+  entries: T[],
+  getKey: (entry: T) => string,
+  getLastAccessAt: (entry: T) => number,
+  getSizeBytes: (entry: T) => number,
+  isPinned: (entry: T) => boolean,
+  isProtected: (entry: T) => boolean,
+  maxBytes: number,
+  idleContext: IdleCleanupContext,
+): Promise<ByteBudgetResult | null> {
+  const keptKeys = new Set<string>();
+  let unprotectedBytes = 0;
+
+  for (const [entryIndex, entry] of entries.entries()) {
+    if (
+      entryIndex % MAINTENANCE_LOOP_CHUNK_SIZE === 0 &&
+      !(await idleContext.yieldIfNeeded())
+    ) {
+      return null;
+    }
+    if (!isProtected(entry)) {
+      unprotectedBytes += getSizeBytes(entry);
+    }
+  }
+
+  if (unprotectedBytes <= maxBytes) {
+    for (const [entryIndex, entry] of entries.entries()) {
+      if (
+        entryIndex % MAINTENANCE_LOOP_CHUNK_SIZE === 0 &&
+        !(await idleContext.yieldIfNeeded())
+      ) {
+        return null;
+      }
+      keptKeys.add(getKey(entry));
+    }
+    return { keptKeys, unprotectedBytes };
+  }
+
+  const compareEntries = (left: T, right: T): number => {
+    const leftProtected = isProtected(left);
+    const rightProtected = isProtected(right);
+    if (leftProtected && !rightProtected) return -1;
+    if (!leftProtected && rightProtected) return 1;
+
+    const leftPinned = isPinned(left);
+    const rightPinned = isPinned(right);
+    if (leftPinned && !rightPinned) return -1;
+    if (!leftPinned && rightPinned) return 1;
+
+    return getLastAccessAt(right) - getLastAccessAt(left);
+  };
+  const sortedChunks: T[][] = [];
+  for (
+    let chunkStart = 0;
+    chunkStart < entries.length;
+    chunkStart += MAINTENANCE_SORT_CHUNK_SIZE
+  ) {
+    if (!(await idleContext.yieldIfNeeded())) return null;
+    sortedChunks.push(
+      entries
+        .slice(chunkStart, chunkStart + MAINTENANCE_SORT_CHUNK_SIZE)
+        .sort(compareEntries),
+    );
+  }
+
+  let mergeChunks = sortedChunks;
+  while (mergeChunks.length > 1) {
+    const nextMergeChunks: T[][] = [];
+    for (let chunkIndex = 0; chunkIndex < mergeChunks.length; chunkIndex += 2) {
+      if (!(await idleContext.yieldIfNeeded())) return null;
+
+      const leftChunk = mergeChunks[chunkIndex];
+      const rightChunk = mergeChunks[chunkIndex + 1];
+      if (leftChunk === undefined) continue;
+      if (rightChunk === undefined) {
+        nextMergeChunks.push(leftChunk);
+        continue;
+      }
+
+      const mergedChunk: T[] = [];
+      let leftIndex = 0;
+      let rightIndex = 0;
+      while (leftIndex < leftChunk.length || rightIndex < rightChunk.length) {
+        if (
+          mergedChunk.length % MAINTENANCE_LOOP_CHUNK_SIZE === 0 &&
+          !(await idleContext.yieldIfNeeded())
+        ) {
+          return null;
+        }
+
+        const leftEntry = leftChunk[leftIndex];
+        const rightEntry = rightChunk[rightIndex];
+        if (
+          rightEntry === undefined ||
+          (leftEntry !== undefined &&
+            compareEntries(leftEntry, rightEntry) <= 0)
+        ) {
+          if (leftEntry !== undefined) mergedChunk.push(leftEntry);
+          leftIndex++;
+        } else {
+          mergedChunk.push(rightEntry);
+          rightIndex++;
+        }
+      }
+      nextMergeChunks.push(mergedChunk);
+    }
+    mergeChunks = nextMergeChunks;
+  }
+  const sortedEntries = mergeChunks[0] ?? [];
+
+  let keptUnprotectedBytes = 0;
+  for (const [entryIndex, entry] of sortedEntries.entries()) {
+    if (
+      entryIndex % MAINTENANCE_LOOP_CHUNK_SIZE === 0 &&
+      !(await idleContext.yieldIfNeeded())
+    ) {
+      return null;
+    }
+
     const key = getKey(entry);
     if (isProtected(entry)) {
       keptKeys.add(key);

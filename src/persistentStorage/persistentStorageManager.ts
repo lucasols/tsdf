@@ -29,8 +29,10 @@ import type { OfflineNetworkModeConfig } from './offline/types';
 import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
 import { serializeJsonForStorage } from './persistenceUtils';
 import {
+  createIdleCleanupContext,
   INITIAL_MAINTENANCE_CLEANUP_DELAY_MS,
   scheduleIdleCleanup,
+  type IdleCleanupContext,
 } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
@@ -58,6 +60,9 @@ let scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
 let localStorageTouchTimestamps = new Map<string, number>();
 let cancelScheduledLocalStorageExpirationScan: (() => void) | null = null;
 let cancelScheduledLocalStorageMaintenance: (() => void) | null = null;
+let activeLocalStorageMaintenanceContext: IdleCleanupContext | null = null;
+let localStorageMaintenanceRunning = false;
+let localStorageMaintenanceGeneration = 0;
 let localStorageGlobalMaintenanceRequested = false;
 let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
 const scheduledAsyncMaintenance = new Map<
@@ -233,10 +238,20 @@ export function scheduleLocalStorageMaintenance(
     }
   }
 
-  if (cancelScheduledLocalStorageMaintenance !== null) return;
+  scheduleQueuedLocalStorageMaintenance();
+}
 
-  cancelScheduledLocalStorageMaintenance = scheduleIdleCleanup(() => {
+function scheduleQueuedLocalStorageMaintenance(): void {
+  if (
+    cancelScheduledLocalStorageMaintenance !== null ||
+    localStorageMaintenanceRunning
+  ) {
+    return;
+  }
+
+  cancelScheduledLocalStorageMaintenance = scheduleIdleCleanup((deadline) => {
     cancelScheduledLocalStorageMaintenance = null;
+    const generation = localStorageMaintenanceGeneration;
 
     const runGlobalMaintenance = localStorageGlobalMaintenanceRequested;
     const maintenanceManifestKeys = runGlobalMaintenance
@@ -246,7 +261,25 @@ export function scheduleLocalStorageMaintenance(
     localStorageGlobalMaintenanceRequested = false;
     scheduledLocalStorageMaintenanceManifestKeys.clear();
 
-    void localPersistentStorage.runMaintenance(maintenanceManifestKeys);
+    const context = createIdleCleanupContext(deadline);
+    activeLocalStorageMaintenanceContext = context;
+    localStorageMaintenanceRunning = true;
+
+    void localPersistentStorage
+      .runMaintenance(maintenanceManifestKeys, context)
+      .catch(handleManagedLocalStorageBackgroundError)
+      .finally(() => {
+        if (generation !== localStorageMaintenanceGeneration) return;
+
+        activeLocalStorageMaintenanceContext = null;
+        localStorageMaintenanceRunning = false;
+        if (
+          localStorageGlobalMaintenanceRequested ||
+          scheduledLocalStorageMaintenanceManifestKeys.size > 0
+        ) {
+          scheduleQueuedLocalStorageMaintenance();
+        }
+      });
   });
 }
 
@@ -943,6 +976,12 @@ type PersistentStorageNamespaceCommitArgs<
   upserts?: Array<{ data: T; key: string; metadata?: TMetadata }>;
 };
 
+type LocalStorageMaintenanceRemovalResult = {
+  completed: boolean;
+  removedKeys: Set<string>;
+  staleKeys: Set<string>;
+};
+
 type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
@@ -963,6 +1002,7 @@ type PersistentStorageNamespaceHandle<
     options?: { touch?: AsyncStorageTouchMode },
   ): Promise<Array<T | null>>;
   save(entryKey: string, data: T): Promise<void>;
+  replaceAll(entries: Array<{ data: T; key: string }>): Promise<void>;
   remove(entryKey: string): Promise<void>;
   listKeys(): Promise<string[]>;
   listMetadata(args?: {
@@ -973,6 +1013,15 @@ type PersistentStorageNamespaceHandle<
     key: string;
     order?: AsyncStorageMetadataOrder;
   }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]>;
+  removeLocalEntriesIfUnchanged(
+    entries: Array<{
+      key: string;
+      lastAccessAt: number;
+      offlineProtected: boolean;
+    }>,
+    context: IdleCleanupContext,
+    shouldContinue?: () => boolean,
+  ): Promise<LocalStorageMaintenanceRemovalResult>;
   clear(): Promise<void>;
   dispose(): void;
 };
@@ -1655,8 +1704,85 @@ export function createPersistentStorageNamespaceHandle<
     await commit({ upserts: [{ data, key: entryKey }] });
   }
 
+  async function replaceAll(
+    entries: Array<{ data: T; key: string }>,
+  ): Promise<void> {
+    const replaceEntries = async (): Promise<void> => {
+      const nextKeys = new Set(entries.map((entry) => entry.key));
+      const currentKeys = await listKeys();
+      await commit({
+        removes: currentKeys.filter((key) => !nextKeys.has(key)),
+        upserts: entries,
+      });
+    };
+
+    if (asyncAdapter === null) {
+      await runLocalStorageMutation(replaceEntries);
+      return;
+    }
+
+    await replaceEntries();
+  }
+
   async function remove(entryKey: string): Promise<void> {
     await commit({ removes: [entryKey] });
+  }
+
+  async function removeLocalEntriesIfUnchanged(
+    entries: Array<{
+      key: string;
+      lastAccessAt: number;
+      offlineProtected: boolean;
+    }>,
+    context: IdleCleanupContext,
+    shouldContinue?: () => boolean,
+  ): Promise<LocalStorageMaintenanceRemovalResult> {
+    const removedKeys = new Set<string>();
+    const staleKeys = new Set<string>();
+    const prefix = getPrefix();
+    if (asyncAdapter !== null || prefix === false) {
+      return { completed: false, removedKeys, staleKeys };
+    }
+
+    const candidates = entries.map((entry) => ({
+      entryKey: entry.key,
+      lastAccessAt: entry.lastAccessAt,
+      offlineProtected: entry.offlineProtected,
+    }));
+    let entryIndex = 0;
+    while (entryIndex < entries.length) {
+      if (shouldContinue?.() === false) {
+        return { completed: false, removedKeys, staleKeys };
+      }
+      if (!(await context.yieldIfNeeded())) {
+        return { completed: false, removedKeys, staleKeys };
+      }
+
+      const result = await localPersistentStorage.runMaintenanceLocked(
+        context,
+        () => {
+          if (shouldContinue?.() === false) return null;
+          return localPersistentStorage.removeNamespaceEntriesIfUnchanged(
+            prefix,
+            candidates,
+            entryIndex,
+            () => context.shouldYield(),
+          );
+        },
+      );
+      if (result === null) {
+        return { completed: false, removedKeys, staleKeys };
+      }
+      entryIndex += result.processedCount;
+      for (const entryKey of result.removedEntryKeys) {
+        removedKeys.add(entryKey);
+      }
+      for (const entryKey of result.staleEntryKeys) {
+        staleKeys.add(entryKey);
+      }
+    }
+
+    return { completed: true, removedKeys, staleKeys };
   }
 
   async function listMetadata(
@@ -2047,10 +2173,12 @@ export function createPersistentStorageNamespaceHandle<
     load,
     loadMany,
     save,
+    replaceAll,
     remove,
     listKeys,
     listMetadata,
     listMetadataByFilter,
+    removeLocalEntriesIfUnchanged,
     clear,
     dispose,
   };
@@ -2292,10 +2420,14 @@ export function refreshLocalStorageTimestamp(
  * low-level reset stays coordinated with the other session/runtime resets.
  */
 export function resetExpirationScanTracking(): void {
+  localStorageMaintenanceGeneration++;
   cancelScheduledLocalStorageExpirationScan?.();
   cancelScheduledLocalStorageExpirationScan = null;
   cancelScheduledLocalStorageMaintenance?.();
   cancelScheduledLocalStorageMaintenance = null;
+  activeLocalStorageMaintenanceContext?.cancel();
+  activeLocalStorageMaintenanceContext = null;
+  localStorageMaintenanceRunning = false;
   for (const entry of scheduledAsyncMaintenance.values()) {
     entry.cancel?.();
   }

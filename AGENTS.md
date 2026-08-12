@@ -139,6 +139,11 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 - Avoid unnecessary boilerplate
 - Internal-only functions in src/ folder (not part of the public API or tests) should use positional arguments instead of object parameters to allow better minification. Reserve object parameters for the public API surface where named arguments improve call-site readability for library consumers.
 
+### Code review and bug triage
+
+- Rank findings by realistic user impact and likelihood, not theoretical severity alone; rare edge cases are not automatically merge blockers because their worst-case outcome is serious.
+- Treat TSDF runtime performance as part of correctness: before recommending a fix, account for added work on common paths (especially storage reads/writes, serialization, iteration, locking, memory), and defer the fix when its real-usage cost outweighs the issue unless a low-overhead solution exists.
+
 ## Alpha-stage API policy
 
 - This library is still in a major-version alpha stage and is not in production yet; prioritize a clean, coherent API over backward compatibility
