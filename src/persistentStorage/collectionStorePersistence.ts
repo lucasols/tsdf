@@ -12,6 +12,7 @@ import {
   buildPersistedStaticPolicy,
   estimateManagedAsyncStorageEntrySizeBytes,
   getProtectedKeysFromMetadata,
+  isAsyncStorageMetadataOfflineProtected,
   mergeManagedAsyncStorageCustomMetadata,
   readAsyncStorageNamespaceIndexStateUsingDriver,
   registerAsyncStartupStoreCleanup,
@@ -44,6 +45,7 @@ import {
   createTimedKeySet,
   keepEntriesWithinByteBudget,
   keepEntriesWithinByteBudgetDuringIdle,
+  commitAsyncStorageRemovalsDuringIdle,
   serializeJsonForStorage,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
@@ -1022,94 +1024,135 @@ export function setupCollectionPersistence<
       return;
     }
 
-    const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
-      namespace,
-      { order: 'lru-desc' },
-    );
-    if (metadataEntries.length === 0) return;
-    const protectedItemKeys = getProtectedKeysFromMetadata(metadataEntries);
+    if (idleContext !== undefined) {
+      while (!idleContext.isCanceled()) {
+        const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
+          namespace,
+          { order: 'lru-desc' },
+        );
+        if (idleContext.isCanceled()) return;
+        if (metadataEntries.length === 0) return;
 
-    const invalidEntries: { itemKey: string }[] = [];
-    const validEntries: {
-      itemKey: string;
-      lastAccessAt: number;
-      payload: ItemPayload;
-      sizeBytes: number;
-    }[] = [];
+        const metadataContinuationCount = idleContext.getContinuationCount();
+        const protectedItemKeys = new Set<string>();
+        const invalidItemKeys: string[] = [];
+        const ignoredItemKeys = new Set<string>();
+        const filteredEntries: Array<{
+          itemKey: string;
+          lastAccessAt: number;
+          sizeBytes: number;
+        }> = [];
+        let snapshotStale = false;
 
-    for (const entry of metadataEntries) {
-      const payload = validateWithSchema(
-        config.payloadSchema,
-        readManifestPayloadMeta(entry.customMetadata),
-      );
+        for (const [entryIndex, entry] of metadataEntries.entries()) {
+          if (
+            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+            !(await idleContext.yieldIfNeeded())
+          ) {
+            return;
+          }
+          if (
+            idleContext.getContinuationCount() !== metadataContinuationCount
+          ) {
+            snapshotStale = true;
+            break;
+          }
 
-      if (payload === null) {
-        invalidEntries.push({ itemKey: entry.key });
-      } else {
-        validEntries.push({
-          itemKey: entry.key,
-          lastAccessAt: entry.lastAccessAt,
-          payload,
-          sizeBytes: rememberPersistedMetadataSize(entry.key, entry.sizeBytes),
-        });
+          if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
+            protectedItemKeys.add(entry.key);
+          }
+          const payload = validateWithSchema(
+            config.payloadSchema,
+            readManifestPayloadMeta(entry.customMetadata),
+          );
+          if (payload === null) {
+            invalidItemKeys.push(entry.key);
+            continue;
+          }
+          if (shouldIgnoreItem(payload)) {
+            ignoredItemKeys.add(entry.key);
+            continue;
+          }
+          filteredEntries.push({
+            itemKey: entry.key,
+            lastAccessAt: entry.lastAccessAt,
+            sizeBytes: rememberPersistedMetadataSize(
+              entry.key,
+              entry.sizeBytes,
+            ),
+          });
+        }
+        if (snapshotStale) continue;
+
+        const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
+          filteredEntries,
+          (entry) => entry.itemKey,
+          (entry) => entry.lastAccessAt,
+          (entry) => entry.sizeBytes,
+          (entry) => pinnedItemKeys.has(entry.itemKey),
+          (entry) => protectedItemKeys.has(entry.itemKey),
+          maxBytes,
+          idleContext,
+        );
+        if (byteBudgetResult === null) return;
+        if (idleContext.getContinuationCount() !== metadataContinuationCount) {
+          continue;
+        }
+
+        const { keptKeys, unprotectedBytes } = byteBudgetResult;
+        const budgetEvictedItemKeys = new Set<string>();
+        const removalItemKeys = [...invalidItemKeys, ...ignoredItemKeys];
+        for (const [entryIndex, { itemKey }] of filteredEntries.entries()) {
+          if (
+            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+            !(await idleContext.yieldIfNeeded())
+          ) {
+            return;
+          }
+          if (
+            idleContext.getContinuationCount() !== metadataContinuationCount
+          ) {
+            snapshotStale = true;
+            break;
+          }
+          if (keptKeys.has(itemKey)) continue;
+          budgetEvictedItemKeys.add(itemKey);
+          removalItemKeys.push(itemKey);
+        }
+        if (snapshotStale) continue;
+
+        const removalsCompleted = await commitAsyncStorageRemovalsDuringIdle(
+          removalItemKeys,
+          async (batchKeys) => {
+            await namespace.commit({ removes: batchKeys });
+            for (const itemKey of batchKeys) {
+              if (
+                ignoredItemKeys.has(itemKey) ||
+                budgetEvictedItemKeys.has(itemKey)
+              ) {
+                forgetPersistedItem(itemKey);
+              }
+            }
+          },
+          idleContext,
+          metadataContinuationCount,
+        );
+        if (!removalsCompleted) {
+          if (idleContext.isCanceled()) return;
+          continue;
+        }
+
+        knownPersistedKeys = keptKeys;
+        logByteBudgetCleanup(
+          'maintenance',
+          filteredEntries.length,
+          keptKeys,
+          unprotectedBytes,
+        );
+        return;
       }
+      return;
     }
-
-    if (invalidEntries.length > 0) {
-      await Promise.all(
-        invalidEntries.map(({ itemKey }) => namespace.remove(itemKey)),
-      );
-    }
-
-    const ignoredEntries = validEntries.filter(({ payload }) =>
-      shouldIgnoreItem(payload),
-    );
-
-    if (ignoredEntries.length > 0) {
-      await Promise.all(
-        ignoredEntries.map(({ itemKey }) => namespace.remove(itemKey)),
-      );
-      for (const { itemKey } of ignoredEntries) {
-        forgetPersistedItem(itemKey);
-      }
-    }
-
-    const filteredEntries = validEntries.filter(
-      ({ payload }) => !shouldIgnoreItem(payload),
-    );
-
-    const { keptKeys, unprotectedBytes } = keepEntriesWithinByteBudget(
-      filteredEntries,
-      (entry) => entry.itemKey,
-      (entry) => entry.lastAccessAt,
-      (entry) => entry.sizeBytes,
-      (entry) => pinnedItemKeys.has(entry.itemKey),
-      (entry) => protectedItemKeys.has(entry.itemKey),
-      maxBytes,
-    );
-    logByteBudgetCleanup(
-      'maintenance',
-      filteredEntries.length,
-      keptKeys,
-      unprotectedBytes,
-    );
-
-    await Promise.all(
-      filteredEntries
-        .filter(({ itemKey }) => !keptKeys.has(itemKey))
-        .map(({ itemKey }) => namespace.remove(itemKey)),
-    );
-    for (const { itemKey } of filteredEntries) {
-      if (!keptKeys.has(itemKey)) {
-        forgetPersistedItem(itemKey);
-      }
-    }
-
-    knownPersistedKeys = new Set(
-      filteredEntries
-        .filter(({ itemKey }) => keptKeys.has(itemKey))
-        .map(({ itemKey }) => itemKey),
-    );
   }
 
   async function flushPersistedState(): Promise<void> {
