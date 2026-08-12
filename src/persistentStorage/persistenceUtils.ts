@@ -3,6 +3,7 @@ import type { IdleCleanupContext } from './scheduleIdleCleanup';
 
 const MAINTENANCE_SORT_CHUNK_SIZE = 100;
 const MAINTENANCE_LOOP_CHUNK_SIZE = 25;
+const ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE = 25;
 
 /**
  * Creates a key set that auto-clears entries after a microtask.
@@ -80,6 +81,38 @@ export function serializeJsonForStorage(value: unknown): {
   return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
 }
 
+/**
+ * Commits async maintenance removals in bounded transactions. A continuation
+ * invalidates the caller's metadata snapshot, so the caller must re-read and
+ * re-plan before committing another batch.
+ */
+export async function commitAsyncStorageRemovalsDuringIdle(
+  keys: string[],
+  commitRemoves: (keys: string[]) => Promise<void>,
+  idleContext: IdleCleanupContext,
+  metadataContinuationCount: number,
+): Promise<boolean> {
+  for (
+    let batchStart = 0;
+    batchStart < keys.length;
+    batchStart += ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE
+  ) {
+    if (!(await idleContext.yieldIfNeeded())) return false;
+    if (idleContext.getContinuationCount() !== metadataContinuationCount) {
+      return false;
+    }
+
+    const batchKeys = keys.slice(
+      batchStart,
+      batchStart + ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE,
+    );
+    await commitRemoves(batchKeys);
+    if (idleContext.isCanceled()) return false;
+  }
+
+  return true;
+}
+
 export type ByteBudgetResult = {
   keptKeys: Set<string>;
   unprotectedBytes: number;
@@ -148,7 +181,7 @@ export function keepEntriesWithinByteBudget<T>(
   return { keptKeys, unprotectedBytes };
 }
 
-/** Deadline-aware variant used by synchronous localStorage maintenance. */
+/** Deadline-aware variant used by background storage maintenance. */
 export async function keepEntriesWithinByteBudgetDuringIdle<T>(
   entries: T[],
   getKey: (entry: T) => string,

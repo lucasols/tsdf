@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import {
@@ -62,6 +62,98 @@ async function getCollectionPayloadDeleteTarget(args: {
 }
 
 describe('async storage efficiency: collection', () => {
+  test('background maintenance bounds removal work to the idle deadline and resumes with a timeout budget', async () => {
+    const storeName = 'collection-deadline-maintenance';
+    const sessionKey = 'sess1';
+    const ignoredItemCount = 51;
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleCallbackId = 1;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        const callbackId = nextIdleCallbackId++;
+        idleCallbacks.set(callbackId, callback);
+        return callbackId;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
+      idleCallbacks.delete(callbackId);
+    });
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    for (let index = 0; index < ignoredItemCount; index++) {
+      const payload = `ignored-${index}`;
+      collectionScope.collection.seedItem(payload, {
+        value: { id: payload, name: 'Ignored cached item' },
+      });
+    }
+
+    const env = createCollectionEnv({
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      storeName,
+      sessionKey,
+    });
+
+    // A normal store update schedules maintenance for the preloaded entries.
+    env.apiStore.addItemToState('kept', {
+      value: { id: 'kept', name: 'Kept live item' },
+    });
+    await advanceTime(1200);
+
+    async function runNextIdleCallback(
+      timeRemaining: () => number,
+      didTimeout = false,
+    ): Promise<void> {
+      const nextCallbackEntry = idleCallbacks.entries().next().value;
+      if (nextCallbackEntry === undefined) {
+        throw new Error('Expected a scheduled async maintenance callback.');
+      }
+
+      const [callbackId, callback] = nextCallbackEntry;
+      idleCallbacks.delete(callbackId);
+      callback({ didTimeout, timeRemaining });
+      await advanceTime(500);
+    }
+
+    // Exhaust the first deadline after one bounded removal commit. The other
+    // ignored entries must remain until a continuation receives more time.
+    const firstSliceCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    await runNextIdleCallback(() =>
+      collectionScope.collection.listStoredPayloads().length >
+      ignoredItemCount + 1 - 25
+        ? 50
+        : 0,
+    );
+    const firstSliceOperations = firstSliceCapture.finish().timelineString;
+
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      payloadDeletes: firstSliceOperations.match(/🗑️/g)?.length ?? 0,
+      storedEntryCount: collectionScope.collection.listStoredPayloads().length,
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 1
+      payloadDeletes: 25
+      storedEntryCount: 27
+    `);
+
+    // A timeout-fired continuation has no usable browser deadline. The
+    // synthetic budget still lets this small remainder finish.
+    const performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
+    await runNextIdleCallback(() => 0, true);
+    performanceNowSpy.mockRestore();
+
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      storedPayloads: collectionScope.collection.listStoredPayloads(),
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 0
+      storedPayloads: ['kept']
+    `);
+  });
+
   test('expiration cleanup removes expired items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'collection-expiration';

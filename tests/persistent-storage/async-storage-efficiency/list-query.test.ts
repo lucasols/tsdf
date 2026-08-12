@@ -1,7 +1,9 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { TSDFDebugLogEntry } from '../../../src/debug';
+import { createAsyncStorageAdapter } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
@@ -35,6 +37,146 @@ import {
 setupAsyncStorageEfficiencyTestSuite();
 
 describe('async storage efficiency: list-query', () => {
+  test('item maintenance resumes after its deadline and repairs persisted query references', async () => {
+    const storeName = 'list-query-deadline-maintenance';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'all-users' };
+    const ignoredItemCount = 51;
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleCallbackId = 1;
+
+    vi.stubGlobal(
+      'requestIdleCallback',
+      (callback: IdleRequestCallback): number => {
+        const callbackId = nextIdleCallbackId++;
+        idleCallbacks.set(callbackId, callback);
+        return callbackId;
+      },
+    );
+    vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
+      idleCallbacks.delete(callbackId);
+    });
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+    const queryItemKeys: string[] = [];
+    for (let index = 0; index < ignoredItemCount; index++) {
+      queryItemKeys.push(
+        listQueryScope.listQuery.seedItem('ignored', index, {
+          id: index,
+          name: 'Ignored cached item',
+        }).itemKey,
+      );
+    }
+    const keptItem = listQueryScope.listQuery.seedItem('kept', 1, {
+      id: 1,
+      name: 'Kept cached item',
+    });
+    queryItemKeys.push(keptItem.itemKey);
+    listQueryScope.listQuery.seedQuery(usersQuery, queryItemKeys);
+
+    const env = createListQueryEnv({
+      ignoreItems: (payload) => payload.startsWith('ignored||'),
+      storeName,
+      sessionKey,
+    });
+
+    // A normal item update schedules maintenance for the preloaded query and
+    // item namespaces without eagerly deleting their unhydrated entries.
+    env.apiStore.addItemToState(rawItemPayload('trigger', 1), {
+      id: 1,
+      name: 'Trigger item',
+    });
+    await advanceTime(1200);
+
+    async function runNextIdleCallback(timeRemaining: () => number) {
+      const nextCallbackEntry = idleCallbacks.entries().next().value;
+      if (nextCallbackEntry === undefined) {
+        throw new Error('Expected a scheduled async maintenance callback.');
+      }
+
+      const [callbackId, callback] = nextCallbackEntry;
+      idleCallbacks.delete(callbackId);
+      callback({ didTimeout: false, timeRemaining });
+      await advanceTime(500);
+    }
+
+    // The first slice removes one bounded item batch. The stored query may
+    // temporarily reference those missing items because hydration already
+    // filters missing payloads safely, but repair must resume afterward.
+    await runNextIdleCallback(() =>
+      listQueryScope.listQuery.listStoredItemKeys().length >
+      ignoredItemCount + 2 - 25
+        ? 50
+        : 0,
+    );
+
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      storedItemCount: listQueryScope.listQuery.listStoredItemKeys().length,
+      storedQueryCount: listQueryScope.listQuery.listStoredQueryKeys().length,
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 1
+      storedItemCount: 28
+      storedQueryCount: 1
+    `);
+
+    // Another tab refreshes the query and adds a new persisted item while
+    // maintenance is suspended. The continuation must re-read both manifests
+    // and the query payload before it repairs the old missing references.
+    const refreshedItemKey = storeItemKey('refreshed', 1);
+    const siblingAdapter = createAsyncStorageAdapter(
+      new OpfsAsyncStorageDriver(),
+    );
+    const siblingRefreshPromise = Promise.all([
+      siblingAdapter
+        .openNamespace<{ id: number; name: string }, { p: string }>(
+          listQueryScope.listQuery.itemNamespace,
+        )
+        .commit({
+          upserts: [
+            {
+              key: refreshedItemKey,
+              value: { id: 1, name: 'Refreshed cached item' },
+              version: 1,
+              metadata: { p: rawItemPayload('refreshed', 1) },
+            },
+          ],
+        }),
+      siblingAdapter
+        .openNamespace<string[], { p: { tableId: string } }>(
+          listQueryScope.listQuery.queryNamespace,
+        )
+        .commit({
+          upserts: [
+            {
+              key: listQueryScope.listQuery.queryKey(usersQuery),
+              value: [...queryItemKeys, refreshedItemKey],
+              version: 1,
+              metadata: { p: usersQuery },
+            },
+          ],
+        }),
+    ]);
+    await advanceTime(100);
+    await siblingRefreshPromise;
+    siblingAdapter.resetForTests?.();
+
+    await runNextIdleCallback(() => 50);
+
+    expect({
+      continuationScheduled: idleCallbacks.size,
+      query: getParsedOpfsFileData(
+        'tsdf/sess1/list-query-deadline-maintenance/lq.<{tableId:"all-users"}>.p.json',
+      ),
+      storedItemKeys: listQueryScope.listQuery.listStoredItemKeys().sort(),
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 0
+      query: ['"kept||1', '"refreshed||1']
+      storedItemKeys: ['"kept||1', '"refreshed||1', '"trigger||1']
+    `);
+  });
+
   test('expiration cleanup removes expired queries and items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'list-query-expiration';
