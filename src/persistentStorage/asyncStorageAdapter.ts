@@ -74,7 +74,7 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   return value;
 }
 
-function isOfflineProtectedMetadata(
+export function isAsyncStorageMetadataOfflineProtected(
   customMetadata: Record<string, unknown> | undefined,
 ): boolean {
   return customMetadata?.o === true;
@@ -88,7 +88,7 @@ export function getProtectedKeysFromMetadata(
 ): Set<string> {
   const keys = new Set<string>();
   for (const entry of entries) {
-    if (isOfflineProtectedMetadata(entry.customMetadata)) {
+    if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
       keys.add(entry.key);
     }
   }
@@ -143,15 +143,15 @@ export function mergeManagedAsyncStorageCustomMetadata(
       protectedKeysSnapshotSet?.has(
         serializeProtectedRef({ ...scope, key }),
       ) === true ||
-        isOfflineProtectedMetadata(nextCustomMetadata) ||
-        isOfflineProtectedMetadata(currentCustomMetadata),
+        isAsyncStorageMetadataOfflineProtected(nextCustomMetadata) ||
+        isAsyncStorageMetadataOfflineProtected(currentCustomMetadata),
     );
   }
 
   return setOfflineProtectionMetadata(
     mergedCustomMetadata,
-    isOfflineProtectedMetadata(nextCustomMetadata) ||
-      isOfflineProtectedMetadata(currentCustomMetadata),
+    isAsyncStorageMetadataOfflineProtected(nextCustomMetadata) ||
+      isAsyncStorageMetadataOfflineProtected(currentCustomMetadata),
   );
 }
 const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
@@ -1153,7 +1153,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
         const refs: string[] = [];
         for (const entry of metadataEntries) {
-          if (isOfflineProtectedMetadata(entry.customMetadata)) {
+          if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
             refs.push(serializeProtectedRef({ ...scope, key: entry.key }));
           }
         }
@@ -1250,8 +1250,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             const existingMetadata = indexEntries.get(key);
             if (existingMetadata === undefined) continue;
             if (
-              isOfflineProtectedMetadata(existingMetadata.customMetadata) ===
-              shouldProtect
+              isAsyncStorageMetadataOfflineProtected(
+                existingMetadata.customMetadata,
+              ) === shouldProtect
             ) {
               continue;
             }
@@ -3007,7 +3008,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     for (const [key, metadata] of indexState.entries.entries()) {
       const isProtected =
-        isOfflineProtectedMetadata(metadata.customMetadata) ||
+        isAsyncStorageMetadataOfflineProtected(metadata.customMetadata) ||
         args.protectedRefs?.has(
           serializeProtectedRef({ ...args.scope, key }),
         ) === true;

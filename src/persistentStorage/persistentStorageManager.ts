@@ -68,8 +68,9 @@ let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
 const scheduledAsyncMaintenance = new Map<
   string,
   {
+    activeContext: IdleCleanupContext | null;
     cancel: (() => void) | null;
-    callback: () => Promise<void>;
+    callback: (context: IdleCleanupContext) => Promise<void>;
     running: boolean;
     rerunRequested: boolean;
   }
@@ -2430,6 +2431,7 @@ export function resetExpirationScanTracking(): void {
   localStorageMaintenanceRunning = false;
   for (const entry of scheduledAsyncMaintenance.values()) {
     entry.cancel?.();
+    entry.activeContext?.cancel();
   }
   scheduledAsyncMaintenance.clear();
   localStorageGlobalMaintenanceRequested = false;
@@ -2502,7 +2504,7 @@ export async function readProtectedStorageKeys(
 
 export function scheduleAsyncStorageMaintenance(
   maintenanceKey: string,
-  callback: () => Promise<void>,
+  callback: (context: IdleCleanupContext) => Promise<void>,
 ): void {
   const existing = scheduledAsyncMaintenance.get(maintenanceKey);
   if (existing) {
@@ -2515,6 +2517,7 @@ export function scheduleAsyncStorageMaintenance(
   }
 
   const entry = existing ?? {
+    activeContext: null,
     cancel: null,
     callback,
     running: false,
@@ -2523,12 +2526,19 @@ export function scheduleAsyncStorageMaintenance(
   entry.callback = callback;
   scheduledAsyncMaintenance.set(maintenanceKey, entry);
 
-  entry.cancel = scheduleIdleCleanup(() => {
+  entry.cancel = scheduleIdleCleanup((deadline) => {
     entry.cancel = null;
     entry.running = true;
+    const context = createIdleCleanupContext(deadline);
+    entry.activeContext = context;
 
-    void entry.callback().finally(() => {
+    void entry.callback(context).finally(() => {
+      context.cancel();
+      if (entry.activeContext === context) {
+        entry.activeContext = null;
+      }
       entry.running = false;
+      if (scheduledAsyncMaintenance.get(maintenanceKey) !== entry) return;
       if (entry.rerunRequested) {
         entry.rerunRequested = false;
         scheduleAsyncStorageMaintenance(maintenanceKey, entry.callback);

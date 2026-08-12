@@ -109,6 +109,7 @@ export function setupAsyncStorageEfficiencyTestSuite(): void {
     localStorage.clear();
     resetMockBrowserOpfsForTests();
     opfsPersistentStorage.resetForTests?.();
+    vi.unstubAllGlobals();
     clearSessionProtectedKeysSnapshot('sess1');
     clearSessionProtectedKeysSnapshot('session1');
     clearSessionProtectedKeysSnapshot('user@example.com');
@@ -189,6 +190,7 @@ export function createDocumentEnv(options: {
 type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
+  ignoreItems?: string[] | ((payload: string) => boolean);
   maxBytes?: number;
   pinnedItems?: string[];
   serverData?: Record<string, CollectionItemState>;
@@ -200,6 +202,7 @@ export function createCollectionEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       adapter: opfsPersistentStorage,
+      ignoreItems: options.ignoreItems,
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
       maxBytes: options.maxBytes,
@@ -219,6 +222,7 @@ export function storeItemKey(tableId: string, id: number): string {
 export function createListQueryEnv(options: {
   defaultQuerySize?: number;
   debugEntries?: TSDFDebugLogEntry[];
+  ignoreItems?: string[] | ((payload: string) => boolean);
   maxItemBytes?: number;
   maxQueryBytes?: number;
   maxQuerySize?: number;
@@ -249,6 +253,7 @@ export function createListQueryEnv(options: {
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {
       adapter: opfsPersistentStorage,
+      ignoreItems: options.ignoreItems,
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
