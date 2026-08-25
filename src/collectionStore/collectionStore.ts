@@ -673,8 +673,8 @@ export type CollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called if the sub-item is still missing and no refetch is in progress. */
       loadItemFallback?: () => void;
-      /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
-      ensureIsLoaded?: boolean;
+      /** Requires a mount refresh before reporting ready. May cause an extra request. */
+      requireFreshData?: boolean;
     },
   ) => boolean;
   /** React hook that tracks whether a nested list item has been deleted. */
@@ -687,8 +687,8 @@ export type CollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called once when deletion is detected. */
       onDelete?: () => void;
-      /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
-      ensureIsLoaded?: boolean;
+      /** Requires a mount refresh before reporting ready. May cause an extra request. */
+      requireFreshData?: boolean;
     },
   ) => boolean;
   /** React hook for selecting one nested list item plus loading/deleted flags. */
@@ -703,8 +703,8 @@ export type CollectionStore<
       loadItemFallback?: () => void;
       /** Called once when deletion is detected. */
       onDelete?: () => void;
-      /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
-      ensureIsLoaded?: boolean;
+      /** Requires a mount refresh before reporting ready. May cause an extra request. */
+      requireFreshData?: boolean;
     },
   ) => { isLoading: boolean; isDeleted: boolean; data: Selected };
   /** Clears in-memory state and cancels store-local runtime state. */
@@ -2611,7 +2611,7 @@ export function createCollectionStore<
       itemId,
       selector,
       loadItemFallback,
-      ensureIsLoaded,
+      requireFreshData,
     }: {
       /** Unique identifier of the sub-item within the collection item */
       itemId: string;
@@ -2619,14 +2619,14 @@ export function createCollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called after a timeout if the sub-item is still missing and no refetch is in progress. Defaults to `invalidateItem(payload)`. */
       loadItemFallback?: () => void;
-      /** If true, forces a high-priority fetch and shows loading until the data is loaded */
-      ensureIsLoaded?: boolean;
+      /** Requires a mount refresh before reporting ready. May cause an extra request. */
+      requireFreshData?: boolean;
     },
   ): boolean {
     const item = useItem(payload, {
       returnRefetchingStatus: true,
       selector,
-      ensureIsLoaded,
+      requireFreshData,
     });
 
     const itemExists = item.data != null;
@@ -2651,7 +2651,7 @@ export function createCollectionStore<
       itemId,
       selector,
       onDelete,
-      ensureIsLoaded,
+      requireFreshData,
     }: {
       /** Unique identifier of the sub-item within the collection item */
       itemId: string;
@@ -2659,14 +2659,14 @@ export function createCollectionStore<
       selector: (data: ItemState | null) => unknown;
       /** Called once when the deletion is detected */
       onDelete?: () => void;
-      /** If true, forces a high-priority fetch and shows loading until the data is loaded */
-      ensureIsLoaded?: boolean;
+      /** Requires a mount refresh before reporting ready. May cause an extra request. */
+      requireFreshData?: boolean;
     },
   ): boolean {
     const item = useItem(payload, {
       returnRefetchingStatus: true,
       selector,
-      ensureIsLoaded,
+      requireFreshData,
     });
 
     const itemExists = item.data != null;
@@ -2689,7 +2689,7 @@ export function createCollectionStore<
       selector,
       loadItemFallback,
       onDelete,
-      ensureIsLoaded,
+      requireFreshData,
     }: {
       /** Unique identifier of the sub-item within the collection item */
       itemId: string;
@@ -2699,14 +2699,14 @@ export function createCollectionStore<
       loadItemFallback?: () => void;
       /** Called once when the deletion is detected */
       onDelete?: () => void;
-      /** If true, forces a high-priority fetch and shows loading until the data is loaded */
-      ensureIsLoaded?: boolean;
+      /** Requires a mount refresh before reporting ready. May cause an extra request. */
+      requireFreshData?: boolean;
     },
   ): { isLoading: boolean; isDeleted: boolean; data: Selected } {
     const item = useItem(payload, {
       returnRefetchingStatus: true,
       selector,
-      ensureIsLoaded,
+      requireFreshData,
     });
 
     const itemExists = item.data != null;

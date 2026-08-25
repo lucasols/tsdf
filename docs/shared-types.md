@@ -108,7 +108,8 @@ Important behavior:
 - If cached data already exists for the latest payload, the hook can still
   return it immediately while the fetch is deferred
 - `useItem` and `useListQuery` do not support combining `debouncePayload` with
-  `ensureIsLoaded`
+  `requireFreshData`, because that option requires an immediate high-priority
+  refresh
 
 Example:
 

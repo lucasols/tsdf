@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
-import { assertNoEnsureIsLoadedWithDebouncePayload } from '../utils/payloadDebounce';
+import { assertNoRequireFreshDataWithDebouncePayload } from '../utils/payloadDebounce';
 import {
   ValidPayload,
   ValidStoreState,
   invalidPayloadError,
 } from '../utils/storeShared';
-import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
+import { useRequireFreshData } from '../utils/useRequireFreshData';
 import type {
   FieldsInput,
   ListQueryUseMultipleListQueriesQuery,
@@ -22,11 +22,12 @@ export type UseListQueryOptions<
   SelectedItem,
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
   /**
-   * Forces a high-priority fetch on mount and keeps the hook in `loading`
-   * until the current payload finishes loading. Cannot be combined with
-   * `debouncePayload`.
+   * Unconditionally schedules a high-priority fetch on mount and reports
+   * `loading` until that refresh succeeds or fails, even when cached data
+   * exists. Use sparingly because each mount can cause an extra request.
+   * Cannot be combined with `debouncePayload`.
    */
-  ensureIsLoaded?: boolean;
+  requireFreshData?: boolean;
   /**
    * Partial-resource fields to request for each item in this query.
    *
@@ -58,7 +59,7 @@ export function useListQuery<
     showPartialAsRefetching,
     loadSize,
     isOffScreen,
-    ensureIsLoaded,
+    requireFreshData,
     fields,
     debouncePayload,
   }: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>,
@@ -82,9 +83,9 @@ export function useListQuery<
     payload !== undefined &&
     payload !== '';
 
-  assertNoEnsureIsLoadedWithDebouncePayload(
+  assertNoRequireFreshDataWithDebouncePayload(
     'useListQuery',
-    ensureIsLoaded,
+    requireFreshData,
     debouncePayload,
   );
 
@@ -164,8 +165,8 @@ export function useListQuery<
   const queryKey = hasPayload ? getQueryKey(payload) : '';
   const fetchQuery = hasPayload ? query[0] : undefined;
 
-  const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
-    ensureIsLoaded,
+  const [useModifyResult, markRefreshSettled] = useRequireFreshData(
+    requireFreshData,
     hasPayload,
     () => {
       if (fetchQuery && hasPayload) {
@@ -180,7 +181,7 @@ export function useListQuery<
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (!ensureIsLoaded || !hasPayload || !queryKey) {
+    if (!requireFreshData || !hasPayload || !queryKey) {
       return;
     }
 
@@ -190,7 +191,7 @@ export function useListQuery<
       })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
-          emitIsLoadedEvt();
+          markRefreshSettled();
         }
       });
   });

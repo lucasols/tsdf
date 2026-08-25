@@ -651,7 +651,7 @@ describe('useQuery', () => {
     `);
   });
 
-  test('use ensureIsLoaded prop', async () => {
+  test('required fresh data refetches a cached query before reporting success', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
     });
@@ -677,7 +677,7 @@ describe('useQuery', () => {
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
         { tableId: 'users' },
-        { ensureIsLoaded: true, itemSelector: (data) => data.name },
+        { requireFreshData: true, itemSelector: (data) => data.name },
       );
 
       renders.add(pick(selectionResult, ['status', 'isLoading', 'items']));
@@ -693,7 +693,7 @@ describe('useQuery', () => {
     `);
   });
 
-  test('ensureIsLoaded stops forcing loading when the first query fetch fails', async () => {
+  test('a failed required query refresh reports error instead of remaining loading', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;
     const renders = createLoggerStore();
@@ -704,7 +704,7 @@ describe('useQuery', () => {
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
         { tableId: 'users' },
-        { ensureIsLoaded: true, itemSelector: (data) => data.name },
+        { requireFreshData: true, itemSelector: (data) => data.name },
       );
 
       renders.add(
@@ -938,7 +938,7 @@ describe('useQuery', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('use ensureIsLoaded prop with disabled', async () => {
+  test('required fresh data waits until the query hook is enabled', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
     });
@@ -948,7 +948,7 @@ describe('useQuery', () => {
 
     function Comp({ payload }: { payload?: FetchQueryParams }) {
       const selectionResult = listQueryStore.useListQuery(payload, {
-        ensureIsLoaded: true,
+        requireFreshData: true,
         itemSelector: (data) => data.name,
       });
 
@@ -991,7 +991,7 @@ describe('useQuery', () => {
     `);
   });
 
-  test('throws when ensureIsLoaded is combined with debouncePayload', () => {
+  test('throws when requireFreshData is combined with debouncePayload', () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;
 
@@ -1000,7 +1000,7 @@ describe('useQuery', () => {
         listQueryStore.useListQuery(
           { tableId: 'users' },
           {
-            ensureIsLoaded: true,
+            requireFreshData: true,
             debouncePayload: { ms: 100 },
             itemSelector: (data) => data.name,
           },
@@ -1009,7 +1009,7 @@ describe('useQuery', () => {
     ).toThrowErrorMatchingInlineSnapshot(
       `
       Error#:
-        message: 'useListQuery does not support using ensureIsLoaded together with debouncePayload.'
+        message: 'useListQuery does not support using requireFreshData together with debouncePayload.'
         name: 'Error'
       `,
     );
@@ -1150,7 +1150,7 @@ describe('useItem', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('use ensureIsLoaded prop', async () => {
+  test('required fresh data refetches a cached item before reporting success', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
     });
@@ -1173,7 +1173,7 @@ describe('useItem', () => {
 
     renderHook(() => {
       const selectionResult = listQueryStore.useItem('users||1', {
-        ensureIsLoaded: true,
+        requireFreshData: true,
         selector: (data) => data?.name,
       });
 
@@ -1190,7 +1190,7 @@ describe('useItem', () => {
     `);
   });
 
-  test('ensureIsLoaded stops forcing loading when the first item fetch fails', async () => {
+  test('a failed required item refresh reports error instead of remaining loading', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;
     const renders = createLoggerStore();
@@ -1200,7 +1200,7 @@ describe('useItem', () => {
 
     renderHook(() => {
       const selectionResult = listQueryStore.useItem('users||1', {
-        ensureIsLoaded: true,
+        requireFreshData: true,
         selector: (data) => data?.name ?? null,
       });
 
@@ -1379,7 +1379,7 @@ describe('useItem', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(4);
   });
 
-  test('use ensureIsLoaded prop with disabled', async () => {
+  test('required fresh data waits until the item hook is enabled', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
     });
@@ -1389,7 +1389,7 @@ describe('useItem', () => {
 
     function Comp({ payload }: { payload?: string }) {
       const selectionResult = listQueryStore.useItem(payload, {
-        ensureIsLoaded: true,
+        requireFreshData: true,
         selector: (data) => data?.name ?? null,
       });
 
@@ -1422,21 +1422,21 @@ describe('useItem', () => {
     `);
   });
 
-  test('throws when ensureIsLoaded is combined with debouncePayload', () => {
+  test('throws when requireFreshData is combined with debouncePayload', () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;
 
     expect(() =>
       renderHook(() =>
         listQueryStore.useItem('users||1', {
-          ensureIsLoaded: true,
+          requireFreshData: true,
           debouncePayload: { ms: 100 },
         }),
       ),
     ).toThrowErrorMatchingInlineSnapshot(
       `
       Error#:
-        message: 'useItem does not support using ensureIsLoaded together with debouncePayload.'
+        message: 'useItem does not support using requireFreshData together with debouncePayload.'
         name: 'Error'
       `,
     );

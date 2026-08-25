@@ -20,18 +20,18 @@ export function getPayloadDebounceOptions(
   return { leading, maxWait, trailing: true };
 }
 
-export function assertNoEnsureIsLoadedWithDebouncePayload(
+export function assertNoRequireFreshDataWithDebouncePayload(
   hookName: string,
-  ensureIsLoaded: boolean | undefined,
+  requireFreshData: boolean | undefined,
   debouncePayload: PayloadDebounce | undefined,
 ): void {
   if (
     !import.meta.env.PROD &&
-    ensureIsLoaded &&
+    requireFreshData &&
     shouldDebouncePayload(debouncePayload)
   ) {
     throw new Error(
-      `${hookName} does not support using ensureIsLoaded together with debouncePayload.`,
+      `${hookName} does not support using requireFreshData together with debouncePayload.`,
     );
   }
 }

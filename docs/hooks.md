@@ -22,7 +22,40 @@ These options are available across all data hooks:
 | `disableRefetchOnMount`    | `false` (or `true` when `usesRealTimeUpdates` is enabled) | Only fetches if data was explicitly invalidated or has never been loaded. Skips the low-priority refetch that normally happens on mount                     |
 | `returnIdleStatus`         | `true` when disabled, `false` otherwise                   | When `false`, maps `idle` status to `loading` so the UI shows a loading state immediately                                                                   |
 | `returnRefetchingStatus`   | `false`                                                   | When `false`, maps `refetching` status to `success` so the UI doesn't flicker during background refetches                                                   |
-| `ensureIsLoaded`           | `false`                                                   | Forces a high-priority fetch on mount and overrides status to `loading` until data is loaded. Useful for components that must show fresh data               |
+| `requireFreshData`         | `false`                                                   | Unconditionally schedules a high-priority mount fetch and reports `loading` until it settles. Use sparingly because mounts can cause extra requests         |
+
+## `requireFreshData`
+
+Most components should use the default mount behavior. TSDF normally serves
+cached data immediately and uses low-priority mount scheduling, which allows
+the scheduler to throttle or skip redundant requests.
+
+Set `requireFreshData: true` only when a component must not report itself as
+ready until it has attempted to refresh from the server:
+
+```tsx
+const result = store.useDocument({ requireFreshData: true });
+```
+
+This option changes both fetching and the returned status:
+
+- Every enabled hook mount unconditionally schedules a `highPriority` fetch,
+  even when the cache already contains successful data.
+- Cached data remains available in `data`, but `status` is reported as
+  `loading` and `isLoading` as `true` until the refresh settles.
+- A successful refresh reports `success`; a failed refresh reports `error`.
+  The option requires a refresh attempt—it cannot guarantee fresh data when
+  the request fails.
+- It takes precedence over `disableRefetches` and `disableRefetchOnMount`.
+  Disabled hooks do not fetch.
+- Scheduler coalescing can merge simultaneous work, but repeated mounts can
+  still produce repeated network requests.
+
+Avoid enabling this broadly in shared hooks, list rows, or route-level
+components. Doing so bypasses TSDF's normal low-priority mount throttling and
+can significantly increase request volume. Prefer the default cache behavior,
+targeted invalidation, or an explicit user-triggered refresh unless readiness
+truly depends on a new server response.
 
 ## `debouncePayload`
 
@@ -44,7 +77,7 @@ Behavior:
 - Intermediate payloads are skipped if they are replaced before the debounce
   window ends
 - `useItem` and `useListQuery` throw if `debouncePayload` is combined with
-  `ensureIsLoaded`
+  `requireFreshData`
 
 ### Basic trailing debounce
 
@@ -158,7 +191,8 @@ const item = store.useItem(selectedItemId, {
 This is useful when `selectedItemId` changes rapidly, such as typeahead-driven
 selection or fast keyboard navigation.
 
-`ensureIsLoaded` cannot be combined with `debouncePayload` on single hooks.
+`requireFreshData` cannot be combined with `debouncePayload` on single hooks
+because the required refresh must be scheduled immediately.
 
 ### List Query Store specific options
 
@@ -225,7 +259,8 @@ const result = store.useListQuery(
 );
 ```
 
-`ensureIsLoaded` cannot be combined with `debouncePayload` on `useListQuery`.
+`requireFreshData` cannot be combined with `debouncePayload` on `useListQuery`
+because the required refresh must be scheduled immediately.
 
 This is useful for search forms and filter panels where the query payload
 changes on every keystroke.

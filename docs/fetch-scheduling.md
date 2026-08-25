@@ -11,7 +11,7 @@ Every fetch request has a priority that determines its behavior:
 | `lowPriority`    | Hook mount (default), window focus revalidation | Throttled — skipped if a fetch happened recently (within `lowPriorityThrottleMs`)                                                                                                              |
 | `mediumPriority` | Background refetches                            | Delayed by `mediumPriorityDelayMs`, then executed. Cancelled if another fetch including the same request starts. If the store has never been fetched, automatically promotes to `highPriority` |
 | `realtimeUpdate` | Real-time data pushes                           | Uses `dynamicRealtimeThrottleMs` for adaptive throttling based on last fetch duration                                                                                                          |
-| `highPriority`   | Explicit invalidation, `ensureIsLoaded`         | Executes immediately (after coalescing window). Never throttled                                                                                                                                |
+| `highPriority`   | Explicit invalidation, `requireFreshData`       | Executes immediately (after coalescing window). Never throttled                                                                                                                                |
 
 ## Throttling
 
@@ -22,6 +22,11 @@ lowPriorityThrottleMs: 40 * 60 * 1_000
 ```
 
 If a hook mounts within the configured throttle window after the last fetch completed, the low-priority fetch is **skipped** because the data is still fresh enough.
+
+`requireFreshData` deliberately bypasses this mount throttling by scheduling a
+high-priority fetch even when successful cached data exists. Use it only when a
+component must wait for a server refresh attempt before reporting a ready
+status; applying it broadly can turn remounts into repeated network requests.
 
 ## Coalescing
 

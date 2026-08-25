@@ -2,13 +2,13 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType } from '../requestScheduler';
-import { assertNoEnsureIsLoadedWithDebouncePayload } from '../utils/payloadDebounce';
+import { assertNoRequireFreshDataWithDebouncePayload } from '../utils/payloadDebounce';
 import {
   ValidPayload,
   ValidStoreState,
   invalidPayloadError,
 } from '../utils/storeShared';
-import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
+import { useRequireFreshData } from '../utils/useRequireFreshData';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionState,
@@ -21,11 +21,12 @@ export type UseItemOptions<
   Selected,
 > = UseMultipleItemsOptions<ItemState, Selected> & {
   /**
-   * Forces a high-priority fetch on mount and keeps the hook in `loading`
-   * until the current payload finishes loading. Cannot be combined with
-   * `debouncePayload`.
+   * Unconditionally schedules a high-priority fetch on mount and reports
+   * `loading` until that refresh succeeds or fails, even when cached data
+   * exists. Use sparingly because each mount can cause an extra request.
+   * Cannot be combined with `debouncePayload`.
    */
-  ensureIsLoaded?: boolean;
+  requireFreshData?: boolean;
 };
 
 export function useItem<
@@ -37,7 +38,7 @@ export function useItem<
   {
     omitPayload,
     selector,
-    ensureIsLoaded,
+    requireFreshData,
     returnRefetchingStatus,
     disableRefetches,
     disableRefetchOnMount,
@@ -59,9 +60,9 @@ export function useItem<
     payload !== undefined &&
     payload !== '';
 
-  assertNoEnsureIsLoadedWithDebouncePayload(
+  assertNoRequireFreshDataWithDebouncePayload(
     'useItem',
-    ensureIsLoaded,
+    requireFreshData,
     debouncePayload,
   );
 
@@ -129,8 +130,8 @@ export function useItem<
 
   const fetchQuery = hasPayload ? query[0] : undefined;
 
-  const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
-    ensureIsLoaded,
+  const [useModifyResult, markRefreshSettled] = useRequireFreshData(
+    requireFreshData,
     hasPayload,
     () => {
       if (fetchQuery) {
@@ -140,7 +141,7 @@ export function useItem<
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (!ensureIsLoaded || !hasPayload || !result.itemStateKey) {
+    if (!requireFreshData || !hasPayload || !result.itemStateKey) {
       return;
     }
 
@@ -150,7 +151,7 @@ export function useItem<
       })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
-          emitIsLoadedEvt();
+          markRefreshSettled();
         }
       });
   });

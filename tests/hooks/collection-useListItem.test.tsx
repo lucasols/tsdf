@@ -225,7 +225,7 @@ describe('collection store useListItemIsLoading', () => {
     `);
   });
 
-  test('ensureIsLoaded forces a fetch and shows loading', async () => {
+  test('required fresh data refetches the collection item and reports loading', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo },
       { testScenario: 'loaded', usesRealTimeUpdates: true },
@@ -237,7 +237,7 @@ describe('collection store useListItemIsLoading', () => {
       const isLoading = env.apiStore.useListItemIsLoading('1', {
         itemId: 'a',
         selector: (data) => data?.value.items['a'],
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
 
       renders.add({ isLoading });

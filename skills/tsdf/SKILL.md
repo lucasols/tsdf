@@ -68,7 +68,8 @@ Every store ships React hooks with consistent behavior:
 
 - Auto-fetch on mount; refetch on invalidation; deep equality to skip re-renders.
 - Falsy payload (`null` / `undefined` / `false`) disables the hook — no fetch, status `idle`. Use this instead of a separate `enabled` flag.
-- Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `ensureIsLoaded`, `selector`, `debouncePayload`.
+- Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `requireFreshData`, `selector`, `debouncePayload`.
+- Use `requireFreshData` sparingly. It unconditionally schedules a high-priority fetch on every enabled hook mount—even with successful cached data—and reports `loading` until that refresh succeeds or fails. Cached `data` remains available. Prefer normal cache behavior or targeted invalidation unless the component must wait for a new server response; broad use can substantially increase request volume. It overrides `disableRefetches` / `disableRefetchOnMount` and cannot be combined with `debouncePayload` on single-item or single-query hooks.
 
 | Store             | Hooks                                                                                                            |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -84,12 +85,12 @@ Docs: `docs/hooks.md` (every hook + options + return values).
 
 Every fetch has a priority:
 
-| Priority         | Source                             | Behavior                                                                                                          |
-| ---------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `lowPriority`    | Hook mount, focus revalidation     | Throttled by `lowPriorityThrottleMs`                                                                              |
-| `mediumPriority` | Background refetches               | Delayed by `mediumPriorityDelayMs`; cancelled if another fetch runs; promoted to `highPriority` when never loaded |
-| `highPriority`   | User action, explicit invalidation | Runs immediately after the coalescing window; never throttled                                                     |
-| `realtimeUpdate` | Push-driven updates                | Adaptive throttle via `dynamicRealtimeThrottleMs(...)`                                                            |
+| Priority         | Source                                                 | Behavior                                                                                                          |
+| ---------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `lowPriority`    | Hook mount, focus revalidation                         | Throttled by `lowPriorityThrottleMs`                                                                              |
+| `mediumPriority` | Background refetches                                   | Delayed by `mediumPriorityDelayMs`; cancelled if another fetch runs; promoted to `highPriority` when never loaded |
+| `highPriority`   | User action, explicit invalidation, `requireFreshData` | Runs immediately after the coalescing window; never throttled                                                     |
+| `realtimeUpdate` | Push-driven updates                                    | Adaptive throttle via `dynamicRealtimeThrottleMs(...)`                                                            |
 
 Requests within `baseCoalescingWindowMs` are merged into a single scheduler flush. Mutation locks defer fetches for affected items until the mutation finishes.
 

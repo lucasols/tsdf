@@ -125,7 +125,7 @@ import {
   type UnwrapTSDFResult,
   type ValidStoreState,
 } from './utils/storeShared';
-import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
+import { useRequireFreshData } from './utils/useRequireFreshData';
 
 /** Lifecycle status for a document store. */
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -496,10 +496,11 @@ export type DocumentStore<
     /** Returns `idle` instead of `loading` while the document has not been fetched. */
     returnIdleStatus?: boolean;
     /**
-     * Forces a high-priority fetch on mount and keeps the hook in `loading`
-     * until the document finishes loading.
+     * Unconditionally schedules a high-priority fetch on mount and reports
+     * `loading` until that refresh succeeds or fails, even when cached data
+     * exists. Use sparingly because each mount can cause an extra request.
      */
-    ensureIsLoaded?: boolean;
+    requireFreshData?: boolean;
     /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   }) => TSDFUseDocumentReturn<Selected>;
@@ -511,8 +512,8 @@ export type DocumentStore<
     selector: (data: State | null) => unknown;
     /** Called if the item is still missing and no refetch is in progress. */
     loadItemFallback?: () => void;
-    /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
-    ensureIsLoaded?: boolean;
+    /** Requires a mount refresh before reporting ready. May cause an extra request. */
+    requireFreshData?: boolean;
   }) => boolean;
   /** React hook that tracks whether a nested list item has been deleted. */
   useListItemIsDeleted: (args: {
@@ -522,8 +523,8 @@ export type DocumentStore<
     selector: (data: State | null) => unknown;
     /** Called once when deletion is detected. */
     onDelete?: () => void;
-    /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
-    ensureIsLoaded?: boolean;
+    /** Requires a mount refresh before reporting ready. May cause an extra request. */
+    requireFreshData?: boolean;
   }) => boolean;
   /** React hook for selecting one nested list item plus loading/deleted flags. */
   useListItem: <Selected>(args: {
@@ -535,8 +536,8 @@ export type DocumentStore<
     loadItemFallback?: () => void;
     /** Called once when deletion is detected. */
     onDelete?: () => void;
-    /** Forces a high-priority fetch and keeps the hook loading until data is loaded. */
-    ensureIsLoaded?: boolean;
+    /** Requires a mount refresh before reporting ready. May cause an extra request. */
+    requireFreshData?: boolean;
   }) => { isLoading: boolean; isDeleted: boolean; data: Selected };
   /**
    * Runs the full mutation lifecycle: optional optimistic update, async
@@ -1479,7 +1480,7 @@ export function createDocumentStore<
     returnRefetchingStatus,
     disableRefetchOnMount = globalDisableRefetchOnMount,
     returnIdleStatus: returnIdleStatusProp,
-    ensureIsLoaded,
+    requireFreshData,
     disableRefetches,
   }: {
     /** Maps the document data before it is returned from the hook. */
@@ -1498,10 +1499,11 @@ export function createDocumentStore<
     /** Returns `idle` instead of `loading` while the document has not been fetched. */
     returnIdleStatus?: boolean;
     /**
-     * Forces a high-priority fetch on mount and keeps the hook in `loading`
-     * until the document finishes loading.
+     * Unconditionally schedules a high-priority fetch on mount and reports
+     * `loading` until that refresh succeeds or fails, even when cached data
+     * exists. Use sparingly because each mount can cause an extra request.
      */
-    ensureIsLoaded?: boolean;
+    requireFreshData?: boolean;
     /** Returns `refetching` instead of keeping `loaded` status during refetches. */
     returnRefetchingStatus?: boolean;
   } = {}) {
@@ -1649,8 +1651,8 @@ export function createDocumentStore<
       disabled,
     ]);
 
-    const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
-      ensureIsLoaded,
+    const [useModifyResult, markRefreshSettled] = useRequireFreshData(
+      requireFreshData,
       !disabled,
       () => {
         scheduleFetch('highPriority');
@@ -1662,7 +1664,7 @@ export function createDocumentStore<
         .ifSelector((state) => state.status)
         .change.then(({ current }) => {
           if (current === 'success' || current === 'error') {
-            emitIsLoadedEvt();
+            markRefreshSettled();
           }
         });
     });
@@ -1677,7 +1679,7 @@ export function createDocumentStore<
     itemId,
     selector,
     loadItemFallback,
-    ensureIsLoaded,
+    requireFreshData,
   }: {
     /** Unique identifier of the item within the document */
     itemId: string;
@@ -1685,13 +1687,13 @@ export function createDocumentStore<
     selector: (data: State | null) => unknown;
     /** Called after a timeout if the item is still missing and no refetch is in progress. Defaults to `invalidateData()`. */
     loadItemFallback?: () => void;
-    /** If true, forces a high-priority fetch and shows loading until the data is loaded */
-    ensureIsLoaded?: boolean;
+    /** Requires a mount refresh before reporting ready. May cause an extra request. */
+    requireFreshData?: boolean;
   }): boolean {
     const doc = useDocument({
       returnRefetchingStatus: true,
       selector,
-      ensureIsLoaded,
+      requireFreshData,
     });
 
     const itemExists = doc.data != null;
@@ -1714,7 +1716,7 @@ export function createDocumentStore<
     itemId,
     selector,
     onDelete,
-    ensureIsLoaded,
+    requireFreshData,
   }: {
     /** Unique identifier of the item within the document */
     itemId: string;
@@ -1722,13 +1724,13 @@ export function createDocumentStore<
     selector: (data: State | null) => unknown;
     /** Called once when the deletion is detected */
     onDelete?: () => void;
-    /** If true, forces a high-priority fetch and shows loading until the data is loaded */
-    ensureIsLoaded?: boolean;
+    /** Requires a mount refresh before reporting ready. May cause an extra request. */
+    requireFreshData?: boolean;
   }): boolean {
     const doc = useDocument({
       returnRefetchingStatus: true,
       selector,
-      ensureIsLoaded,
+      requireFreshData,
     });
 
     const itemExists = doc.data != null;
@@ -1749,7 +1751,7 @@ export function createDocumentStore<
     selector,
     loadItemFallback,
     onDelete,
-    ensureIsLoaded,
+    requireFreshData,
   }: {
     /** Unique identifier of the item within the document */
     itemId: string;
@@ -1759,13 +1761,13 @@ export function createDocumentStore<
     loadItemFallback?: () => void;
     /** Called once when the deletion is detected */
     onDelete?: () => void;
-    /** If true, forces a high-priority fetch and shows loading until the data is loaded */
-    ensureIsLoaded?: boolean;
+    /** Requires a mount refresh before reporting ready. May cause an extra request. */
+    requireFreshData?: boolean;
   }): { isLoading: boolean; isDeleted: boolean; data: Selected } {
     const doc = useDocument({
       returnRefetchingStatus: true,
       selector,
-      ensureIsLoaded,
+      requireFreshData,
     });
 
     const itemExists = doc.data != null;

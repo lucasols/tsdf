@@ -448,7 +448,7 @@ test('rollback on error', async () => {
 });
 
 describe('isolated tests', () => {
-  test('use ensureIsLoaded prop', async () => {
+  test('required fresh data refetches a cached document before reporting success', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
     // trigger a load before the hook is rendered
@@ -462,7 +462,7 @@ describe('isolated tests', () => {
 
     renderHook(() => {
       const selectionResult = env.apiStore.useDocument({
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
 
       renders.add({
@@ -503,17 +503,17 @@ describe('isolated tests', () => {
     `);
   });
 
-  test('ensureIsLoaded stops forcing loading when the first fetch fails', async () => {
+  test('a failed required refresh reports error instead of remaining loading', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
     const renders = createLoggerStore();
 
-    // Make the mount-triggered ensureIsLoaded fetch fail immediately so the hook
-    // must react to the first terminal state without relying on a later retry.
+    // Make the required mount refresh fail immediately so the hook must react
+    // to the first terminal state without relying on a later retry.
     env.errorInNextFetch('Fetch error');
 
     renderHook(() => {
       const selectionResult = env.apiStore.useDocument({
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
 
       renders.add({
@@ -657,7 +657,7 @@ describe('isolated tests', () => {
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
   });
 
-  test('use ensureIsLoaded prop with disabled', async () => {
+  test('required fresh data waits until the document hook is enabled', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
     // trigger a load before the hook is rendered
@@ -672,7 +672,7 @@ describe('isolated tests', () => {
     const { rerender } = renderHook(
       ({ disabled }: { disabled: boolean }) => {
         const res = env.apiStore.useDocument({
-          ensureIsLoaded: true,
+          requireFreshData: true,
           disabled,
         });
 

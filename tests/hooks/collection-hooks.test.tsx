@@ -758,7 +758,7 @@ describe('useItem isolated tests', () => {
     `);
   });
 
-  test('use ensureIsLoaded prop', async () => {
+  test('required fresh data refetches a cached item before reporting success', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
       { testScenario: 'loaded', usesRealTimeUpdates: true },
@@ -779,7 +779,7 @@ describe('useItem isolated tests', () => {
 
     renderHook(() => {
       const selectionResult = env.apiStore.useItem('1', {
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
 
       renders.add({
@@ -802,7 +802,7 @@ describe('useItem isolated tests', () => {
     `);
   });
 
-  test('ensureIsLoaded stops forcing loading when the first fetch fails', async () => {
+  test('a failed required refresh reports error instead of remaining loading', async () => {
     const env = createCollectionStoreTestEnv<Todo>({
       '1': defaultTodo,
       '2': defaultTodo,
@@ -814,7 +814,7 @@ describe('useItem isolated tests', () => {
 
     renderHook(() => {
       const selectionResult = env.apiStore.useItem('1', {
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
 
       renders.add({
@@ -1032,7 +1032,7 @@ describe('useItem isolated tests', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('use ensureIsLoaded prop with disabled', async () => {
+  test('required fresh data waits until the item hook is enabled', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
       { testScenario: 'loaded', usesRealTimeUpdates: true },
@@ -1043,7 +1043,7 @@ describe('useItem isolated tests', () => {
     const { rerender } = renderHook(
       ({ itemPayload }: { itemPayload: string | false }) => {
         const selectionResult = env.apiStore.useItem(itemPayload, {
-          ensureIsLoaded: true,
+          requireFreshData: true,
         });
 
         renders.add({
@@ -1078,20 +1078,20 @@ describe('useItem isolated tests', () => {
     `);
   });
 
-  test('throws when ensureIsLoaded is combined with debouncePayload', () => {
+  test('throws when requireFreshData is combined with debouncePayload', () => {
     const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     expect(() =>
       renderHook(() =>
         env.apiStore.useItem('1', {
-          ensureIsLoaded: true,
+          requireFreshData: true,
           debouncePayload: { ms: 100 },
         }),
       ),
     ).toThrowErrorMatchingInlineSnapshot(
       `
       Error#:
-        message: 'useItem does not support using ensureIsLoaded together with debouncePayload.'
+        message: 'useItem does not support using requireFreshData together with debouncePayload.'
         name: 'Error'
       `,
     );

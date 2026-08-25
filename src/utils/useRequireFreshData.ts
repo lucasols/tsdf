@@ -4,23 +4,25 @@ import { useOnChange } from '@ls-stack/react-utils/useOnChange';
 import { evtmitter } from 'evtmitter';
 import { useMemo, useState } from 'react';
 
-type EnsureIsLoadedResultModifier = <
+type RequireFreshDataResultModifier = <
   T extends { isLoading: boolean; status: string },
 >(
   result: T,
 ) => T;
 
-export function useEnsureIsLoaded(
-  ensureIsLoaded: boolean | undefined,
+export function useRequireFreshData(
+  requireFreshData: boolean | undefined,
   enabled: boolean,
   forceFetch: () => void,
-): readonly [EnsureIsLoadedResultModifier, () => void] {
-  const isLoadedEvtEmitter = useConst(() => evtmitter<{ isLoaded: boolean }>());
+): readonly [RequireFreshDataResultModifier, () => void] {
+  const refreshSettledEvtEmitter = useConst(() =>
+    evtmitter<{ refreshSettled: boolean }>(),
+  );
 
-  const [isForceLoading, setIsForceLoading] = useState(true);
+  const [isWaitingForRefresh, setIsWaitingForRefresh] = useState(true);
 
   useOnChange(
-    ensureIsLoaded && isForceLoading && enabled,
+    requireFreshData && isWaitingForRefresh && enabled,
     ({ current }) => {
       if (current) {
         forceFetch();
@@ -30,11 +32,11 @@ export function useEnsureIsLoaded(
   );
 
   useOnEvtmitterEvent(
-    isLoadedEvtEmitter,
-    'isLoaded',
-    ({ payload: isLoaded }) => {
-      if (ensureIsLoaded && enabled && isLoaded) {
-        setIsForceLoading(false);
+    refreshSettledEvtEmitter,
+    'refreshSettled',
+    ({ payload: refreshSettled }) => {
+      if (requireFreshData && enabled && refreshSettled) {
+        setIsWaitingForRefresh(false);
       }
     },
   );
@@ -44,27 +46,28 @@ export function useEnsureIsLoaded(
   ): T {
     return useGetModifyResult<T>(
       result,
-      ensureIsLoaded,
+      requireFreshData,
       enabled,
-      isForceLoading,
+      isWaitingForRefresh,
     );
   }
 
   return [
     useModifyResult,
-    () => isLoadedEvtEmitter.emit('isLoaded', true),
+    () => refreshSettledEvtEmitter.emit('refreshSettled', true),
   ] as const;
 }
 
 function useGetModifyResult<T extends { isLoading: boolean; status: string }>(
   result: T,
-  ensureIsLoaded: boolean | undefined,
+  requireFreshData: boolean | undefined,
   enabled: boolean,
-  isForceLoading: boolean,
+  isWaitingForRefresh: boolean,
 ) {
   return useMemo(() => {
-    if (ensureIsLoaded) {
-      const newStatus = enabled && isForceLoading ? 'loading' : result.status;
+    if (requireFreshData) {
+      const newStatus =
+        enabled && isWaitingForRefresh ? 'loading' : result.status;
 
       return {
         ...result,
@@ -74,5 +77,5 @@ function useGetModifyResult<T extends { isLoading: boolean; status: string }>(
     }
 
     return result;
-  }, [ensureIsLoaded, isForceLoading, result, enabled]);
+  }, [requireFreshData, isWaitingForRefresh, result, enabled]);
 }

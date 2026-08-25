@@ -213,7 +213,7 @@ describe('document store useListItemIsLoading', () => {
     `);
   });
 
-  test('ensureIsLoaded forces a fetch and shows loading', async () => {
+  test('required fresh data refetches the document and reports item loading', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>(defaultValue);
 
     // Pre-load the data
@@ -228,7 +228,7 @@ describe('document store useListItemIsLoading', () => {
       const isLoading = env.apiStore.useListItemIsLoading({
         itemId: 'a',
         selector: (data) => data?.value.items['a'],
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
 
       renders.add({ isLoading });

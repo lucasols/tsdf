@@ -65,7 +65,7 @@ export function isStrictItemKeyPrefix(
  *
  * The hook still reads data from state using the latest payload immediately.
  * Only the automatic fetch side is delayed. Single hooks do not support
- * combining this with `ensureIsLoaded`.
+ * combining this with `requireFreshData`.
  */
 export type PayloadDebounce = {
   /** Debounce window in milliseconds before the latest payload is fetched. */

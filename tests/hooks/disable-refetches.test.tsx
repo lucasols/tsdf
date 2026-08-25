@@ -120,7 +120,7 @@ describe('document store', () => {
     expect(env.serverMock.numOfFinishedFetches).toBe(0);
   });
 
-  test('ensureIsLoaded bypasses disableRefetches', async () => {
+  test('required fresh data bypasses disableRefetches', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>(
       { hello: 'world' },
       { testScenario: 'loaded' },
@@ -131,14 +131,15 @@ describe('document store', () => {
     renderHook(() => {
       const result = env.apiStore.useDocument({
         disableRefetches: true,
-        ensureIsLoaded: true,
+        requireFreshData: true,
       });
       renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
 
-    // ensureIsLoaded forces a high-priority fetch regardless of disableRefetches
+    // A required refresh takes precedence because the consumer cannot consider
+    // cached data ready until a new server request settles.
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
