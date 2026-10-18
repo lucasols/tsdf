@@ -102,6 +102,7 @@ import {
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
 } from './utils/browserTabsSync';
+import { createOptimisticMutationTracker } from './utils/optimisticMutationTracker';
 import { performMutationWithLifecycle } from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
@@ -1342,6 +1343,12 @@ export function createDocumentStore<
     };
   }
 
+  const pendingDebounceRollbacks = new Map<
+    string,
+    { before: State | null; after: State | null; mutationId: number }[]
+  >();
+  const optimisticMutations = createOptimisticMutationTracker();
+
   /**
    * Runs a document mutation with optional optimistic updates and revalidation.
    *
@@ -1410,15 +1417,14 @@ export function createDocumentStore<
 
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
-    const optimisticRollbackSnapshot = optimisticUpdate
-      ? klona(store.state.data)
-      : undefined;
 
     const directMutation = async () =>
       unwrapTSDFResult(
         await mutation({ updateState, currentState: store.state.data }),
       );
 
+    // Whether the server accepted the mutation, even if `onSuccess` threw
+    let accepted = false;
     const result = await performMutationWithLifecycle(
       startMutation,
       offline
@@ -1439,15 +1445,50 @@ export function createDocumentStore<
             kind: 'online' as const,
             data: await directMutation(),
           }),
-      (exception) => {
-        if (optimisticUpdate) {
+      (exception, rollbacks) => {
+        let data = store.state.data;
+        let changedSince = false;
+        // Newest first. An update is only reverted if nothing changed the
+        // data since, otherwise the newer data is kept and revalidated
+        for (let i = rollbacks.length - 1; i >= 0; i--) {
+          const rollback = rollbacks[i];
+          if (!rollback || rollback.before === rollback.after) continue;
+          if (data !== rollback.after) {
+            changedSince = true;
+            break;
+          }
+          data = rollback.before;
+        }
+
+        const reverted = data !== store.state.data;
+        // A newer optimistic update may have left the data as it was, e.g.
+        // saving the same value, so a revert can contradict a newer mutation
+        // that succeeded
+        const revalidate =
+          changedSince ||
+          (reverted &&
+            optimisticMutations.hasNewer(
+              DOC_REQUEST_ID,
+              rollbacks[0]?.mutationId ?? mutationId,
+              mutationId,
+            ));
+
+        if (reverted) {
           runWithBroadcastConsistency('confirmed', () => {
-            store.setKey('data', optimisticRollbackSnapshot ?? null, {
-              action: 'rollback-mutation-error',
-            });
-            publishDocumentSnapshot();
+            store.setKey('data', data, { action: 'rollback-mutation-error' });
+            // Data kept until the revalidation, or still carrying another
+            // in-flight optimistic update, isn't confirmed by the server, so
+            // other tabs must not treat it as such
+            publishDocumentSnapshot(
+              revalidate ||
+                optimisticMutations.hasOtherInFlight(DOC_REQUEST_ID, mutationId)
+                ? 'optimistic'
+                : 'confirmed',
+            );
           });
         }
+
+        if (revalidate) invalidateData();
 
         if (resolvedOnMutationError) {
           resolvedOnMutationError(exception, { silentErrors });
@@ -1456,19 +1497,30 @@ export function createDocumentStore<
         return toStoreMutationError(exception, errorNormalizer);
       },
       optimisticUpdate
-        ? () =>
-            runWithBroadcastConsistency('optimistic', () =>
-              optimisticUpdate(store.state.data),
-            )
+        ? (addRollback) => {
+            const before = store.state.data;
+            optimisticMutations.start(DOC_REQUEST_ID, mutationId);
+            try {
+              return runWithBroadcastConsistency('optimistic', () =>
+                optimisticUpdate(store.state.data),
+              );
+            } finally {
+              addRollback({ before, after: store.state.data, mutationId });
+            }
+          }
         : undefined,
       (result) => {
+        accepted = true;
         if (revalidateOnSuccess && result.kind === 'online') {
           invalidateData();
         }
       },
       debounce,
       blockWindowClose ?? undefined,
-    );
+      pendingDebounceRollbacks,
+    ).finally(() => {
+      optimisticMutations.end(DOC_REQUEST_ID, mutationId, accepted);
+    });
 
     storeEvents.emit('mutationEnd', {
       mutationId,

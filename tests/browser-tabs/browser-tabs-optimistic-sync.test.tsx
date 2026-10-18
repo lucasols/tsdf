@@ -464,3 +464,147 @@ test('list query failed optimistic mutations revert the synced background state'
     "
   `);
 });
+
+// A failed optimistic rename restores an item to the value of an older rename
+// still in flight. That value isn't confirmed by the server yet, so other tabs
+// must not receive the restored item as confirmed (which would cancel their
+// pending fetches of it).
+test('list query rollbacks sync restored items as optimistic while an older optimistic mutation of the item is in flight', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-rollback-pending-same-item');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  renderHook(() => {
+    envB.trackItemUI('users||2', envB.apiStore.useItem('users||2').data?.name);
+  });
+
+  // Slow rename of Bob, still in flight when the next rename fails
+  const renameToBobby = envA.performClientItemUpdateAction(
+    'users||2',
+    { name: 'Bobby' },
+    { withOptimisticUpdate: true, duration: 2_000 },
+  );
+  await advanceTime(100);
+  // Second rename of Bob, which fails and restores the item to Bobby
+  const renameToRob = envA.performClientItemUpdateAction(
+    'users||2',
+    { name: 'Rob' },
+    { withOptimisticUpdate: true, error: 'Mutation failed' },
+  );
+
+  await flushAllTimers();
+  await Promise.all([renameToBobby, renameToRob]);
+
+  // The item restored to Bobby is still unconfirmed, so it reaches the other
+  // tab as optimistic
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||2 |
+    0     | Bob      | ui-initialized
+    .     | Bob      | <optimistic-item-snapshot-received (value: {"id":2,"name":"Bobby"})
+    .     | Bobby    | ui-changed
+    .     | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    100ms | Bobby    | <optimistic-item-snapshot-received (value: {"id":2,"name":"Rob"})
+    .     | Rob      | ui-changed
+    .     | Rob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Rob      | <optimistic-item-snapshot-received (value: {"id":2,"name":"Bobby"})
+    .     | Bobby    | ui-changed
+    "
+  `);
+});
+
+// A failed optimistic mutation restores a list in which another item still
+// has an optimistic change in flight. The restored list snapshot carries that
+// unconfirmed change, so other tabs must not receive it as confirmed (which
+// would cancel their pending fetches of it).
+test('list query rollbacks sync restored lists as optimistic while a listed item has another optimistic mutation in flight', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-rollback-pending-item');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: { loaded: { tables: ['users'] } },
+    optimisticListUpdates: createOptimisticSortConfig(),
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    testScenario: { loaded: { tables: ['users'] } },
+    optimisticListUpdates: createOptimisticSortConfig(),
+  });
+
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    envA.trackItemUI(
+      'users||2',
+      query.items.find((item) => item.id === 2)?.name,
+    );
+  });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI(
+      'users||2',
+      query.items.find((item) => item.id === 2)?.name,
+    );
+  });
+
+  // Slow rename of Bob, still in flight when the other mutation fails
+  const renameBob = envA.performClientItemUpdateAction(
+    'users||2',
+    { name: 'Bobby' },
+    { withOptimisticUpdate: true, duration: 2_000 },
+  );
+  await advanceTime(100);
+  // Rename of Alice, which fails and restores the list
+  const renameAlice = envA.performClientItemUpdateAction(
+    'users||1',
+    { name: 'Zoe' },
+    { withOptimisticUpdate: true, error: 'Mutation failed' },
+  );
+
+  await flushAllTimers();
+  await Promise.all([renameBob, renameAlice]);
+
+  // The list restored by Alice's rollback still carries Bobby, unconfirmed, so
+  // it reaches the other tab as optimistic
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||2 |
+    0     | Bob      | [users||2] ui-initialized
+    .     | Bob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Bobby    | [users||2] ui-changed
+    .     | Bobby    | [users||2] <optimistic-item-snapshot-received (value: {"id":2,"name":"Bobby"})
+    .     | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    100ms | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Bobby    | [users||1] <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    .     | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Bobby    | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
+    .     | Bobby    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    "
+  `);
+});

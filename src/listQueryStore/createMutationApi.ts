@@ -17,6 +17,8 @@ import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUp
 import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
+import { createOptimisticMutationTracker } from '../utils/optimisticMutationTracker';
+import { revertOptimisticChange } from '../utils/optimisticRollback';
 import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
@@ -308,24 +310,42 @@ export function createMutationApi<
         type?: FetchType;
         fields?: string[];
       };
-  type MutationItemRollbackSnapshot = {
-    itemKey: string;
+  type ItemRollbackState = {
     item: ItemState | null | undefined;
     itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
     loadedFields: ItemLoadedFields | undefined;
     invalidationFields: string[] | undefined;
+  };
+  type ItemInvalidationTracking = {
     pendingInvalidationFields: Map<string, FetchType | null> | undefined;
     pendingFullInvalidation: FetchType | undefined;
     droppedFieldInvalidations:
       | Map<string, DroppedFieldInvalidation>
       | undefined;
     invalidationWasTriggered: boolean;
+  };
+  type ListQueryItemRollback = {
+    itemKey: string;
+    payload: ItemPayload;
+    before: ItemRollbackState;
+    trackingBefore: ItemInvalidationTracking;
+    after: ItemRollbackState;
     hadPendingFetch: boolean;
   };
   type MutationQueryRollbackSnapshot = {
     queryKey: string;
-    query: TSFDListQuery<QueryPayload> | undefined;
+    before: TSFDListQuery<QueryPayload> | undefined;
     invalidationWasTriggered: boolean;
+  };
+  type ListQueryQueryRollback = MutationQueryRollbackSnapshot & {
+    after: TSFDListQuery<QueryPayload> | undefined;
+  };
+  type ListQueryMutationRollback = {
+    items: ListQueryItemRollback[];
+    queries: ListQueryQueryRollback[];
+    mutationId: number;
+    /** List revalidations deferred until the mutation succeeds */
+    deferredQueryInvalidations: Map<string, QueryPayload>;
   };
   type OptimisticMutationQueryContext = {
     dynamicQueryMutationEnders: Array<() => boolean>;
@@ -354,14 +374,204 @@ export function createMutationApi<
     return [payload];
   }
 
-  function restoreMutationRollbackState({
-    itemSnapshots,
-    querySnapshots,
-  }: {
-    itemSnapshots: MutationItemRollbackSnapshot[];
-    querySnapshots: MutationQueryRollbackSnapshot[];
-  }): void {
-    if (itemSnapshots.length === 0 && querySnapshots.length === 0) return;
+  const pendingDebounceRollbacks = new Map<
+    string,
+    ListQueryMutationRollback[]
+  >();
+  const optimisticMutations = createOptimisticMutationTracker();
+
+  function getItemRollbackState(itemKey: string): ItemRollbackState {
+    return {
+      item: store.state.items[itemKey],
+      itemQuery: store.state.itemQueries[itemKey],
+      loadedFields: store.state.itemLoadedFields[itemKey],
+      invalidationFields: store.state.itemFieldInvalidationFields[itemKey],
+    };
+  }
+
+  function getItemInvalidationTracking(
+    itemKey: string,
+  ): ItemInvalidationTracking {
+    const pendingInvalidationFields =
+      itemPendingInvalidationFields.get(itemKey);
+    const droppedFieldInvalidations =
+      itemDroppedFieldInvalidations.get(itemKey);
+    return {
+      pendingInvalidationFields:
+        pendingInvalidationFields && new Map(pendingInvalidationFields),
+      pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
+      droppedFieldInvalidations:
+        droppedFieldInvalidations && new Map(droppedFieldInvalidations),
+      invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+    };
+  }
+
+  function revertOptimisticMutations(
+    rollbacks: ListQueryMutationRollback[],
+    mutationId: number,
+  ): void {
+    // `tracking` is the invalidation tracking to restore, if any
+    const revertedItems = new Map<
+      string,
+      {
+        payload: ItemPayload;
+        state: ItemRollbackState;
+        tracking: ItemInvalidationTracking | undefined;
+        hadPendingFetch: boolean;
+      }
+    >();
+    const revertedQueries = new Map<
+      string,
+      {
+        query: TSFDListQuery<QueryPayload> | undefined;
+        invalidationWasTriggered: boolean | undefined;
+      }
+    >();
+    const changedItems = new Map<string, ItemPayload>();
+    // Items whose data, not only metadata, is kept until the revalidation
+    const keptDataItemKeys = new Set<string>();
+    const changedQueryKeys = new Set<string>();
+    // The oldest reverted mutation of each item, older than this one when
+    // reverting superseded debounced calls
+    const oldestMutationIds = new Map<string, number>();
+
+    // Newest first, so each update is reverted on top of the state it
+    // produced. Data changed again since is kept and revalidated.
+    for (let i = rollbacks.length - 1; i >= 0; i--) {
+      const rollback = rollbacks[i];
+      if (!rollback) continue;
+
+      for (const {
+        itemKey,
+        payload,
+        before,
+        after,
+        trackingBefore,
+        hadPendingFetch,
+      } of rollback.items) {
+        oldestMutationIds.set(itemKey, rollback.mutationId);
+        const reverted = revertedItems.get(itemKey);
+        const current = reverted?.state ?? getItemRollbackState(itemKey);
+        const { value, changed } = revertOptimisticChange(
+          current,
+          before,
+          after,
+        );
+        // A failed create (or recreation of a deleted item) is reverted with
+        // all its metadata, even if the metadata changed since, e.g. by an
+        // invalidation. If newer data is kept instead, its metadata is kept
+        // too, so the item stays readable and can be revalidated.
+        const isCreate = !before.item && !!after.item;
+        const createReverted = isCreate && value.item === before.item;
+        // Invalidations change the item metadata, so its tracking is only
+        // restored if no invalidation happened since the update
+        const metadataUnchanged =
+          current.itemQuery === after.itemQuery &&
+          current.loadedFields === after.loadedFields &&
+          current.invalidationFields === after.invalidationFields;
+
+        revertedItems.set(itemKey, {
+          payload,
+          state: createReverted ? before : isCreate ? current : value,
+          tracking:
+            createReverted || (!isCreate && metadataUnchanged)
+              ? trackingBefore
+              : reverted?.tracking,
+          hadPendingFetch: hadPendingFetch || !!reverted?.hadPendingFetch,
+        });
+        if (changed && !createReverted) changedItems.set(itemKey, payload);
+        if (current.item !== after.item && before.item !== after.item) {
+          keptDataItemKeys.add(itemKey);
+        }
+      }
+
+      for (const queryRollback of rollback.queries) {
+        const { queryKey } = queryRollback;
+        const reverted = revertedQueries.get(queryKey);
+        const current = reverted
+          ? reverted.query
+          : store.state.queries[queryKey];
+        const { value, changed } = revertOptimisticChange(
+          current,
+          queryRollback.before,
+          queryRollback.after,
+        );
+
+        revertedQueries.set(queryKey, {
+          query: value,
+          invalidationWasTriggered:
+            current?.refetchOnMount === queryRollback.after?.refetchOnMount
+              ? queryRollback.invalidationWasTriggered
+              : reverted?.invalidationWasTriggered,
+        });
+        if (changed) changedQueryKeys.add(queryKey);
+      }
+    }
+
+    // Skip entries the rollback leaves as they are. `removedItemKeys` are the
+    // items that end up removed, which the kept lists can't list.
+    const removedItemKeys = new Set<string>();
+    for (const [itemKey, { payload, state }] of revertedItems) {
+      const current = getItemRollbackState(itemKey);
+      if (
+        state.item === current.item &&
+        state.itemQuery === current.itemQuery &&
+        state.loadedFields === current.loadedFields &&
+        state.invalidationFields === current.invalidationFields
+      ) {
+        revertedItems.delete(itemKey);
+        continue;
+      }
+
+      // A newer optimistic update may have left the item as it was, e.g.
+      // saving the same value, so a revert can contradict a newer mutation
+      // that succeeded
+      if (
+        state.item !== current.item &&
+        optimisticMutations.hasNewer(
+          itemKey,
+          oldestMutationIds.get(itemKey) ?? mutationId,
+          mutationId,
+        )
+      ) {
+        changedItems.set(itemKey, payload);
+        keptDataItemKeys.add(itemKey);
+
+        // A removed item can't be revalidated, so it's kept until then
+        if (!state.item && current.item) {
+          revertedItems.delete(itemKey);
+          continue;
+        }
+      }
+
+      if (!state.item && current.item) removedItemKeys.add(itemKey);
+    }
+    for (const [queryKey, reverted] of revertedQueries) {
+      const { query } = reverted;
+      // A query can't list the items the rollback removes
+      if (
+        query &&
+        query.items.some((itemKey) => removedItemKeys.has(itemKey))
+      ) {
+        reverted.query = {
+          ...query,
+          items: query.items.filter((itemKey) => !removedItemKeys.has(itemKey)),
+        };
+      } else if (query === store.state.queries[queryKey]) {
+        revertedQueries.delete(queryKey);
+      }
+    }
+
+    // List hooks don't refetch on item invalidations, so the queries showing
+    // kept item data, before or after the rollback, are revalidated too
+    function addQueriesShowingKeptData() {
+      for (const [queryKey, query] of Object.entries(store.state.queries)) {
+        if (query.items.some((itemKey) => keptDataItemKeys.has(itemKey))) {
+          changedQueryKeys.add(queryKey);
+        }
+      }
+    }
+    if (keptDataItemKeys.size > 0) addQueriesShowingKeptData();
 
     // Deleting an item drops its pending fetch work (an in-flight or delayed
     // refetch), so restoring it must resume that work, even when no hook is
@@ -375,12 +585,8 @@ export function createMutationApi<
     }[] = [];
     const interruptedFetchPayloadsToInvalidate: ItemPayload[] = [];
 
-    for (const {
-      itemKey,
-      itemQuery,
-      loadedFields,
-      hadPendingFetch,
-    } of itemSnapshots) {
+    for (const [itemKey, { state, hadPendingFetch }] of revertedItems) {
+      const { itemQuery, loadedFields } = state;
       if (itemQuery && hadPendingFetch && !store.state.itemQueries[itemKey]) {
         if (partialResources && !loadedFields) {
           interruptedFetchPayloadsToInvalidate.push(itemQuery.payload);
@@ -397,95 +603,140 @@ export function createMutationApi<
       }
     }
 
-    runWithBroadcastConsistency('confirmed', () => {
-      store.produceState(
-        (draftState) => {
-          for (const snapshot of itemSnapshots) {
-            if (snapshot.item === undefined) {
-              delete draftState.items[snapshot.itemKey];
-            } else {
-              draftState.items[snapshot.itemKey] = snapshot.item;
+    if (revertedItems.size > 0 || revertedQueries.size > 0) {
+      runWithBroadcastConsistency('confirmed', () => {
+        store.produceState(
+          (draftState) => {
+            for (const [itemKey, { state }] of revertedItems) {
+              if (state.item === undefined) {
+                delete draftState.items[itemKey];
+              } else {
+                draftState.items[itemKey] = state.item;
+              }
+
+              if (state.itemQuery === undefined) {
+                delete draftState.itemQueries[itemKey];
+              } else {
+                draftState.itemQueries[itemKey] = state.itemQuery;
+              }
+
+              if (state.loadedFields === undefined) {
+                delete draftState.itemLoadedFields[itemKey];
+              } else {
+                draftState.itemLoadedFields[itemKey] = state.loadedFields;
+              }
+
+              if (state.invalidationFields === undefined) {
+                delete draftState.itemFieldInvalidationFields[itemKey];
+              } else {
+                draftState.itemFieldInvalidationFields[itemKey] =
+                  state.invalidationFields;
+              }
             }
 
-            if (snapshot.itemQuery === undefined) {
-              delete draftState.itemQueries[snapshot.itemKey];
+            for (const [queryKey, { query }] of revertedQueries) {
+              if (query === undefined) {
+                delete draftState.queries[queryKey];
+              } else {
+                draftState.queries[queryKey] = query;
+              }
+            }
+          },
+          { action: 'rollback-mutation-error' },
+        );
+
+        for (const [itemKey, { tracking }] of revertedItems) {
+          if (tracking) {
+            if (tracking.pendingInvalidationFields === undefined) {
+              itemPendingInvalidationFields.delete(itemKey);
             } else {
-              draftState.itemQueries[snapshot.itemKey] = snapshot.itemQuery;
+              itemPendingInvalidationFields.set(
+                itemKey,
+                tracking.pendingInvalidationFields,
+              );
             }
 
-            if (snapshot.loadedFields === undefined) {
-              delete draftState.itemLoadedFields[snapshot.itemKey];
+            if (tracking.pendingFullInvalidation === undefined) {
+              itemsPendingFullInvalidation.delete(itemKey);
             } else {
-              draftState.itemLoadedFields[snapshot.itemKey] =
-                snapshot.loadedFields;
+              itemsPendingFullInvalidation.set(
+                itemKey,
+                tracking.pendingFullInvalidation,
+              );
             }
 
-            if (snapshot.invalidationFields === undefined) {
-              delete draftState.itemFieldInvalidationFields[snapshot.itemKey];
+            // Dropped field invalidations record invalidations that happened,
+            // so the ones the update cleared are merged back into the newer ones
+            if (tracking.droppedFieldInvalidations) {
+              const dropped = itemDroppedFieldInvalidations.get(itemKey);
+              if (dropped) {
+                for (const [
+                  field,
+                  record,
+                ] of tracking.droppedFieldInvalidations) {
+                  if (!dropped.has(field)) dropped.set(field, record);
+                }
+              } else {
+                itemDroppedFieldInvalidations.set(
+                  itemKey,
+                  tracking.droppedFieldInvalidations,
+                );
+              }
+            }
+
+            if (tracking.invalidationWasTriggered) {
+              itemInvalidationWasTriggered.add(itemKey);
             } else {
-              draftState.itemFieldInvalidationFields[snapshot.itemKey] =
-                snapshot.invalidationFields;
+              itemInvalidationWasTriggered.delete(itemKey);
             }
           }
 
-          for (const snapshot of querySnapshots) {
-            if (snapshot.query === undefined) {
-              delete draftState.queries[snapshot.queryKey];
-            } else {
-              draftState.queries[snapshot.queryKey] = snapshot.query;
-            }
+          // Newer data kept until the revalidation, or still carrying another
+          // in-flight optimistic update, isn't confirmed by the server, so
+          // other tabs must not treat it as such
+          publishItemSnapshot(
+            itemKey,
+            keptDataItemKeys.has(itemKey) ||
+              optimisticMutations.hasOtherInFlight(itemKey, mutationId)
+              ? 'optimistic'
+              : 'confirmed',
+          );
+        }
+
+        for (const [
+          queryKey,
+          { query, invalidationWasTriggered },
+        ] of revertedQueries) {
+          if (invalidationWasTriggered === true) {
+            queryInvalidationWasTriggered.add(queryKey);
+          } else if (invalidationWasTriggered === false) {
+            queryInvalidationWasTriggered.delete(queryKey);
           }
-        },
-        { action: 'rollback-mutation-error' },
-      );
 
-      for (const snapshot of itemSnapshots) {
-        if (snapshot.pendingInvalidationFields === undefined) {
-          itemPendingInvalidationFields.delete(snapshot.itemKey);
-        } else {
-          itemPendingInvalidationFields.set(
-            snapshot.itemKey,
-            new Map(snapshot.pendingInvalidationFields),
+          // A query snapshot carries its items, so it isn't confirmed while
+          // one of them has kept data or another optimistic mutation in flight
+          publishQuerySnapshot(
+            queryKey,
+            changedQueryKeys.has(queryKey) ||
+              query?.items.some(
+                (itemKey) =>
+                  keptDataItemKeys.has(itemKey) ||
+                  optimisticMutations.hasOtherInFlight(itemKey, mutationId),
+              )
+              ? 'optimistic'
+              : 'confirmed',
           );
         }
+      });
+    }
 
-        if (snapshot.pendingFullInvalidation === undefined) {
-          itemsPendingFullInvalidation.delete(snapshot.itemKey);
-        } else {
-          itemsPendingFullInvalidation.set(
-            snapshot.itemKey,
-            snapshot.pendingFullInvalidation,
-          );
-        }
+    if (keptDataItemKeys.size > 0) addQueriesShowingKeptData();
 
-        if (snapshot.droppedFieldInvalidations === undefined) {
-          itemDroppedFieldInvalidations.delete(snapshot.itemKey);
-        } else {
-          itemDroppedFieldInvalidations.set(
-            snapshot.itemKey,
-            new Map(snapshot.droppedFieldInvalidations),
-          );
-        }
-
-        if (snapshot.invalidationWasTriggered) {
-          itemInvalidationWasTriggered.add(snapshot.itemKey);
-        } else {
-          itemInvalidationWasTriggered.delete(snapshot.itemKey);
-        }
-
-        publishItemSnapshot(snapshot.itemKey);
-      }
-
-      for (const snapshot of querySnapshots) {
-        if (snapshot.invalidationWasTriggered) {
-          queryInvalidationWasTriggered.add(snapshot.queryKey);
-        } else {
-          queryInvalidationWasTriggered.delete(snapshot.queryKey);
-        }
-
-        publishQuerySnapshot(snapshot.queryKey);
-      }
-    });
+    const changedQueries: QueryPayload[] = [];
+    for (const queryKey of changedQueryKeys) {
+      const query = store.state.queries[queryKey];
+      if (query) changedQueries.push(query.payload);
+    }
 
     for (const { itemKey, payload, fields } of interruptedFetches) {
       getOrCreateItemScheduler(itemKey, payload).scheduleFetch(
@@ -497,6 +748,13 @@ export function createMutationApi<
 
     if (interruptedFetchPayloadsToInvalidate.length > 0) {
       invalidateItem(interruptedFetchPayloadsToInvalidate);
+    }
+
+    if (changedItems.size > 0 || changedQueries.length > 0) {
+      invalidateQueryAndItems({
+        itemPayload: changedItems.size > 0 ? [...changedItems.values()] : false,
+        queryPayload: changedQueries.length > 0 ? changedQueries : false,
+      });
     }
   }
 
@@ -516,7 +774,7 @@ export function createMutationApi<
     if (!context.queryRollbackSnapshots.has(queryKey)) {
       context.queryRollbackSnapshots.set(queryKey, {
         queryKey,
-        query: klona(store.state.queries[queryKey]),
+        before: store.state.queries[queryKey],
         invalidationWasTriggered: queryInvalidationWasTriggered.has(queryKey),
       });
     }
@@ -1541,7 +1799,6 @@ export function createMutationApi<
       normalizeRevalidateOnSuccessOption(revalidateOnSuccess);
     const mutationId = getAutoIncrementId();
 
-    let itemRollbackSnapshots: MutationItemRollbackSnapshot[] = [];
     const deferredOptimisticQueryInvalidations = new Map<
       string,
       QueryPayload
@@ -1552,42 +1809,13 @@ export function createMutationApi<
       queryRollbackSnapshots: new Map<string, MutationQueryRollbackSnapshot>(),
     };
 
-    if (affectedItemEntries) {
-      itemRollbackSnapshots = affectedItemEntries.map(
-        ({ itemKey, payload: itemPayload }) => {
-          const pendingInvalidationFields =
-            itemPendingInvalidationFields.get(itemKey);
-          const droppedFieldInvalidations =
-            itemDroppedFieldInvalidations.get(itemKey);
-          return {
-            itemKey,
-            item: klona(store.state.items[itemKey]),
-            itemQuery: klona(store.state.itemQueries[itemKey]),
-            loadedFields: klona(store.state.itemLoadedFields[itemKey]),
-            invalidationFields: klona(
-              store.state.itemFieldInvalidationFields[itemKey],
-            ),
-            pendingInvalidationFields:
-              pendingInvalidationFields && new Map(pendingInvalidationFields),
-            pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
-            droppedFieldInvalidations:
-              droppedFieldInvalidations && new Map(droppedFieldInvalidations),
-            invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
-            hadPendingFetch:
-              !!fetchItemFn &&
-              getOrCreateItemScheduler(itemKey, itemPayload).hasPendingRequest(
-                itemKey,
-              ),
-          };
-        },
-      );
-    }
-
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
 
+    // Whether the server accepted the mutation, even if `onSuccess` threw
+    let accepted = false;
     const result = await performMutationWithLifecycle(
       () => {
         const endBaseMutations = startItemMutation(payloadToUse);
@@ -1612,18 +1840,10 @@ export function createMutationApi<
             kind: 'online' as const,
             data: await directMutation(),
           }),
-      (exception) => {
+      (exception, rollbacks) => {
         const error = toStoreMutationError(exception, errorNormalizer);
-        const queryRollbackSnapshots = [
-          ...optimisticMutationQueryContext.queryRollbackSnapshots.values(),
-        ];
 
-        if (itemRollbackSnapshots.length > 0 || queryRollbackSnapshots.length) {
-          restoreMutationRollbackState({
-            itemSnapshots: itemRollbackSnapshots,
-            querySnapshots: queryRollbackSnapshots,
-          });
-        }
+        revertOptimisticMutations(rollbacks, mutationId);
 
         if (onMutationError) {
           onMutationError(exception, { silentErrors });
@@ -1636,7 +1856,25 @@ export function createMutationApi<
         return error;
       },
       optimisticUpdate
-        ? () => {
+        ? (addRollback) => {
+            const itemSnapshots = (affectedItemEntries ?? []).map(
+              ({ itemKey, payload: itemPayload }) => {
+                optimisticMutations.start(itemKey, mutationId);
+                return {
+                  itemKey,
+                  payload: itemPayload,
+                  before: getItemRollbackState(itemKey),
+                  trackingBefore: getItemInvalidationTracking(itemKey),
+                  hadPendingFetch:
+                    !!fetchItemFn &&
+                    getOrCreateItemScheduler(
+                      itemKey,
+                      itemPayload,
+                    ).hasPendingRequest(itemKey),
+                };
+              },
+            );
+
             deferredOptimisticQueryInvalidationsStack.push(
               deferredOptimisticQueryInvalidations,
             );
@@ -1651,10 +1889,39 @@ export function createMutationApi<
             } finally {
               optimisticMutationQueryContextStack.pop();
               deferredOptimisticQueryInvalidationsStack.pop();
+
+              addRollback({
+                items: itemSnapshots.map((snapshot) => ({
+                  ...snapshot,
+                  after: getItemRollbackState(snapshot.itemKey),
+                })),
+                queries: Array.from(
+                  optimisticMutationQueryContext.queryRollbackSnapshots.values(),
+                  (snapshot) => ({
+                    ...snapshot,
+                    after: store.state.queries[snapshot.queryKey],
+                  }),
+                ),
+                mutationId,
+                deferredQueryInvalidations:
+                  deferredOptimisticQueryInvalidations,
+              });
             }
           }
         : undefined,
-      (result) => {
+      (result, rollbacks) => {
+        accepted = true;
+        // Includes the list revalidations of the debounced calls this one
+        // superseded
+        for (const rollback of rollbacks) {
+          for (const [
+            queryKey,
+            queryPayload,
+          ] of rollback.deferredQueryInvalidations) {
+            deferredOptimisticQueryInvalidations.set(queryKey, queryPayload);
+          }
+        }
+
         const successInvalidationQueryPayloads =
           result.kind === 'online'
             ? getSuccessInvalidationQueryPayloads(
@@ -1688,7 +1955,12 @@ export function createMutationApi<
       },
       debounce,
       blockWindowClose ?? undefined,
-    );
+      pendingDebounceRollbacks,
+    ).finally(() => {
+      for (const { itemKey } of affectedItemEntries ?? []) {
+        optimisticMutations.end(itemKey, mutationId, accepted);
+      }
+    });
 
     storeEvents.emit('mutationEnd', {
       mutationId,
