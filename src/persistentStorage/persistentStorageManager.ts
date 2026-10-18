@@ -6,10 +6,6 @@ import {
   type TSDFPersistentStorageDebugOperation,
 } from '../debug';
 import {
-  getAsyncStorageMaintenanceRemoveBatchSize,
-  removeAsyncStorageNamespaceEntriesIfUnchanged,
-} from './asyncStorageAdapter';
-import {
   parsePersistedAsyncNamespaceKind,
   serializeProtectedRef,
 } from './asyncStorageShared';
@@ -994,18 +990,25 @@ type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
-  /** Number of keys idle-deadline maintenance removes per commit. */
-  getMaintenanceRemoveBatchSize(): number;
+  /** The async adapter backing this handle, or `null` for `local-sync`. */
+  getAsyncAdapter(): AsyncStorageAdapter | null;
   commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
   ): Promise<void>;
   /**
-   * Async adapters only: removes entries whose metadata still matches and
-   * resolves with the keys kept because they changed, or `null` when nothing
-   * could be verified (no active session or a storage error).
+   * Async adapters only: removes entries whose metadata still matches through
+   * `removeEntries` and resolves with the keys kept because they changed, or
+   * `null` when nothing could be verified (no active session or a storage
+   * error). The remover is passed in so shared persistence code doesn't pull
+   * the async adapter implementation into sync-only bundles.
    */
   removeEntriesIfUnchanged(
     entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    removeEntries: (
+      adapter: AsyncStorageAdapter,
+      scope: AsyncStorageNamespaceScope,
+      entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    ) => Promise<ReadonlySet<string>>,
   ): Promise<ReadonlySet<string> | null>;
   readEntry(
     entryKey: string,
@@ -2199,12 +2202,17 @@ export function createPersistentStorageNamespaceHandle<
     // No-op for namespaced handles: debouncing lives in the store integrations.
   }
 
-  function getMaintenanceRemoveBatchSize(): number {
-    return getAsyncStorageMaintenanceRemoveBatchSize(asyncAdapter);
+  function getAsyncAdapter(): AsyncStorageAdapter | null {
+    return asyncAdapter;
   }
 
   async function removeEntriesIfUnchanged(
     entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    removeEntries: (
+      adapter: AsyncStorageAdapter,
+      scope: AsyncStorageNamespaceScope,
+      entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    ) => Promise<ReadonlySet<string>>,
   ): Promise<ReadonlySet<string> | null> {
     const scope = getAsyncNamespaceScope();
     if (asyncAdapter === null || scope === null) return null;
@@ -2216,11 +2224,7 @@ export function createPersistentStorageNamespaceHandle<
       ? { removes: entries.length, touches: 0, upserts: 0 }
       : undefined;
     try {
-      const staleKeys = await removeAsyncStorageNamespaceEntriesIfUnchanged(
-        asyncAdapter,
-        scope,
-        entries,
-      );
+      const staleKeys = await removeEntries(asyncAdapter, scope, entries);
       if (import.meta.env.DEV) {
         logPersistentStorageOperation(
           debugContext,
@@ -2248,7 +2252,7 @@ export function createPersistentStorageNamespaceHandle<
   }
 
   return {
-    getMaintenanceRemoveBatchSize,
+    getAsyncAdapter,
     commit,
     removeEntriesIfUnchanged,
     readEntry,

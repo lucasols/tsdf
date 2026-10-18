@@ -11,11 +11,13 @@ import {
   ASYNC_STORAGE_MAX_AGE_MS,
   buildPersistedStaticPolicy,
   estimateManagedAsyncStorageEntrySizeBytes,
+  getAsyncStorageMaintenanceRemoveBatchSize,
   getProtectedKeysFromMetadata,
   isAsyncStorageMetadataOfflineProtected,
   mergeManagedAsyncStorageCustomMetadata,
   readAsyncStorageNamespaceIndexStateUsingDriver,
   registerAsyncStartupStoreCleanup,
+  removeAsyncStorageNamespaceEntriesIfUnchanged,
   serializeProtectedRef,
   unregisterAsyncStartupStoreCleanup,
   type AsyncStartupCleanupScopePlan,
@@ -1103,7 +1105,11 @@ export function setupCollectionPersistence<
     const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
       removalEntries,
       isAsyncStorageMetadataOfflineProtected,
-      (entries) => namespace.removeEntriesIfUnchanged(entries),
+      (entries) =>
+        namespace.removeEntriesIfUnchanged(
+          entries,
+          removeAsyncStorageNamespaceEntriesIfUnchanged,
+        ),
       (removedKeys) => {
         for (const itemKey of removedKeys) {
           if (
@@ -1114,7 +1120,7 @@ export function setupCollectionPersistence<
           }
         }
       },
-      namespace.getMaintenanceRemoveBatchSize(),
+      getAsyncStorageMaintenanceRemoveBatchSize(namespace.getAsyncAdapter()),
       isSessionCurrent,
       idleContext,
     );

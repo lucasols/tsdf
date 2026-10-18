@@ -1923,7 +1923,16 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     this.#broadcastNamespaceInvalidation(scope, 'clear');
     const namespaceKey = getNamespaceId(scope);
     this.#observedScopes.delete(namespaceKey);
+    const pending = this.#pendingNamespaceCommits.get(namespaceKey);
     this.#pendingNamespaceCommits.delete(namespaceKey);
+    if (pending) {
+      // Writes queued before the clear are discarded with the namespace, but
+      // their callers still need to settle.
+      pending.cancelFlush?.();
+      for (const waiter of pending.waiters) {
+        waiter.resolve(pending.staleConditionalRemoveKeys);
+      }
+    }
     this.clearRecentTouchedBucketsForNamespace(scope);
   }
 
@@ -1995,6 +2004,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
     }
 
+    // Another tab's write may land before its invalidation message reaches
+    // this tab, so conditional removes are checked against the persisted
+    // index rather than the cached one.
+    if (conditionalRemoves.length > 0) {
+      this.#invalidateCachedNamespaceIndexState(scope);
+    }
     const currentIndexState = await this.#readNamespaceIndexStateUsingDriver(
       this.#driver,
       scope,
@@ -3348,9 +3363,11 @@ const INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE = 250;
 export function getAsyncStorageMaintenanceRemoveBatchSize(
   adapter: AsyncStorageAdapter | null,
 ): number {
+  // Other adapters re-list the whole namespace for every batch, so they get
+  // the larger batches too.
   return adapter instanceof ManagedAsyncStorageAdapter
     ? adapter.getMaintenanceRemoveBatchSize()
-    : PER_KEY_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
+    : INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
 }
 
 /**

@@ -951,6 +951,31 @@ describe('persistent storage integration', () => {
     ).toMatchInlineSnapshot(`[null, 'b', 'c updated', 'd updated']`);
   });
 
+  test('async adapter settles commits queued while a namespace clear waits for the writer lock', async () => {
+    const driver = createInMemoryAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driver);
+    const namespace = adapter.openNamespace<{ value: string }>({
+      sessionKey: 'sess1',
+      storeName: 'async-clear-pending-commit',
+      kind: 'collection.item',
+    });
+
+    // The clear flushes nothing, then waits for the writer lock; the commit
+    // queued meanwhile is dropped by the clear, but its caller must not hang.
+    const clearPromise = namespace.clear();
+    let commitSettled = false;
+    void namespace
+      .commit({ upserts: [{ key: 'a', value: { value: 'a' }, version: 1 }] })
+      .finally(() => {
+        commitSettled = true;
+      });
+    await flushAllTimers();
+    await clearPromise;
+    await flushAllTimers();
+
+    expect(commitSettled).toBe(true);
+  });
+
   test('async adapter returns cloned payload snapshots from the read cache', async () => {
     const driver = createInMemoryAsyncStorageDriver({ cloneValues: true });
     const adapter = createAsyncStorageAdapter(driver);

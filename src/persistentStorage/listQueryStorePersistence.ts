@@ -16,11 +16,13 @@ import {
 import {
   buildPersistedStaticPolicy,
   estimateManagedAsyncStorageEntrySizeBytes,
+  getAsyncStorageMaintenanceRemoveBatchSize,
   getProtectedKeysFromMetadata,
   isAsyncStorageMetadataOfflineProtected,
   mergeManagedAsyncStorageCustomMetadata,
   readAsyncStorageNamespaceIndexStateUsingDriver,
   registerAsyncStartupStoreCleanup,
+  removeAsyncStorageNamespaceEntriesIfUnchanged,
   serializeProtectedRef,
   unregisterAsyncStartupStoreCleanup,
   type AsyncStartupCleanupScopePlan,
@@ -2436,7 +2438,11 @@ export function setupListQueryPersistence<
     const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
       removalEntries,
       isAsyncStorageMetadataOfflineProtected,
-      (entries) => queryNamespace.removeEntriesIfUnchanged(entries),
+      (entries) =>
+        queryNamespace.removeEntriesIfUnchanged(
+          entries,
+          removeAsyncStorageNamespaceEntriesIfUnchanged,
+        ),
       (removedKeys) => {
         for (const queryKey of removedKeys) {
           const entry = budgetEvictedEntries.get(queryKey);
@@ -2452,7 +2458,9 @@ export function setupListQueryPersistence<
           forgetPersistedQuery(queryKey);
         }
       },
-      queryNamespace.getMaintenanceRemoveBatchSize(),
+      getAsyncStorageMaintenanceRemoveBatchSize(
+        queryNamespace.getAsyncAdapter(),
+      ),
       isSessionCurrent,
       idleContext,
     );
@@ -2472,7 +2480,10 @@ export function setupListQueryPersistence<
       return incompleteResult;
     }
 
-    knownPersistedQueryKeys = keptQueryKeys;
+    // An empty listing may be a reported storage error, so the next flush
+    // re-lists the keys instead of trusting an empty set.
+    knownPersistedQueryKeys =
+      metadataEntries.length === 0 ? null : keptQueryKeys;
     logQueryByteBudgetCleanup(
       'maintenance',
       validEntries.length,
@@ -2904,7 +2915,11 @@ export function setupListQueryPersistence<
     const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
       removalEntries,
       isAsyncStorageMetadataOfflineProtected,
-      (entries) => itemNamespace.removeEntriesIfUnchanged(entries),
+      (entries) =>
+        itemNamespace.removeEntriesIfUnchanged(
+          entries,
+          removeAsyncStorageNamespaceEntriesIfUnchanged,
+        ),
       (removedKeys) => {
         for (const itemKey of removedKeys) {
           const entry = budgetEvictedEntries.get(itemKey);
@@ -2922,7 +2937,9 @@ export function setupListQueryPersistence<
           }
         }
       },
-      itemNamespace.getMaintenanceRemoveBatchSize(),
+      getAsyncStorageMaintenanceRemoveBatchSize(
+        itemNamespace.getAsyncAdapter(),
+      ),
       isSessionCurrent,
       idleContext,
     );
@@ -2941,7 +2958,10 @@ export function setupListQueryPersistence<
       return;
     }
 
-    knownPersistedItemKeys = keptItemKeys;
+    // An empty listing may be a reported storage error, so the next flush
+    // re-lists the keys instead of trusting an empty set.
+    knownPersistedItemKeys =
+      itemMetadataEntries.length === 0 ? null : keptItemKeys;
     logItemByteBudgetCleanup(
       'maintenance',
       persistedItemEntries.length,
