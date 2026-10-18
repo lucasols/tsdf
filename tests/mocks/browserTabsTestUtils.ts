@@ -1,4 +1,3 @@
-import { klona } from 'klona/json';
 import { afterEach } from 'vitest';
 import type {
   BrowserTabsTransport,
@@ -59,7 +58,11 @@ function createInMemoryBrowserTabsTransportFactoryBase() {
 
     return {
       postMessage(message) {
-        auditLog.push({ channelName, message: klona(message) });
+        // Like a real BroadcastChannel, the message is serialized with the
+        // structured clone algorithm when it is posted, so non-cloneable values
+        // (e.g. functions) throw a `DataCloneError` synchronously.
+        const serializedMessage = structuredClone(message);
+        auditLog.push({ channelName, message: serializedMessage });
 
         const listenersForChannel = listenersByChannel.get(channelName);
         if (!listenersForChannel) return;
@@ -69,7 +72,7 @@ function createInMemoryBrowserTabsTransportFactoryBase() {
           if (listener === onMessage) continue;
 
           setTimeout(() => {
-            listener(klona(message));
+            listener(structuredClone(serializedMessage));
           }, 0);
         }
       },
@@ -100,7 +103,7 @@ function createInMemoryBrowserTabsTransportFactoryBase() {
 
       for (const listener of listenersForChannel) {
         setTimeout(() => {
-          listener(klona(entry.message));
+          listener(structuredClone(entry.message));
         }, 0);
       }
     },

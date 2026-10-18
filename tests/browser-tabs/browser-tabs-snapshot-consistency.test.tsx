@@ -1,5 +1,12 @@
 import { renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  onTestFinished,
+  test,
+  vi,
+} from 'vitest';
 import { createStoreManager } from '../../src/storeManager';
 import {
   createInMemoryBrowserTabsTransportFactory,
@@ -79,6 +86,105 @@ test('collection snapshots do not re-broadcast after remote application', async 
   expect(messages.length).toBeGreaterThan(0);
   expect(getPublisherTabIds(messages).size).toBe(1);
   expect(getMessageKinds(messages)).not.toContain('stale-marker');
+});
+
+// Item data holding a function can't go through the structured clone algorithm
+// used by BroadcastChannel, so posting its snapshot throws a DataCloneError.
+function createNonCloneableCollectionItems() {
+  return { item1: { name: 'Item 1', format: () => 'Item 1' } };
+}
+
+test('collection fetches still complete and broadcast their success when the item data cannot be sent to other tabs', async () => {
+  const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  onTestFinished(() => consoleWarn.mockRestore());
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const sharedServerTableState = createSharedServerTableState(
+    createNonCloneableCollectionItems(),
+  );
+
+  const env = createCollectionStoreTestEnv(
+    createNonCloneableCollectionItems(),
+    {
+      id: 'non-cloneable-collection',
+      sharedServerTableState,
+      browserTabsTransportFactory: transport.transportFactory,
+    },
+  );
+
+  renderHook(() => {
+    const item = env.apiStore.useItem('item1');
+    env.trackItemUI('item1', item.data?.value.name);
+  });
+
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1  |
+    0     | ···    | ui-initialized
+    10ms  | ···    | 🔴 >fetch-started
+    810ms | ···    | 🔴 <fetch-finished (value: {"name":"Item 1"})
+    .     | Item 1 | ui-changed
+    "
+  `);
+  // The item snapshot can't be posted, but the fetch itself succeeded, so the
+  // fetch completion is still broadcast to the other tabs.
+  expect(
+    getMessageKinds(getNonStatusMessages(transport.getMessages())),
+  ).toMatchInlineSnapshot(`['fetch-start', 'fetch-success']`);
+  // The dropped snapshot is surfaced as a dev-only warning.
+  expect(
+    consoleWarn.mock.calls.map(([message]) => String(message)),
+  ).toMatchInlineSnapshot(
+    `- '[tsdf] Failed to sync a "collection-item-snapshot" message of the collection store "non-cloneable-collection" with other browser tabs'`,
+  );
+});
+
+test('optimistic collection mutations still succeed when the item data cannot be sent to other tabs', async () => {
+  const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  onTestFinished(() => consoleWarn.mockRestore());
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const sharedServerTableState = createSharedServerTableState(
+    createNonCloneableCollectionItems(),
+  );
+
+  const env = createCollectionStoreTestEnv(
+    createNonCloneableCollectionItems(),
+    {
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      testScenario: 'loaded',
+    },
+  );
+
+  renderHook(() => {
+    const item = env.apiStore.useItem('item1');
+    env.trackItemUI('item1', item.data?.value.name);
+  });
+
+  // The optimistic update publishes an item snapshot that can't be cloned.
+  const mutation = env.performClientUpdateAction(
+    'item1',
+    { name: 'Updated', format: () => 'Updated' },
+    { withOptimisticUpdate: true, duration: 1_000 },
+  );
+
+  await flushAllTimers();
+
+  // Failing to sync with other tabs must not fail the local mutation.
+  expect((await mutation).ok).toBe(true);
+  expect(env.apiStore.getItemState('item1')?.data?.value.name).toBe('Updated');
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1              |
+    0     | Item 1             | ui-initialized
+    .     | {"name":"Updated"} | ⬜ optimistic-ui-commit
+    .     | {"name":"Updated"} | ⬜ >mutation-started (value: {"name":"Updated"})
+    .     | Updated            | ui-changed
+    700ms | Updated            | ⬜ <mutation-data-persisted (value: {"name":"Updated"})
+    "
+  `);
+  expect(consoleWarn).toHaveBeenCalled();
 });
 
 test('collection resets stay local to the tab that triggered them', async () => {
@@ -285,7 +391,7 @@ test('tabs on different app versions fetch independently instead of applying sib
   `);
 });
 
-test('confirmed collection snapshots do not overwrite a local in-flight mutation', async () => {
+test('confirmed collection snapshots do not overwrite a local in-flight mutation, and the tabs re-sync once it ends', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-conflict');
   const sharedServerTableState = createSharedServerTableState({
@@ -329,6 +435,8 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
   });
   await advanceTime(0);
 
+  // The confirmed sibling snapshot must not clobber B's in-flight optimistic
+  // value.
   expect(pick(envB.apiStore.getItemState('item1'), ['data', 'refetchOnMount']))
     .toMatchInlineSnapshot(`
       data:
@@ -339,19 +447,20 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
 
   await flushAllTimers();
 
-  expect(pick(envB.apiStore.getItemState('item1'), ['data', 'refetchOnMount']))
-    .toMatchInlineSnapshot(`
-      data:
-        value: { name: 'Local' }
-
-      refetchOnMount: '❌'
-    `);
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
-    0,
+  // B ignored a confirmed snapshot during its mutation, so it can't assume it
+  // still matches A. It revalidates once the mutation ends and broadcasts the
+  // server value, so both tabs converge instead of A keeping 'Remote'.
+  expect(envB.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Local' }`,
   );
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
-    0,
+  expect(envA.apiStore.getItemState('item1')?.data).toMatchInlineSnapshot(
+    `value: { name: 'Local' }`,
   );
+  expect(envB.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(`
+    - _type: 'item'
+      payload: { itemId: 'item1' }
+      time: '1.01s -> 1.81s | duration: 800ms'
+  `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1            |
@@ -360,6 +469,8 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
     .     | {"name":"Local"} | ⬜ >mutation-started (value: {"name":"Local"})
     .     | Local            | ui-changed
     700ms | Local            | ⬜ <mutation-data-persisted (value: {"name":"Local"})
+    1.01s | Local            | 🔴 >fetch-started
+    1.81s | Local            | 🔴 <fetch-finished (value: {"name":"Local"})
     "
   `);
 });
@@ -483,7 +594,7 @@ test('a fresh document tab still performs its first fetch after a sibling tab fe
   `);
 });
 
-test('confirmed document snapshots do not overwrite a local in-flight mutation', async () => {
+test('confirmed document snapshots do not overwrite a local in-flight mutation, and the tabs re-sync once it ends', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-conflict');
   const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
@@ -521,12 +632,19 @@ test('confirmed document snapshots do not overwrite a local in-flight mutation',
   envA.scheduleFetch('highPriority');
   await advanceTime(200);
 
+  // A's confirmed fetch result (20) must not clobber B's in-flight optimistic
+  // value.
   expect(envB.store.state.data?.value).toBe(10);
 
   await flushAllTimers();
 
+  // B's write lands after A's fetch, so the server ends with 10. B ignored a
+  // confirmed snapshot during its mutation, so it revalidates once the
+  // mutation ends and broadcasts the result: A converges instead of keeping
+  // its stale 20.
+  expect(envA.serverMock.current).toBe(10);
   expect(envB.store.state.data?.value).toBe(10);
-  expect(envB.serverMock.fetchHistory).toHaveLength(0);
+  expect(envA.store.state.data?.value).toBe(10);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -535,6 +653,7 @@ test('confirmed document snapshots do not overwrite a local in-flight mutation',
     .     | scheduled-fetch-triggered
     11ms  | 🔴 >fetch-started
     111ms | 🔴 <fetch-finished (value: 20)
+    4.81s | <confirmed-snapshot-received (value: 10)
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
@@ -544,6 +663,151 @@ test('confirmed document snapshots do not overwrite a local in-flight mutation',
     .     | 10 | ⬜ optimistic-ui-commit
     .     | 10 | ⬜ >mutation-started (value: 10)
     700ms | 10 | ⬜ <mutation-data-persisted (value: 10)
+    4.01s | 10 | 🔴 >fetch-started
+    4.81s | 10 | 🔴 <fetch-finished (value: 10)
+    "
+  `);
+});
+
+test('a document tab does not refetch after its mutation when the ignored sibling snapshot already matches it', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-matching-ignored-snapshot');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(0);
+
+  const envA = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+  });
+  const envB = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    testScenario: 'loaded',
+  });
+
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
+
+  void envB.performClientUpdateAction(10, {
+    withOptimisticUpdate: true,
+    duration: 1_000,
+  });
+
+  // A refetches after B's server write (700ms) but before B's mutation
+  // resolves (1000ms), so B ignores A's confirmed snapshot even though it
+  // already carries B's value.
+  await advanceTime(750);
+  envA.setNextFetchDurations(100);
+  envA.scheduleFetch('highPriority');
+
+  await flushAllTimers();
+
+  // The ignored snapshot matches B's final state, so the tabs already agree
+  // and B skips the re-sync fetch.
+  expect(envA.store.state.data?.value).toBe(10);
+  expect(envB.store.state.data?.value).toBe(10);
+  expect(envB.serverMock.fetchHistory).toHaveLength(0);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 10 | ⬜ optimistic-ui-commit
+    .     | 10 | ⬜ >mutation-started (value: 10)
+    700ms | 10 | ⬜ <mutation-data-persisted (value: 10)
+    "
+  `);
+});
+
+test('two tabs mutating the same document concurrently converge on the server value', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-missed-confirmed-snapshot');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(0);
+
+  const envA = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+  });
+  const envB = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    testScenario: 'loaded',
+  });
+
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
+
+  // Tab B starts a slow optimistic mutation: its server write lands at 1400ms
+  // and the mutation only resolves at 2000ms.
+  const mutationB = envB.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    duration: 2_000,
+  });
+
+  await advanceTime(1_100);
+
+  // While B's mutation is still in flight, tab A saves a newer value (server
+  // write at 1450ms) and revalidates. A's revalidation fetch broadcasts the
+  // confirmed value while B is still mutation-locked, so B has to ignore it.
+  envA.setNextFetchDurations(200);
+  const mutationA = envA.performClientUpdateAction(2, {
+    duration: 500,
+    withRevalidation: true,
+  });
+
+  await flushAllTimers();
+
+  expect((await mutationA).ok).toBe(true);
+  expect((await mutationB).ok).toBe(true);
+
+  // The server keeps A's later write. Both tabs must converge on it instead of
+  // B keeping its optimistic value forever: B revalidates once its mutation
+  // ends (the fetch starts later because B is a background tab).
+  expect(envA.serverMock.current).toBe(2);
+  expect(envA.store.state.data?.value).toBe(2);
+  expect(envB.store.state.data?.value).toBe(2);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | <optimistic-snapshot-received (value: 1)
+    .     | 1  | ui-changed
+    1.1s  | 1  | ⬜ >mutation-started (value: 2)
+    1.45s | 1  | ⬜ <mutation-data-persisted (value: 2)
+    1.61s | 1  | 🔴 >fetch-started
+    1.81s | 1  | 🔴 <fetch-finished (value: 2)
+    .     | 2  | ui-changed
+    5.81s | 2  | <confirmed-snapshot-received (value: 2)
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    1.4s  | 1  | ⬜ <mutation-data-persisted (value: 1)
+    5.01s | 1  | 🔴 >fetch-started
+    5.81s | 1  | 🔴 <fetch-finished (value: 2)
+    .     | 2  | ui-changed
     "
   `);
 });
@@ -680,7 +944,7 @@ test('a fresh list-query tab still performs its first fetch after a sibling tab 
   `);
 });
 
-test('confirmed list query snapshots do not overwrite a local in-flight mutation', async () => {
+test('confirmed list query snapshots do not overwrite a local in-flight mutation, and the tabs re-sync once it ends', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-conflict');
   const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
@@ -708,6 +972,9 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
     const item = envB.apiStore.useItem('users||1');
     envB.trackItemUI('users||1', item.data?.name);
   });
+  renderHook(() => {
+    envB.apiStore.useListQuery({ tableId: 'users' });
+  });
 
   void envB.performClientItemUpdateAction(
     'users||1',
@@ -720,6 +987,7 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
   const queryKey = envB.getQueryKey({ tableId: 'users' });
 
+  // B's optimistic rename re-sorts the list locally.
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
   expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
     `['"users||2', '"users||1']`,
@@ -729,6 +997,8 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
   envA.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' });
   await advanceTime(900);
 
+  // A's confirmed list snapshot must not clobber B's in-flight optimistic
+  // state.
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
   expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
     `['"users||2', '"users||1']`,
@@ -736,18 +1006,25 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
 
   await flushAllTimers();
 
+  // A's snapshot (server order) differs from B's optimistically sorted list,
+  // so B revalidates the query once its mutation ends and both tabs converge
+  // on the server result instead of keeping different orders.
   expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
+  expect(envA.store.state.items[itemKey]?.name).toBe('Zoe');
+  expect(envB.store.state.queries[queryKey]?.items).toEqual(
+    envA.store.state.queries[queryKey]?.items,
+  );
   expect(envB.store.state.queries[queryKey]?.items).toMatchInlineSnapshot(
-    `['"users||2', '"users||1']`,
+    `['"users||1', '"users||2']`,
   );
-  expect(envB.store.state.itemQueries[itemKey]?.refetchOnMount).toBe(false);
-  expect(envB.store.state.queries[queryKey]?.refetchOnMount).toBe(false);
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
-    0,
-  );
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
-    0,
-  );
+  expect(envB.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(`
+    - _type: 'list'
+      payload:
+        fields: '*'
+        pos: { limit: 50, offset: 0 }
+      returned_items: 2
+      time: '4.01s -> 4.81s | duration: 800ms'
+  `);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
@@ -757,6 +1034,7 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
     1ms   | server-data-changed (value: {"id":1,"name":"Aaron"})
     11ms  | 🔴 >list-fetch-started
     811ms | 🔴 <list-fetch-finished (value: {"count":2})
+    4.81s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
@@ -767,6 +1045,8 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
     .     | {"id":1,"name":"Zoe"} | ⬜ >mutation-started (value: {"id":1,"name":"Zoe"})
     .     | Zoe                   | ui-changed
     700ms | Zoe                   | ⬜ <mutation-data-persisted (value: {"id":1,"name":"Zoe"})
+    4.01s | Zoe                   | 🔴 >list-fetch-started
+    4.81s | Zoe                   | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 });

@@ -3,6 +3,7 @@ import {
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter, type Emitter } from 'evtmitter';
@@ -874,6 +875,16 @@ export function createCollectionStore<
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastCollectionSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  /**
+   * Latest confirmed sibling-tab snapshot per item that was ignored because a
+   * local mutation was in flight. Once the item's last mutation ends, it is
+   * revalidated unless the local state already matches the snapshot, so the
+   * tabs converge again.
+   */
+  const ignoredConfirmedSnapshots = new Map<
+    string,
+    CollectionItemSnapshotMessage<ItemState, ItemPayload>
+  >();
   const offlineOverlayStore = new Store<
     Record<string, CollectionOfflineOverlay>
   >({ debugName: `${id}:collection-offline-overlays`, state: () => ({}) });
@@ -1635,6 +1646,7 @@ export function createCollectionStore<
 
     if (shouldIgnoreConfirmedRemoteCollectionSnapshot(message)) {
       lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
+      ignoredConfirmedSnapshots.set(message.itemKey, message);
       return;
     }
 
@@ -1722,6 +1734,7 @@ export function createCollectionStore<
 
   function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
     invalidationWasTriggered.delete(itemKey);
+    ignoredConfirmedSnapshots.delete(itemKey);
     itemKeyToPayload.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
 
@@ -2122,16 +2135,39 @@ export function createCollectionStore<
   ): () => void {
     const itemKeys = getItemsKeyArray(fetchParams);
 
-    const endMutations: (() => boolean)[] = [];
-
-    for (const { itemKey, payload } of itemKeys) {
+    const lockedItems = itemKeys.map(({ itemKey, payload }) => {
       const scheduler = getScheduler(itemKey, payload);
-      endMutations.push(scheduler.startMutation(itemKey));
-    }
+      return {
+        itemKey,
+        payload,
+        scheduler,
+        endMutation: scheduler.startMutation(itemKey),
+      };
+    });
 
     return () => {
-      for (const endMutation of endMutations) {
+      for (const { endMutation } of lockedItems) {
         endMutation();
+      }
+
+      if (ignoredConfirmedSnapshots.size === 0) return;
+
+      const payloadsToRevalidate: ItemPayload[] = [];
+      for (const { itemKey, payload, scheduler } of lockedItems) {
+        if (scheduler.isMutationInProgress(itemKey)) continue;
+
+        const snapshot = ignoredConfirmedSnapshots.get(itemKey);
+        if (!snapshot) continue;
+        ignoredConfirmedSnapshots.delete(itemKey);
+
+        const localData = store.state[itemKey]?.data ?? null;
+        if (!deepEqual(snapshot.item?.data ?? null, localData)) {
+          payloadsToRevalidate.push(payload);
+        }
+      }
+
+      if (payloadsToRevalidate.length > 0) {
+        invalidateItem(payloadsToRevalidate);
       }
     };
   }
@@ -2561,6 +2597,7 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    ignoredConfirmedSnapshots.clear();
     clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
@@ -2593,6 +2630,7 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    ignoredConfirmedSnapshots.clear();
     clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();

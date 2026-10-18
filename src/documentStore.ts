@@ -601,6 +601,12 @@ export function createDocumentStore<
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
+  /**
+   * Latest confirmed sibling-tab snapshot ignored because a local mutation was
+   * in flight. Once the last mutation ends, the document is revalidated unless
+   * the local state already matches it, so the tabs converge again.
+   */
+  let ignoredConfirmedSnapshot: DocumentSnapshotMessage<State> | null = null;
   const offlineOverlayStore = new Store<DocumentOfflineOverlay<State>>({
     debugName: `${id}:document-offline-overlay`,
     state: () => null,
@@ -959,6 +965,7 @@ export function createDocumentStore<
 
     if (shouldIgnoreConfirmedRemoteDocumentSnapshot(message)) {
       lastDocumentSyncVersion = candidateVersion;
+      ignoredConfirmedSnapshot = message;
       return;
     }
 
@@ -1283,6 +1290,7 @@ export function createDocumentStore<
     if (isDisposed) return;
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
+    ignoredConfirmedSnapshot = null;
     clearOfflineOverlay();
 
     persistence?.dispose();
@@ -1314,7 +1322,24 @@ export function createDocumentStore<
   }
 
   function startMutation(): () => boolean {
-    return scheduler.startMutation(DOC_REQUEST_ID);
+    const endMutation = scheduler.startMutation(DOC_REQUEST_ID);
+
+    return () => {
+      const ended = endMutation();
+
+      if (
+        ignoredConfirmedSnapshot &&
+        !isDisposed &&
+        !scheduler.isMutationInProgress(DOC_REQUEST_ID)
+      ) {
+        const snapshotData = ignoredConfirmedSnapshot.data;
+        ignoredConfirmedSnapshot = null;
+
+        if (!deepEqual(snapshotData, store.state.data)) invalidateData();
+      }
+
+      return ended;
+    };
   }
 
   /**

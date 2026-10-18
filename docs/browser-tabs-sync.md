@@ -28,6 +28,8 @@ Tabs use a versioned message model so later snapshots do not overwrite fresher r
 - Background tabs are ranked and may receive an extended coalescing window (`base` + `backgroundCoalescingDelayMs` + background rank \* `1000ms`), which helps avoid duplicate background refetch work. The first background tab uses rank `0`, so the default first background window is `base + 3000ms`.
 - `fetch-start` messages let sibling tabs drop duplicate scheduled work when another tab is already fetching the same request IDs.
 - Confirmed snapshots from one tab are only applied to others when remote ordering says they are newer than the current version.
+- While a tab has a mutation in flight for a document, item, or query, confirmed snapshots from other tabs for it are ignored so they cannot overwrite the local optimistic state. When the last mutation ends, the tab revalidates that data unless its state already matches the latest ignored snapshot, so all tabs converge again.
+- Sync is best effort: if a message cannot be posted (for example, state holding functions makes `BroadcastChannel` throw a `DataCloneError`), it is skipped with a development-only warning and the local fetch, mutation, or state update still completes normally.
 
 ## Isolation
 
