@@ -2360,12 +2360,21 @@ export function setupListQueryPersistence<
     };
     // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
     if (idleContext === undefined) return incompleteResult;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return incompleteResult;
 
+    // The namespace resolves the active session on every call, so the run
+    // stops once it no longer matches the session it planned for.
+    const isSessionCurrent = () => config.getSessionKey() === sessionKey;
     const readMetadata = () =>
       listAllPersistentStorageNamespaceMetadata(queryNamespace, {
         order: 'lru-desc',
       });
     const metadataEntries = await readMetadata();
+    if (!isSessionCurrent()) {
+      knownPersistedQueryKeys = null;
+      return incompleteResult;
+    }
     if (idleContext.isCanceled()) return incompleteResult;
 
     // The plan is built from this snapshot even if scanning spans several
@@ -2447,21 +2456,22 @@ export function setupListQueryPersistence<
           forgetPersistedQuery(queryKey);
         }
       },
+      isSessionCurrent,
       idleContext,
     );
-    if (!removalResult.completed) return incompleteResult;
+    if (!removalResult.completed) {
+      if (!isSessionCurrent()) knownPersistedQueryKeys = null;
+      return incompleteResult;
+    }
 
     if (removalResult.hasStaleEntries) {
       // Queries changed during the run were kept; re-plan with fresh metadata
       // before evicting items against an outdated query set.
       knownPersistedQueryKeys = null;
-      const sessionKey = config.getSessionKey();
-      if (sessionKey !== false) {
-        scheduleAsyncStorageMaintenance(
-          `list-query:${sessionKey}:${config.storeName}`,
-          runMaintenance,
-        );
-      }
+      scheduleAsyncStorageMaintenance(
+        `list-query:${sessionKey}:${config.storeName}`,
+        runMaintenance,
+      );
       return incompleteResult;
     }
 
@@ -2816,13 +2826,20 @@ export function setupListQueryPersistence<
     }
 
     // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
-    if (idleContext === undefined) return;
+    if (idleContext === undefined || sessionKey === false) return;
 
+    // The namespace resolves the active session on every call, so the run
+    // stops once it no longer matches the session it planned for.
+    const isSessionCurrent = () => config.getSessionKey() === sessionKey;
     const readMetadata = () =>
       listAllPersistentStorageNamespaceMetadata(itemNamespace, {
         order: 'lru-desc',
       });
     const itemMetadataEntries = await readMetadata();
+    if (!isSessionCurrent()) {
+      knownPersistedItemKeys = null;
+      return;
+    }
     if (idleContext.isCanceled()) return;
 
     // The plan is built from this snapshot even if scanning spans several
@@ -2912,19 +2929,21 @@ export function setupListQueryPersistence<
           }
         }
       },
+      isSessionCurrent,
       idleContext,
     );
-    if (!removalResult.completed) return;
+    if (!removalResult.completed) {
+      if (!isSessionCurrent()) knownPersistedItemKeys = null;
+      return;
+    }
 
     if (removalResult.hasStaleEntries) {
       // Items changed during the run were kept; re-plan with fresh metadata.
       knownPersistedItemKeys = null;
-      if (sessionKey !== false) {
-        scheduleAsyncStorageMaintenance(
-          `list-query:${sessionKey}:${config.storeName}`,
-          runMaintenance,
-        );
-      }
+      scheduleAsyncStorageMaintenance(
+        `list-query:${sessionKey}:${config.storeName}`,
+        runMaintenance,
+      );
       return;
     }
 

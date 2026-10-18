@@ -94,7 +94,8 @@ type AsyncMaintenanceMetadataEntry = {
  * continuations let other code and tabs write, so after each continuation the
  * remaining plan is checked against freshly read metadata and entries changed
  * since planning are skipped as stale. The plan itself is never restarted, so
- * every deadline makes progress.
+ * every deadline makes progress. `shouldContinue` is checked before every read
+ * and commit so a plan never outlives the session it was built for.
  */
 export async function removeAsyncMaintenanceEntriesIfUnchanged<
   T extends AsyncMaintenanceMetadataEntry,
@@ -104,6 +105,7 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
   readMetadata: () => Promise<T[]>,
   isOfflineProtected: (customMetadata: T['customMetadata']) => boolean,
   commitRemoves: (keys: string[]) => Promise<void>,
+  shouldContinue: () => boolean,
   idleContext: IdleCleanupContext,
 ): Promise<{ completed: boolean; hasStaleEntries: boolean }> {
   let hasStaleEntries = false;
@@ -112,7 +114,7 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
   let batchStart = 0;
 
   while (batchStart < pendingEntries.length) {
-    if (!(await idleContext.yieldIfNeeded())) {
+    if (!(await idleContext.yieldIfNeeded()) || !shouldContinue()) {
       return { completed: false, hasStaleEntries };
     }
 
@@ -122,7 +124,7 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
       for (const entry of await readMetadata()) {
         currentEntries.set(entry.key, entry);
       }
-      if (idleContext.isCanceled()) {
+      if (idleContext.isCanceled() || !shouldContinue()) {
         return { completed: false, hasStaleEntries };
       }
 

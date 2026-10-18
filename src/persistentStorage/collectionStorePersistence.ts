@@ -1027,11 +1027,18 @@ export function setupCollectionPersistence<
     // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
     if (idleContext === undefined) return;
 
+    // The namespace resolves the active session on every call, so the run
+    // stops once it no longer matches the session it planned for.
+    const isSessionCurrent = () => config.getSessionKey() === sessionKey;
     const readMetadata = () =>
       listAllPersistentStorageNamespaceMetadata(namespace, {
         order: 'lru-desc',
       });
     const metadataEntries = await readMetadata();
+    if (!isSessionCurrent()) {
+      knownPersistedKeys = null;
+      return;
+    }
     if (idleContext.isCanceled() || metadataEntries.length === 0) return;
 
     // The plan is built from this snapshot even if scanning spans several
@@ -1111,9 +1118,13 @@ export function setupCollectionPersistence<
           }
         }
       },
+      isSessionCurrent,
       idleContext,
     );
-    if (!removalResult.completed) return;
+    if (!removalResult.completed) {
+      if (!isSessionCurrent()) knownPersistedKeys = null;
+      return;
+    }
 
     if (removalResult.hasStaleEntries) {
       // Entries changed during the run were kept; re-plan with fresh metadata.

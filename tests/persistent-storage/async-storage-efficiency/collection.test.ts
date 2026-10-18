@@ -266,6 +266,76 @@ describe('async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`['cached-1', 'cached-29', 'live']`);
   });
 
+  test('background maintenance stops when the active session changes between removal batches', async () => {
+    const storeName = 'collection-session-switch-maintenance';
+    const cachedItemCount = 30;
+    let activeSessionKey = 'session-a';
+    const idleCallbacks = stubIdleCallbacks();
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const sessionAScope = mockAdapter.scope(storeName, 'session-a');
+    const sessionBScope = mockAdapter.scope(storeName, 'session-b');
+    const cachedItem = (index: number) => ({
+      value: { id: `cached-${index}`, name: 'Cached item' },
+    });
+    // Session A is far over budget. Session B cached two of the same items
+    // and fits its budget, so nothing in B should ever be evicted.
+    for (let index = 0; index < cachedItemCount; index++) {
+      sessionAScope.collection.seedItem(`cached-${index}`, cachedItem(index), {
+        timestamp: TEST_INITIAL_TIME + index,
+      });
+    }
+    for (const index of [0, 1]) {
+      sessionBScope.collection.seedItem(`cached-${index}`, cachedItem(index), {
+        timestamp: TEST_INITIAL_TIME + index,
+      });
+    }
+
+    const liveItem = { value: { id: 'live', name: 'Live item' } };
+    const env = createCollectionEnv({
+      getSessionKey: () => activeSessionKey,
+      // Stores with an `ignoreItems` filter enforce the byte budget during
+      // background maintenance instead of evicting inline on flush.
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      // Room for the live item plus two cached entries.
+      maxBytes: sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('live', liveItem),
+        getAsyncCollectionEntrySizeBytes('cached-28', cachedItem(28)),
+        getAsyncCollectionEntrySizeBytes('cached-29', cachedItem(29)),
+      ),
+      storeName,
+    });
+
+    env.apiStore.addItemToState('live', liveItem);
+    await advanceTime(1200);
+
+    // Session A plans to evict `cached-0`..`cached-27`. The user switches to
+    // session B while the first 25-entry batch is being committed, before the
+    // batch holding `cached-0`..`cached-2` starts in the same idle period.
+    await idleCallbacks.runNext(() => {
+      if (
+        activeSessionKey === 'session-a' &&
+        sessionAScope.collection.listStoredPayloads().length <=
+          cachedItemCount + 1 - 25
+      ) {
+        activeSessionKey = 'session-b';
+      }
+      return 50;
+    });
+    while (idleCallbacks.pendingCount() > 0) {
+      await idleCallbacks.runNext(() => 50);
+    }
+
+    // The session A plan must not be applied to session B's namespace.
+    expect({
+      sessionA: sessionAScope.collection.listStoredPayloads().sort(),
+      sessionB: sessionBScope.collection.listStoredPayloads().sort(),
+    }).toMatchInlineSnapshot(`
+      sessionA: ['cached-0', 'cached-1', 'cached-2', 'cached-28', 'cached-29', 'live']
+      sessionB: ['cached-0', 'cached-1']
+    `);
+  });
+
   test('expiration cleanup removes expired items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'collection-expiration';

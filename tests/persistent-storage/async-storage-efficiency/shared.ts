@@ -190,6 +190,7 @@ export function createDocumentEnv(options: {
 type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
+  getSessionKey?: () => string | false;
   ignoreItems?: string[] | ((payload: string) => boolean);
   maxBytes?: number;
   pinnedItems?: string[];
@@ -199,7 +200,8 @@ export function createCollectionEnv(options: {
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
-    getSessionKey: () => options.sessionKey ?? 'session1',
+    getSessionKey:
+      options.getSessionKey ?? (() => options.sessionKey ?? 'session1'),
     persistentStorage: {
       adapter: opfsPersistentStorage,
       ignoreItems: options.ignoreItems,
