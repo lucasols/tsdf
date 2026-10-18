@@ -526,16 +526,14 @@ export function createMutationApi<
       // A newer optimistic update may have left the item as it was, e.g.
       // saving the same value, so a revert can contradict a newer mutation
       // that succeeded
-      const newer =
-        state.item !== current.item
-          ? optimisticMutations.getNewer(
-              itemKey,
-              oldestMutationIds.get(itemKey) ?? mutationId,
-              mutationId,
-            )
-          : null;
-
-      if (newer) {
+      if (
+        state.item !== current.item &&
+        optimisticMutations.hasNewer(
+          itemKey,
+          oldestMutationIds.get(itemKey) ?? mutationId,
+          mutationId,
+        )
+      ) {
         changedItems.set(itemKey, payload);
         keptDataItemKeys.add(itemKey);
 
@@ -693,11 +691,15 @@ export function createMutationApi<
             }
           }
 
-          // Newer data kept until the revalidation isn't confirmed by the
-          // server, so other tabs must not treat it as such
+          // Newer data kept until the revalidation, or still carrying another
+          // in-flight optimistic update, isn't confirmed by the server, so
+          // other tabs must not treat it as such
           publishItemSnapshot(
             itemKey,
-            keptDataItemKeys.has(itemKey) ? 'optimistic' : 'confirmed',
+            keptDataItemKeys.has(itemKey) ||
+              optimisticMutations.hasOtherInFlight(itemKey, mutationId)
+              ? 'optimistic'
+              : 'confirmed',
           );
         }
 
@@ -1812,6 +1814,8 @@ export function createMutationApi<
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
 
+    // Whether the server accepted the mutation, even if `onSuccess` threw
+    let accepted = false;
     const result = await performMutationWithLifecycle(
       () => {
         const endBaseMutations = startItemMutation(payloadToUse);
@@ -1906,6 +1910,7 @@ export function createMutationApi<
           }
         : undefined,
       (result, rollbacks) => {
+        accepted = true;
         // Includes the list revalidations of the debounced calls this one
         // superseded
         for (const rollback of rollbacks) {
@@ -1951,11 +1956,11 @@ export function createMutationApi<
       debounce,
       blockWindowClose ?? undefined,
       pendingDebounceRollbacks,
-    );
-
-    for (const { itemKey } of affectedItemEntries ?? []) {
-      optimisticMutations.end(itemKey, mutationId, result.ok);
-    }
+    ).finally(() => {
+      for (const { itemKey } of affectedItemEntries ?? []) {
+        optimisticMutations.end(itemKey, mutationId, accepted);
+      }
+    });
 
     storeEvents.emit('mutationEnd', {
       mutationId,

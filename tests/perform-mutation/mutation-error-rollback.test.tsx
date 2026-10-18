@@ -1594,6 +1594,137 @@ test('list-query optimistic failures revalidate when a newer save of the same va
   expect(env.serverTable.numOfStartedFetches).toBe(1);
 });
 
+// Same as above, but the newer save's `onSuccess` callback throws. The server
+// still accepted that save, so the older failure must still revalidate instead
+// of leaving the reverted name on screen.
+test('collection optimistic failures revalidate after a newer accepted save whose onSuccess threw', async () => {
+  const env = createCollectionStoreTestEnv(
+    { 'item-1': { name: 'Ada' } },
+    { testScenario: 'loaded' },
+  );
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const { data } = env.apiStore.useItem('item-1', {
+      disableRefetchOnMount: true,
+    });
+    renders.add({ name: data?.value.name });
+  });
+
+  function saveGrace(mutation: () => Promise<unknown>, onSuccess?: () => void) {
+    act(() => {
+      void env.apiStore.performMutation('item-1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('item-1', (draft) => {
+            draft.value.name = 'Grace';
+          });
+        },
+        mutation,
+        onSuccess,
+      });
+    });
+  }
+
+  // First save: slow request that ends up failing
+  saveGrace(async () => {
+    await sleep(1_200);
+    throw new Error('save failed');
+  });
+
+  // Second save of the same name: accepted by the server, but its callback
+  // throws
+  await advanceTime(100);
+  saveGrace(
+    () =>
+      env.serverTable.delayedUpdateItem(
+        'item-1',
+        { name: 'Grace' },
+        { durationMs: 500 },
+      ),
+    () => {
+      throw new Error('onSuccess bug');
+    },
+  );
+
+  await flushAllTimers();
+
+  // The failed save is reverted, then the refetch restores the saved name
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> name: Ada
+    -> name: Grace
+    -> name: Ada
+    -> name: Grace
+    "
+  `);
+  expect(env.serverTable.numOfStartedFetches).toBe(1);
+});
+
+test('list-query optimistic failures revalidate after a newer accepted save whose onSuccess threw', async () => {
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    { testScenario: { loaded: { items: ['users||1'] } } },
+  );
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const { data } = env.apiStore.useItem('users||1', {
+      disableRefetchOnMount: true,
+    });
+    renders.add({ name: data?.name });
+  });
+
+  function saveGrace(mutation: () => Promise<unknown>, onSuccess?: () => void) {
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||1', (draft) => {
+            draft.name = 'Grace';
+          });
+        },
+        mutation,
+        onSuccess,
+      });
+    });
+  }
+
+  // First save: slow request that ends up failing
+  saveGrace(async () => {
+    await sleep(1_200);
+    throw new Error('save failed');
+  });
+
+  // Second save of the same name: accepted by the server, but its callback
+  // throws
+  await advanceTime(100);
+  saveGrace(
+    () =>
+      env.serverTable.delayedUpdateItem(
+        'users||1',
+        { name: 'Grace' },
+        { durationMs: 500 },
+      ),
+    () => {
+      throw new Error('onSuccess bug');
+    },
+  );
+
+  await flushAllTimers();
+
+  // The failed save is reverted, then the refetch restores the saved name
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> name: Ada
+    -> name: Grace
+    -> name: Ada
+    -> name: Grace
+    "
+  `);
+  expect(env.serverTable.numOfStartedFetches).toBe(1);
+});
+
 // Moving an item to another list twice: the second move succeeds before the
 // first one fails. Reverting the first move puts the item back in the list it
 // left, so both lists must be revalidated to show the item where the server

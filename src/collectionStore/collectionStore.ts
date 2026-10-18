@@ -2410,6 +2410,8 @@ export function createCollectionStore<
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
 
+    // Whether the server accepted the mutation, even if `onSuccess` threw
+    let accepted = false;
     const result = await performMutationWithLifecycle(
       () => startMutation(payloadToUse),
       offline
@@ -2478,12 +2480,15 @@ export function createCollectionStore<
           // A newer optimistic update may have left the item as it was, e.g.
           // saving the same value, so a revert can contradict a newer
           // mutation that succeeded
-          const newer = optimisticMutations.getNewer(
-            itemKey,
-            oldestMutationIds.get(itemKey) ?? mutationId,
-            mutationId,
-          );
-          if (!newer) continue;
+          if (
+            !optimisticMutations.hasNewer(
+              itemKey,
+              oldestMutationIds.get(itemKey) ?? mutationId,
+              mutationId,
+            )
+          ) {
+            continue;
+          }
 
           if (!item && current) {
             // A removed item can't be revalidated, so it's kept until then
@@ -2539,11 +2544,15 @@ export function createCollectionStore<
                 cleanupItemResources(itemKey, itemPayload);
               }
 
-              // Newer data kept until the revalidation isn't confirmed by the
+              // Newer data kept until the revalidation, or still carrying
+              // another in-flight optimistic update, isn't confirmed by the
               // server, so other tabs must not treat it as such
               publishItemSnapshot(
                 itemKey,
-                changedItems.has(itemKey) ? 'optimistic' : 'confirmed',
+                changedItems.has(itemKey) ||
+                  optimisticMutations.hasOtherInFlight(itemKey, mutationId)
+                  ? 'optimistic'
+                  : 'confirmed',
               );
             }
           });
@@ -2600,6 +2609,7 @@ export function createCollectionStore<
           }
         : undefined,
       (result) => {
+        accepted = true;
         if (revalidateOnSuccess && affectedItems.length > 0) {
           invalidateItem(payloadToUse);
         }
@@ -2611,13 +2621,12 @@ export function createCollectionStore<
       _debounce,
       blockWindowClose ?? undefined,
       pendingDebounceRollbacks,
-    );
-
-    if (optimisticUpdate) {
+    ).finally(() => {
+      if (!optimisticUpdate) return;
       for (const { itemKey } of affectedItemEntries) {
-        optimisticMutations.end(itemKey, mutationId, result.ok);
+        optimisticMutations.end(itemKey, mutationId, accepted);
       }
-    }
+    });
 
     storeEvents.emit('mutationEnd', {
       mutationId,

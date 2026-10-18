@@ -22,22 +22,19 @@ export function createOptimisticMutationTracker() {
       }
     },
     /**
-     * The state of the newest optimistic mutation started after `sinceId`,
-     * other than `selfId`. `sinceId` is older than `selfId` when the failing
-     * mutation reverts the updates of the debounced calls it superseded.
+     * Whether an optimistic mutation other than `selfId`, started after
+     * `sinceId`, succeeded or is still in flight. `sinceId` is older than
+     * `selfId` when the failing mutation reverts the updates of the debounced
+     * calls it superseded.
      */
-    getNewer(
-      key: string,
-      sinceId: number,
-      selfId: number,
-    ): 'succeeded' | 'inFlight' | null {
+    hasNewer(key: string, sinceId: number, selfId: number): boolean {
       const entity = entities.get(key);
-      if (!entity) return null;
-      if (entity.lastSucceededId > sinceId) return 'succeeded';
+      if (!entity) return false;
+      if (entity.lastSucceededId > sinceId) return true;
       for (const id of entity.active) {
-        if (id > sinceId && id !== selfId) return 'inFlight';
+        if (id > sinceId && id !== selfId) return true;
       }
-      return null;
+      return false;
     },
     /** Whether an optimistic mutation other than `selfId` is in flight */
     hasOtherInFlight(key: string, selfId: number): boolean {
@@ -48,6 +45,7 @@ export function createOptimisticMutationTracker() {
       }
       return false;
     },
+    /** `succeeded` is whether the server accepted the mutation */
     end(key: string, mutationId: number, succeeded: boolean): void {
       const entity = entities.get(key);
       if (!entity?.active.delete(mutationId)) return;

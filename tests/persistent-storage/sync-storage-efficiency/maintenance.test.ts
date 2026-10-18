@@ -653,9 +653,9 @@ describe('sync storage efficiency: maintenance', () => {
              |    └ (namespace index)
       .      | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
              |    └ (entry data, <document>)
-      .      | 🔑[10] #11 ✅ tsdf.user@example.com.invalid-stray (entry data)
-      .      | 🔑[11] #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .      | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
              |    └ (namespace index)
+      .      | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
       .      | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
       .      | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
              |    └ (namespace index)
@@ -668,13 +668,13 @@ describe('sync storage efficiency: maintenance', () => {
              |    └ (namespace index) | 0.06 kb
       .      | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
              |    └ (namespace index) | 0.14 kb
-      .      | 📖 #12 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+      .      | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
              |    └ (namespace index) | 0.09 kb
       .      | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
              |    └ (namespace index) | 0.06 kb
       .      | 📖 #15 ❌ tsdf._m.r.s:user@example.com.invalid-stray.m
              |    └ (namespace index)
-      .      | 🗑️ #11 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
+      .      | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
       .      | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);

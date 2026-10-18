@@ -1423,6 +1423,8 @@ export function createDocumentStore<
         await mutation({ updateState, currentState: store.state.data }),
       );
 
+    // Whether the server accepted the mutation, even if `onSuccess` threw
+    let accepted = false;
     const result = await performMutationWithLifecycle(
       startMutation,
       offline
@@ -1465,18 +1467,24 @@ export function createDocumentStore<
         const revalidate =
           changedSince ||
           (reverted &&
-            optimisticMutations.getNewer(
+            optimisticMutations.hasNewer(
               DOC_REQUEST_ID,
               rollbacks[0]?.mutationId ?? mutationId,
               mutationId,
-            ) !== null);
+            ));
 
         if (reverted) {
           runWithBroadcastConsistency('confirmed', () => {
             store.setKey('data', data, { action: 'rollback-mutation-error' });
-            // Data kept until the revalidation isn't confirmed by the server,
-            // so other tabs must not treat it as such
-            publishDocumentSnapshot(revalidate ? 'optimistic' : 'confirmed');
+            // Data kept until the revalidation, or still carrying another
+            // in-flight optimistic update, isn't confirmed by the server, so
+            // other tabs must not treat it as such
+            publishDocumentSnapshot(
+              revalidate ||
+                optimisticMutations.hasOtherInFlight(DOC_REQUEST_ID, mutationId)
+                ? 'optimistic'
+                : 'confirmed',
+            );
           });
         }
 
@@ -1502,6 +1510,7 @@ export function createDocumentStore<
           }
         : undefined,
       (result) => {
+        accepted = true;
         if (revalidateOnSuccess && result.kind === 'online') {
           invalidateData();
         }
@@ -1509,9 +1518,9 @@ export function createDocumentStore<
       debounce,
       blockWindowClose ?? undefined,
       pendingDebounceRollbacks,
-    );
-
-    optimisticMutations.end(DOC_REQUEST_ID, mutationId, result.ok);
+    ).finally(() => {
+      optimisticMutations.end(DOC_REQUEST_ID, mutationId, accepted);
+    });
 
     storeEvents.emit('mutationEnd', {
       mutationId,
