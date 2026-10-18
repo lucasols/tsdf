@@ -15,6 +15,7 @@ import { clearSessionStorage } from '../../src/main';
 import {
   ASYNC_STORAGE_COMMIT_DEBOUNCE_MS,
   createAsyncStorageAdapter,
+  removeAsyncStorageNamespaceEntriesIfUnchanged,
   serializeProtectedRef,
 } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
@@ -894,11 +895,12 @@ describe('persistent storage integration', () => {
   test('async adapter conditional removes keep entries that changed after they were read', async () => {
     const driver = createInMemoryAsyncStorageDriver();
     const adapter = createAsyncStorageAdapter(driver);
-    const namespace = adapter.openNamespace<{ value: string }>({
+    const scope = {
       sessionKey: 'sess1',
       storeName: 'async-conditional-removes',
       kind: 'collection.item',
-    });
+    } satisfies AsyncStorageNamespaceScope;
+    const namespace = adapter.openNamespace<{ value: string }>(scope);
 
     const seedPromise = namespace.commit({
       upserts: ['a', 'b', 'c', 'd'].map((key) => ({
@@ -933,25 +935,35 @@ describe('persistent storage integration', () => {
       namespace.commit({
         upserts: [{ key: 'c', value: { value: 'c updated' }, version: 1 }],
       }),
-      namespace.commit({ conditionalRemoves: plannedRemoves }),
+      removeAsyncStorageNamespaceEntriesIfUnchanged(
+        adapter,
+        scope,
+        plannedRemoves,
+      ),
       namespace.commit({
         upserts: [{ key: 'd', value: { value: 'd updated' }, version: 1 }],
       }),
     ]);
     await flushAllTimers();
-    await writesAndRemoves;
+    const [, staleKeys] = await writesAndRemoves;
 
-    // Only the unchanged `a` is removed.
-    expect(
-      await Promise.all(
+    // `b` and `c` changed before the removal ran, so they are kept and
+    // reported back as stale for cleanup to re-plan. `d` is removed with `a`,
+    // and its newer write still lands afterwards.
+    expect({
+      staleKeys: [...staleKeys].sort(),
+      values: await Promise.all(
         ['a', 'b', 'c', 'd'].map(
           async (key) => (await namespace.get(key))?.value.value ?? null,
         ),
       ),
-    ).toMatchInlineSnapshot(`[null, 'b', 'c updated', 'd updated']`);
+    }).toMatchInlineSnapshot(`
+      staleKeys: ['b', 'c']
+      values: [null, 'b', 'c updated', 'd updated']
+    `);
   });
 
-  test('async adapter settles commits queued while a namespace clear waits for the writer lock', async () => {
+  test('async adapter keeps commits queued while a namespace clear waits for the writer lock', async () => {
     const driver = createInMemoryAsyncStorageDriver();
     const adapter = createAsyncStorageAdapter(driver);
     const namespace = adapter.openNamespace<{ value: string }>({
@@ -960,12 +972,22 @@ describe('persistent storage integration', () => {
       kind: 'collection.item',
     });
 
-    // The clear flushes nothing, then waits for the writer lock; the commit
-    // queued meanwhile is dropped by the clear, but its caller must not hang.
+    // Seed an entry that the clear must remove.
+    const seedPromise = namespace.commit({
+      upserts: [{ key: 'old', value: { value: 'old' }, version: 1 }],
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    // The clear flushes nothing, then waits for the writer lock. A write
+    // queued meanwhile is newer than the clear, so it must survive it and its
+    // caller must settle.
     const clearPromise = namespace.clear();
     let commitSettled = false;
     void namespace
-      .commit({ upserts: [{ key: 'a', value: { value: 'a' }, version: 1 }] })
+      .commit({
+        upserts: [{ key: 'new', value: { value: 'new' }, version: 1 }],
+      })
       .finally(() => {
         commitSettled = true;
       });
@@ -973,7 +995,11 @@ describe('persistent storage integration', () => {
     await clearPromise;
     await flushAllTimers();
 
-    expect(commitSettled).toBe(true);
+    expect({ commitSettled, storedKeys: await namespace.listKeys() })
+      .toMatchInlineSnapshot(`
+        commitSettled: '✅'
+        storedKeys: ['new']
+      `);
   });
 
   test('async adapter returns cloned payload snapshots from the read cache', async () => {

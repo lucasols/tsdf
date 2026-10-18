@@ -31,7 +31,7 @@ import type {
   AsyncStorageDriverSetEntry,
   AsyncStorageEntryMetadata,
   AsyncStorageMetadataOrder,
-  AsyncStorageNamespaceCommitArgs,
+  ManagedAsyncStorageNamespaceCommitArgs,
   AsyncStorageNamespaceGetResult,
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
@@ -133,7 +133,10 @@ type IndexedDbTestOperation =
 type IndexedDbDriverInstrumentation = {
   onApplyManagedCommit?: (
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<
+      unknown,
+      Record<string, unknown>
+    >,
   ) => void;
   onClearManagedNamespace?: (scope: AsyncStorageNamespaceScope) => void;
   onPersistNamespaceIndexState?: (
@@ -1121,7 +1124,10 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   async applyManagedCommit(
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<
+      unknown,
+      Record<string, unknown>
+    >,
     helpers: {
       mergeOfflineProtectionMetadata: (
         key: string,

@@ -39,6 +39,7 @@ import type {
   AsyncStorageMaintenanceState,
   AsyncStorageMetadataOrder,
   AsyncStorageNamespaceCommitArgs,
+  ManagedAsyncStorageNamespaceCommitArgs,
   AsyncStorageNamespaceCommitConditionalRemove,
   AsyncStorageNamespaceCommitUpsert,
   AsyncStorageNamespaceGetResult,
@@ -431,7 +432,10 @@ export type AsyncStorageManagedDriverCapabilities = {
   /** Resolves with the `conditionalRemoves` keys kept because they changed. */
   applyManagedCommit?: (
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<
+      unknown,
+      Record<string, unknown>
+    >,
     helpers: {
       mergeOfflineProtectionMetadata: (
         key: string,
@@ -1126,7 +1130,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
       await Promise.all(
         scopesToClear.map((scope) =>
-          this.#clearManagedNamespaceUnlocked(scope),
+          this.#clearManagedNamespaceUnlocked(scope, false),
         ),
       );
     });
@@ -1358,7 +1362,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     TCustomMetadata extends Record<string, unknown>,
   >(
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<ReadonlySet<string>> {
     const pending = this.#getOrCreatePendingNamespaceCommit(scope);
     const now = Date.now();
@@ -1432,7 +1436,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     TCustomMetadata extends Record<string, unknown>,
   >(
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<ReadonlySet<string>> {
     const committed = this.queueCommitToNamespace(scope, args);
     // A flush already in flight leaves these writes queued for the next one.
@@ -1906,12 +1910,19 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     await this.#runWithSessionWriterLock(scope.sessionKey, async () => {
-      await this.#clearManagedNamespaceUnlocked(scope);
+      await this.#clearManagedNamespaceUnlocked(scope, true);
     });
   }
 
+  /**
+   * Commits still pending here were queued after the clear was requested,
+   * because both clear paths flush first. A namespace clear keeps them so
+   * they flush once the writer lock is released; a session clear discards
+   * them with the session data.
+   */
   async #clearManagedNamespaceUnlocked(
     scope: AsyncStorageNamespaceScope,
+    keepPendingCommits: boolean,
   ): Promise<void> {
     const managedCapabilities = getManagedDriverCapabilities(this.#driver);
     if (managedCapabilities?.clearManagedNamespace !== undefined) {
@@ -1924,10 +1935,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const namespaceKey = getNamespaceId(scope);
     this.#observedScopes.delete(namespaceKey);
     const pending = this.#pendingNamespaceCommits.get(namespaceKey);
-    this.#pendingNamespaceCommits.delete(namespaceKey);
-    if (pending) {
-      // Writes queued before the clear are discarded with the namespace, but
-      // their callers still need to settle.
+    if (pending && keepPendingCommits) {
+      this.#schedulePendingNamespaceFlush(pending);
+    } else if (pending) {
+      this.#pendingNamespaceCommits.delete(namespaceKey);
+      // The discarded writes' callers still need to settle.
       pending.cancelFlush?.();
       for (const waiter of pending.waiters) {
         waiter.resolve(pending.staleConditionalRemoveKeys);
@@ -1954,7 +1966,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   /** Resolves with the `conditionalRemoves` keys kept because they changed. */
   async #applyManagedCommit(
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<
+      unknown,
+      Record<string, unknown>
+    >,
   ): Promise<ReadonlySet<string>> {
     const upserts = args.upserts ?? [];
     const removes = [...new Set(args.removes ?? [])];

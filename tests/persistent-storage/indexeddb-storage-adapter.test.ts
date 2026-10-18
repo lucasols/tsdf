@@ -1,6 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { serializeProtectedRef } from '../../src/persistentStorage/asyncStorageAdapter';
+import {
+  removeAsyncStorageNamespaceEntriesIfUnchanged,
+  serializeProtectedRef,
+} from '../../src/persistentStorage/asyncStorageAdapter';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../src/persistentStorage/documentEntryKey';
 import {
   createIndexedDbPersistentStorageForTests,
@@ -300,10 +303,21 @@ describe('indexeddb persistent storage adapter', () => {
       [],
     );
 
-    await namespace.commit({ conditionalRemoves: plannedRemoves });
+    const staleKeys = await removeAsyncStorageNamespaceEntriesIfUnchanged(
+      adapter,
+      scope,
+      plannedRemoves,
+    );
 
-    // Only the unchanged `a` is removed.
-    expect(await namespace.listKeys()).toMatchInlineSnapshot(`['b', 'c']`);
+    // Only the unchanged `a` is removed; the changed entries are reported
+    // back as stale so cleanup can re-plan them.
+    expect({
+      staleKeys: [...staleKeys].sort(),
+      storedKeys: await namespace.listKeys(),
+    }).toMatchInlineSnapshot(`
+      staleKeys: ['b', 'c']
+      storedKeys: ['b', 'c']
+    `);
 
     adapter.resetForTests?.();
   });

@@ -16,6 +16,7 @@ import {
   setSessionProtectedKeysSnapshot,
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
+import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
 import { createStoreManager } from '../../../src/storeManager';
@@ -110,6 +111,9 @@ export function setupAsyncStorageEfficiencyTestSuite(): void {
     localStorage.clear();
     resetMockBrowserOpfsForTests();
     opfsPersistentStorage.resetForTests?.();
+    // Cancel maintenance a timed-out test left suspended on its idle
+    // callbacks so it can't leak into the next test.
+    resetExpirationScanTracking();
     vi.unstubAllGlobals();
     clearSessionProtectedKeysSnapshot('sess1');
     clearSessionProtectedKeysSnapshot('session1');
@@ -370,6 +374,7 @@ function serializeProtectedNamespaceEntry(
 export function stubIdleCallbacks(): {
   pendingCount: () => number;
   runNext: (timeRemaining: () => number, didTimeout?: boolean) => Promise<void>;
+  runUntilIdle: (timeRemaining: () => number) => Promise<void>;
 } {
   const idleCallbacks = new Map<number, IdleRequestCallback>();
   let nextIdleCallbackId = 1;
@@ -386,21 +391,52 @@ export function stubIdleCallbacks(): {
     idleCallbacks.delete(callbackId);
   });
 
+  async function runNext(
+    timeRemaining: () => number,
+    didTimeout = false,
+  ): Promise<void> {
+    const nextCallbackEntry = idleCallbacks.entries().next().value;
+    if (nextCallbackEntry === undefined) {
+      throw new Error('Expected a scheduled idle callback.');
+    }
+
+    const [callbackId, callback] = nextCallbackEntry;
+    idleCallbacks.delete(callbackId);
+    callback({ didTimeout, timeRemaining });
+    await advanceTime(500);
+  }
+
   return {
     pendingCount: () => idleCallbacks.size,
-    async runNext(timeRemaining, didTimeout = false) {
-      const nextCallbackEntry = idleCallbacks.entries().next().value;
-      if (nextCallbackEntry === undefined) {
-        throw new Error('Expected a scheduled idle callback.');
+    runNext,
+    /**
+     * Runs scheduled callbacks until none is left. Fails instead of hanging
+     * when maintenance keeps rescheduling itself.
+     */
+    async runUntilIdle(timeRemaining) {
+      for (
+        let runCount = 0;
+        idleCallbacks.size > 0 && runCount < MAX_IDLE_CALLBACK_RUNS;
+        runCount++
+      ) {
+        await runNext(timeRemaining);
       }
-
-      const [callbackId, callback] = nextCallbackEntry;
-      idleCallbacks.delete(callbackId);
-      callback({ didTimeout, timeRemaining });
-      await advanceTime(500);
+      if (idleCallbacks.size > 0) {
+        throw new Error(
+          `Idle callbacks still pending after ${MAX_IDLE_CALLBACK_RUNS} runs.`,
+        );
+      }
     },
   };
 }
+
+const MAX_IDLE_CALLBACK_RUNS = 30;
+
+/**
+ * Options for tests that seed several full maintenance removal batches; their
+ * real storage mock work can exceed the default timeout on loaded runners.
+ */
+export const LARGE_MAINTENANCE_TEST_OPTIONS = { timeout: 10_000 };
 
 /**
  * Deadline whose budget is spent by maintenance checking it: each check stands

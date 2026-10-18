@@ -148,16 +148,26 @@ export type AsyncStorageNamespaceCommitArgs<
   upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
   /** Raw namespace keys to remove. */
   removes?: string[];
-  /**
-   * Keys to remove only if their stored metadata still matches, checked in the
-   * same write as the removal. Entries that changed meanwhile, or that the
-   * adapter cannot verify, are kept.
-   */
-  conditionalRemoves?: AsyncStorageNamespaceCommitConditionalRemove[];
   /** Static cleanup policy applied during this commit. */
   staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   /** Existing entries whose access metadata should be updated. */
   touches?: AsyncStorageNamespaceCommitTouch[];
+};
+
+/**
+ * Internal commit args used by adapters built with `createAsyncStorageAdapter`
+ * and their managed drivers.
+ */
+export type ManagedAsyncStorageNamespaceCommitArgs<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata> & {
+  /**
+   * Keys to remove only if their stored metadata still matches, checked in the
+   * same write as the removal. Entries that changed meanwhile, or that the
+   * driver cannot verify, are kept and reported back as stale.
+   */
+  conditionalRemoves?: AsyncStorageNamespaceCommitConditionalRemove[];
 };
 
 export type AsyncStorageMaintenanceState = {
