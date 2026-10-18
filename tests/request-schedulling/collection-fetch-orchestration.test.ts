@@ -407,6 +407,52 @@ test('mutation on one item does not drop an in-flight batch fetch of other items
   expect(env.apiStore.getItemState('item2')?.status).toBe('success');
 });
 
+test('retries of a batch aborted by a mutation join the next fetch of another item', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 }, item3: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  // Both items are refetched in the same batch request
+  env.scheduleFetch('highPriority', 'item1');
+  env.scheduleFetch('highPriority', 'item2');
+  await advanceTime(100);
+
+  // The mutation aborts the batch and queues item2's retry until the aborted
+  // request settles
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation on item1 aborts the item1+item2 batch fetch',
+  ]);
+  void env.performClientUpdateAction('item1', { v: 1 });
+  await advanceTime(50);
+
+  // Fetching another item before then replaces the aborted request
+  env.addTimelineComments('beforeNextAction', ['item3 fetch is scheduled']);
+  env.scheduleFetch('highPriority', 'item3');
+
+  await flushAllTimers();
+
+  // item2's retry is sent in the same batch as item3 instead of waiting for
+  // item3's fetch to finish. The last fetch is item1's retry, sent after its
+  // mutation ends.
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | scheduled-fetch-triggered
+    10ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    100ms | -- Mutation on item1 aborts the item1+item2 batch fetch
+    .     | 🔴 <list-fetch-aborted 🚫
+    .     | ⬜ >mutation-started (value: {"v":1})
+    160ms | -- item3 fetch is scheduled
+    .     | 🟠 >list-fetch-started (value: {"itemIds":["item2","item3"]})
+    940ms | ⬜ <mutation-data-persisted (value: {"v":1})
+    960ms | 🟠 <list-fetch-finished (value: {"count":2})
+    1.31s | 🟡 >fetch-started
+    2.11s | 🟡 <fetch-finished (value: {"v":1})
+    "
+  `);
+});
+
 test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 }, item2: { v: 0 } },

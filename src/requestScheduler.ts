@@ -443,6 +443,26 @@ export class RequestScheduler<T> {
       const addedAt = Date.now();
       for (const [fetchingRequestId, request] of phase.fetchingRequests) {
         this.#state.lastAbortedRequests.add(fetchingRequestId);
+
+        // A request queued during the aborted fetch is newer than the retried
+        // one, so its payload takes precedence
+        const queued = pending.scheduledRequests.get(fetchingRequestId);
+        if (queued) {
+          if (this.#coalescePayload) {
+            queued.payload = this.#coalescePayload(
+              request.payload,
+              queued.payload,
+            );
+          }
+          queued.priority = getHigherPriorityFetchType(
+            queued.priority,
+            request.priority,
+          );
+          queued.remoteStartCancelable =
+            queued.remoteStartCancelable && request.remoteStartCancelable;
+          continue;
+        }
+
         this.#addToScheduledRequests(
           fetchingRequestId,
           request.payload,
@@ -962,6 +982,14 @@ export class RequestScheduler<T> {
       }
     }
 
+    this.#rescheduleRtuAfterFetch(rtuAfterFetch);
+
+    this.#flushScheduledRequests();
+
+    return true;
+  }
+
+  #rescheduleRtuAfterFetch(rtuAfterFetch: Map<string, QueuedRequest<T>>): void {
     for (const rtu of rtuAfterFetch.values()) {
       const wasDelayed = this.#scheduleDelayedRTU(
         Date.now(),
@@ -980,10 +1008,6 @@ export class RequestScheduler<T> {
         );
       }
     }
-
-    this.#flushScheduledRequests();
-
-    return true;
   }
 
   #endMutation(requestId: string): boolean {
@@ -1454,6 +1478,12 @@ export class RequestScheduler<T> {
     }
 
     this.#state.phase = { type: 'idle' };
+
+    // The aborted fetch's late settle is ignored, so the work it would have
+    // started is started now: realtime updates received during it and requests
+    // queued behind it, like the retries of a fetch aborted by a mutation
+    this.#rescheduleRtuAfterFetch(phase.rtuAfterFetch);
+    this.#flushScheduledRequests();
   }
 
   #createShouldAbort(

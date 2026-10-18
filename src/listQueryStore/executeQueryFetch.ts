@@ -166,7 +166,18 @@ export async function executeQueryFetch<
 
   const fetchPromises = requests.map(
     async ({ requestId: queryKey, payload: fetchPayload }) => {
-      const { payload, offset, limit, fields } = fetchPayload;
+      const { payload, limit, fields } = fetchPayload;
+
+      // An offset loadMore continues after the loaded items, which may have
+      // changed since it was scheduled, e.g. when it is the retry of a loadMore
+      // aborted by a mutation that removed an item from the list
+      const isAppendLoadMore =
+        !!offsetPagination &&
+        fetchPayload.type === 'loadMore' &&
+        fetchPayload.offset > 0;
+      const offset = isAppendLoadMore
+        ? (store.state.queries[queryKey]?.items.length ?? fetchPayload.offset)
+        : fetchPayload.offset;
 
       try {
         // Determine if we need chunked invalidation (offset mode, load type, limit > maxInvalidationLimit)

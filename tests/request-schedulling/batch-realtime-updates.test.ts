@@ -146,4 +146,59 @@ describe('realtime updates on a shared batch scheduler', () => {
       "
     `);
   });
+
+  test('a realtime update received during a fetch aborted by a mutation still refetches', async () => {
+    const env = createLoadedBatchEnv();
+    await primeBatchEnv(env);
+
+    // Items 1 and 2 are refetched in one batch, and item 3 receives a realtime
+    // invalidation while it is in flight, to be refetched after it
+    env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api1-item2');
+    await advanceTime(100);
+    env.addTimelineComments('beforeNextAction', [
+      'item3 receives a realtime update',
+    ]);
+    env.scheduleFetch('realtimeUpdate', 'api1-item3');
+
+    // A mutation on item 1 aborts the batch, and a new fetch of item 2 then
+    // replaces the aborted request before it settles
+    env.addTimelineComments('beforeNextAction', [
+      'item1 mutation aborts the batch',
+    ]);
+    void env.performClientUpdateAction('api1-item1', { v: 10 });
+    await advanceTime(50);
+    env.addTimelineComments('beforeNextAction', [
+      'item2 fetch replaces the aborted batch',
+    ]);
+    env.scheduleFetch('highPriority', 'api1-item2');
+
+    await flushAllTimers();
+
+    // item 3's realtime update is not lost with the aborted request: it is
+    // rescheduled with the realtime throttle delay and then refetched
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      850ms | -- timeline-cleared
+      .     | [api1-item1] scheduled-fetch-triggered
+      900ms | 🟠 >list-fetch-started (value: {"itemIds":["api1-item1","api1-item2"]})
+      950ms | -- item3 receives a realtime update
+      .     | -- item1 mutation aborts the batch
+      .     | 🟠 <list-fetch-aborted 🚫
+      .     | ⬜ [api1-item1] >mutation-started (value: {"v":10})
+      1s    | -- item2 fetch replaces the aborted batch
+      .     | rt-fetch-scheduled (delay: 1700ms)
+      .     | [api1-item2] scheduled-fetch-coalesced
+      1.05s | 🟡 [api1-item2] >fetch-started
+      1.79s | ⬜ [api1-item1] <mutation-data-persisted (value: {"v":10})
+      1.85s | 🟡 [api1-item2] <fetch-finished (value: {"v":2})
+      2.2s  | 🟢 [api1-item1] >fetch-started
+      2.7s  | scheduled-rt-fetch-started
+      3s    | 🟢 [api1-item1] <fetch-finished (value: {"v":10})
+      3.05s | 🔵 [api1-item3] >fetch-started
+      3.85s | 🔵 [api1-item3] <fetch-finished (value: {"v":3})
+      "
+    `);
+  });
 });

@@ -1224,6 +1224,53 @@ describe('offset pagination - refetch after loadMore keeps size', () => {
   });
 });
 
+describe('offset pagination - mutations', () => {
+  const serverData = {
+    users: range(1, 6).map((id) => ({ id, name: `User ${id}` })),
+  };
+
+  test('loadMore interrupted by an optimistic delete continues after the remaining items', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 2,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+
+    // Load the first page: users 1 and 2
+    env.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' });
+    await flushAllTimers();
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Request the next page from offset 2, then delete a loaded user while
+    // it is in flight. The delete aborts the loadMore, which is retried after
+    // the delete ends.
+    env.apiStore.loadMore({ tableId: 'users' });
+    await advanceTime(100);
+    void env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||1');
+      },
+      mutation: () => env.serverTable.delayedRemoveItem('users||1'),
+    });
+
+    await flushAllTimers();
+
+    // Only one user is still loaded, so the retry continues from offset 1. The
+    // stale offset 2 would skip users||3, which moved to offset 1 on the server.
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+        - { limit: 2, offset: 2 }
+        - { limit: 2, offset: 1 }
+      `);
+    expect(
+      env.apiStore.getQueryState({ tableId: 'users' })?.items,
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3', '"users||4']`);
+  });
+});
+
 describe('offset pagination - awaitListQueryFetch', () => {
   const serverData = {
     products: range(1, 20).map((id) => ({ id, name: `Product ${id}` })),
