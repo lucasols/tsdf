@@ -620,3 +620,99 @@ test('list-query optimistic delete failures restore item state and query members
     refetchOnMount: '❌'
   `);
 });
+
+// An optimistic update can throw, e.g. when the cached data has an unexpected
+// shape. That must fail the mutation like any other error instead of leaving
+// the store mutation-locked, which would hold every later fetch forever.
+test('document optimistic updates that throw fail the mutation and release the store lock', async () => {
+  const env = createDocumentStoreTestEnv<DocumentValue>(
+    { hello: 'world' },
+    { testScenario: 'loaded' },
+  );
+  const mutation = vi.fn(() => Promise.resolve());
+
+  const result = await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      throw new Error('unexpected cached data');
+    },
+    mutation,
+  });
+
+  // The failure is returned as a mutation error and nothing is sent
+  expect(result.ok).toBe(false);
+  expect(mutation).not.toHaveBeenCalled();
+
+  // With a leaked lock the fetch would be held as 'scheduled' forever
+  expect(env.scheduleFetch('highPriority')).toBe('triggered');
+});
+
+test('collection optimistic updates that throw fail the mutation and release the item lock', async () => {
+  const env = createCollectionStoreTestEnv(
+    { 'item-1': { name: 'Item 1' } },
+    { testScenario: 'loaded' },
+  );
+  const mutation = vi.fn(() => Promise.resolve());
+
+  const result = await env.apiStore.performMutation('item-1', {
+    optimisticUpdate: () => {
+      throw new Error('unexpected cached data');
+    },
+    mutation,
+  });
+
+  // The failure is returned as a mutation error and nothing is sent
+  expect(result.ok).toBe(false);
+  expect(mutation).not.toHaveBeenCalled();
+
+  // With a leaked lock the fetch would be held as 'scheduled' forever
+  expect(env.scheduleFetch('highPriority', 'item-1')).toBe('triggered');
+});
+
+test('list-query optimistic updates that throw fail the mutation and release the item and query locks', async () => {
+  const adminQuery = { tableId: 'users', filters: byTypeFilter('admin') };
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada', type: 'admin' }] },
+    { testScenario: { loaded: { queries: [adminQuery] } } },
+  );
+  const mutation = vi.fn(() => Promise.resolve());
+
+  const result = await env.apiStore.performMutation('users||1', {
+    optimisticUpdate: () => {
+      throw new Error('unexpected cached data');
+    },
+    mutation,
+  });
+
+  // The failure is returned as a mutation error and nothing is sent
+  expect(result.ok).toBe(false);
+  expect(mutation).not.toHaveBeenCalled();
+
+  // Both the item and the query containing it must be fetchable again
+  expect(env.scheduleItemFetch('highPriority', 'users||1')).toBe('triggered');
+  expect(env.scheduleFetch('highPriority', adminQuery)).toBe('triggered');
+});
+
+test('a throwing onSuccess does not release the lock of a concurrent mutation on the same item', async () => {
+  const env = createCollectionStoreTestEnv(
+    { 'item-1': { name: 'Item 1' } },
+    { testScenario: 'loaded' },
+  );
+
+  // A slow mutation keeps item-1 locked
+  void env.apiStore.performMutation('item-1', {
+    mutation: () => env.serverTable.delayedUpdateItem('item-1', { name: 'A' }),
+  });
+
+  // A fast mutation on the same item finishes first and its onSuccess throws,
+  // which runs the error path after the lock was already released once
+  await env.apiStore.performMutation('item-1', {
+    mutation: () => Promise.resolve(),
+    onSuccess: () => {
+      throw new Error('onSuccess failed');
+    },
+  });
+
+  // The slow mutation is still in flight, so fetches of item-1 must stay on
+  // hold instead of committing data from before it is persisted
+  expect(env.scheduleFetch('highPriority', 'item-1')).toBe('scheduled');
+});

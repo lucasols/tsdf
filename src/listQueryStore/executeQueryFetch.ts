@@ -166,13 +166,36 @@ export async function executeQueryFetch<
 
   const fetchPromises = requests.map(
     async ({ requestId: queryKey, payload: fetchPayload }) => {
-      const { payload, offset, limit, fields } = fetchPayload;
+      const { payload, limit, fields } = fetchPayload;
+
+      // An offset loadMore continues after the loaded items, which may have
+      // shrunk since it was scheduled, e.g. when it is the retry of a loadMore
+      // aborted by a mutation that removed an item from the list. Items added
+      // locally (e.g. optimistic creates) aren't part of the server pages
+      // loaded so far, so they never move the offset forward.
+      const isAppendLoadMore =
+        !!offsetPagination &&
+        fetchPayload.type === 'loadMore' &&
+        fetchPayload.offset > 0;
+      const offset = isAppendLoadMore
+        ? Math.min(
+            fetchPayload.offset,
+            store.state.queries[queryKey]?.items.length ?? fetchPayload.offset,
+          )
+        : fetchPayload.offset;
+
+      // In offset mode, append only when loadMore range starts after head.
+      // Coalesced loadMore+load can produce type='loadMore' with offset=0,
+      // which must replace the list to avoid stale head items.
+      const appendToExisting =
+        !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
 
       try {
-        // Determine if we need chunked invalidation (offset mode, load type, limit > maxInvalidationLimit)
+        // A fetch that replaces the list in offset mode (a load, or a loadMore
+        // merged with one) is split into chunks of at most maxInvalidationLimit
         const useChunkedInvalidation =
           offsetPagination &&
-          fetchPayload.type === 'load' &&
+          !appendToExisting &&
           limit > offsetPagination.maxInvalidationLimit;
 
         let allItems: FetchListFnReturn<ItemState, ItemPayload>['items'];
@@ -249,12 +272,6 @@ export async function executeQueryFetch<
           results.set(queryKey, false);
           return;
         }
-
-        // In offset mode, append only when loadMore range starts after head.
-        // Coalesced loadMore+load can produce type='loadMore' with offset=0,
-        // which must replace the list to avoid stale head items.
-        const appendToExisting =
-          !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
 
         store.produceState(
           (draft) => {

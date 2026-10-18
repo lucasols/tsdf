@@ -1,8 +1,10 @@
-import { renderHook } from '@testing-library/react';
+import { sleep } from '@ls-stack/utils/sleep';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -307,3 +309,446 @@ test('coalesces multiple fetches for the same item', async () => {
     `v: 1`,
   );
 });
+
+test('fetch interrupted by a mutation is retried after the mutation ends', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 } },
+    { testScenario: 'loaded' },
+  );
+
+  renderHook(() => {
+    const { status, data } = env.apiStore.useItem('item1');
+    env.trackItemUI('item1', `${status}:${data?.value.v ?? '-'}`);
+  });
+
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', 'item1');
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation without revalidation starts while the refetch is in flight',
+  ]);
+  void env.performClientUpdateAction('item1', { v: 1 });
+
+  await flushAllTimers();
+
+  // The aborted refetch must not leave the item stuck on refetching: it is
+  // retried once the mutation lock is released
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1     |
+    0     | success:0 | ui-initialized
+    10ms  | success:0 | 🔴 >fetch-started
+    810ms | success:0 | 🔴 <fetch-finished (value: {"v":0})
+    .     | success:0 | scheduled-fetch-triggered
+    820ms | success:0 | 🟠 >fetch-started
+    910ms | success:0 | -- Mutation without revalidation starts while the refetch is in flight
+    .     | success:0 | 🟠 <fetch-aborted 🚫
+    .     | success:0 | ⬜ >mutation-started (value: {"v":1})
+    1.75s | success:0 | ⬜ <mutation-data-persisted (value: {"v":1})
+    2.12s | success:0 | 🟡 >fetch-started
+    2.92s | success:0 | 🟡 <fetch-finished (value: {"v":1})
+    .     | success:1 | ui-changed
+    "
+  `);
+  expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+});
+
+test('mutation on one item does not drop an in-flight batch fetch of other items', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  renderHook(() => {
+    const item1 = env.apiStore.useItem('item1');
+    const item2 = env.apiStore.useItem('item2');
+    env.trackItemUI('item1', `${item1.status}:${item1.data?.value.v ?? '-'}`);
+    env.trackItemUI('item2', `${item2.status}:${item2.data?.value.v ?? '-'}`);
+  });
+
+  await flushAllTimers();
+
+  // Both items are refetched in the same batch request
+  env.scheduleFetch('highPriority', 'item1');
+  env.scheduleFetch('highPriority', 'item2');
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation on item1 starts while the item1+item2 batch fetch is in flight',
+  ]);
+  void env.performClientUpdateAction('item1', { v: 1 });
+
+  await flushAllTimers();
+
+  // Neither item may stay stuck on refetching: item2 is refetched as soon as
+  // the aborted batch settles and item1 after its mutation ends
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1     | item2     |
+    0     | success:0 | success:0 | [item1, item2] ui-initialized
+    10ms  | success:0 | success:0 | 🔴 [item1] >fetch-started
+    810ms | success:0 | success:0 | 🔴 [item1] <fetch-finished (value: {"v":0})
+    .     | success:0 | success:0 | [item1] scheduled-fetch-triggered
+    820ms | success:0 | success:0 | 🟠 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    910ms | success:0 | success:0 | -- Mutation on item1 starts while the item1+item2 batch fetch is in flight
+    .     | success:0 | success:0 | 🟠 <list-fetch-aborted 🚫
+    .     | success:0 | success:0 | ⬜ [item1] >mutation-started (value: {"v":1})
+    1.63s | success:0 | success:0 | 🟡 [item2] >fetch-started
+    1.75s | success:0 | success:0 | ⬜ [item1] <mutation-data-persisted (value: {"v":1})
+    2.43s | success:0 | success:0 | 🟡 [item2] <fetch-finished (value: {"v":0})
+    2.44s | success:0 | success:0 | 🟢 [item1] >fetch-started
+    3.24s | success:0 | success:0 | 🟢 [item1] <fetch-finished (value: {"v":1})
+    .     | success:1 | success:0 | [item1] ui-changed
+    "
+  `);
+  expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+  expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+});
+
+test('retries of a batch aborted by a mutation join the next fetch of another item', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 }, item3: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  // Both items are refetched in the same batch request
+  env.scheduleFetch('highPriority', 'item1');
+  env.scheduleFetch('highPriority', 'item2');
+  await advanceTime(100);
+
+  // The mutation aborts the batch and queues item2's retry until the aborted
+  // request settles
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation on item1 aborts the item1+item2 batch fetch',
+  ]);
+  void env.performClientUpdateAction('item1', { v: 1 });
+  await advanceTime(50);
+
+  // Fetching another item before then replaces the aborted request
+  env.addTimelineComments('beforeNextAction', ['item3 fetch is scheduled']);
+  env.scheduleFetch('highPriority', 'item3');
+
+  await flushAllTimers();
+
+  // item2's retry is sent in the same batch as item3 instead of waiting for
+  // item3's fetch to finish. The last fetch is item1's retry, sent after its
+  // mutation ends.
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | scheduled-fetch-triggered
+    10ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    100ms | -- Mutation on item1 aborts the item1+item2 batch fetch
+    .     | 🔴 <list-fetch-aborted 🚫
+    .     | ⬜ >mutation-started (value: {"v":1})
+    160ms | -- item3 fetch is scheduled
+    .     | 🟠 >list-fetch-started (value: {"itemIds":["item2","item3"]})
+    940ms | ⬜ <mutation-data-persisted (value: {"v":1})
+    960ms | 🟠 <list-fetch-finished (value: {"count":2})
+    1.31s | 🟡 >fetch-started
+    2.11s | 🟡 <fetch-finished (value: {"v":1})
+    "
+  `);
+});
+
+test('awaitFetch calls interrupted by a mutation resolve with the retried batch fetches', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  // Both awaited fetches are sent in the same batch request
+  const item1Promise = env.apiStore.awaitFetch('item1');
+  const item2Promise = env.apiStore.awaitFetch('item2');
+  await advanceTime(100);
+
+  // The mutation on item1 aborts the whole batch: item2 is retried as soon as
+  // the aborted request settles and item1 after its mutation ends
+  env.serverTable.updateItem('item2', { v: 2 });
+  void env.performClientUpdateAction('item1', { v: 1 });
+
+  await flushAllTimers();
+
+  // Both callers get the retries' results, including the mutated item1 value,
+  // instead of an AbortedStoreError for the interrupted batch
+  expect({ item1: await item1Promise, item2: await item2Promise })
+    .toMatchInlineSnapshot(`
+      item1:
+        data:
+          value: { v: 1 }
+        error: null
+
+      item2:
+        data:
+          value: { v: 2 }
+        error: null
+    `);
+});
+
+test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  // Both items are refetched in the same batch request
+  env.scheduleFetch('highPriority', 'item1');
+  env.scheduleFetch('highPriority', 'item2');
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'item1 is deleted while the item1+item2 batch fetch is in flight',
+  ]);
+  void env.apiStore.performMutation('item1', {
+    optimisticUpdate: () => {
+      env.apiStore.deleteItemState('item1');
+    },
+    mutation: () => env.serverTable.delayedRemoveItem('item1'),
+  });
+
+  await flushAllTimers();
+
+  // Only item2 is retried: the deleted item must not be refetched, which
+  // would bring it back as an "item not found" error
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | [item1] scheduled-fetch-triggered
+    10ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    100ms | -- item1 is deleted while the item1+item2 batch fetch is in flight
+    .     | 🔴 <list-fetch-aborted 🚫
+    820ms | 🟠 [item2] >fetch-started
+    1.3s  | [item1] server-item-removed
+    1.62s | 🟠 [item2] <fetch-finished (value: {"v":0})
+    "
+  `);
+  expect(env.apiStore.getItemState('item1')).toBe(null);
+  expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+});
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'awaitFetch interrupted by deleting the item resolves without waiting for the timeout ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    // item2 is fetched along with item1, so a batch scheduler is kept after
+    // item1 is deleted
+    const fetchResult = createLoggerStore();
+    void env.apiStore.awaitFetch('item1').then((result) => {
+      fetchResult.add({ item1Error: result.error?.message ?? null });
+    });
+    void env.apiStore.awaitFetch('item2').then((result) => {
+      fetchResult.add({ item2Error: result.error?.message ?? null });
+    });
+    await advanceTime(100);
+    fetchResult.addMark(
+      'item1 is deleted while its awaited fetch is in flight',
+    );
+
+    // The delete aborts the fetch and drops item1's retry (along with its
+    // scheduler, for per-item schedulers)
+    void env.apiStore.performMutation('item1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('item1');
+      },
+      mutation: () => env.serverTable.delayedRemoveItem('item1'),
+    });
+
+    // The item1 caller learns right away that the item is gone instead of
+    // waiting for the aborted fetch or a 30s timeout
+    await advanceTime(10);
+    fetchResult.addMark('10ms after the delete');
+
+    // item2 still resolves with its own fetch
+    await flushAllTimers();
+    expect(fetchResult.changesSnapshot).toMatchInlineSnapshot(`
+      "
+
+      >>> item1 is deleted while its awaited fetch is in flight
+
+      -> item1Error: Not found
+
+      >>> 10ms after the delete
+
+      -> item2Error: null
+      "
+    `);
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'awaitFetch interrupted by a store reset resolves as aborted ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    const fetchPromise = env.apiStore.awaitFetch('item1');
+    await advanceTime(100);
+
+    // A reset (e.g. on logout) discards the in-flight fetch and clears the
+    // items, unlike deleting the item, which resolves the caller as not found
+    env.apiStore.reset();
+    await flushAllTimers();
+
+    expect((await fetchPromise).error?.name).toBe('AbortedStoreError');
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches the restored item ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    const ui = createLoggerStore();
+    renderHook(() => {
+      const item1 = env.apiStore.useItem('item1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+      ui.add({ item1: `${item1.status}:${item1.data?.value.v ?? '-'}` });
+    });
+
+    await flushAllTimers();
+
+    // The server has a newer value, so the refetch is needed
+    env.serverTable.setItem('item1', { v: 1 });
+    env.scheduleFetch('highPriority', 'item1');
+    env.scheduleFetch('highPriority', 'item2');
+    await advanceTime(100);
+    ui.addMark('item1 is deleted while its refetch is in flight');
+
+    // The delete aborts item1's refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('item1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('item1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback restores item1 mid-refetch, so it is refetched instead of
+    // staying on `refetching` with no fetch pending
+    expect(ui.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> item1: success:0
+      -> item1: refetching:0
+
+      >>> item1 is deleted while its refetch is in flight
+
+      -> item1: deleted:-
+      -> item1: refetching:0
+      -> item1: success:1
+      "
+    `);
+    expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+    expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches it with no hook mounted ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    // An imperative refetch, with no hook displaying the item
+    env.serverTable.setItem('item1', { v: 1 });
+    env.scheduleFetch('highPriority', 'item1');
+    await advanceTime(100);
+
+    // The delete aborts item1's refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('item1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('item1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // No hook is mounted to react to an invalidation, so the rollback itself
+    // resumes the interrupted refetch instead of leaving item1 on `refetching`
+    // with its old value
+    const item1 = env.apiStore.getItemState('item1');
+    expect({ status: item1?.status, value: item1?.data?.value })
+      .toMatchInlineSnapshot(`
+        status: 'success'
+        value: { v: 1 }
+      `);
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item with a delayed refetch pending still refetches it ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch, mediumPriorityDelayMs: 2_000 },
+    );
+
+    // A medium priority refetch of item1 waits for its delay
+    env.serverTable.setItem('item1', { v: 1 });
+    env.scheduleFetch('mediumPriority', 'item1');
+    await advanceTime(100);
+    expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+
+    // The delete drops the delayed refetch, then fails
+    act(() => {
+      void env.apiStore.performMutation('item1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('item1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback resumes the dropped refetch, so item1 doesn't keep its old
+    // value
+    expect(
+      env.apiStore.getItemState('item1')?.data?.value,
+    ).toMatchInlineSnapshot(`v: 1`);
+  },
+);

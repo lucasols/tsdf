@@ -57,6 +57,16 @@ type InvalidateItemEvent = {
 
 type SchedulerWithMutation = { startMutation: (key: string) => () => boolean };
 
+type ItemSchedulerWithMutation<ItemPayload extends ValidPayload> =
+  SchedulerWithMutation & {
+    scheduleFetch: (
+      key: string,
+      fetchType: FetchType,
+      payload: { payload: ItemPayload; fields?: string[] },
+    ) => unknown;
+    hasPendingRequest: (key: string) => boolean;
+  };
+
 type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -101,7 +111,7 @@ type CreateMutationApiOptions<
   getOrCreateItemScheduler: (
     itemKey: string,
     payload: ItemPayload,
-  ) => SchedulerWithMutation;
+  ) => ItemSchedulerWithMutation<ItemPayload>;
   getOrCreateQueryScheduler: (queryKey: string) => SchedulerWithMutation;
   deleteItemFetchResources: (
     items: { itemKey: string; payload: ItemPayload }[],
@@ -310,6 +320,7 @@ export function createMutationApi<
       | Map<string, DroppedFieldInvalidation>
       | undefined;
     invalidationWasTriggered: boolean;
+    hadPendingFetch: boolean;
   };
   type MutationQueryRollbackSnapshot = {
     queryKey: string;
@@ -351,6 +362,40 @@ export function createMutationApi<
     querySnapshots: MutationQueryRollbackSnapshot[];
   }): void {
     if (itemSnapshots.length === 0 && querySnapshots.length === 0) return;
+
+    // Deleting an item drops its pending fetch work (an in-flight or delayed
+    // refetch), so restoring it must resume that work, even when no hook is
+    // mounted to react to an invalidation. With partial resources the fetched
+    // fields are only known once some were loaded; otherwise the item is
+    // invalidated so its hooks refetch their fields.
+    const interruptedFetches: {
+      itemKey: string;
+      payload: ItemPayload;
+      fields: string[] | undefined;
+    }[] = [];
+    const interruptedFetchPayloadsToInvalidate: ItemPayload[] = [];
+
+    for (const {
+      itemKey,
+      itemQuery,
+      loadedFields,
+      hadPendingFetch,
+    } of itemSnapshots) {
+      if (itemQuery && hadPendingFetch && !store.state.itemQueries[itemKey]) {
+        if (partialResources && !loadedFields) {
+          interruptedFetchPayloadsToInvalidate.push(itemQuery.payload);
+        } else {
+          interruptedFetches.push({
+            itemKey,
+            payload: itemQuery.payload,
+            fields:
+              loadedFields === '*' || !partialResources
+                ? undefined
+                : loadedFields,
+          });
+        }
+      }
+    }
 
     runWithBroadcastConsistency('confirmed', () => {
       store.produceState(
@@ -441,6 +486,18 @@ export function createMutationApi<
         publishQuerySnapshot(snapshot.queryKey);
       }
     });
+
+    for (const { itemKey, payload, fields } of interruptedFetches) {
+      getOrCreateItemScheduler(itemKey, payload).scheduleFetch(
+        itemKey,
+        'highPriority',
+        { payload, fields },
+      );
+    }
+
+    if (interruptedFetchPayloadsToInvalidate.length > 0) {
+      invalidateItem(interruptedFetchPayloadsToInvalidate);
+    }
   }
 
   function getCurrentOptimisticMutationQueryContext():
@@ -1496,27 +1553,34 @@ export function createMutationApi<
     };
 
     if (affectedItemEntries) {
-      itemRollbackSnapshots = affectedItemEntries.map(({ itemKey }) => {
-        const pendingInvalidationFields =
-          itemPendingInvalidationFields.get(itemKey);
-        const droppedFieldInvalidations =
-          itemDroppedFieldInvalidations.get(itemKey);
-        return {
-          itemKey,
-          item: klona(store.state.items[itemKey]),
-          itemQuery: klona(store.state.itemQueries[itemKey]),
-          loadedFields: klona(store.state.itemLoadedFields[itemKey]),
-          invalidationFields: klona(
-            store.state.itemFieldInvalidationFields[itemKey],
-          ),
-          pendingInvalidationFields:
-            pendingInvalidationFields && new Map(pendingInvalidationFields),
-          pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
-          droppedFieldInvalidations:
-            droppedFieldInvalidations && new Map(droppedFieldInvalidations),
-          invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
-        };
-      });
+      itemRollbackSnapshots = affectedItemEntries.map(
+        ({ itemKey, payload: itemPayload }) => {
+          const pendingInvalidationFields =
+            itemPendingInvalidationFields.get(itemKey);
+          const droppedFieldInvalidations =
+            itemDroppedFieldInvalidations.get(itemKey);
+          return {
+            itemKey,
+            item: klona(store.state.items[itemKey]),
+            itemQuery: klona(store.state.itemQueries[itemKey]),
+            loadedFields: klona(store.state.itemLoadedFields[itemKey]),
+            invalidationFields: klona(
+              store.state.itemFieldInvalidationFields[itemKey],
+            ),
+            pendingInvalidationFields:
+              pendingInvalidationFields && new Map(pendingInvalidationFields),
+            pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
+            droppedFieldInvalidations:
+              droppedFieldInvalidations && new Map(droppedFieldInvalidations),
+            invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+            hadPendingFetch:
+              !!fetchItemFn &&
+              getOrCreateItemScheduler(itemKey, itemPayload).hasPendingRequest(
+                itemKey,
+              ),
+          };
+        },
+      );
     }
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });

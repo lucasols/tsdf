@@ -2099,13 +2099,15 @@ test('a mutation snapshot sent while the sender is fully invalidated does not er
       status: 'success'
     `);
   // The timeline shows tab B only consumes incoming snapshots — the status
-  // never leaves success and no local fetch is started.
+  // never leaves success and no local fetch is started. The confirmed
+  // snapshot comes from tab A retrying the '*' refetch its mutation aborted.
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | full-hook | full-hook-status |
     4.62s | Alice:30  | success          | -- timeline-cleared
     4.72s | Alice:30  | success          | [users||1] <optimistic-item-snapshot-received (value: {"id":1,"name":"Alice","age":31})
     .     | Alice:31  | success          | [full-hook] ui-changed
+    6.73s | Alice:31  | success          | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice","age":31})
     "
   `);
 });

@@ -1714,7 +1714,10 @@ export function createCollectionStore<
     return results;
   }
 
-  function maybeDisposeBatchScheduler(payload: ItemPayload): void {
+  function maybeDisposeBatchScheduler(
+    itemKey: string,
+    payload: ItemPayload,
+  ): void {
     const batchKey = getBatchKey(payload);
     if (batchKey === false) return;
 
@@ -1729,6 +1732,11 @@ export function createCollectionStore<
     if (!hasRelatedItems) {
       scheduler.reset();
       batchKeySchedulers.delete(batchKey);
+    } else {
+      // The shared scheduler is kept for the other items, so the removed
+      // item's pending fetches (e.g. the retry of a fetch aborted by its
+      // delete mutation) must not bring it back
+      scheduler.cancelPendingRequests([itemKey]);
     }
   }
 
@@ -1744,7 +1752,7 @@ export function createCollectionStore<
       perItemSchedulers.delete(itemKey);
     }
 
-    maybeDisposeBatchScheduler(payload);
+    maybeDisposeBatchScheduler(itemKey, payload);
   }
 
   function isProtectedFromEviction(
@@ -2286,6 +2294,7 @@ export function createCollectionStore<
     itemKey: string;
     payload: ItemPayload;
     item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
+    hadPendingFetch: boolean;
   };
 
   /**
@@ -2393,6 +2402,10 @@ export function createCollectionStore<
             itemKey,
             payload: itemPayload,
             item: klona(store.state[itemKey]),
+            hadPendingFetch: getScheduler(
+              itemKey,
+              itemPayload,
+            ).hasPendingRequest(itemKey),
           }))
         : [];
 
@@ -2424,6 +2437,20 @@ export function createCollectionStore<
 
         if (optimisticRollbackSnapshots.length > 0) {
           const restoredItemKeys: string[] = [];
+          // Deleting an item drops its pending fetch work (an in-flight or
+          // delayed refetch), so restoring it must resume that work, even
+          // when no hook is mounted to react to an invalidation
+          const interruptedFetchPayloads: ItemPayload[] = [];
+
+          for (const snapshot of optimisticRollbackSnapshots) {
+            if (
+              snapshot.item &&
+              snapshot.hadPendingFetch &&
+              !store.state[snapshot.itemKey]
+            ) {
+              interruptedFetchPayloads.push(snapshot.payload);
+            }
+          }
 
           runWithBroadcastConsistency('confirmed', () => {
             store.produceState(
@@ -2453,6 +2480,10 @@ export function createCollectionStore<
 
           if (restoredItemKeys.length > 0) {
             touchItemsAndMaybeEnforceLimits(restoredItemKeys);
+          }
+
+          if (interruptedFetchPayloads.length > 0) {
+            scheduleFetch('highPriority', interruptedFetchPayloads);
           }
         }
 
@@ -2585,13 +2616,13 @@ export function createCollectionStore<
   function reset() {
     if (isDisposed) return;
     for (const scheduler of batchKeySchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     batchKeySchedulers.clear();
     itemKeyToPayload.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     perItemSchedulers.clear();
 
@@ -2618,13 +2649,13 @@ export function createCollectionStore<
     unregisterStoreFromManager();
 
     for (const scheduler of batchKeySchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     batchKeySchedulers.clear();
     itemKeyToPayload.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     perItemSchedulers.clear();
 

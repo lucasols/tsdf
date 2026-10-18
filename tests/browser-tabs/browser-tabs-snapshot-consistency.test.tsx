@@ -812,6 +812,141 @@ test('two tabs mutating the same document concurrently converge on the server va
   `);
 });
 
+test('a sibling fetch ignored during a mutation does not cancel the retry of the fetch the mutation interrupted', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-mutation-retry');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'b');
+  const sharedServerState = createSharedServerMockState(0);
+
+  const envA = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+  });
+  const envB = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+  });
+
+  // Tab B loads the document, so its later refetches can be satisfied by
+  // sibling fetches
+  envB.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // Tab B starts a refetch, and a mutation interrupts it
+  envB.setNextFetchDurations(800);
+  envB.scheduleFetch('highPriority');
+  await advanceTime(100);
+  void envB.performClientUpdateAction(10, {
+    withOptimisticUpdate: true,
+    duration: 1_000,
+  });
+
+  // Tab A fetches while tab B's mutation holds the lock, so tab B ignores
+  // its confirmed snapshot (and its fetch start)
+  await advanceTime(100);
+  await tabs.focusTab('a');
+  envA.setNextFetchDurations(100);
+  envA.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // Tab B still retries the interrupted fetch once the mutation ends instead
+  // of staying `refetching` with no fetch pending
+  expect(pick(envB.store.state, ['status', 'data'])).toMatchInlineSnapshot(`
+    data: { value: 10 }
+    status: 'success'
+  `);
+  // The 🟡 fetch after the mutation is the retry; tab B is in the background
+  // by then, so it waits for the background scheduling delay
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | -  | scheduled-fetch-triggered
+    10ms  | -  | 🔴 >fetch-started
+    810ms | -  | 🔴 <fetch-finished (value: 0)
+    .     | -  | scheduled-fetch-triggered
+    820ms | -  | 🟠 >fetch-started
+    910ms | -  | 🟠 <fetch-aborted 🚫
+    .     | 10 | ⬜ optimistic-ui-commit
+    .     | 10 | ⬜ >mutation-started (value: 10)
+    1.01s | 10 | 🔕 window-blurred
+    1.61s | 10 | ⬜ <mutation-data-persisted (value: 10)
+    4.92s | 10 | 🟡 >fetch-started
+    5.72s | 10 | 🟡 <fetch-finished (value: 10)
+    "
+  `);
+  // Tab A's fetch ran while tab B held the lock
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time   |
+    810ms  | <confirmed-snapshot-received (value: 0)
+    910ms  | <optimistic-snapshot-received (value: 10)
+    1.015s | 👁 window-focused
+    1.02s  | scheduled-fetch-triggered
+    1.03s  | 🔴 >fetch-started
+    1.13s  | 🔴 <fetch-finished (value: 0)
+    5.72s  | <confirmed-snapshot-received (value: 10)
+    "
+  `);
+});
+
+test('a sibling fetch that fails after a mutation does not leave the retried fetch stuck', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-mutation-retry-failed-sibling');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'b');
+  const sharedServerState = createSharedServerMockState(0);
+
+  const envA = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+  });
+  const envB = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+  });
+
+  envB.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // Tab B starts a refetch, and a mutation interrupts it
+  envB.setNextFetchDurations(800);
+  envB.scheduleFetch('highPriority');
+  await advanceTime(100);
+  void envB.performClientUpdateAction(10, {
+    withOptimisticUpdate: true,
+    duration: 1_000,
+  });
+
+  // Tab B goes to the background, so after the mutation ends its retry waits
+  // for the background scheduling delay
+  await advanceTime(100);
+  await tabs.focusTab('a');
+  await advanceTime(1_000);
+
+  // Tab A fetches while tab B's retry is waiting, and its fetch fails, so it
+  // publishes no confirmed snapshot for tab B
+  envA.errorInNextFetch();
+  envA.setNextFetchDurations(100);
+  envA.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // Tab B still runs its retry instead of staying `refetching` with no fetch
+  // pending
+  expect(pick(envB.store.state, ['status', 'data'])).toMatchInlineSnapshot(`
+    data: { value: 10 }
+    status: 'success'
+  `);
+});
+
 test('list query snapshots do not re-broadcast after remote application', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-audit');

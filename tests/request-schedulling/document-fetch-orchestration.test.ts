@@ -960,3 +960,78 @@ test('low priority fetch during mutation inside throttle window', async () => {
     "
   `);
 });
+
+test('fetch interrupted by a mutation is retried after the mutation ends', async () => {
+  const env = createDocumentStoreTestEnv(0, { testScenario: 'idle' });
+
+  renderHook(() => {
+    const { status, data } = env.apiStore.useDocument();
+    env.trackUIChanges(`${status}:${data?.value ?? '-'}`);
+  });
+
+  // Mounting the hook starts the initial fetch
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation without revalidation starts while the initial fetch is in flight',
+  ]);
+  void env.performClientUpdateAction(1);
+
+  await flushAllTimers();
+
+  // The aborted fetch must not leave the UI stuck on loading: it is retried
+  // once the mutation lock is released and commits the latest server value
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui          |
+    0     | "loading:-" | ui-initialized
+    10ms  | "loading:-" | 🔴 >fetch-started
+    100ms | "loading:-" | -- Mutation without revalidation starts while the initial fetch is in flight
+    .     | "loading:-" | 🔴 <fetch-aborted 🚫
+    .     | "loading:-" | ⬜ >mutation-started (value: 1)
+    940ms | "loading:-" | ⬜ <mutation-data-persisted (value: 1)
+    1.31s | "loading:-" | 🟠 >fetch-started
+    2.11s | "loading:-" | 🟠 <fetch-finished (value: 1)
+    .     | "success:1" | ui-changed
+    "
+  `);
+  expect(env.apiStore.store.state.status).toBe('success');
+});
+
+test('a mutation that ends after a store reset does not release the lock of a newer mutation', async () => {
+  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded' });
+
+  // Mutation A starts, then the store is reset (e.g. on logout) and mutation
+  // B starts
+  void env.performClientUpdateAction(1);
+  await advanceTime(100);
+  env.apiStore.reset();
+  await advanceTime(100);
+  env.addTimelineComments('beforeNextAction', ['Mutation B starts']);
+  void env.performClientUpdateAction(2);
+
+  // A fetch requested after A ended, while B is still in progress
+  await advanceTime(750);
+  env.addTimelineComments('beforeNextAction', ['Fetch requested during B']);
+  env.scheduleFetch('highPriority');
+
+  await flushAllTimers();
+
+  // A's lock was dropped by the reset, so A ending (at 1.21s) must not
+  // release B's lock: the fetch waits for B to end (at 1.41s) instead of
+  // racing it
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | ⬜ >mutation-started (value: 1)
+    200ms | -- Mutation B starts
+    .     | ⬛ >mutation-started (value: 2)
+    840ms | ⬜ <mutation-data-persisted (value: 1)
+    950ms | -- Fetch requested during B
+    .     | scheduled-fetch-scheduled
+    1.04s | ⬛ <mutation-data-persisted (value: 2)
+    1.41s | 🔴 >fetch-started
+    2.21s | 🔴 <fetch-finished (value: 2)
+    "
+  `);
+});

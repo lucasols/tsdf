@@ -38,14 +38,14 @@ export async function performMutationWithLifecycle<
 ): Promise<TResult<Awaited<T>, TError | MutationSkipped>> {
   const endMutation = startMutation();
 
-  if (optimisticUpdate?.() === false) {
-    endMutation();
-    return Result.err(mutationSkipped);
-  }
-
   let unblockWindowClose: VoidFunction | null = null;
 
   try {
+    if (optimisticUpdate?.() === false) {
+      endMutation();
+      return Result.err(mutationSkipped);
+    }
+
     if (debounce) {
       unblockWindowClose = blockWindowClose?.().unblock ?? null;
 

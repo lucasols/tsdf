@@ -1,3 +1,4 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
@@ -815,3 +816,294 @@ test('a mounted item that never loaded fetches immediately on a realtime invalid
   expect(item2.result.current.status).toBe('success');
   expect(item2.result.current.data?.name).toBe('User 2 updated');
 });
+
+test('query refetch interrupted by an item mutation is retried after the mutation ends', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const { status, items } = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { returnRefetchingStatus: true, disableRefetchOnMount: true },
+    );
+
+    renders.add({ status, firstItem: items[0]?.name });
+  });
+
+  // Refetch the query, then mutate one of its items while it is in flight.
+  // The mutation locks the query and aborts the refetch to avoid a stale commit.
+  env.scheduleFetch('highPriority', { tableId: 'users' });
+  await advanceTime(100);
+  renders.addMark('item mutation starts');
+  void env.performClientItemUpdateAction('users||1', { name: 'Renamed' });
+
+  await flushAllTimers();
+
+  // The aborted refetch is retried after the mutation instead of leaving the
+  // query stuck on refetching, and it commits the mutated server value
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ firstItem: User 1
+    -> status: refetching ⋅ firstItem: User 1
+
+    >>> item mutation starts
+
+    -> status: success ⋅ firstItem: Renamed
+    "
+  `);
+});
+
+test('item mutation does not error or drop an in-flight batch fetch of other items', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+    useBatchFetch: true,
+  });
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const item1 = env.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+    const item2 = env.apiStore.useItem('users||2', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      item1: `${item1.status}:${item1.data?.name}`,
+      item2: `${item2.status}:${item2.data?.name}`,
+    });
+  });
+
+  // Both items are refetched in the same batch request
+  env.scheduleItemFetch('highPriority', 'users||1');
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await advanceTime(100);
+  renders.addMark('users||1 mutation starts');
+  void env.performClientItemUpdateAction('users||1', { name: 'Renamed' });
+
+  await flushAllTimers();
+
+  // The aborted batch must not surface as an error, and both items are
+  // retried: users||2 right after the aborted batch settles and users||1
+  // after its mutation ends
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> item1: success:User 1 ⋅ item2: success:User 2
+    -> item1: refetching:User 1 ⋅ item2: refetching:User 2
+
+    >>> users||1 mutation starts
+
+    -> item1: refetching:User 1 ⋅ item2: success:User 2
+    -> item1: success:Renamed ⋅ item2: success:User 2
+    "
+  `);
+});
+
+test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+    useBatchFetch: true,
+  });
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const item1 = env.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+    const item2 = env.apiStore.useItem('users||2', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      item1: `${item1.status}:${item1.data?.name}`,
+      item2: `${item2.status}:${item2.data?.name}`,
+    });
+  });
+
+  // Both items are refetched in the same batch request
+  env.scheduleItemFetch('highPriority', 'users||1');
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await advanceTime(100);
+  renders.addMark('users||1 is deleted');
+  act(() => {
+    void env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||1');
+      },
+      mutation: () => env.serverTable.delayedRemoveItem('users||1'),
+    });
+  });
+
+  await flushAllTimers();
+
+  // Only users||2 is retried: the deleted item must not be refetched, which
+  // would bring it back as an "item not found" error
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> item1: success:User 1 ⋅ item2: success:User 2
+    -> item1: refetching:User 1 ⋅ item2: refetching:User 2
+
+    >>> users||1 is deleted
+
+    -> item1: deleted:undefined ⋅ item2: refetching:User 2
+    -> item1: deleted:undefined ⋅ item2: success:User 2
+    "
+  `);
+});
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches the restored item ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+      useBatchFetch,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const item1 = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({ item1: `${item1.status}:${item1.data?.name}` });
+    });
+
+    await flushAllTimers();
+
+    // The server has a newer value, so the refetch is needed
+    env.serverTable.updateItem('users||1', { name: 'Renamed' });
+    env.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||2');
+    await advanceTime(100);
+    renders.addMark('users||1 is deleted while its refetch is in flight');
+
+    // The delete aborts the refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback restores users||1 mid-refetch, so it is refetched instead
+    // of staying on `refetching` with no fetch pending
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> item1: success:User 1
+      -> item1: refetching:User 1
+
+      >>> users||1 is deleted while its refetch is in flight
+
+      -> item1: deleted:undefined
+      -> item1: refetching:User 1
+      -> item1: success:Renamed
+      "
+    `);
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches it with no hook mounted ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+      useBatchFetch,
+    });
+
+    // An imperative refetch, with no hook displaying the item
+    env.serverTable.updateItem('users||1', { name: 'Renamed' });
+    env.scheduleItemFetch('highPriority', 'users||1');
+    await advanceTime(100);
+
+    // The delete aborts the refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // No hook is mounted to react to an invalidation, so the rollback itself
+    // resumes the interrupted refetch instead of leaving users||1 on
+    // `refetching` with its old value
+    expect({
+      status: env.getItemQueryState('users||1')?.status,
+      name: env.apiStore.getItemState('users||1')?.name,
+    }).toMatchInlineSnapshot(`
+      name: 'Renamed'
+      status: 'success'
+    `);
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item with a delayed refetch pending still refetches it ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+      useBatchFetch,
+      mediumPriorityDelayMs: 2_000,
+    });
+
+    // A medium priority refetch of the item waits for its delay
+    env.serverTable.updateItem('users||1', { name: 'Renamed' });
+    env.scheduleItemFetch('mediumPriority', 'users||1');
+    await advanceTime(100);
+    expect(env.getItemQueryState('users||1')?.status).toBe('success');
+
+    // The delete drops the delayed refetch, then fails
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback resumes the dropped refetch, so the item doesn't keep its
+    // old name
+    expect(env.apiStore.getItemState('users||1')?.name).toMatchInlineSnapshot(
+      `"Renamed"`,
+    );
+  },
+);

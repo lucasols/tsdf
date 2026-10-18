@@ -73,10 +73,7 @@ type SchedulerPhase<T> =
       fetchId: number;
       startTime: number;
       /** Requests being fetched with their await callbacks */
-      fetchingRequests: Map<
-        string,
-        { awaitCallbacks: Array<(wasAborted: boolean) => void> }
-      >;
+      fetchingRequests: Map<string, PendingRequest<T>>;
       /** Realtime updates received during the fetch, keyed by requestId, to
        * be rescheduled after it completes */
       rtuAfterFetch: Map<string, QueuedRequest<T>>;
@@ -263,6 +260,20 @@ export class RequestScheduler<T> {
     );
   }
 
+  /** Whether the request has a fetch in flight, queued or delayed */
+  hasPendingRequest(requestId: string): boolean {
+    const { phase, pending } = this.#state;
+    return (
+      pending.scheduledRequests.has(requestId) ||
+      pending.rtuDelayed.has(requestId) ||
+      pending.mediumPriorityDelayed.has(requestId) ||
+      (phase.type === 'coalescing' && phase.pendingRequests.has(requestId)) ||
+      (phase.type === 'fetching' &&
+        (phase.fetchingRequests.has(requestId) ||
+          phase.rtuAfterFetch.has(requestId)))
+    );
+  }
+
   get fetchIsInProgress(): boolean {
     return this.#state.phase.type === 'fetching';
   }
@@ -302,6 +313,10 @@ export class RequestScheduler<T> {
 
   syncExternalFetchStart(requestIds: string[], startedAt: number): void {
     for (const requestId of requestIds) {
+      // The mutation lock ignores the sibling fetch's confirmed snapshot, so
+      // its start must not supersede the requests queued until the lock ends
+      if (this.#state.pending.mutationsInProgress.has(requestId)) continue;
+
       this.setLastFetchStartTimeForRequest(requestId, startedAt);
     }
   }
@@ -396,7 +411,12 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (this.#state.phase.type === 'fetching') {
+    // A fetch already aborted by a mutation commits nothing, and its waiters
+    // were moved to its retry, so there is nothing left to wait for on it
+    if (
+      this.#state.phase.type === 'fetching' &&
+      this.#state.phase.fetchId > this.#state.abort.abortBoundary
+    ) {
       const fetchingRequest = this.#state.phase.fetchingRequests.get(requestId);
       if (fetchingRequest) {
         await new Promise<void>((resolve) => {
@@ -414,8 +434,6 @@ export class RequestScheduler<T> {
     const currentCount = pending.mutationsInProgress.get(requestId) ?? 0;
     pending.mutationsInProgress.set(requestId, currentCount + 1);
 
-    abort.abortBoundary = abort.lastFetchId;
-
     if (phase.type === 'coalescing') {
       const request = phase.pendingRequests.get(requestId);
       if (request) {
@@ -429,17 +447,77 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (phase.type === 'fetching') {
-      if (phase.fetchingRequests.has(requestId) && abort.controller) {
-        abort.controller.abort();
-        abort.controller = null;
+    // Only a fetch that includes the mutated request can commit stale data.
+    // Batch schedulers share one fetch across requests, so a fetch of other
+    // requests must keep running. A fetch already aborted by an earlier
+    // mutation has all its requests queued for retry already.
+    if (
+      phase.type === 'fetching' &&
+      phase.fetchId > abort.abortBoundary &&
+      phase.fetchingRequests.has(requestId)
+    ) {
+      abort.abortBoundary = phase.fetchId;
+      abort.controller?.abort();
+      abort.controller = null;
+
+      // The aborted fetch commits nothing for any of its requests, so all of
+      // them are retried: the mutated ones when their mutation ends and the
+      // others as soon as the aborted fetch settles. Retries can't be
+      // cancelled by another tab's fetch start: their status already shows a
+      // fetch, and that tab publishes nothing if its fetch fails
+      const addedAt = Date.now();
+      for (const [fetchingRequestId, request] of phase.fetchingRequests) {
+        this.#state.lastAbortedRequests.add(fetchingRequestId);
+
+        // A request queued during the aborted fetch is newer than the retried
+        // one, so its payload takes precedence
+        let retry = pending.scheduledRequests.get(fetchingRequestId);
+        if (retry) {
+          if (this.#coalescePayload) {
+            retry.payload = this.#coalescePayload(
+              request.payload,
+              retry.payload,
+            );
+          }
+          retry.priority = getHigherPriorityFetchType(
+            retry.priority,
+            request.priority,
+          );
+          retry.remoteStartCancelable = false;
+        } else {
+          retry = {
+            payload: request.payload,
+            priority: request.priority,
+            addedAt,
+            awaitCallbacks: [],
+            remoteStartCancelable: false,
+          };
+          pending.scheduledRequests.set(fetchingRequestId, retry);
+        }
+
+        // Callers awaiting the aborted fetch resolve with the retry's result
+        retry.awaitCallbacks.push(...request.awaitCallbacks);
+        request.awaitCallbacks.length = 0;
       }
     }
 
-    return () => this.#endMutation(requestId);
+    // Each mutation releases its lock once, even if its ender is called again,
+    // so it never releases the lock of a concurrent mutation. A reset drops
+    // the lock, so ending it afterwards must not release a newer one.
+    const lockState = this.#state;
+    let ended = false;
+    return () => {
+      if (ended || this.#state !== lockState) return false;
+      ended = true;
+      return this.#endMutation(requestId);
+    };
   }
 
-  reset(): void {
+  /** `markWaitersAborted` resolves callers awaiting the discarded requests as
+   * aborted, for store resets where the cleared state says nothing about the
+   * resource. Without it they read the store's current state, e.g. not found
+   * for a deleted item. */
+  reset(markWaitersAborted = false): void {
     const { phase, pending, abort } = this.#state;
 
     if (phase.type === 'coalescing') {
@@ -456,7 +534,21 @@ export class RequestScheduler<T> {
       abort.controller.abort();
     }
 
+    const discardedRequests = [...pending.scheduledRequests];
+    if (phase.type === 'coalescing') {
+      discardedRequests.push(...phase.pendingRequests);
+    } else if (phase.type === 'fetching') {
+      discardedRequests.push(...phase.fetchingRequests);
+    }
+
     this.#state = this.#createInitialState();
+
+    // Callers awaiting the discarded requests resolve now instead of waiting
+    // for their timeout
+    for (const [requestId, request] of discardedRequests) {
+      if (markWaitersAborted) this.#state.lastAbortedRequests.add(requestId);
+      this.#finalizePendingRequestCallbacks(request, true);
+    }
   }
 
   /** Re-evaluates the pending delayed realtime update fetch against the
@@ -528,6 +620,9 @@ export class RequestScheduler<T> {
       }
 
       this.#state.pending.scheduledRequests.delete(requestId);
+      // Waiters of a cancelled request read the store's current state, even
+      // when it is the retry of a fetch aborted by a mutation
+      this.#state.lastAbortedRequests.delete(requestId);
       this.#finalizePendingRequestCallbacks(scheduledRequest, false);
       wasCancelled = true;
     }
@@ -590,6 +685,7 @@ export class RequestScheduler<T> {
       if (!matchesShouldCancel(shouldCancel, requestId, request)) continue;
 
       this.#state.phase.pendingRequests.delete(requestId);
+      if (isExplicitCancel) this.#state.lastAbortedRequests.delete(requestId);
       this.#finalizePendingRequestCallbacks(request, !isExplicitCancel);
       wasCancelled = true;
     }
@@ -658,21 +754,24 @@ export class RequestScheduler<T> {
       return 'scheduled';
     }
 
-    if (this.#state.phase.type === 'fetching') {
-      const shouldAbortCurrentFetch = this.#shouldCurrentFetchBeAborted();
+    if (
+      this.#state.phase.type === 'fetching' &&
+      this.#shouldCurrentFetchBeAborted()
+    ) {
+      this.#forceAbortCurrentFetch();
+    }
 
-      if (shouldAbortCurrentFetch) {
-        this.#forceAbortCurrentFetch();
-      } else {
-        this.#addToScheduledRequests(
-          requestId,
-          payload,
-          fetchType,
-          startTime,
-          remoteStartCancelable,
-        );
-        return 'scheduled';
-      }
+    // Force-aborting starts the work queued behind the aborted fetch, which
+    // can start a new fetch right away when it fills a batch
+    if (this.#state.phase.type === 'fetching') {
+      this.#addToScheduledRequests(
+        requestId,
+        payload,
+        fetchType,
+        startTime,
+        remoteStartCancelable,
+      );
+      return 'scheduled';
     }
 
     if (this.#state.phase.type === 'coalescing') {
@@ -847,12 +946,38 @@ export class RequestScheduler<T> {
       this.setLastFetchStartTimeForRequest(requestId, startTime);
     }
 
-    const fetchingRequests = new Map<
-      string,
-      { awaitCallbacks: Array<(wasAborted: boolean) => void> }
-    >();
+    // A starting fetch only supersedes the delayed refetches of the requests
+    // it includes — other requests sharing this scheduler keep their pending
+    // delayed refetch. A delayed refetch can cover more than the starting
+    // fetch (e.g. other fields), so its payload is merged in first.
+    const { rtuDelayed, mediumPriorityDelayed } = this.#state.pending;
+    for (const [requestId, request] of requests) {
+      if (this.#coalescePayload) {
+        const delayedRtu = rtuDelayed.get(requestId);
+        if (delayedRtu) {
+          request.payload = this.#coalescePayload(
+            delayedRtu.payload,
+            request.payload,
+          );
+        }
+
+        const delayedMedium = mediumPriorityDelayed.get(requestId);
+        if (delayedMedium) {
+          request.payload = this.#coalescePayload(
+            delayedMedium.payload,
+            request.payload,
+          );
+        }
+      }
+
+      this.#clearRtuDelayed(requestId);
+      this.#cancelMediumPriority(requestId);
+    }
+
+    const fetchingRequests = new Map<string, PendingRequest<T>>();
     for (const [requestId, request] of requests) {
       fetchingRequests.set(requestId, {
+        ...request,
         awaitCallbacks: [...request.awaitCallbacks],
       });
     }
@@ -864,14 +989,6 @@ export class RequestScheduler<T> {
       fetchingRequests,
       rtuAfterFetch: new Map(),
     };
-
-    // A starting fetch only supersedes the delayed refetches of the requests
-    // it includes — other requests sharing this scheduler keep their pending
-    // delayed refetch
-    for (const requestId of requests.keys()) {
-      this.#clearRtuDelayed(requestId);
-      this.#cancelMediumPriority(requestId);
-    }
 
     const shouldAbort = this.#createShouldAbort(
       fetchId,
@@ -897,10 +1014,16 @@ export class RequestScheduler<T> {
       }
     }
 
-    this.#state.abort.controller = null;
+    // A fetch replaced before it settled must not touch the state of the fetch
+    // that replaced it
+    if (this.#state.abort.controller === abortController) {
+      this.#state.abort.controller = null;
+    }
 
     if (!this.#isCurrentFetch(fetchId)) {
-      this.#state.timing.lastFetchStartTime = prevFetchStartTime;
+      if (this.#state.abort.lastFetchId === fetchId) {
+        this.#state.timing.lastFetchStartTime = prevFetchStartTime;
+      }
       return false;
     }
 
@@ -920,6 +1043,14 @@ export class RequestScheduler<T> {
       }
     }
 
+    this.#rescheduleRtuAfterFetch(rtuAfterFetch);
+
+    this.#flushScheduledRequests();
+
+    return true;
+  }
+
+  #rescheduleRtuAfterFetch(rtuAfterFetch: Map<string, QueuedRequest<T>>): void {
     for (const rtu of rtuAfterFetch.values()) {
       const wasDelayed = this.#scheduleDelayedRTU(
         Date.now(),
@@ -938,10 +1069,6 @@ export class RequestScheduler<T> {
         );
       }
     }
-
-    this.#flushScheduledRequests();
-
-    return true;
   }
 
   #endMutation(requestId: string): boolean {
@@ -1412,6 +1539,12 @@ export class RequestScheduler<T> {
     }
 
     this.#state.phase = { type: 'idle' };
+
+    // The aborted fetch's late settle is ignored, so the work it would have
+    // started is started now: realtime updates received during it and requests
+    // queued behind it, like the retries of a fetch aborted by a mutation
+    this.#rescheduleRtuAfterFetch(phase.rtuAfterFetch);
+    this.#flushScheduledRequests();
   }
 
   #createShouldAbort(
@@ -1431,9 +1564,14 @@ export class RequestScheduler<T> {
       const shouldAbortNow = shouldAbortFetch || anyMutation;
 
       if (shouldAbortNow) {
-        this.#state.lastFetchWasAborted = true;
-        for (const requestId of requests.keys()) {
-          this.#state.lastAbortedRequests.add(requestId);
+        // Only the current fetch records its aborted requests: a replaced
+        // fetch settling late would mark the requests of the fetch that
+        // replaced it, e.g. retries, as aborted
+        if (this.#isCurrentFetch(fetchId)) {
+          this.#state.lastFetchWasAborted = true;
+          for (const requestId of requests.keys()) {
+            this.#state.lastAbortedRequests.add(requestId);
+          }
         }
         abortController.abort();
       }
