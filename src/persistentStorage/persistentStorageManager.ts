@@ -5,6 +5,7 @@ import {
   type TSDFDebugLogger,
   type TSDFPersistentStorageDebugOperation,
 } from '../debug';
+import { commitToAsyncStorageNamespaceNow } from './asyncStorageAdapter';
 import {
   parsePersistedAsyncNamespaceKind,
   serializeProtectedRef,
@@ -42,7 +43,9 @@ import { OFFLINE_SESSION_STATUS_STORE_NAME } from './storageEntryPrefixes';
 import type {
   AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
+  AsyncStorageNamespaceCommitArgs,
   AsyncStorageNamespaceKind,
+  AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
   AsyncStorageTouchMode,
   PersistentStorageBaseConfig,
@@ -987,8 +990,10 @@ type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
+  /** `flushNow` skips the async commit debounce. */
   commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
+    flushNow?: boolean,
   ): Promise<void>;
   readEntry(
     entryKey: string,
@@ -1089,7 +1094,7 @@ export function createPersistentStorageNamespaceHandle<
     return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
   }
 
-  function getAsyncNamespace() {
+  function getAsyncNamespaceScope(): AsyncStorageNamespaceScope | null {
     if (asyncAdapter === null) return null;
 
     const sessionKey = config.getSessionKey();
@@ -1098,11 +1103,18 @@ export function createPersistentStorageNamespaceHandle<
     asyncAdapter.debugLogger = config.debugLogger;
     asyncAdapter.logger = config.logger;
 
-    return asyncAdapter.openNamespace<unknown, TMetadata>({
+    return {
       sessionKey,
       storeName: config.storeName,
       kind: asyncNamespaceKind,
-    });
+    };
+  }
+
+  function getAsyncNamespace() {
+    const scope = getAsyncNamespaceScope();
+    if (asyncAdapter === null || scope === null) return null;
+
+    return asyncAdapter.openNamespace<unknown, TMetadata>(scope);
   }
 
   if (asyncAdapter !== null) {
@@ -1111,6 +1123,7 @@ export function createPersistentStorageNamespaceHandle<
 
   async function commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
+    flushNow = false,
   ): Promise<void> {
     const startTime = import.meta.env.DEV
       ? startPersistentStorageDebugTiming(debugContext)
@@ -1125,8 +1138,8 @@ export function createPersistentStorageNamespaceHandle<
 
     try {
       if (asyncAdapter !== null) {
-        const namespace = getAsyncNamespace();
-        if (!namespace) {
+        const scope = getAsyncNamespaceScope();
+        if (scope === null) {
           if (import.meta.env.DEV) {
             logPersistentStorageOperation(
               debugContext,
@@ -1139,7 +1152,7 @@ export function createPersistentStorageNamespaceHandle<
           return;
         }
 
-        await namespace.commit({
+        const asyncArgs: AsyncStorageNamespaceCommitArgs<unknown, TMetadata> = {
           removes: args.removes,
           staticPolicy: args.staticPolicy,
           touches: args.touches,
@@ -1161,7 +1174,12 @@ export function createPersistentStorageNamespaceHandle<
             metadata:
               upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
           })),
-        });
+        };
+        await (flushNow
+          ? commitToAsyncStorageNamespaceNow(asyncAdapter, scope, asyncArgs)
+          : asyncAdapter
+              .openNamespace<unknown, TMetadata>(scope)
+              .commit(asyncArgs));
         if (import.meta.env.DEV) {
           logPersistentStorageOperation(
             debugContext,

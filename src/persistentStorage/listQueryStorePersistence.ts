@@ -2441,7 +2441,7 @@ export function setupListQueryPersistence<
       readMetadata,
       isAsyncStorageMetadataOfflineProtected,
       async (batchKeys) => {
-        await queryNamespace.commit({ removes: batchKeys });
+        await queryNamespace.commit({ removes: batchKeys }, true);
         for (const queryKey of batchKeys) {
           const entry = budgetEvictedEntries.get(queryKey);
           if (entry === undefined) continue;
@@ -2912,7 +2912,7 @@ export function setupListQueryPersistence<
       readMetadata,
       isAsyncStorageMetadataOfflineProtected,
       async (batchKeys) => {
-        await itemNamespace.commit({ removes: batchKeys });
+        await itemNamespace.commit({ removes: batchKeys }, true);
         for (const itemKey of batchKeys) {
           const entry = budgetEvictedEntries.get(itemKey);
           if (entry !== undefined) {

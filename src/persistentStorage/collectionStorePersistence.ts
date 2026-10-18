@@ -1108,7 +1108,7 @@ export function setupCollectionPersistence<
       readMetadata,
       isAsyncStorageMetadataOfflineProtected,
       async (batchKeys) => {
-        await namespace.commit({ removes: batchKeys });
+        await namespace.commit({ removes: batchKeys }, true);
         for (const itemKey of batchKeys) {
           if (
             ignoredItemKeys.has(itemKey) ||

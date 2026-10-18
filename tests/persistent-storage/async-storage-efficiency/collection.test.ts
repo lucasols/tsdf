@@ -21,6 +21,7 @@ import {
   createChunkBudgetDeadline,
   createCollectionEnv,
   createDocumentEnv,
+  createWallClockDeadline,
   flushInvalidationPersistence,
   getAsyncCollectionEntrySizeBytes,
   setProtectedKeysSnapshot,
@@ -178,6 +179,59 @@ describe('async storage efficiency: collection', () => {
     }).toMatchInlineSnapshot(`
       continuationScheduled: 0
       storedCountAfterEachSlice: [201, 201, 201, 101, 1]
+      storedPayloads: ['kept']
+    `);
+  });
+
+  test('background maintenance commits several removal batches within one idle period', async () => {
+    const storeName = 'collection-wall-clock-maintenance';
+    const sessionKey = 'sess1';
+    const ignoredItemCount = 500;
+    const idleCallbacks = stubIdleCallbacks();
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    for (let index = 0; index < ignoredItemCount; index++) {
+      const payload = `ignored-${index}`;
+      collectionScope.collection.seedItem(payload, {
+        value: { id: payload, name: 'Ignored cached item' },
+      });
+    }
+
+    const env = createCollectionEnv({
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      storeName,
+      sessionKey,
+    });
+    env.apiStore.addItemToState('kept', {
+      value: { id: 'kept', name: 'Kept live item' },
+    });
+    await advanceTime(1200);
+
+    // Each idle period is a 50 ms browser deadline spent by real time, so
+    // the storage I/O of every removal batch counts against it. Batches must
+    // only wait for their own transaction, not for the commit debounce, or a
+    // single 25-entry batch would use up a whole idle period.
+    const storedCountAfterEachSlice: number[] = [];
+    while (
+      idleCallbacks.pendingCount() > 0 &&
+      storedCountAfterEachSlice.length < 30
+    ) {
+      await idleCallbacks.runNext(createWallClockDeadline(50));
+      storedCountAfterEachSlice.push(
+        collectionScope.collection.listStoredPayloads().length,
+      );
+    }
+
+    // Ten 25-entry batches fit into each idle period, so 500 removals take
+    // two idle callbacks instead of ten.
+    expect({
+      continuationScheduled: idleCallbacks.pendingCount(),
+      storedCountAfterEachSlice,
+      storedPayloads: collectionScope.collection.listStoredPayloads(),
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 0
+      storedCountAfterEachSlice: [251, 1]
       storedPayloads: ['kept']
     `);
   });

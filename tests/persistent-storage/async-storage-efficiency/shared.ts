@@ -409,3 +409,12 @@ export function createChunkBudgetDeadline(chunks: number): () => number {
   let checks = 0;
   return () => (checks++ < chunks ? 50 : 0);
 }
+
+/**
+ * Deadline that expires after `budgetMs` of (fake) wall-clock time, like a
+ * browser idle period, so awaited storage I/O spends the same budget.
+ */
+export function createWallClockDeadline(budgetMs: number): () => number {
+  const startedAt = Date.now();
+  return () => Math.max(0, budgetMs - (Date.now() - startedAt));
+}

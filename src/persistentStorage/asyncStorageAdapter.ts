@@ -1386,6 +1386,21 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     });
   }
 
+  async commitToNamespaceNow<
+    TValue,
+    TCustomMetadata extends Record<string, unknown>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<void> {
+    const committed = this.queueCommitToNamespace(scope, args);
+    // A flush already in flight leaves these writes queued for the next one.
+    const flushed = this.flushPendingNamespaceCommit(scope).then(() =>
+      this.flushPendingNamespaceCommit(scope),
+    );
+    await Promise.all([committed, flushed]);
+  }
+
   async flushPendingNamespaceCommit(
     scope: AsyncStorageNamespaceScope,
     keys?: readonly string[],
@@ -3221,6 +3236,25 @@ export function createAsyncStorageAdapter(
   driver: AsyncStorageDriver,
 ): AsyncStorageAdapter {
   return new ManagedAsyncStorageAdapter(driver);
+}
+
+/**
+ * Commits without waiting for the namespace batching debounce, so the await
+ * only lasts as long as the driver write. Used by idle-deadline maintenance,
+ * which bounds its own batches.
+ */
+export function commitToAsyncStorageNamespaceNow<
+  TValue,
+  TCustomMetadata extends Record<string, unknown>,
+>(
+  adapter: AsyncStorageAdapter,
+  scope: AsyncStorageNamespaceScope,
+  args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+): Promise<void> {
+  if (adapter instanceof ManagedAsyncStorageAdapter) {
+    return adapter.commitToNamespaceNow(scope, args);
+  }
+  return adapter.openNamespace<TValue, TCustomMetadata>(scope).commit(args);
 }
 export function serializeProtectedRef(
   ref: AsyncStorageProtectedEntryRef,

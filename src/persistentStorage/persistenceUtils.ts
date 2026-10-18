@@ -120,12 +120,19 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
 
     if (idleContext.getContinuationCount() !== validatedContinuationCount) {
       validatedContinuationCount = idleContext.getContinuationCount();
-      const currentEntries = new Map<string, T>();
-      for (const entry of await readMetadata()) {
-        currentEntries.set(entry.key, entry);
-      }
+      const currentMetadata = await readMetadata();
       if (idleContext.isCanceled() || !shouldContinue()) {
         return { completed: false, hasStaleEntries };
+      }
+      // Failed driver reads also come back empty, so re-plan instead of
+      // treating every pending entry as removed elsewhere.
+      if (currentMetadata.length === 0) {
+        return { completed: true, hasStaleEntries: true };
+      }
+
+      const currentEntries = new Map<string, T>();
+      for (const entry of currentMetadata) {
+        currentEntries.set(entry.key, entry);
       }
 
       pendingEntries = pendingEntries.slice(batchStart).filter((planned) => {
@@ -151,7 +158,7 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
       .map((entry) => entry.key);
     batchStart += ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE;
     await commitRemoves(batchKeys);
-    if (idleContext.isCanceled()) {
+    if (idleContext.isCanceled() || !shouldContinue()) {
       return { completed: false, hasStaleEntries };
     }
   }
