@@ -112,7 +112,7 @@ export type TSFDUseListQueryReturn<
   hasMore: boolean;
   /** Whether this result was derived from local items instead of fetched directly. */
   isDerived: boolean;
-  /** Convenience flag for `loading` or `refetching` states. */
+  /** Shorthand for `status === 'loading'`. Stays `false` while loaded data is `refetching`. */
   isLoading: boolean;
   /** Whether a `loadMore(...)` request is currently active. */
   isLoadingMore: boolean;
@@ -138,7 +138,7 @@ export type TSFDUseListItemReturn<
   loadingFields?: string[];
   /** Last item fetch error, if any. */
   error: StoreError | null;
-  /** Convenience flag for `loading` or `refetching` states. */
+  /** Shorthand for `status === 'loading'`. Stays `false` while loaded data is `refetching`. */
   isLoading: boolean;
   /** Stable store key for the current item payload. */
   itemStateKey: string;

@@ -168,7 +168,7 @@ export type TSFDUseCollectionItemReturn<
   error: StoreError | null;
   /** Stable store key for the current item payload. */
   itemStateKey: string;
-  /** Convenience flag for `loading` or `refetching` states. */
+  /** Shorthand for `status === 'loading'`. Stays `false` while loaded data is `refetching`. */
   isLoading: boolean;
   /** Whether this result has local offline changes that still need to sync to the server. */
   pendingSync: boolean;
