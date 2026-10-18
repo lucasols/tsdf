@@ -2875,6 +2875,63 @@ describe("partial resources: invalidations arriving during a field's first fetch
     // changed value.
     expect(result.current.items[0]?.name).toBe('Renamed User 1');
   });
+
+  test('a failed optimistic delete during the first list fetch keeps an invalidation that arrived before it', async () => {
+    const env = createRealtimeEnv();
+
+    // The first-ever list fetch starts, loading 'name' for all items.
+    const { result } = renderHook(() =>
+      env.apiStore.useListQuery({ tableId: 'users' }, { fields: ['name'] }),
+    );
+
+    // While the list fetch is in flight, item 1's name changes on the server
+    // and its realtime invalidation arrives, so a follow-up refetch is owed.
+    await advanceTime(100);
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['name'],
+      });
+    });
+
+    // Item 1 is then optimistically deleted, but the delete fails while the
+    // list fetch is still in flight
+    let rejectMutation: (error: Error) => void = () => {};
+    let mutationResult: Promise<unknown> = Promise.resolve();
+    act(() => {
+      mutationResult = env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: () =>
+          new Promise((_resolve, reject) => {
+            rejectMutation = reject;
+          }),
+      });
+    });
+    await advanceTime(100);
+    await act(async () => {
+      rejectMutation(new Error('delete failed'));
+      await mutationResult;
+    });
+
+    // The in-flight list fetch settles with the pre-invalidation value...
+    await advanceTime(800);
+    expect(result.current.items[0]?.name).toBe('User 1');
+
+    // ...and only fetches from here on can observe the changed value.
+    act(() => {
+      env.serverTable.updateItem('users||1', { name: 'Renamed User 1' });
+    });
+
+    await flushAllTimers();
+
+    // Rolling back the failed delete must not drop the invalidation it had
+    // cleared: a follow-up refetch still picks up the changed value
+    expect(result.current.items[0]?.name).toBe('Renamed User 1');
+  });
 });
 
 describe("partial resources: a fields:'*' query mounting over genuinely missing data", () => {

@@ -1,4 +1,5 @@
 import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { Result, type Result as TResult } from 't-result';
 import { mutationSkipped, type MutationSkipped } from './storeShared';
 
@@ -27,21 +28,31 @@ type ResultError =
 export async function performMutationWithLifecycle<
   T,
   TError extends ResultError,
+  TRollback,
 >(
   startMutation: () => () => unknown,
   mutation: () => Promise<T>,
-  onError: (exception: unknown) => TError,
-  optimisticUpdate: (() => void | boolean) | undefined,
-  onSuccess: ((result: Awaited<T>) => void) | undefined,
+  onError: (exception: unknown, rollbacks: TRollback[]) => TError,
+  optimisticUpdate:
+    | ((addRollback: (rollback: TRollback) => void) => void | boolean)
+    | undefined,
+  onSuccess: ((result: Awaited<T>, rollbacks: TRollback[]) => void) | undefined,
   debounce: MutationDebounce | undefined,
   blockWindowClose: BlockWindowCloseHandler | null | undefined,
+  pendingDebounceRollbacks: Map<string, TRollback[]>,
 ): Promise<TResult<Awaited<T>, TError | MutationSkipped>> {
   const endMutation = startMutation();
 
   let unblockWindowClose: VoidFunction | null = null;
+  let rollbacks: TRollback[] = [];
+  let mutationSucceeded = false;
 
   try {
-    if (optimisticUpdate?.() === false) {
+    if (
+      optimisticUpdate?.((rollback) => {
+        rollbacks.push(rollback);
+      }) === false
+    ) {
       endMutation();
       return Result.err(mutationSkipped);
     }
@@ -49,8 +60,16 @@ export async function performMutationWithLifecycle<
     if (debounce) {
       unblockWindowClose = blockWindowClose?.().unblock ?? null;
 
+      // Superseded calls never send their mutation, so their optimistic
+      // changes are handed to the call that superseded them, which reverts
+      // all of them if it fails, or completes them if it succeeds
+      const debounceKey = getCompositeKey([debounce.context, debounce.payload]);
+      const groupRollbacks = pendingDebounceRollbacks.get(debounceKey) ?? [];
+      groupRollbacks.push(...rollbacks);
+      pendingDebounceRollbacks.set(debounceKey, groupRollbacks);
+
       const debounceResult = await awaitDebounce({
-        callId: [debounce.context, debounce.payload],
+        callId: debounceKey,
         debounce: debounce.ms,
       });
 
@@ -58,18 +77,24 @@ export async function performMutationWithLifecycle<
         endMutation();
         return Result.err(mutationSkipped);
       }
+
+      pendingDebounceRollbacks.delete(debounceKey);
+      rollbacks = groupRollbacks;
     }
 
     const result = await mutation();
+    mutationSucceeded = true;
 
     endMutation();
-    onSuccess?.(result);
+    onSuccess?.(result, rollbacks);
 
     return Result.ok(result);
   } catch (exception) {
     endMutation();
 
-    return Result.err(onError(exception));
+    // The server accepted the mutation if only `onSuccess` threw, so its
+    // optimistic updates are kept
+    return Result.err(onError(exception, mutationSucceeded ? [] : rollbacks));
   } finally {
     unblockWindowClose?.();
   }

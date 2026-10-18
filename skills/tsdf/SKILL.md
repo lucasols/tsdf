@@ -149,7 +149,7 @@ if (result.ok) {
 ```
 
 - Result is `Result<T, StoreMutationError | MutationSkipped>` (`t-result`).
-- On error: optimistic updates roll back via automatic invalidation.
+- On error: the optimistic update is reverted; data changed again while in flight (e.g. by a concurrent mutation) is kept and revalidated instead. Debounced calls roll back to the state before the first superseded call.
 - `silentErrors: true` still calls `onMutationError(error, { silentErrors: true })`; handlers should use the flag to suppress user-facing noise while preserving logging/recovery.
 - `revalidateOnSuccess`: `true | false | 'queries' | (queryPayload) => boolean | { queries, items }` (List Query).
 - Manual locks: `startMutation()` (Document), `startMutation(payload)` (Collection), `startItemMutation(itemId)` (List Query).

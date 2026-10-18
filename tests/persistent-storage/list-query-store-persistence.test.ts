@@ -874,7 +874,7 @@ describe('localStorage: list query store persistence', () => {
     ).toBe('*');
   });
 
-  test('a failed mutation rollback does not resurrect stale loadedFields into the persisted snapshot', async () => {
+  test('a failed mutation rollback keeps a concurrent invalidation in state and in the persisted snapshot', async () => {
     const itemPayload = rawItemPayload('users', 1);
     const storeName = 'lq-rollback-loaded-fields';
     const sessionKey = 'sess1';
@@ -942,8 +942,10 @@ describe('localStorage: list query store persistence', () => {
       p: 'users||1'
     `);
 
-    // The save fails: the rollback restores the metadata-free baseline,
-    // deleting the state loadedFields entry while the item stays in state.
+    // The save fails: the rollback only reverts what the optimistic update
+    // changed (the name). The invalidation happened independently of the
+    // mutation, so its cleared loaded fields stay, just like they would have
+    // without the mutation.
     rejectMutation(new Error('save failed'));
     await act(async () => {
       await mutationResult;
@@ -951,15 +953,18 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    // The follow-up flush must persist the item without `lf` again. The state
-    // deliberately has no metadata anymore, so the stale mid-mutation `lf`
-    // must not be resurrected from the previously persisted snapshot.
+    // The follow-up flush persists the reverted data with the invalidation's
+    // loaded fields, matching the state
+    expect(
+      env.store.state.itemLoadedFields[storeItemKey('users', 1)],
+    ).toMatchInlineSnapshot(`[]`);
     expect(
       getParsedLocalStorageValue(
         itemStorageKey(storeName, sessionKey, 'users', 1),
       ),
     ).toMatchInlineSnapshot(`
       d: { id: 1, name: 'Client draft' }
+      lf: []
       p: 'users||1'
     `);
   });

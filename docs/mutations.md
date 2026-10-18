@@ -128,7 +128,7 @@ await store.performMutation('item-id', {
 });
 ```
 
-If the mutation **fails**, TSDF automatically invalidates the data, causing a refetch that reverts the optimistic update to the server's actual state.
+If the mutation **fails**, TSDF reverts the optimistic update (see [Error Handling](#error-handling)).
 
 ### Cancelling a Mutation
 
@@ -159,6 +159,8 @@ await store.performMutation({
 
 During the debounce period, the window close is blocked to prevent data loss.
 
+Superseded calls never send their mutation, so their optimistic updates are handed to the call that superseded them: if that call fails, the state goes back to what it was before the first superseded call.
+
 ## Revalidation on Success
 
 | Option                                           | Behavior                                                          |
@@ -171,7 +173,9 @@ During the debounce period, the window close is blocked to prevent data loss.
 
 ### Error Handling
 
-On error, TSDF **rolls back** optimistic updates to their pre-mutation state. Non-optimistic mutations leave state untouched on error.
+On error, TSDF **rolls back** the optimistic update by restoring the pre-mutation data of each document, item or query it changed. If another mutation changed or saved that data while the mutation was in flight, e.g. a concurrent mutation that succeeded, TSDF revalidates it, keeping any newer data until then, so the state converges to the server once that refetch succeeds. Invalidations received while the mutation was in flight are kept.
+
+Non-optimistic mutations leave state untouched on error.
 
 ## List Query Store Specific Options
 
