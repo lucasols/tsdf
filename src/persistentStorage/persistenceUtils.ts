@@ -81,36 +81,80 @@ export function serializeJsonForStorage(value: unknown): {
   return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
 }
 
+type AsyncMaintenanceMetadataEntry = {
+  customMetadata: Record<string, unknown>;
+  key: string;
+  lastAccessAt: number;
+  sizeBytes?: number;
+  version: number;
+};
+
 /**
- * Commits async maintenance removals in bounded transactions. A continuation
- * invalidates the caller's metadata snapshot, so the caller must re-read and
- * re-plan before committing another batch.
+ * Removes planned async maintenance entries in bounded commits. Idle
+ * continuations let other code and tabs write, so after each continuation the
+ * remaining plan is checked against freshly read metadata and entries changed
+ * since planning are skipped as stale. The plan itself is never restarted, so
+ * every deadline makes progress.
  */
-export async function commitAsyncStorageRemovalsDuringIdle(
-  keys: string[],
+export async function removeAsyncMaintenanceEntriesIfUnchanged<
+  T extends AsyncMaintenanceMetadataEntry,
+>(
+  plannedEntries: T[],
+  metadataContinuationCount: number,
+  readMetadata: () => Promise<T[]>,
+  isOfflineProtected: (customMetadata: T['customMetadata']) => boolean,
   commitRemoves: (keys: string[]) => Promise<void>,
   idleContext: IdleCleanupContext,
-  metadataContinuationCount: number,
-): Promise<boolean> {
-  for (
-    let batchStart = 0;
-    batchStart < keys.length;
-    batchStart += ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE
-  ) {
-    if (!(await idleContext.yieldIfNeeded())) return false;
-    if (idleContext.getContinuationCount() !== metadataContinuationCount) {
-      return false;
+): Promise<{ completed: boolean; hasStaleEntries: boolean }> {
+  let hasStaleEntries = false;
+  let validatedContinuationCount = metadataContinuationCount;
+  let pendingEntries = plannedEntries;
+  let batchStart = 0;
+
+  while (batchStart < pendingEntries.length) {
+    if (!(await idleContext.yieldIfNeeded())) {
+      return { completed: false, hasStaleEntries };
     }
 
-    const batchKeys = keys.slice(
-      batchStart,
-      batchStart + ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE,
-    );
+    if (idleContext.getContinuationCount() !== validatedContinuationCount) {
+      validatedContinuationCount = idleContext.getContinuationCount();
+      const currentEntries = new Map<string, T>();
+      for (const entry of await readMetadata()) {
+        currentEntries.set(entry.key, entry);
+      }
+      if (idleContext.isCanceled()) {
+        return { completed: false, hasStaleEntries };
+      }
+
+      pendingEntries = pendingEntries.slice(batchStart).filter((planned) => {
+        const current = currentEntries.get(planned.key);
+        // Already removed elsewhere.
+        if (current === undefined) return false;
+
+        const unchanged =
+          current.lastAccessAt === planned.lastAccessAt &&
+          current.sizeBytes === planned.sizeBytes &&
+          current.version === planned.version &&
+          isOfflineProtected(current.customMetadata) ===
+            isOfflineProtected(planned.customMetadata);
+        if (!unchanged) hasStaleEntries = true;
+        return unchanged;
+      });
+      batchStart = 0;
+      if (pendingEntries.length === 0) break;
+    }
+
+    const batchKeys = pendingEntries
+      .slice(batchStart, batchStart + ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE)
+      .map((entry) => entry.key);
+    batchStart += ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE;
     await commitRemoves(batchKeys);
-    if (idleContext.isCanceled()) return false;
+    if (idleContext.isCanceled()) {
+      return { completed: false, hasStaleEntries };
+    }
   }
 
-  return true;
+  return { completed: true, hasStaleEntries };
 }
 
 export type ByteBudgetResult = {

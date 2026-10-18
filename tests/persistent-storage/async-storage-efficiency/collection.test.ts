@@ -1,6 +1,8 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test, vi } from 'vitest';
+import { createAsyncStorageAdapter } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import {
@@ -16,6 +18,7 @@ import {
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
+  createChunkBudgetDeadline,
   createCollectionEnv,
   createDocumentEnv,
   flushInvalidationPersistence,
@@ -24,6 +27,7 @@ import {
   settleStartupBackgroundScan,
   sumPersistedEntryBytes,
   setupAsyncStorageEfficiencyTestSuite,
+  stubIdleCallbacks,
   syncEntriesOfflineProtectedFromSiblingTab,
   waitForScheduledCleanup,
 } from './shared';
@@ -66,20 +70,7 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'collection-deadline-maintenance';
     const sessionKey = 'sess1';
     const ignoredItemCount = 51;
-    const idleCallbacks = new Map<number, IdleRequestCallback>();
-    let nextIdleCallbackId = 1;
-
-    vi.stubGlobal(
-      'requestIdleCallback',
-      (callback: IdleRequestCallback): number => {
-        const callbackId = nextIdleCallbackId++;
-        idleCallbacks.set(callbackId, callback);
-        return callbackId;
-      },
-    );
-    vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
-      idleCallbacks.delete(callbackId);
-    });
+    const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -102,26 +93,11 @@ describe('async storage efficiency: collection', () => {
     });
     await advanceTime(1200);
 
-    async function runNextIdleCallback(
-      timeRemaining: () => number,
-      didTimeout = false,
-    ): Promise<void> {
-      const nextCallbackEntry = idleCallbacks.entries().next().value;
-      if (nextCallbackEntry === undefined) {
-        throw new Error('Expected a scheduled async maintenance callback.');
-      }
-
-      const [callbackId, callback] = nextCallbackEntry;
-      idleCallbacks.delete(callbackId);
-      callback({ didTimeout, timeRemaining });
-      await advanceTime(500);
-    }
-
     // Exhaust the first deadline after one bounded removal commit. The other
     // ignored entries must remain until a continuation receives more time.
     const firstSliceCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
-    await runNextIdleCallback(() =>
+    await idleCallbacks.runNext(() =>
       collectionScope.collection.listStoredPayloads().length >
       ignoredItemCount + 1 - 25
         ? 50
@@ -130,7 +106,7 @@ describe('async storage efficiency: collection', () => {
     const firstSliceOperations = firstSliceCapture.finish().timelineString;
 
     expect({
-      continuationScheduled: idleCallbacks.size,
+      continuationScheduled: idleCallbacks.pendingCount(),
       payloadDeletes: firstSliceOperations.match(/🗑️/g)?.length ?? 0,
       storedEntryCount: collectionScope.collection.listStoredPayloads().length,
     }).toMatchInlineSnapshot(`
@@ -142,16 +118,152 @@ describe('async storage efficiency: collection', () => {
     // A timeout-fired continuation has no usable browser deadline. The
     // synthetic budget still lets this small remainder finish.
     const performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
-    await runNextIdleCallback(() => 0, true);
+    await idleCallbacks.runNext(() => 0, true);
     performanceNowSpy.mockRestore();
 
     expect({
-      continuationScheduled: idleCallbacks.size,
+      continuationScheduled: idleCallbacks.pendingCount(),
       storedPayloads: collectionScope.collection.listStoredPayloads(),
     }).toMatchInlineSnapshot(`
       continuationScheduled: 0
       storedPayloads: ['kept']
     `);
+  });
+
+  test('background maintenance finishes when planning a large cache takes several idle deadlines', async () => {
+    const storeName = 'collection-multi-deadline-maintenance';
+    const sessionKey = 'sess1';
+    const idleCallbacks = stubIdleCallbacks();
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    for (let index = 0; index < 200; index++) {
+      const payload = `ignored-${index}`;
+      collectionScope.collection.seedItem(payload, {
+        value: { id: payload, name: 'Ignored cached item' },
+      });
+    }
+
+    const env = createCollectionEnv({
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      storeName,
+      sessionKey,
+    });
+    env.apiStore.addItemToState('kept', {
+      value: { id: 'kept', name: 'Kept live item' },
+    });
+    await advanceTime(1200);
+
+    // Each idle period only fits three chunks of work (~75 scanned entries),
+    // so scanning the 201 entries alone needs several deadlines. Maintenance
+    // must carry its progress across them instead of restarting each time.
+    const storedCountAfterEachSlice: number[] = [];
+    while (
+      idleCallbacks.pendingCount() > 0 &&
+      storedCountAfterEachSlice.length < 30
+    ) {
+      await idleCallbacks.runNext(createChunkBudgetDeadline(3));
+      storedCountAfterEachSlice.push(
+        collectionScope.collection.listStoredPayloads().length,
+      );
+    }
+
+    // Planning spans the first slices without deleting anything, then each
+    // following slice commits bounded removal batches until only the live
+    // item remains and no continuation is left scheduled.
+    expect({
+      continuationScheduled: idleCallbacks.pendingCount(),
+      storedCountAfterEachSlice,
+      storedPayloads: collectionScope.collection.listStoredPayloads(),
+    }).toMatchInlineSnapshot(`
+      continuationScheduled: 0
+      storedCountAfterEachSlice: [201, 201, 201, 101, 1]
+      storedPayloads: ['kept']
+    `);
+  });
+
+  test('background maintenance keeps an entry another tab refreshed while it was suspended', async () => {
+    const storeName = 'collection-stale-maintenance-plan';
+    const sessionKey = 'sess1';
+    const cachedItemCount = 30;
+    const idleCallbacks = stubIdleCallbacks();
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const cachedItem = (index: number) => ({
+      value: { id: `cached-${index}`, name: 'Cached item' },
+    });
+    // Seed in recency order so `cached-0` is the least recently used entry.
+    for (let index = 0; index < cachedItemCount; index++) {
+      collectionScope.collection.seedItem(
+        `cached-${index}`,
+        cachedItem(index),
+        { timestamp: TEST_INITIAL_TIME + index },
+      );
+    }
+
+    const liveItem = { value: { id: 'live', name: 'Live item' } };
+    const env = createCollectionEnv({
+      // Stores with an `ignoreItems` filter enforce the byte budget during
+      // background maintenance instead of evicting inline on flush.
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      // Room for the live item plus the two most recent cached entries.
+      maxBytes: sumPersistedEntryBytes(
+        getAsyncCollectionEntrySizeBytes('live', liveItem),
+        getAsyncCollectionEntrySizeBytes('cached-28', cachedItem(28)),
+        getAsyncCollectionEntrySizeBytes('cached-29', cachedItem(29)),
+      ),
+      storeName,
+      sessionKey,
+    });
+
+    env.apiStore.addItemToState('live', liveItem);
+    await advanceTime(1200);
+
+    // The first slice plans to evict `cached-0`..`cached-27` and runs out of
+    // time after the first 25-entry batch, leaving `cached-0`..`cached-2`
+    // still planned for removal.
+    await idleCallbacks.runNext(() =>
+      collectionScope.collection.listStoredPayloads().length >
+      cachedItemCount + 1 - 25
+        ? 50
+        : 0,
+    );
+    expect(
+      collectionScope.collection.listStoredPayloads().sort(),
+    ).toMatchInlineSnapshot(
+      `['cached-0', 'cached-1', 'cached-2', 'cached-28', 'cached-29', 'live']`,
+    );
+
+    // While maintenance waits for the next idle period, another tab reads
+    // `cached-1`, making it the most recently used entry.
+    const siblingAdapter = createAsyncStorageAdapter(
+      new OpfsAsyncStorageDriver(),
+    );
+    await resolveAfterAllTimers(
+      siblingAdapter
+        .openNamespace(collectionScope.collection.namespace)
+        .commit({
+          touches: [
+            {
+              key: collectionScope.collection.itemKey('cached-1'),
+              lastAccessAt: Date.now(),
+            },
+          ],
+        }),
+    );
+    siblingAdapter.resetForTests?.();
+
+    // The continuation re-checks the remaining plan: `cached-1` changed, so
+    // it is kept while the unchanged entries are removed. Maintenance then
+    // re-plans with fresh metadata, which evicts the now older `cached-28`.
+    while (idleCallbacks.pendingCount() > 0) {
+      await idleCallbacks.runNext(() => 50);
+    }
+
+    expect(
+      collectionScope.collection.listStoredPayloads().sort(),
+    ).toMatchInlineSnapshot(`['cached-1', 'cached-29', 'live']`);
   });
 
   test('expiration cleanup removes expired items through namespace manifests only', async () => {

@@ -57,7 +57,7 @@ import {
   getSerializedStringSize,
   keepEntriesWithinByteBudget,
   keepEntriesWithinByteBudgetDuringIdle,
-  commitAsyncStorageRemovalsDuringIdle,
+  removeAsyncMaintenanceEntriesIfUnchanged,
   serializeJsonForStorage,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
@@ -2353,337 +2353,126 @@ export function setupListQueryPersistence<
       return { completed: true, keptQueryKeys, managedQueryEntriesByKey };
     }
 
-    if (idleContext !== undefined) {
-      while (!idleContext.isCanceled()) {
-        const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
-          queryNamespace,
-          { order: 'lru-desc' },
-        );
-        if (idleContext.isCanceled()) break;
-
-        const metadataContinuationCount = idleContext.getContinuationCount();
-        const protectedQueryKeys = new Set<string>();
-        const invalidQueryKeys: string[] = [];
-        const validEntries: Array<{
-          queryKey: string;
-          lastAccessAt: number;
-          sizeBytes: number;
-        }> = [];
-        let snapshotStale = false;
-
-        for (const [entryIndex, entry] of metadataEntries.entries()) {
-          if (
-            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return {
-              completed: false,
-              keptQueryKeys: new Set(),
-              managedQueryEntriesByKey: null,
-            };
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
-
-          if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
-            protectedQueryKeys.add(entry.key);
-          }
-          const payload = validateWithSchema(
-            config.queryPayloadSchema,
-            readManifestPayloadMeta(entry.customMetadata),
-          );
-          if (payload === null) {
-            invalidQueryKeys.push(entry.key);
-            continue;
-          }
-          validEntries.push({
-            queryKey: entry.key,
-            lastAccessAt: entry.lastAccessAt,
-            sizeBytes: rememberQueryMetadataSize(entry.key, entry.sizeBytes),
-          });
-        }
-        if (snapshotStale) continue;
-
-        const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
-          validEntries,
-          (entry) => entry.queryKey,
-          (entry) => entry.lastAccessAt,
-          (entry) => entry.sizeBytes,
-          (entry) => pinnedQueryKeys.has(entry.queryKey),
-          (entry) => protectedQueryKeys.has(entry.queryKey),
-          maxQueryBytes,
-          idleContext,
-        );
-        if (byteBudgetResult === null) {
-          return {
-            completed: false,
-            keptQueryKeys: new Set(),
-            managedQueryEntriesByKey: null,
-          };
-        }
-        if (idleContext.getContinuationCount() !== metadataContinuationCount) {
-          continue;
-        }
-
-        const { keptKeys: keptQueryKeys, unprotectedBytes } = byteBudgetResult;
-        const budgetEvictedEntries = new Map<
-          string,
-          (typeof validEntries)[number]
-        >();
-        const removalQueryKeys = [...invalidQueryKeys];
-        for (const [entryIndex, entry] of validEntries.entries()) {
-          if (
-            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return {
-              completed: false,
-              keptQueryKeys: new Set(),
-              managedQueryEntriesByKey: null,
-            };
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
-          if (keptQueryKeys.has(entry.queryKey)) continue;
-          budgetEvictedEntries.set(entry.queryKey, entry);
-          removalQueryKeys.push(entry.queryKey);
-        }
-        if (snapshotStale) continue;
-
-        const removalsCompleted = await commitAsyncStorageRemovalsDuringIdle(
-          removalQueryKeys,
-          async (batchKeys) => {
-            await queryNamespace.commit({ removes: batchKeys });
-            for (const queryKey of batchKeys) {
-              const entry = budgetEvictedEntries.get(queryKey);
-              if (entry === undefined) continue;
-              rememberBudgetEvictedEntry(
-                budgetEvictedQueryRecency,
-                queryKey,
-                entry.lastAccessAt,
-                querySnapshotByKey.get(queryKey),
-                storeRef !== null &&
-                  Object.hasOwn(storeRef.state.queries, queryKey),
-              );
-              forgetPersistedQuery(queryKey);
-            }
-          },
-          idleContext,
-          metadataContinuationCount,
-        );
-        if (!removalsCompleted) {
-          if (idleContext.isCanceled()) break;
-          continue;
-        }
-
-        knownPersistedQueryKeys = keptQueryKeys;
-        logQueryByteBudgetCleanup(
-          'maintenance',
-          validEntries.length,
-          keptQueryKeys,
-          unprotectedBytes,
-        );
-        return {
-          completed: true,
-          keptQueryKeys,
-          managedQueryEntriesByKey: null,
-        };
-      }
-
-      return {
-        completed: false,
-        keptQueryKeys: new Set(),
-        managedQueryEntriesByKey: null,
-      };
-    }
-
-    return {
+    const incompleteResult: StoredQueryEvictionResult = {
       completed: false,
       keptQueryKeys: new Set(),
       managedQueryEntriesByKey: null,
     };
-  }
+    // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
+    if (idleContext === undefined) return incompleteResult;
 
-  async function revalidateRemovedAsyncItemKeys(
-    removedItemKeys: Set<string>,
-    idleContext: IdleCleanupContext,
-  ): Promise<{
-    metadataContinuationCount: number;
-    removedItemKeys: Set<string>;
-  } | null> {
-    while (!idleContext.isCanceled()) {
-      const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
-        itemNamespace,
-        { order: 'key' },
-      );
-      if (idleContext.isCanceled()) return null;
+    const readMetadata = () =>
+      listAllPersistentStorageNamespaceMetadata(queryNamespace, {
+        order: 'lru-desc',
+      });
+    const metadataEntries = await readMetadata();
+    if (idleContext.isCanceled()) return incompleteResult;
 
-      const metadataContinuationCount = idleContext.getContinuationCount();
-      const presentRemovedItemKeys = new Set<string>();
-      let snapshotStale = false;
-      for (const [entryIndex, entry] of metadataEntries.entries()) {
-        if (
-          entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-          !(await idleContext.yieldIfNeeded())
-        ) {
-          return null;
-        }
-        if (idleContext.getContinuationCount() !== metadataContinuationCount) {
-          snapshotStale = true;
-          break;
-        }
-        if (removedItemKeys.has(entry.key)) {
-          presentRemovedItemKeys.add(entry.key);
-        }
-      }
-      if (!snapshotStale) {
-        const nextRemovedItemKeys = new Set<string>();
-        let itemIndex = 0;
-        for (const itemKey of removedItemKeys) {
-          if (
-            itemIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return null;
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
-          if (!presentRemovedItemKeys.has(itemKey)) {
-            nextRemovedItemKeys.add(itemKey);
-          }
-          itemIndex++;
-        }
-        if (snapshotStale) continue;
-        return {
-          metadataContinuationCount,
-          removedItemKeys: nextRemovedItemKeys,
-        };
-      }
-    }
+    // The plan is built from this snapshot even if scanning spans several
+    // idle callbacks; removals re-check entries changed after it was read.
+    const metadataContinuationCount = idleContext.getContinuationCount();
+    const protectedQueryKeys = new Set<string>();
+    const removalEntries: typeof metadataEntries = [];
+    const validEntries: Array<{
+      entry: (typeof metadataEntries)[number];
+      sizeBytes: number;
+    }> = [];
 
-    return null;
-  }
-
-  async function rewriteAsyncQueriesAfterItemRemoval(
-    keptQueryKeys: Set<string>,
-    removedItemKeys: Set<string>,
-    idleContext: IdleCleanupContext,
-    itemMetadataContinuationCount: number,
-  ): Promise<boolean> {
-    if (keptQueryKeys.size === 0 || removedItemKeys.size === 0) return true;
-
-    let pendingRemovedItemKeys = removedItemKeys;
-    let validatedItemContinuationCount = itemMetadataContinuationCount;
-    const queryKeyIterator = keptQueryKeys.values();
-    while (!idleContext.isCanceled()) {
-      const queryKeys: string[] = [];
-      for (
-        let queryIndex = 0;
-        queryIndex < MAINTENANCE_SCAN_CHUNK_SIZE;
-        queryIndex++
+    for (const [entryIndex, entry] of metadataEntries.entries()) {
+      if (
+        entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+        !(await idleContext.yieldIfNeeded())
       ) {
-        const nextQueryKey = queryKeyIterator.next();
-        if (nextQueryKey.done) break;
-        queryKeys.push(nextQueryKey.value);
-      }
-      if (queryKeys.length === 0 || pendingRemovedItemKeys.size === 0) {
-        return true;
+        return incompleteResult;
       }
 
-      let batchCompleted = false;
-      while (!batchCompleted && !idleContext.isCanceled()) {
-        if (!(await idleContext.yieldIfNeeded())) return false;
-        if (
-          idleContext.getContinuationCount() !== validatedItemContinuationCount
-        ) {
-          const revalidatedItems = await revalidateRemovedAsyncItemKeys(
-            pendingRemovedItemKeys,
-            idleContext,
-          );
-          if (revalidatedItems === null) return false;
-          pendingRemovedItemKeys = revalidatedItems.removedItemKeys;
-          validatedItemContinuationCount =
-            revalidatedItems.metadataContinuationCount;
-          if (pendingRemovedItemKeys.size === 0) return true;
-        }
-
-        const queryMetadataContinuationCount =
-          idleContext.getContinuationCount();
-        const persistedQueries = await queryNamespace.loadMany(queryKeys, {
-          touch: 'never',
-        });
-        if (idleContext.isCanceled()) return false;
-
-        const queryUpserts: Array<{
-          data: PersistedListQueryData;
-          key: string;
-        }> = [];
-        let snapshotStale = false;
-        for (const [queryIndex, persistedQuery] of persistedQueries.entries()) {
-          const queryKey = queryKeys[queryIndex];
-          if (queryKey === undefined || persistedQuery === null) continue;
-
-          const filteredItems: string[] = [];
-          for (const [itemIndex, itemKey] of persistedQuery.items.entries()) {
-            if (
-              itemIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-              !(await idleContext.yieldIfNeeded())
-            ) {
-              return false;
-            }
-            if (
-              idleContext.getContinuationCount() !==
-              queryMetadataContinuationCount
-            ) {
-              snapshotStale = true;
-              break;
-            }
-            if (!pendingRemovedItemKeys.has(itemKey)) {
-              filteredItems.push(itemKey);
-            }
-          }
-          if (snapshotStale) break;
-          if (filteredItems.length === persistedQuery.items.length) continue;
-
-          const limitedQuery = limitPersistedQueryItems(
-            filteredItems,
-            persistedQuery.hasMore,
-            maxQuerySize,
-          );
-          queryUpserts.push({
-            key: queryKey,
-            data: {
-              payload: persistedQuery.payload,
-              items: limitedQuery.itemKeys,
-              hasMore: limitedQuery.hasMore,
-            },
-          });
-        }
-        if (snapshotStale) continue;
-
-        if (queryUpserts.length > 0) {
-          await queryNamespace.commit({ upserts: queryUpserts });
-          for (const { data, key } of queryUpserts) {
-            rememberHydratedQuery(key, data);
-          }
-        }
-        batchCompleted = true;
+      if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
+        protectedQueryKeys.add(entry.key);
       }
+      const payload = validateWithSchema(
+        config.queryPayloadSchema,
+        readManifestPayloadMeta(entry.customMetadata),
+      );
+      if (payload === null) {
+        removalEntries.push(entry);
+        continue;
+      }
+      validEntries.push({
+        entry,
+        sizeBytes: rememberQueryMetadataSize(entry.key, entry.sizeBytes),
+      });
     }
 
-    return false;
+    const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
+      validEntries,
+      ({ entry }) => entry.key,
+      ({ entry }) => entry.lastAccessAt,
+      ({ sizeBytes }) => sizeBytes,
+      ({ entry }) => pinnedQueryKeys.has(entry.key),
+      ({ entry }) => protectedQueryKeys.has(entry.key),
+      maxQueryBytes,
+      idleContext,
+    );
+    if (byteBudgetResult === null) return incompleteResult;
+
+    const { keptKeys: keptQueryKeys, unprotectedBytes } = byteBudgetResult;
+    const budgetEvictedEntries = new Map<
+      string,
+      (typeof metadataEntries)[number]
+    >();
+    for (const { entry } of validEntries) {
+      if (keptQueryKeys.has(entry.key)) continue;
+      budgetEvictedEntries.set(entry.key, entry);
+      removalEntries.push(entry);
+    }
+
+    const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
+      removalEntries,
+      metadataContinuationCount,
+      readMetadata,
+      isAsyncStorageMetadataOfflineProtected,
+      async (batchKeys) => {
+        await queryNamespace.commit({ removes: batchKeys });
+        for (const queryKey of batchKeys) {
+          const entry = budgetEvictedEntries.get(queryKey);
+          if (entry === undefined) continue;
+          rememberBudgetEvictedEntry(
+            budgetEvictedQueryRecency,
+            queryKey,
+            entry.lastAccessAt,
+            querySnapshotByKey.get(queryKey),
+            storeRef !== null &&
+              Object.hasOwn(storeRef.state.queries, queryKey),
+          );
+          forgetPersistedQuery(queryKey);
+        }
+      },
+      idleContext,
+    );
+    if (!removalResult.completed) return incompleteResult;
+
+    if (removalResult.hasStaleEntries) {
+      // Queries changed during the run were kept; re-plan with fresh metadata
+      // before evicting items against an outdated query set.
+      knownPersistedQueryKeys = null;
+      const sessionKey = config.getSessionKey();
+      if (sessionKey !== false) {
+        scheduleAsyncStorageMaintenance(
+          `list-query:${sessionKey}:${config.storeName}`,
+          runMaintenance,
+        );
+      }
+      return incompleteResult;
+    }
+
+    knownPersistedQueryKeys = keptQueryKeys;
+    logQueryByteBudgetCleanup(
+      'maintenance',
+      validEntries.length,
+      keptQueryKeys,
+      unprotectedBytes,
+    );
+    return { completed: true, keptQueryKeys, managedQueryEntriesByKey: null };
   }
 
   async function evictStoredItems(
@@ -3026,150 +2815,126 @@ export function setupListQueryPersistence<
       return;
     }
 
-    if (idleContext !== undefined) {
-      const removedItemKeys = new Set<string>();
-      while (!idleContext.isCanceled()) {
-        const itemMetadataEntries =
-          await listAllPersistentStorageNamespaceMetadata(itemNamespace, {
-            order: 'lru-desc',
-          });
-        if (idleContext.isCanceled()) return;
+    // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
+    if (idleContext === undefined) return;
 
-        const metadataContinuationCount = idleContext.getContinuationCount();
-        const protectedItemKeys = new Set<string>();
-        const invalidItemKeys: string[] = [];
-        const ignoredItemKeys = new Set<string>();
-        const persistedItemEntries: Array<{
-          itemKey: string;
-          lastAccessAt: number;
-          sizeBytes: number;
-        }> = [];
-        let snapshotStale = false;
+    const readMetadata = () =>
+      listAllPersistentStorageNamespaceMetadata(itemNamespace, {
+        order: 'lru-desc',
+      });
+    const itemMetadataEntries = await readMetadata();
+    if (idleContext.isCanceled()) return;
 
-        for (const [entryIndex, entry] of itemMetadataEntries.entries()) {
-          if (
-            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return;
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
+    // The plan is built from this snapshot even if scanning spans several
+    // idle callbacks; removals re-check entries changed after it was read.
+    const metadataContinuationCount = idleContext.getContinuationCount();
+    const protectedItemKeys = new Set<string>();
+    const removalEntries: typeof itemMetadataEntries = [];
+    const ignoredItemKeys = new Set<string>();
+    const persistedItemEntries: Array<{
+      entry: (typeof itemMetadataEntries)[number];
+      sizeBytes: number;
+    }> = [];
 
-          if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
-            protectedItemKeys.add(entry.key);
-          }
-          const payload = validateWithSchema(
-            config.itemPayloadSchema,
-            readManifestPayloadMeta(entry.customMetadata),
-          );
-          if (payload === null) {
-            invalidItemKeys.push(entry.key);
-            continue;
-          }
-          if (shouldIgnoreItem(payload)) {
-            ignoredItemKeys.add(entry.key);
-            continue;
-          }
-          persistedItemEntries.push({
-            itemKey: entry.key,
-            lastAccessAt: entry.lastAccessAt,
-            sizeBytes: rememberItemMetadataSize(entry.key, entry.sizeBytes),
-          });
-        }
-        if (snapshotStale) continue;
-
-        const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
-          persistedItemEntries,
-          (entry) => entry.itemKey,
-          (entry) => entry.lastAccessAt,
-          (entry) => entry.sizeBytes,
-          (entry) => pinnedItemKeys.has(entry.itemKey),
-          (entry) => protectedItemKeys.has(entry.itemKey),
-          maxItemBytes,
-          idleContext,
-        );
-        if (byteBudgetResult === null) return;
-        if (idleContext.getContinuationCount() !== metadataContinuationCount) {
-          continue;
-        }
-
-        const { keptKeys: keptItemKeys, unprotectedBytes } = byteBudgetResult;
-        const budgetEvictedEntries = new Map<
-          string,
-          (typeof persistedItemEntries)[number]
-        >();
-        const removalItemKeys = [...invalidItemKeys, ...ignoredItemKeys];
-        for (const [entryIndex, entry] of persistedItemEntries.entries()) {
-          if (
-            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return;
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
-          if (keptItemKeys.has(entry.itemKey)) continue;
-          budgetEvictedEntries.set(entry.itemKey, entry);
-          removalItemKeys.push(entry.itemKey);
-        }
-        if (snapshotStale) continue;
-
-        const removalsCompleted = await commitAsyncStorageRemovalsDuringIdle(
-          removalItemKeys,
-          async (batchKeys) => {
-            await itemNamespace.commit({ removes: batchKeys });
-            for (const itemKey of batchKeys) {
-              removedItemKeys.add(itemKey);
-              const entry = budgetEvictedEntries.get(itemKey);
-              if (entry !== undefined) {
-                rememberBudgetEvictedEntry(
-                  budgetEvictedItemRecency,
-                  itemKey,
-                  entry.lastAccessAt,
-                  itemSnapshotByKey.get(itemKey),
-                  storeRef !== null && storeRef.state.items[itemKey] != null,
-                );
-              }
-              if (entry !== undefined || ignoredItemKeys.has(itemKey)) {
-                forgetPersistedItem(itemKey);
-              }
-            }
-          },
-          idleContext,
-          metadataContinuationCount,
-        );
-        if (!removalsCompleted) {
-          if (idleContext.isCanceled()) return;
-          continue;
-        }
-
-        for (const itemKey of keptItemKeys) removedItemKeys.delete(itemKey);
-        knownPersistedItemKeys = keptItemKeys;
-        logItemByteBudgetCleanup(
-          'maintenance',
-          persistedItemEntries.length,
-          keptItemKeys,
-          unprotectedBytes,
-        );
-        await rewriteAsyncQueriesAfterItemRemoval(
-          keptQueryKeys,
-          removedItemKeys,
-          idleContext,
-          metadataContinuationCount,
-        );
+    for (const [entryIndex, entry] of itemMetadataEntries.entries()) {
+      if (
+        entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+        !(await idleContext.yieldIfNeeded())
+      ) {
         return;
+      }
+
+      if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
+        protectedItemKeys.add(entry.key);
+      }
+      const payload = validateWithSchema(
+        config.itemPayloadSchema,
+        readManifestPayloadMeta(entry.customMetadata),
+      );
+      if (payload === null) {
+        removalEntries.push(entry);
+        continue;
+      }
+      if (shouldIgnoreItem(payload)) {
+        ignoredItemKeys.add(entry.key);
+        removalEntries.push(entry);
+        continue;
+      }
+      persistedItemEntries.push({
+        entry,
+        sizeBytes: rememberItemMetadataSize(entry.key, entry.sizeBytes),
+      });
+    }
+
+    const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
+      persistedItemEntries,
+      ({ entry }) => entry.key,
+      ({ entry }) => entry.lastAccessAt,
+      ({ sizeBytes }) => sizeBytes,
+      ({ entry }) => pinnedItemKeys.has(entry.key),
+      ({ entry }) => protectedItemKeys.has(entry.key),
+      maxItemBytes,
+      idleContext,
+    );
+    if (byteBudgetResult === null) return;
+
+    const { keptKeys: keptItemKeys, unprotectedBytes } = byteBudgetResult;
+    const budgetEvictedEntries = new Map<
+      string,
+      (typeof itemMetadataEntries)[number]
+    >();
+    for (const { entry } of persistedItemEntries) {
+      if (keptItemKeys.has(entry.key)) continue;
+      budgetEvictedEntries.set(entry.key, entry);
+      removalEntries.push(entry);
+    }
+
+    const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
+      removalEntries,
+      metadataContinuationCount,
+      readMetadata,
+      isAsyncStorageMetadataOfflineProtected,
+      async (batchKeys) => {
+        await itemNamespace.commit({ removes: batchKeys });
+        for (const itemKey of batchKeys) {
+          const entry = budgetEvictedEntries.get(itemKey);
+          if (entry !== undefined) {
+            rememberBudgetEvictedEntry(
+              budgetEvictedItemRecency,
+              itemKey,
+              entry.lastAccessAt,
+              itemSnapshotByKey.get(itemKey),
+              storeRef !== null && storeRef.state.items[itemKey] != null,
+            );
+          }
+          if (entry !== undefined || ignoredItemKeys.has(itemKey)) {
+            forgetPersistedItem(itemKey);
+          }
+        }
+      },
+      idleContext,
+    );
+    if (!removalResult.completed) return;
+
+    if (removalResult.hasStaleEntries) {
+      // Items changed during the run were kept; re-plan with fresh metadata.
+      knownPersistedItemKeys = null;
+      if (sessionKey !== false) {
+        scheduleAsyncStorageMaintenance(
+          `list-query:${sessionKey}:${config.storeName}`,
+          runMaintenance,
+        );
       }
       return;
     }
+
+    knownPersistedItemKeys = keptItemKeys;
+    logItemByteBudgetCleanup(
+      'maintenance',
+      persistedItemEntries.length,
+      keptItemKeys,
+      unprotectedBytes,
+    );
   }
 
   async function flushPersistedState(): Promise<void> {

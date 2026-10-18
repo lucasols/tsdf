@@ -359,3 +359,51 @@ function serializeProtectedNamespaceEntry(
     kind,
   });
 }
+
+/**
+ * Replaces `requestIdleCallback` with a manually driven queue so tests decide
+ * how much deadline budget each background maintenance slice receives.
+ */
+export function stubIdleCallbacks(): {
+  pendingCount: () => number;
+  runNext: (timeRemaining: () => number, didTimeout?: boolean) => Promise<void>;
+} {
+  const idleCallbacks = new Map<number, IdleRequestCallback>();
+  let nextIdleCallbackId = 1;
+
+  vi.stubGlobal(
+    'requestIdleCallback',
+    (callback: IdleRequestCallback): number => {
+      const callbackId = nextIdleCallbackId++;
+      idleCallbacks.set(callbackId, callback);
+      return callbackId;
+    },
+  );
+  vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
+    idleCallbacks.delete(callbackId);
+  });
+
+  return {
+    pendingCount: () => idleCallbacks.size,
+    async runNext(timeRemaining, didTimeout = false) {
+      const nextCallbackEntry = idleCallbacks.entries().next().value;
+      if (nextCallbackEntry === undefined) {
+        throw new Error('Expected a scheduled idle callback.');
+      }
+
+      const [callbackId, callback] = nextCallbackEntry;
+      idleCallbacks.delete(callbackId);
+      callback({ didTimeout, timeRemaining });
+      await advanceTime(500);
+    },
+  };
+}
+
+/**
+ * Deadline whose budget is spent by maintenance checking it: each check stands
+ * for one chunk of scan, sort, or commit work in that idle period.
+ */
+export function createChunkBudgetDeadline(chunks: number): () => number {
+  let checks = 0;
+  return () => (checks++ < chunks ? 50 : 0);
+}

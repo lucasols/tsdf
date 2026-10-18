@@ -45,7 +45,7 @@ import {
   createTimedKeySet,
   keepEntriesWithinByteBudget,
   keepEntriesWithinByteBudgetDuringIdle,
-  commitAsyncStorageRemovalsDuringIdle,
+  removeAsyncMaintenanceEntriesIfUnchanged,
   serializeJsonForStorage,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
@@ -1024,135 +1024,114 @@ export function setupCollectionPersistence<
       return;
     }
 
-    if (idleContext !== undefined) {
-      while (!idleContext.isCanceled()) {
-        const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
-          namespace,
-          { order: 'lru-desc' },
-        );
-        if (idleContext.isCanceled()) return;
-        if (metadataEntries.length === 0) return;
+    // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
+    if (idleContext === undefined) return;
 
-        const metadataContinuationCount = idleContext.getContinuationCount();
-        const protectedItemKeys = new Set<string>();
-        const invalidItemKeys: string[] = [];
-        const ignoredItemKeys = new Set<string>();
-        const filteredEntries: Array<{
-          itemKey: string;
-          lastAccessAt: number;
-          sizeBytes: number;
-        }> = [];
-        let snapshotStale = false;
+    const readMetadata = () =>
+      listAllPersistentStorageNamespaceMetadata(namespace, {
+        order: 'lru-desc',
+      });
+    const metadataEntries = await readMetadata();
+    if (idleContext.isCanceled() || metadataEntries.length === 0) return;
 
-        for (const [entryIndex, entry] of metadataEntries.entries()) {
-          if (
-            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return;
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
+    // The plan is built from this snapshot even if scanning spans several
+    // idle callbacks; removals re-check entries changed after it was read.
+    const metadataContinuationCount = idleContext.getContinuationCount();
+    const protectedItemKeys = new Set<string>();
+    const removalEntries: typeof metadataEntries = [];
+    const ignoredItemKeys = new Set<string>();
+    const filteredEntries: Array<{
+      entry: (typeof metadataEntries)[number];
+      sizeBytes: number;
+    }> = [];
 
-          if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
-            protectedItemKeys.add(entry.key);
-          }
-          const payload = validateWithSchema(
-            config.payloadSchema,
-            readManifestPayloadMeta(entry.customMetadata),
-          );
-          if (payload === null) {
-            invalidItemKeys.push(entry.key);
-            continue;
-          }
-          if (shouldIgnoreItem(payload)) {
-            ignoredItemKeys.add(entry.key);
-            continue;
-          }
-          filteredEntries.push({
-            itemKey: entry.key,
-            lastAccessAt: entry.lastAccessAt,
-            sizeBytes: rememberPersistedMetadataSize(
-              entry.key,
-              entry.sizeBytes,
-            ),
-          });
-        }
-        if (snapshotStale) continue;
-
-        const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
-          filteredEntries,
-          (entry) => entry.itemKey,
-          (entry) => entry.lastAccessAt,
-          (entry) => entry.sizeBytes,
-          (entry) => pinnedItemKeys.has(entry.itemKey),
-          (entry) => protectedItemKeys.has(entry.itemKey),
-          maxBytes,
-          idleContext,
-        );
-        if (byteBudgetResult === null) return;
-        if (idleContext.getContinuationCount() !== metadataContinuationCount) {
-          continue;
-        }
-
-        const { keptKeys, unprotectedBytes } = byteBudgetResult;
-        const budgetEvictedItemKeys = new Set<string>();
-        const removalItemKeys = [...invalidItemKeys, ...ignoredItemKeys];
-        for (const [entryIndex, { itemKey }] of filteredEntries.entries()) {
-          if (
-            entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
-            !(await idleContext.yieldIfNeeded())
-          ) {
-            return;
-          }
-          if (
-            idleContext.getContinuationCount() !== metadataContinuationCount
-          ) {
-            snapshotStale = true;
-            break;
-          }
-          if (keptKeys.has(itemKey)) continue;
-          budgetEvictedItemKeys.add(itemKey);
-          removalItemKeys.push(itemKey);
-        }
-        if (snapshotStale) continue;
-
-        const removalsCompleted = await commitAsyncStorageRemovalsDuringIdle(
-          removalItemKeys,
-          async (batchKeys) => {
-            await namespace.commit({ removes: batchKeys });
-            for (const itemKey of batchKeys) {
-              if (
-                ignoredItemKeys.has(itemKey) ||
-                budgetEvictedItemKeys.has(itemKey)
-              ) {
-                forgetPersistedItem(itemKey);
-              }
-            }
-          },
-          idleContext,
-          metadataContinuationCount,
-        );
-        if (!removalsCompleted) {
-          if (idleContext.isCanceled()) return;
-          continue;
-        }
-
-        knownPersistedKeys = keptKeys;
-        logByteBudgetCleanup(
-          'maintenance',
-          filteredEntries.length,
-          keptKeys,
-          unprotectedBytes,
-        );
+    for (const [entryIndex, entry] of metadataEntries.entries()) {
+      if (
+        entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+        !(await idleContext.yieldIfNeeded())
+      ) {
         return;
       }
+
+      if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
+        protectedItemKeys.add(entry.key);
+      }
+      const payload = validateWithSchema(
+        config.payloadSchema,
+        readManifestPayloadMeta(entry.customMetadata),
+      );
+      if (payload === null) {
+        removalEntries.push(entry);
+        continue;
+      }
+      if (shouldIgnoreItem(payload)) {
+        ignoredItemKeys.add(entry.key);
+        removalEntries.push(entry);
+        continue;
+      }
+      filteredEntries.push({
+        entry,
+        sizeBytes: rememberPersistedMetadataSize(entry.key, entry.sizeBytes),
+      });
+    }
+
+    const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
+      filteredEntries,
+      ({ entry }) => entry.key,
+      ({ entry }) => entry.lastAccessAt,
+      ({ sizeBytes }) => sizeBytes,
+      ({ entry }) => pinnedItemKeys.has(entry.key),
+      ({ entry }) => protectedItemKeys.has(entry.key),
+      maxBytes,
+      idleContext,
+    );
+    if (byteBudgetResult === null) return;
+
+    const { keptKeys, unprotectedBytes } = byteBudgetResult;
+    const budgetEvictedItemKeys = new Set<string>();
+    for (const { entry } of filteredEntries) {
+      if (keptKeys.has(entry.key)) continue;
+      budgetEvictedItemKeys.add(entry.key);
+      removalEntries.push(entry);
+    }
+
+    const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
+      removalEntries,
+      metadataContinuationCount,
+      readMetadata,
+      isAsyncStorageMetadataOfflineProtected,
+      async (batchKeys) => {
+        await namespace.commit({ removes: batchKeys });
+        for (const itemKey of batchKeys) {
+          if (
+            ignoredItemKeys.has(itemKey) ||
+            budgetEvictedItemKeys.has(itemKey)
+          ) {
+            forgetPersistedItem(itemKey);
+          }
+        }
+      },
+      idleContext,
+    );
+    if (!removalResult.completed) return;
+
+    if (removalResult.hasStaleEntries) {
+      // Entries changed during the run were kept; re-plan with fresh metadata.
+      knownPersistedKeys = null;
+      scheduleAsyncStorageMaintenance(
+        `collection:${sessionKey}:${config.storeName}`,
+        evictStoredItems,
+      );
       return;
     }
+
+    knownPersistedKeys = keptKeys;
+    logByteBudgetCleanup(
+      'maintenance',
+      filteredEntries.length,
+      keptKeys,
+      unprotectedBytes,
+    );
   }
 
   async function flushPersistedState(): Promise<void> {
