@@ -894,6 +894,59 @@ test('a sibling fetch ignored during a mutation does not cancel the retry of the
   `);
 });
 
+test('a sibling fetch that fails after a mutation does not leave the retried fetch stuck', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-mutation-retry-failed-sibling');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'b');
+  const sharedServerState = createSharedServerMockState(0);
+
+  const envA = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+  });
+  const envB = createDocumentStoreTestEnv(0, {
+    id,
+    sharedServerState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+  });
+
+  envB.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // Tab B starts a refetch, and a mutation interrupts it
+  envB.setNextFetchDurations(800);
+  envB.scheduleFetch('highPriority');
+  await advanceTime(100);
+  void envB.performClientUpdateAction(10, {
+    withOptimisticUpdate: true,
+    duration: 1_000,
+  });
+
+  // Tab B goes to the background, so after the mutation ends its retry waits
+  // for the background scheduling delay
+  await advanceTime(100);
+  await tabs.focusTab('a');
+  await advanceTime(1_000);
+
+  // Tab A fetches while tab B's retry is waiting, and its fetch fails, so it
+  // publishes no confirmed snapshot for tab B
+  envA.errorInNextFetch();
+  envA.setNextFetchDurations(100);
+  envA.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // Tab B still runs its retry instead of staying `refetching` with no fetch
+  // pending
+  expect(pick(envB.store.state, ['status', 'data'])).toMatchInlineSnapshot(`
+    data: { value: 10 }
+    status: 'success'
+  `);
+});
+
 test('list query snapshots do not re-broadcast after remote application', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-audit');

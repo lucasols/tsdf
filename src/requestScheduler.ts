@@ -462,7 +462,9 @@ export class RequestScheduler<T> {
 
       // The aborted fetch commits nothing for any of its requests, so all of
       // them are retried: the mutated ones when their mutation ends and the
-      // others as soon as the aborted fetch settles
+      // others as soon as the aborted fetch settles. Retries can't be
+      // cancelled by another tab's fetch start: their status already shows a
+      // fetch, and that tab publishes nothing if its fetch fails
       const addedAt = Date.now();
       for (const [fetchingRequestId, request] of phase.fetchingRequests) {
         this.#state.lastAbortedRequests.add(fetchingRequestId);
@@ -481,15 +483,14 @@ export class RequestScheduler<T> {
             retry.priority,
             request.priority,
           );
-          retry.remoteStartCancelable =
-            retry.remoteStartCancelable && request.remoteStartCancelable;
+          retry.remoteStartCancelable = false;
         } else {
           retry = {
             payload: request.payload,
             priority: request.priority,
             addedAt,
             awaitCallbacks: [],
-            remoteStartCancelable: request.remoteStartCancelable,
+            remoteStartCancelable: false,
           };
           pending.scheduledRequests.set(fetchingRequestId, retry);
         }
