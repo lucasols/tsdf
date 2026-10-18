@@ -1022,3 +1022,47 @@ test.each([
     `);
   },
 );
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches it with no hook mounted ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+      useBatchFetch,
+    });
+
+    // An imperative refetch, with no hook displaying the item
+    env.serverTable.updateItem('users||1', { name: 'Renamed' });
+    env.scheduleItemFetch('highPriority', 'users||1');
+    await advanceTime(100);
+
+    // The delete aborts the refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // No hook is mounted to react to an invalidation, so the rollback itself
+    // resumes the interrupted refetch instead of leaving users||1 on
+    // `refetching` with its old value
+    expect({
+      status: env.getItemQueryState('users||1')?.status,
+      name: env.apiStore.getItemState('users||1')?.name,
+    }).toMatchInlineSnapshot(`
+      name: 'Renamed'
+      status: 'success'
+    `);
+  },
+);

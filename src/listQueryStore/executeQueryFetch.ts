@@ -184,11 +184,18 @@ export async function executeQueryFetch<
           )
         : fetchPayload.offset;
 
+      // In offset mode, append only when loadMore range starts after head.
+      // Coalesced loadMore+load can produce type='loadMore' with offset=0,
+      // which must replace the list to avoid stale head items.
+      const appendToExisting =
+        !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
+
       try {
-        // Determine if we need chunked invalidation (offset mode, load type, limit > maxInvalidationLimit)
+        // A fetch that replaces the list in offset mode (a load, or a loadMore
+        // merged with one) is split into chunks of at most maxInvalidationLimit
         const useChunkedInvalidation =
           offsetPagination &&
-          fetchPayload.type === 'load' &&
+          !appendToExisting &&
           limit > offsetPagination.maxInvalidationLimit;
 
         let allItems: FetchListFnReturn<ItemState, ItemPayload>['items'];
@@ -265,12 +272,6 @@ export async function executeQueryFetch<
           results.set(queryKey, false);
           return;
         }
-
-        // In offset mode, append only when loadMore range starts after head.
-        // Coalesced loadMore+load can produce type='loadMore' with offset=0,
-        // which must replace the list to avoid stale head items.
-        const appendToExisting =
-          !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
 
         store.produceState(
           (draft) => {

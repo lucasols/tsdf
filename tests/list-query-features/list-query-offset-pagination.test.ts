@@ -912,6 +912,54 @@ describe('offset pagination - chunked invalidation', () => {
       message: 'chunk error'
     `);
   });
+
+  test('a loadMore merged with a delayed invalidation is still chunked', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 5 },
+      mediumPriorityDelayMs: 2000,
+    });
+
+    // Load 15 items
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // A delayed refetch of the 15 items is pending when the user loads more,
+    // so the loadMore starts first and carries the refetch with it
+    env.apiStore.scheduleListQueryFetch('mediumPriority', {
+      tableId: 'products',
+    });
+    await advanceTime(100);
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+
+    // The merged fetch replaces the whole list (offset 0, 20 items), so it is
+    // split into chunks of maxInvalidationLimit like any list refetch, instead
+    // of one request above the limit
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+        - { limit: 5, offset: 0 }
+        - { limit: 5, offset: 5 }
+        - { limit: 5, offset: 10 }
+        - { limit: 5, offset: 15 }
+      `);
+    expect(
+      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
+    ).toBe(20);
+  });
 });
 
 describe('offset pagination - coalescing', () => {

@@ -997,3 +997,41 @@ test('fetch interrupted by a mutation is retried after the mutation ends', async
   `);
   expect(env.apiStore.store.state.status).toBe('success');
 });
+
+test('a mutation that ends after a store reset does not release the lock of a newer mutation', async () => {
+  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded' });
+
+  // Mutation A starts, then the store is reset (e.g. on logout) and mutation
+  // B starts
+  void env.performClientUpdateAction(1);
+  await advanceTime(100);
+  env.apiStore.reset();
+  await advanceTime(100);
+  env.addTimelineComments('beforeNextAction', ['Mutation B starts']);
+  void env.performClientUpdateAction(2);
+
+  // A fetch requested after A ended, while B is still in progress
+  await advanceTime(750);
+  env.addTimelineComments('beforeNextAction', ['Fetch requested during B']);
+  env.scheduleFetch('highPriority');
+
+  await flushAllTimers();
+
+  // A's lock was dropped by the reset, so A ending (at 1.21s) must not
+  // release B's lock: the fetch waits for B to end (at 1.41s) instead of
+  // racing it
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | ⬜ >mutation-started (value: 1)
+    200ms | -- Mutation B starts
+    .     | ⬛ >mutation-started (value: 2)
+    840ms | ⬜ <mutation-data-persisted (value: 1)
+    950ms | -- Fetch requested during B
+    .     | scheduled-fetch-scheduled
+    1.04s | ⬛ <mutation-data-persisted (value: 2)
+    1.41s | 🔴 >fetch-started
+    2.21s | 🔴 <fetch-finished (value: 2)
+    "
+  `);
+});

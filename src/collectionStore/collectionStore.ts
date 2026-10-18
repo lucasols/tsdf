@@ -2433,7 +2433,8 @@ export function createCollectionStore<
         if (optimisticRollbackSnapshots.length > 0) {
           const restoredItemKeys: string[] = [];
           // An item deleted mid-fetch lost its fetch work with the delete, so
-          // restoring its `loading`/`refetching` status must refetch it
+          // restoring its `loading`/`refetching` status must resume that
+          // fetch, even when no hook is mounted to react to an invalidation
           const interruptedFetchPayloads: ItemPayload[] = [];
 
           for (const snapshot of optimisticRollbackSnapshots) {
@@ -2477,7 +2478,7 @@ export function createCollectionStore<
           }
 
           if (interruptedFetchPayloads.length > 0) {
-            invalidateItem(interruptedFetchPayloads);
+            scheduleFetch('highPriority', interruptedFetchPayloads);
           }
         }
 

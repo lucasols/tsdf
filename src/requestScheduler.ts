@@ -393,7 +393,12 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (this.#state.phase.type === 'fetching') {
+    // A fetch already aborted by a mutation commits nothing, and its waiters
+    // were moved to its retry, so there is nothing left to wait for on it
+    if (
+      this.#state.phase.type === 'fetching' &&
+      this.#state.phase.fetchId > this.#state.abort.abortBoundary
+    ) {
       const fetchingRequest = this.#state.phase.fetchingRequests.get(requestId);
       if (fetchingRequest) {
         await new Promise<void>((resolve) => {
@@ -478,10 +483,12 @@ export class RequestScheduler<T> {
     }
 
     // Each mutation releases its lock once, even if its ender is called again,
-    // so it never releases the lock of a concurrent mutation
+    // so it never releases the lock of a concurrent mutation. A reset drops
+    // the lock, so ending it afterwards must not release a newer one.
+    const lockState = this.#state;
     let ended = false;
     return () => {
-      if (ended) return false;
+      if (ended || this.#state !== lockState) return false;
       ended = true;
       return this.#endMutation(requestId);
     };
@@ -589,6 +596,9 @@ export class RequestScheduler<T> {
       }
 
       this.#state.pending.scheduledRequests.delete(requestId);
+      // Waiters of a cancelled request read the store's current state, even
+      // when it is the retry of a fetch aborted by a mutation
+      this.#state.lastAbortedRequests.delete(requestId);
       this.#finalizePendingRequestCallbacks(scheduledRequest, false);
       wasCancelled = true;
     }
@@ -651,6 +661,7 @@ export class RequestScheduler<T> {
       if (!matchesShouldCancel(shouldCancel, requestId, request)) continue;
 
       this.#state.phase.pendingRequests.delete(requestId);
+      if (isExplicitCancel) this.#state.lastAbortedRequests.delete(requestId);
       this.#finalizePendingRequestCallbacks(request, !isExplicitCancel);
       wasCancelled = true;
     }

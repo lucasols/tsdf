@@ -57,6 +57,15 @@ type InvalidateItemEvent = {
 
 type SchedulerWithMutation = { startMutation: (key: string) => () => boolean };
 
+type ItemSchedulerWithMutation<ItemPayload extends ValidPayload> =
+  SchedulerWithMutation & {
+    scheduleFetch: (
+      key: string,
+      fetchType: FetchType,
+      payload: { payload: ItemPayload; fields?: string[] },
+    ) => unknown;
+  };
+
 type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -101,7 +110,7 @@ type CreateMutationApiOptions<
   getOrCreateItemScheduler: (
     itemKey: string,
     payload: ItemPayload,
-  ) => SchedulerWithMutation;
+  ) => ItemSchedulerWithMutation<ItemPayload>;
   getOrCreateQueryScheduler: (queryKey: string) => SchedulerWithMutation;
   deleteItemFetchResources: (
     items: { itemKey: string; payload: ItemPayload }[],
@@ -353,16 +362,37 @@ export function createMutationApi<
     if (itemSnapshots.length === 0 && querySnapshots.length === 0) return;
 
     // An item deleted mid-fetch lost its fetch work with the delete, so
-    // restoring its `loading`/`refetching` status must refetch it
-    const interruptedFetchPayloads: ItemPayload[] = [];
+    // restoring its `loading`/`refetching` status must resume that fetch,
+    // even when no hook is mounted to react to an invalidation. With partial
+    // resources the fetched fields are only known once some were loaded;
+    // otherwise the item is invalidated so its hooks refetch their fields.
+    const interruptedFetches: {
+      itemKey: string;
+      payload: ItemPayload;
+      fields: string[] | undefined;
+    }[] = [];
+    const interruptedFetchPayloadsToInvalidate: ItemPayload[] = [];
 
-    for (const { itemKey, itemQuery } of itemSnapshots) {
+    for (const { itemKey, itemQuery, loadedFields } of itemSnapshots) {
       if (
         itemQuery &&
         !store.state.itemQueries[itemKey] &&
         (itemQuery.status === 'loading' || itemQuery.status === 'refetching')
       ) {
-        interruptedFetchPayloads.push(itemQuery.payload);
+        if (!fetchItemFn) continue;
+
+        if (partialResources && !loadedFields) {
+          interruptedFetchPayloadsToInvalidate.push(itemQuery.payload);
+        } else {
+          interruptedFetches.push({
+            itemKey,
+            payload: itemQuery.payload,
+            fields:
+              loadedFields === '*' || !partialResources
+                ? undefined
+                : loadedFields,
+          });
+        }
       }
     }
 
@@ -456,8 +486,16 @@ export function createMutationApi<
       }
     });
 
-    if (interruptedFetchPayloads.length > 0) {
-      invalidateItem(interruptedFetchPayloads);
+    for (const { itemKey, payload, fields } of interruptedFetches) {
+      getOrCreateItemScheduler(itemKey, payload).scheduleFetch(
+        itemKey,
+        'highPriority',
+        { payload, fields },
+      );
+    }
+
+    if (interruptedFetchPayloadsToInvalidate.length > 0) {
+      invalidateItem(interruptedFetchPayloadsToInvalidate);
     }
   }
 

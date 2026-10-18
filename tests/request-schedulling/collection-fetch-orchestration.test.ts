@@ -528,42 +528,61 @@ test('deleting an item while its batch refetch is in flight keeps it deleted', a
   expect(env.apiStore.getItemState('item2')?.status).toBe('success');
 });
 
-test('awaitFetch interrupted by deleting the item resolves without waiting for the timeout', async () => {
-  const env = createCollectionStoreTestEnv(
-    { item1: { v: 0 } },
-    { testScenario: 'loaded' },
-  );
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'awaitFetch interrupted by deleting the item resolves without waiting for the timeout ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
 
-  const fetchResult = createLoggerStore();
-  void env.apiStore.awaitFetch('item1').then((result) => {
-    fetchResult.add({ error: result.error?.message ?? null });
-  });
-  await advanceTime(100);
-  fetchResult.addMark('item1 is deleted while its awaited fetch is in flight');
+    // item2 is fetched along with item1, so a batch scheduler is kept after
+    // item1 is deleted
+    const fetchResult = createLoggerStore();
+    void env.apiStore.awaitFetch('item1').then((result) => {
+      fetchResult.add({ item1Error: result.error?.message ?? null });
+    });
+    void env.apiStore.awaitFetch('item2').then((result) => {
+      fetchResult.add({ item2Error: result.error?.message ?? null });
+    });
+    await advanceTime(100);
+    fetchResult.addMark(
+      'item1 is deleted while its awaited fetch is in flight',
+    );
 
-  // The delete aborts the fetch and drops its retry along with the item's
-  // scheduler
-  void env.apiStore.performMutation('item1', {
-    optimisticUpdate: () => {
-      env.apiStore.deleteItemState('item1');
-    },
-    mutation: () => env.serverTable.delayedRemoveItem('item1'),
-  });
+    // The delete aborts the fetch and drops item1's retry (along with its
+    // scheduler, for per-item schedulers)
+    void env.apiStore.performMutation('item1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('item1');
+      },
+      mutation: () => env.serverTable.delayedRemoveItem('item1'),
+    });
 
-  // The caller learns right away that the item is gone instead of waiting
-  // 30s for a timeout error
-  await advanceTime(10);
-  expect(fetchResult.changesSnapshot).toMatchInlineSnapshot(`
-    "
+    // The item1 caller learns right away that the item is gone instead of
+    // waiting for the aborted fetch or a 30s timeout
+    await advanceTime(10);
+    fetchResult.addMark('10ms after the delete');
 
-    >>> item1 is deleted while its awaited fetch is in flight
+    // item2 still resolves with its own fetch
+    await flushAllTimers();
+    expect(fetchResult.changesSnapshot).toMatchInlineSnapshot(`
+      "
 
-    -> error: Not found
-    "
-  `);
+      >>> item1 is deleted while its awaited fetch is in flight
 
-  await flushAllTimers();
-});
+      -> item1Error: Not found
+
+      >>> 10ms after the delete
+
+      -> item2Error: null
+      "
+    `);
+  },
+);
 
 test.each([
   { scheduler: 'batch', useBatchFetch: true },
@@ -625,5 +644,48 @@ test.each([
     `);
     expect(env.apiStore.getItemState('item1')?.status).toBe('success');
     expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches it with no hook mounted ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    // An imperative refetch, with no hook displaying the item
+    env.serverTable.setItem('item1', { v: 1 });
+    env.scheduleFetch('highPriority', 'item1');
+    await advanceTime(100);
+
+    // The delete aborts item1's refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('item1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('item1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // No hook is mounted to react to an invalidation, so the rollback itself
+    // resumes the interrupted refetch instead of leaving item1 on `refetching`
+    // with its old value
+    const item1 = env.apiStore.getItemState('item1');
+    expect({ status: item1?.status, value: item1?.data?.value })
+      .toMatchInlineSnapshot(`
+        status: 'success'
+        value: { v: 1 }
+      `);
   },
 );
