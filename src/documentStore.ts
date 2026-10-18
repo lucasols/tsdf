@@ -138,7 +138,7 @@ export type TSDFUseDocumentReturn<Selected> = {
   data: Selected;
   /** Last document fetch error, if any. */
   error: StoreError | null;
-  /** Convenience flag for `loading` or `refetching` states. */
+  /** Shorthand for `status === 'loading'`. Stays `false` while loaded data is `refetching`. */
   isLoading: boolean;
   /** Whether this result has local offline changes that still need to sync to the server. */
   pendingSync: boolean;
