@@ -1,5 +1,12 @@
 import { renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  onTestFinished,
+  test,
+  vi,
+} from 'vitest';
 import { createStoreManager } from '../../src/storeManager';
 import {
   createInMemoryBrowserTabsTransportFactory,
@@ -79,6 +86,105 @@ test('collection snapshots do not re-broadcast after remote application', async 
   expect(messages.length).toBeGreaterThan(0);
   expect(getPublisherTabIds(messages).size).toBe(1);
   expect(getMessageKinds(messages)).not.toContain('stale-marker');
+});
+
+// Item data holding a function can't go through the structured clone algorithm
+// used by BroadcastChannel, so posting its snapshot throws a DataCloneError.
+function createNonCloneableCollectionItems() {
+  return { item1: { name: 'Item 1', format: () => 'Item 1' } };
+}
+
+test('collection fetches still complete and broadcast their success when the item data cannot be sent to other tabs', async () => {
+  const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  onTestFinished(() => consoleWarn.mockRestore());
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const sharedServerTableState = createSharedServerTableState(
+    createNonCloneableCollectionItems(),
+  );
+
+  const env = createCollectionStoreTestEnv(
+    createNonCloneableCollectionItems(),
+    {
+      id: 'non-cloneable-collection',
+      sharedServerTableState,
+      browserTabsTransportFactory: transport.transportFactory,
+    },
+  );
+
+  renderHook(() => {
+    const item = env.apiStore.useItem('item1');
+    env.trackItemUI('item1', item.data?.value.name);
+  });
+
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1  |
+    0     | ···    | ui-initialized
+    10ms  | ···    | 🔴 >fetch-started
+    810ms | ···    | 🔴 <fetch-finished (value: {"name":"Item 1"})
+    .     | Item 1 | ui-changed
+    "
+  `);
+  // The item snapshot can't be posted, but the fetch itself succeeded, so the
+  // fetch completion is still broadcast to the other tabs.
+  expect(
+    getMessageKinds(getNonStatusMessages(transport.getMessages())),
+  ).toMatchInlineSnapshot(`['fetch-start', 'fetch-success']`);
+  // The dropped snapshot is surfaced as a dev-only warning.
+  expect(
+    consoleWarn.mock.calls.map(([message]) => String(message)),
+  ).toMatchInlineSnapshot(
+    `- '[tsdf] Failed to sync a "collection-item-snapshot" message of the collection store "non-cloneable-collection" with other browser tabs'`,
+  );
+});
+
+test('optimistic collection mutations still succeed when the item data cannot be sent to other tabs', async () => {
+  const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  onTestFinished(() => consoleWarn.mockRestore());
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const sharedServerTableState = createSharedServerTableState(
+    createNonCloneableCollectionItems(),
+  );
+
+  const env = createCollectionStoreTestEnv(
+    createNonCloneableCollectionItems(),
+    {
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      testScenario: 'loaded',
+    },
+  );
+
+  renderHook(() => {
+    const item = env.apiStore.useItem('item1');
+    env.trackItemUI('item1', item.data?.value.name);
+  });
+
+  // The optimistic update publishes an item snapshot that can't be cloned.
+  const mutation = env.performClientUpdateAction(
+    'item1',
+    { name: 'Updated', format: () => 'Updated' },
+    { withOptimisticUpdate: true, duration: 1_000 },
+  );
+
+  await flushAllTimers();
+
+  // Failing to sync with other tabs must not fail the local mutation.
+  expect((await mutation).ok).toBe(true);
+  expect(env.apiStore.getItemState('item1')?.data?.value.name).toBe('Updated');
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1              |
+    0     | Item 1             | ui-initialized
+    .     | {"name":"Updated"} | ⬜ optimistic-ui-commit
+    .     | {"name":"Updated"} | ⬜ >mutation-started (value: {"name":"Updated"})
+    .     | Updated            | ui-changed
+    700ms | Updated            | ⬜ <mutation-data-persisted (value: {"name":"Updated"})
+    "
+  `);
+  expect(consoleWarn).toHaveBeenCalled();
 });
 
 test('collection resets stay local to the tab that triggered them', async () => {

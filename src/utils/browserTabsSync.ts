@@ -309,7 +309,20 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>(
           MessageWithoutMeta<Message> & BrowserTabsMessageMeta
         >({ ...message, ...meta });
 
-      transport.postMessage(typedMessage);
+      try {
+        transport.postMessage(typedMessage);
+      } catch (error) {
+        // Cross-tab sync is best effort: a message that can't be posted (e.g.
+        // a `DataCloneError` for state holding functions) must never break the
+        // local fetch, mutation or state update that published it.
+        if (import.meta.env.DEV) {
+          console.warn(
+            `[tsdf] Failed to sync a "${message.kind}" message of the ${storeType} store "${storeKey}" with other browser tabs`,
+            error,
+          );
+        }
+        return null;
+      }
       if (import.meta.env.DEV) {
         logBrowserTabsOperation('log', 'publish', 'published message', {
           messageId: typedMessage.messageId,
