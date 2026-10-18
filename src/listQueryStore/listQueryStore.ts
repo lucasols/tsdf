@@ -3,6 +3,7 @@ import {
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
 import { notNullish } from '@ls-stack/utils/assertions';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter, type Emitter } from 'evtmitter';
@@ -1348,6 +1349,20 @@ export function createListQueryStore<
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastQuerySyncVersions = new Map<string, BrowserTabsSyncVersion>();
   const lastItemSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  /**
+   * Latest confirmed sibling-tab snapshots ignored because a local item
+   * mutation was in flight. Once those mutations end, the affected items and
+   * queries are revalidated unless the local state already matches the
+   * snapshot, so the tabs converge again.
+   */
+  const ignoredConfirmedItemSnapshots = new Map<string, ItemState | null>();
+  const ignoredConfirmedQuerySnapshots = new Map<
+    string,
+    Extract<
+      ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>,
+      { kind: 'list-query-snapshot' }
+    >
+  >();
   const offlineOverlayStore = new Store<
     Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
   >({ debugName: `${id}:list-query-offline-overlays`, state: () => ({}) });
@@ -2144,6 +2159,9 @@ export function createListQueryStore<
     itemsPendingFullInvalidation,
     itemDroppedFieldInvalidations,
     itemMutationCountsWithoutScheduler,
+    () => {
+      revalidateAfterIgnoredConfirmedSnapshots();
+    },
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2837,11 +2855,68 @@ export function createListQueryStore<
       const localItemQuery = store.state.itemQueries[item.itemKey];
       if (!localItemQuery) continue;
 
-      const itemScheduler = getKnownItemScheduler(item.itemKey);
-      if (itemScheduler?.isMutationInProgress(item.itemKey)) return true;
+      if (isItemMutationInProgress(item.itemKey)) return true;
     }
 
     return false;
+  }
+
+  function isItemMutationInProgress(itemKey: string): boolean {
+    return (
+      getKnownItemScheduler(itemKey)?.isMutationInProgress(itemKey) ?? false
+    );
+  }
+
+  function localItemMatches(itemKey: string, item: ItemState | null): boolean {
+    return deepEqual(item, store.state.items[itemKey] ?? null);
+  }
+
+  function revalidateAfterIgnoredConfirmedSnapshots(): void {
+    if (
+      ignoredConfirmedItemSnapshots.size === 0 &&
+      ignoredConfirmedQuerySnapshots.size === 0
+    ) {
+      return;
+    }
+
+    const itemPayloads: ItemPayload[] = [];
+    for (const [itemKey, item] of ignoredConfirmedItemSnapshots) {
+      if (isItemMutationInProgress(itemKey)) continue;
+
+      ignoredConfirmedItemSnapshots.delete(itemKey);
+      const itemQuery = store.state.itemQueries[itemKey];
+      if (itemQuery && !localItemMatches(itemKey, item)) {
+        itemPayloads.push(itemQuery.payload);
+      }
+    }
+
+    const queryPayloads: QueryPayload[] = [];
+    for (const [queryKey, message] of ignoredConfirmedQuerySnapshots) {
+      if (
+        message.items.some(({ itemKey }) => isItemMutationInProgress(itemKey))
+      ) {
+        continue;
+      }
+
+      ignoredConfirmedQuerySnapshots.delete(queryKey);
+      const query = store.state.queries[queryKey];
+      if (!query) continue;
+
+      const localQueryMatches =
+        query.hasMore === message.query.hasMore &&
+        deepEqual(query.items, message.query.items) &&
+        message.items.every(({ itemKey, item }) =>
+          localItemMatches(itemKey, item),
+        );
+      if (!localQueryMatches) queryPayloads.push(query.payload);
+    }
+
+    if (itemPayloads.length === 0 && queryPayloads.length === 0) return;
+
+    invalidateQueryAndItems({
+      itemPayload: itemPayloads.length > 0 ? itemPayloads : false,
+      queryPayload: queryPayloads.length > 0 ? queryPayloads : false,
+    });
   }
 
   function handleRemoteBrowserTabsMessage(
@@ -2889,6 +2964,7 @@ export function createListQueryStore<
         itemScheduler?.isMutationInProgress(message.itemKey)
       ) {
         lastItemSyncVersions.set(message.itemKey, candidateVersion);
+        ignoredConfirmedItemSnapshots.set(message.itemKey, message.item);
         return;
       }
 
@@ -2928,6 +3004,7 @@ export function createListQueryStore<
       for (const item of message.items) {
         lastItemSyncVersions.set(item.itemKey, candidateVersion);
       }
+      ignoredConfirmedQuerySnapshots.set(message.queryKey, message);
       return;
     }
 
@@ -3290,6 +3367,8 @@ export function createListQueryStore<
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
     lastItemSyncVersions.clear();
+    ignoredConfirmedItemSnapshots.clear();
+    ignoredConfirmedQuerySnapshots.clear();
     clearOfflineOverlays();
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();
@@ -3327,6 +3406,8 @@ export function createListQueryStore<
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
     lastItemSyncVersions.clear();
+    ignoredConfirmedItemSnapshots.clear();
+    ignoredConfirmedQuerySnapshots.clear();
     clearOfflineOverlays();
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();

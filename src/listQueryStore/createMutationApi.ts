@@ -277,6 +277,7 @@ export function createMutationApi<
     Map<string, DroppedFieldInvalidation>
   >,
   itemMutationCountsWithoutScheduler: Map<string, number>,
+  onItemMutationsEnd: () => void,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -971,6 +972,8 @@ export function createMutationApi<
       for (const endMutation of endMutations) {
         endMutation();
       }
+
+      onItemMutationsEnd();
     };
   }
 
