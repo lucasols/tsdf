@@ -1288,7 +1288,7 @@ export function createDocumentStore<
 
   function reset(): void {
     if (isDisposed) return;
-    scheduler.reset();
+    scheduler.reset(true);
     lastDocumentSyncVersion = undefined;
     ignoredConfirmedSnapshot = null;
     clearOfflineOverlay();
@@ -1312,7 +1312,7 @@ export function createDocumentStore<
 
     isDisposed = true;
     unregisterStoreFromManager();
-    scheduler.reset();
+    scheduler.reset(true);
     lastDocumentSyncVersion = undefined;
     clearOfflineOverlay();
     browserTabsSync.close();

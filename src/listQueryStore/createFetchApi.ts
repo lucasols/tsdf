@@ -1592,18 +1592,18 @@ export function createFetchApi<
 
   function resetSchedulers() {
     for (const scheduler of querySchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     querySchedulers.clear();
     queryInitialFetchStartTime.clear();
 
     for (const scheduler of batchKeySchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     batchKeySchedulers.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     perItemSchedulers.clear();
     itemInitialFetchStartTime.clear();

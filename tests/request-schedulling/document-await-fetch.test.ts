@@ -467,6 +467,24 @@ describe('awaitFetch timing', () => {
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
+  test('awaitFetch interrupted by a store reset resolves as aborted', async () => {
+    const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded' });
+
+    const fetchPromise = env.apiStore.awaitFetch();
+
+    // Let the awaited fetch start
+    await vi.advanceTimersByTimeAsync(100);
+    expect(env.serverMock.numOfStartedFetches).toBe(1);
+
+    // A reset (e.g. on logout) discards the in-flight fetch and clears the data
+    env.apiStore.reset();
+    await flushAllTimers();
+
+    // The caller learns the fetch was aborted, not that the document doesn't
+    // exist, and doesn't wait for the 30s timeout
+    expect((await fetchPromise).error?.name).toBe('AbortedStoreError');
+  });
+
   test('three awaitFetch calls triggered outside each coalescing window coalesce during ongoing fetch', async () => {
     const env = createDocumentStoreTestEnv(1, {
       testScenario: 'loaded',

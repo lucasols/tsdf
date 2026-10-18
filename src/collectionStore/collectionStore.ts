@@ -2616,13 +2616,13 @@ export function createCollectionStore<
   function reset() {
     if (isDisposed) return;
     for (const scheduler of batchKeySchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     batchKeySchedulers.clear();
     itemKeyToPayload.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     perItemSchedulers.clear();
 
@@ -2649,13 +2649,13 @@ export function createCollectionStore<
     unregisterStoreFromManager();
 
     for (const scheduler of batchKeySchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     batchKeySchedulers.clear();
     itemKeyToPayload.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
-      scheduler.reset();
+      scheduler.reset(true);
     }
     perItemSchedulers.clear();
 

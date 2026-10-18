@@ -513,7 +513,11 @@ export class RequestScheduler<T> {
     };
   }
 
-  reset(): void {
+  /** `markWaitersAborted` resolves callers awaiting the discarded requests as
+   * aborted, for store resets where the cleared state says nothing about the
+   * resource. Without it they read the store's current state, e.g. not found
+   * for a deleted item. */
+  reset(markWaitersAborted = false): void {
     const { phase, pending, abort } = this.#state;
 
     if (phase.type === 'coalescing') {
@@ -530,18 +534,19 @@ export class RequestScheduler<T> {
       abort.controller.abort();
     }
 
-    const discardedRequests = [...pending.scheduledRequests.values()];
+    const discardedRequests = [...pending.scheduledRequests];
     if (phase.type === 'coalescing') {
-      discardedRequests.push(...phase.pendingRequests.values());
+      discardedRequests.push(...phase.pendingRequests);
     } else if (phase.type === 'fetching') {
-      discardedRequests.push(...phase.fetchingRequests.values());
+      discardedRequests.push(...phase.fetchingRequests);
     }
 
     this.#state = this.#createInitialState();
 
-    // Callers awaiting the discarded requests read the store's current state
-    // instead of waiting for their timeout
-    for (const request of discardedRequests) {
+    // Callers awaiting the discarded requests resolve now instead of waiting
+    // for their timeout
+    for (const [requestId, request] of discardedRequests) {
+      if (markWaitersAborted) this.#state.lastAbortedRequests.add(requestId);
       this.#finalizePendingRequestCallbacks(request, true);
     }
   }

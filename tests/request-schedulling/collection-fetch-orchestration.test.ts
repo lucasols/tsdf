@@ -588,6 +588,29 @@ test.each([
   { scheduler: 'batch', useBatchFetch: true },
   { scheduler: 'per-item', useBatchFetch: false },
 ])(
+  'awaitFetch interrupted by a store reset resolves as aborted ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    const fetchPromise = env.apiStore.awaitFetch('item1');
+    await advanceTime(100);
+
+    // A reset (e.g. on logout) discards the in-flight fetch and clears the
+    // items, unlike deleting the item, which resolves the caller as not found
+    env.apiStore.reset();
+    await flushAllTimers();
+
+    expect((await fetchPromise).error?.name).toBe('AbortedStoreError');
+  },
+);
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
   'a failed delete of an item whose refetch was in flight refetches the restored item ($scheduler scheduler)',
   async ({ useBatchFetch }) => {
     const env = createCollectionStoreTestEnv(
