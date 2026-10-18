@@ -404,3 +404,44 @@ test('mutation on one item does not drop an in-flight batch fetch of other items
   expect(env.apiStore.getItemState('item1')?.status).toBe('success');
   expect(env.apiStore.getItemState('item2')?.status).toBe('success');
 });
+
+test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  // Both items are refetched in the same batch request
+  env.scheduleFetch('highPriority', 'item1');
+  env.scheduleFetch('highPriority', 'item2');
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'item1 is deleted while the item1+item2 batch fetch is in flight',
+  ]);
+  void env.apiStore.performMutation('item1', {
+    optimisticUpdate: () => {
+      env.apiStore.deleteItemState('item1');
+    },
+    mutation: () => env.serverTable.delayedRemoveItem('item1'),
+  });
+
+  await flushAllTimers();
+
+  // Only item2 is retried: the deleted item must not be refetched, which
+  // would bring it back as an "item not found" error
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | [item1] scheduled-fetch-triggered
+    10ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    100ms | -- item1 is deleted while the item1+item2 batch fetch is in flight
+    .     | 🔴 <list-fetch-aborted 🚫
+    820ms | 🟠 [item2] >fetch-started
+    1.3s  | [item1] server-item-removed
+    1.62s | 🟠 [item2] <fetch-finished (value: {"v":0})
+    "
+  `);
+  expect(env.apiStore.getItemState('item1')).toBe(null);
+  expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+});

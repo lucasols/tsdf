@@ -2450,6 +2450,81 @@ describe('partial resources: realtime invalidations keep the scheduler throttle'
       "
     `);
   });
+
+  test('a throttled realtime refetch of other fields survives the retry of a fetch aborted by a mutation', async () => {
+    const env = createRealtimeEnv();
+
+    // Two hooks load different fields of the same item
+    const nameHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['name'] }),
+    );
+    const ageHook = renderHook(() =>
+      env.apiStore.useItem('users||1', { fields: ['age'] }),
+    );
+    await flushAllTimers();
+    await advanceTime(5000);
+    env.clearTimeline();
+
+    // A 'name' refetch starts...
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    // ...and while it is in flight 'age' changes on the server and its
+    // realtime invalidation arrives, to be refetched after the throttle
+    await advanceTime(100);
+    env.serverTable.updateItem('users||1', { age: 11 });
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||1',
+        type: 'realtimeUpdate',
+        fields: ['age'],
+      });
+    });
+
+    // A 'name' mutation aborts the in-flight 'name' refetch
+    await advanceTime(100);
+    env.addTimelineComments('beforeNextAction', ['name mutation starts']);
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||1', (draft) => {
+            draft.name = 'Renamed';
+          });
+        },
+        mutation: () =>
+          env.serverTable.delayedUpdateItem('users||1', { name: 'Renamed' }),
+      });
+    });
+
+    await flushAllTimers();
+
+    // The retried 'name' fetch starts before the throttled 'age' refetch and
+    // supersedes it, so it must also fetch 'age' instead of leaving it stale
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      5.81s | -- timeline-cleared
+      5.82s | 🟠 >fetch-started
+      5.91s | server-data-changed (value: {"age":11})
+      6.01s | -- name mutation starts
+      .     | 🟠 <fetch-aborted 🚫
+      6.62s | rt-fetch-scheduled (delay: 1000ms)
+      7.21s | server-data-changed (value: {"name":"Renamed"})
+      7.22s | rt-fetch-cancelled
+      .     | 🟡 >fetch-started
+      8.02s | 🟡 <fetch-finished (value: {"age":11,"name":"Renamed"})
+      "
+    `);
+    expect(ageHook.result.current.data?.age).toBe(11);
+    expect(nameHook.result.current.data?.name).toBe('Renamed');
+  });
 });
 
 describe('partial resources: query invalidations with multiple same-payload hooks', () => {

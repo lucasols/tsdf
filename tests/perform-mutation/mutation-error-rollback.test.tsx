@@ -691,3 +691,28 @@ test('list-query optimistic updates that throw fail the mutation and release the
   expect(env.scheduleItemFetch('highPriority', 'users||1')).toBe('triggered');
   expect(env.scheduleFetch('highPriority', adminQuery)).toBe('triggered');
 });
+
+test('a throwing onSuccess does not release the lock of a concurrent mutation on the same item', async () => {
+  const env = createCollectionStoreTestEnv(
+    { 'item-1': { name: 'Item 1' } },
+    { testScenario: 'loaded' },
+  );
+
+  // A slow mutation keeps item-1 locked
+  void env.apiStore.performMutation('item-1', {
+    mutation: () => env.serverTable.delayedUpdateItem('item-1', { name: 'A' }),
+  });
+
+  // A fast mutation on the same item finishes first and its onSuccess throws,
+  // which runs the error path after the lock was already released once
+  await env.apiStore.performMutation('item-1', {
+    mutation: () => Promise.resolve(),
+    onSuccess: () => {
+      throw new Error('onSuccess failed');
+    },
+  });
+
+  // The slow mutation is still in flight, so fetches of item-1 must stay on
+  // hold instead of committing data from before it is persisted
+  expect(env.scheduleFetch('highPriority', 'item-1')).toBe('scheduled');
+});

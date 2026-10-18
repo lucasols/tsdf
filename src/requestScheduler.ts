@@ -426,8 +426,13 @@ export class RequestScheduler<T> {
 
     // Only a fetch that includes the mutated request can commit stale data.
     // Batch schedulers share one fetch across requests, so a fetch of other
-    // requests must keep running.
-    if (phase.type === 'fetching' && phase.fetchingRequests.has(requestId)) {
+    // requests must keep running. A fetch already aborted by an earlier
+    // mutation has all its requests queued for retry already.
+    if (
+      phase.type === 'fetching' &&
+      phase.fetchId > abort.abortBoundary &&
+      phase.fetchingRequests.has(requestId)
+    ) {
       abort.abortBoundary = phase.fetchId;
       abort.controller?.abort();
       abort.controller = null;
@@ -448,7 +453,14 @@ export class RequestScheduler<T> {
       }
     }
 
-    return () => this.#endMutation(requestId);
+    // Each mutation releases its lock once, even if its ender is called again,
+    // so it never releases the lock of a concurrent mutation
+    let ended = false;
+    return () => {
+      if (ended) return false;
+      ended = true;
+      return this.#endMutation(requestId);
+    };
   }
 
   reset(): void {
@@ -859,6 +871,34 @@ export class RequestScheduler<T> {
       this.setLastFetchStartTimeForRequest(requestId, startTime);
     }
 
+    // A starting fetch only supersedes the delayed refetches of the requests
+    // it includes — other requests sharing this scheduler keep their pending
+    // delayed refetch. A delayed refetch can cover more than the starting
+    // fetch (e.g. other fields), so its payload is merged in first.
+    const { rtuDelayed, mediumPriorityDelayed } = this.#state.pending;
+    for (const [requestId, request] of requests) {
+      if (this.#coalescePayload) {
+        const delayedRtu = rtuDelayed.get(requestId);
+        if (delayedRtu) {
+          request.payload = this.#coalescePayload(
+            delayedRtu.payload,
+            request.payload,
+          );
+        }
+
+        const delayedMedium = mediumPriorityDelayed.get(requestId);
+        if (delayedMedium) {
+          request.payload = this.#coalescePayload(
+            delayedMedium.payload,
+            request.payload,
+          );
+        }
+      }
+
+      this.#clearRtuDelayed(requestId);
+      this.#cancelMediumPriority(requestId);
+    }
+
     const fetchingRequests = new Map<string, PendingRequest<T>>();
     for (const [requestId, request] of requests) {
       fetchingRequests.set(requestId, {
@@ -874,14 +914,6 @@ export class RequestScheduler<T> {
       fetchingRequests,
       rtuAfterFetch: new Map(),
     };
-
-    // A starting fetch only supersedes the delayed refetches of the requests
-    // it includes — other requests sharing this scheduler keep their pending
-    // delayed refetch
-    for (const requestId of requests.keys()) {
-      this.#clearRtuDelayed(requestId);
-      this.#cancelMediumPriority(requestId);
-    }
 
     const shouldAbort = this.#createShouldAbort(
       fetchId,

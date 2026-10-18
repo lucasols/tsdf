@@ -674,7 +674,10 @@ export function createFetchApi<
     return getOrCreateItemScheduler(itemKey, payload);
   }
 
-  function maybeDisposeBatchScheduler(payload: ItemPayload): void {
+  function maybeDisposeBatchScheduler(
+    itemKey: string,
+    payload: ItemPayload,
+  ): void {
     const batchKey = getBatchKeyForPayload(payload);
     if (batchKey === false) return;
 
@@ -691,6 +694,11 @@ export function createFetchApi<
     if (!hasRelatedItems) {
       scheduler.reset();
       batchKeySchedulers.delete(batchKey);
+    } else {
+      // The shared scheduler is kept for the other items, so the removed
+      // item's pending fetches (e.g. the retry of a fetch aborted by its
+      // delete mutation) must not bring it back
+      scheduler.cancelPendingRequests([itemKey]);
     }
   }
 
@@ -707,7 +715,7 @@ export function createFetchApi<
         perItemSchedulers.delete(itemKey);
       }
 
-      maybeDisposeBatchScheduler(payload);
+      maybeDisposeBatchScheduler(itemKey, payload);
     }
   }
 

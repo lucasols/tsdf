@@ -903,3 +903,58 @@ test('item mutation does not error or drop an in-flight batch fetch of other ite
     "
   `);
 });
+
+test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+    useBatchFetch: true,
+  });
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const item1 = env.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+    const item2 = env.apiStore.useItem('users||2', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      item1: `${item1.status}:${item1.data?.name}`,
+      item2: `${item2.status}:${item2.data?.name}`,
+    });
+  });
+
+  // Both items are refetched in the same batch request
+  env.scheduleItemFetch('highPriority', 'users||1');
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await advanceTime(100);
+  renders.addMark('users||1 is deleted');
+  act(() => {
+    void env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||1');
+      },
+      mutation: () => env.serverTable.delayedRemoveItem('users||1'),
+    });
+  });
+
+  await flushAllTimers();
+
+  // Only users||2 is retried: the deleted item must not be refetched, which
+  // would bring it back as an "item not found" error
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> item1: success:User 1 ⋅ item2: success:User 2
+    -> item1: refetching:User 1 ⋅ item2: refetching:User 2
+
+    >>> users||1 is deleted
+
+    -> item1: deleted:undefined ⋅ item2: refetching:User 2
+    -> item1: deleted:undefined ⋅ item2: success:User 2
+    "
+  `);
+});

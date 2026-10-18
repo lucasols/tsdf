@@ -1714,7 +1714,10 @@ export function createCollectionStore<
     return results;
   }
 
-  function maybeDisposeBatchScheduler(payload: ItemPayload): void {
+  function maybeDisposeBatchScheduler(
+    itemKey: string,
+    payload: ItemPayload,
+  ): void {
     const batchKey = getBatchKey(payload);
     if (batchKey === false) return;
 
@@ -1729,6 +1732,11 @@ export function createCollectionStore<
     if (!hasRelatedItems) {
       scheduler.reset();
       batchKeySchedulers.delete(batchKey);
+    } else {
+      // The shared scheduler is kept for the other items, so the removed
+      // item's pending fetches (e.g. the retry of a fetch aborted by its
+      // delete mutation) must not bring it back
+      scheduler.cancelPendingRequests([itemKey]);
     }
   }
 
@@ -1744,7 +1752,7 @@ export function createCollectionStore<
       perItemSchedulers.delete(itemKey);
     }
 
-    maybeDisposeBatchScheduler(payload);
+    maybeDisposeBatchScheduler(itemKey, payload);
   }
 
   function isProtectedFromEviction(
