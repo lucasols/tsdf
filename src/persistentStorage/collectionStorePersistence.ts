@@ -1109,6 +1109,9 @@ export function setupCollectionPersistence<
       isAsyncStorageMetadataOfflineProtected,
       async (batchKeys) => {
         await namespace.commit({ removes: batchKeys }, true);
+        // The batch was committed for the planned session; skip in-memory
+        // bookkeeping that would now apply to another session's caches.
+        if (!isSessionCurrent()) return;
         for (const itemKey of batchKeys) {
           if (
             ignoredItemKeys.has(itemKey) ||
@@ -1118,6 +1121,7 @@ export function setupCollectionPersistence<
           }
         }
       },
+      namespace.getMaintenanceRemoveBatchSize(),
       isSessionCurrent,
       idleContext,
     );

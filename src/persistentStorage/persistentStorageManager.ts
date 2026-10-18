@@ -5,7 +5,10 @@ import {
   type TSDFDebugLogger,
   type TSDFPersistentStorageDebugOperation,
 } from '../debug';
-import { commitToAsyncStorageNamespaceNow } from './asyncStorageAdapter';
+import {
+  commitToAsyncStorageNamespaceNow,
+  getAsyncStorageMaintenanceRemoveBatchSize,
+} from './asyncStorageAdapter';
 import {
   parsePersistedAsyncNamespaceKind,
   serializeProtectedRef,
@@ -990,6 +993,8 @@ type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
+  /** Number of keys idle-deadline maintenance removes per commit. */
+  getMaintenanceRemoveBatchSize(): number;
   /** `flushNow` skips the async commit debounce. */
   commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
@@ -1154,7 +1159,11 @@ export function createPersistentStorageNamespaceHandle<
 
         const asyncArgs: AsyncStorageNamespaceCommitArgs<unknown, TMetadata> = {
           removes: args.removes,
-          staticPolicy: args.staticPolicy,
+          // The adapter treats a present `staticPolicy` key as a policy
+          // update, so only forward it when the caller set one.
+          ...('staticPolicy' in args
+            ? { staticPolicy: args.staticPolicy }
+            : {}),
           touches: args.touches,
           upserts: args.upserts?.map((upsert) => ({
             key: upsert.key,
@@ -2186,7 +2195,12 @@ export function createPersistentStorageNamespaceHandle<
     // No-op for namespaced handles: debouncing lives in the store integrations.
   }
 
+  function getMaintenanceRemoveBatchSize(): number {
+    return getAsyncStorageMaintenanceRemoveBatchSize(asyncAdapter);
+  }
+
   return {
+    getMaintenanceRemoveBatchSize,
     commit,
     readEntry,
     load,

@@ -3,7 +3,6 @@ import type { IdleCleanupContext } from './scheduleIdleCleanup';
 
 const MAINTENANCE_SORT_CHUNK_SIZE = 100;
 const MAINTENANCE_LOOP_CHUNK_SIZE = 25;
-const ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE = 25;
 
 /**
  * Creates a key set that auto-clears entries after a microtask.
@@ -105,6 +104,7 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
   readMetadata: () => Promise<T[]>,
   isOfflineProtected: (customMetadata: T['customMetadata']) => boolean,
   commitRemoves: (keys: string[]) => Promise<void>,
+  batchSize: number,
   shouldContinue: () => boolean,
   idleContext: IdleCleanupContext,
 ): Promise<{ completed: boolean; hasStaleEntries: boolean }> {
@@ -154,9 +154,9 @@ export async function removeAsyncMaintenanceEntriesIfUnchanged<
     }
 
     const batchKeys = pendingEntries
-      .slice(batchStart, batchStart + ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE)
+      .slice(batchStart, batchStart + batchSize)
       .map((entry) => entry.key);
-    batchStart += ASYNC_MAINTENANCE_COMMIT_BATCH_SIZE;
+    batchStart += batchSize;
     await commitRemoves(batchKeys);
     if (idleContext.isCanceled() || !shouldContinue()) {
       return { completed: false, hasStaleEntries };

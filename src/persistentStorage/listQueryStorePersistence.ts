@@ -2442,6 +2442,9 @@ export function setupListQueryPersistence<
       isAsyncStorageMetadataOfflineProtected,
       async (batchKeys) => {
         await queryNamespace.commit({ removes: batchKeys }, true);
+        // The batch was committed for the planned session; skip in-memory
+        // bookkeeping that would now apply to another session's caches.
+        if (!isSessionCurrent()) return;
         for (const queryKey of batchKeys) {
           const entry = budgetEvictedEntries.get(queryKey);
           if (entry === undefined) continue;
@@ -2456,6 +2459,7 @@ export function setupListQueryPersistence<
           forgetPersistedQuery(queryKey);
         }
       },
+      queryNamespace.getMaintenanceRemoveBatchSize(),
       isSessionCurrent,
       idleContext,
     );
@@ -2913,6 +2917,9 @@ export function setupListQueryPersistence<
       isAsyncStorageMetadataOfflineProtected,
       async (batchKeys) => {
         await itemNamespace.commit({ removes: batchKeys }, true);
+        // The batch was committed for the planned session; skip in-memory
+        // bookkeeping that would now apply to another session's caches.
+        if (!isSessionCurrent()) return;
         for (const itemKey of batchKeys) {
           const entry = budgetEvictedEntries.get(itemKey);
           if (entry !== undefined) {
@@ -2929,6 +2936,7 @@ export function setupListQueryPersistence<
           }
         }
       },
+      itemNamespace.getMaintenanceRemoveBatchSize(),
       isSessionCurrent,
       idleContext,
     );

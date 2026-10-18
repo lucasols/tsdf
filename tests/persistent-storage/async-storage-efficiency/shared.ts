@@ -7,6 +7,7 @@ import type { TSDFDebugLogEntry } from '../../../src/debug';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import {
   createAsyncStorageAdapter,
+  getAsyncStorageMaintenanceRemoveBatchSize,
   serializeProtectedRef,
 } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
@@ -418,3 +419,28 @@ export function createWallClockDeadline(budgetMs: number): () => number {
   const startedAt = Date.now();
   return () => Math.max(0, budgetMs - (Date.now() - startedAt));
 }
+
+/**
+ * Deadline that expires once at least `deleteCount` more OPFS files were
+ * deleted, so a maintenance slice runs out of time right after a batch.
+ */
+export function createDeadlineUntilFileDeletes(
+  mockAdapter: MockOpfsAdapter,
+  deleteCount: number,
+): () => number {
+  const { operations } = mockAdapter.mockBrowserOpfs;
+  let scannedOperations = operations.length;
+  let deletedFiles = 0;
+  return () => {
+    for (; scannedOperations < operations.length; scannedOperations++) {
+      if (operations[scannedOperations]?.type === 'deleteFile') {
+        deletedFiles++;
+      }
+    }
+    return deletedFiles < deleteCount ? 50 : 0;
+  };
+}
+
+/** Keys OPFS background maintenance removes per commit. */
+export const opfsMaintenanceRemoveBatchSize =
+  getAsyncStorageMaintenanceRemoveBatchSize(opfsPersistentStorage);

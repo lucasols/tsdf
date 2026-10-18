@@ -19,11 +19,13 @@ import {
 import {
   captureHookRemount,
   createChunkBudgetDeadline,
+  createDeadlineUntilFileDeletes,
   createCollectionEnv,
   createDocumentEnv,
   createWallClockDeadline,
   flushInvalidationPersistence,
   getAsyncCollectionEntrySizeBytes,
+  opfsMaintenanceRemoveBatchSize,
   setProtectedKeysSnapshot,
   settleStartupBackgroundScan,
   sumPersistedEntryBytes,
@@ -70,7 +72,8 @@ describe('async storage efficiency: collection', () => {
   test('background maintenance bounds removal work to the idle deadline and resumes with a timeout budget', async () => {
     const storeName = 'collection-deadline-maintenance';
     const sessionKey = 'sess1';
-    const ignoredItemCount = 51;
+    // Two full removal batches plus one entry.
+    const ignoredItemCount = opfsMaintenanceRemoveBatchSize * 2 + 1;
     const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -98,11 +101,11 @@ describe('async storage efficiency: collection', () => {
     // ignored entries must remain until a continuation receives more time.
     const firstSliceCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
-    await idleCallbacks.runNext(() =>
-      collectionScope.collection.listStoredPayloads().length >
-      ignoredItemCount + 1 - 25
-        ? 50
-        : 0,
+    await idleCallbacks.runNext(
+      createDeadlineUntilFileDeletes(
+        mockAdapter,
+        opfsMaintenanceRemoveBatchSize,
+      ),
     );
     const firstSliceOperations = firstSliceCapture.finish().timelineString;
 
@@ -112,8 +115,8 @@ describe('async storage efficiency: collection', () => {
       storedEntryCount: collectionScope.collection.listStoredPayloads().length,
     }).toMatchInlineSnapshot(`
       continuationScheduled: 1
-      payloadDeletes: 25
-      storedEntryCount: 27
+      payloadDeletes: 250
+      storedEntryCount: 252
     `);
 
     // A timeout-fired continuation has no usable browser deadline. The
@@ -169,16 +172,16 @@ describe('async storage efficiency: collection', () => {
       );
     }
 
-    // Planning spans the first slices without deleting anything, then each
-    // following slice commits bounded removal batches until only the live
-    // item remains and no continuation is left scheduled.
+    // Planning spans the first slices without deleting anything, then the
+    // removals are committed until only the live item remains and no
+    // continuation is left scheduled.
     expect({
       continuationScheduled: idleCallbacks.pendingCount(),
       storedCountAfterEachSlice,
       storedPayloads: collectionScope.collection.listStoredPayloads(),
     }).toMatchInlineSnapshot(`
       continuationScheduled: 0
-      storedCountAfterEachSlice: [201, 201, 201, 101, 1]
+      storedCountAfterEachSlice: [201, 201, 201, 1]
       storedPayloads: ['kept']
     `);
   });
@@ -186,7 +189,7 @@ describe('async storage efficiency: collection', () => {
   test('background maintenance commits several removal batches within one idle period', async () => {
     const storeName = 'collection-wall-clock-maintenance';
     const sessionKey = 'sess1';
-    const ignoredItemCount = 500;
+    const ignoredItemCount = opfsMaintenanceRemoveBatchSize * 4;
     const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -210,8 +213,8 @@ describe('async storage efficiency: collection', () => {
 
     // Each idle period is a 50 ms browser deadline spent by real time, so
     // the storage I/O of every removal batch counts against it. Batches must
-    // only wait for their own transaction, not for the commit debounce, or a
-    // single 25-entry batch would use up a whole idle period.
+    // only wait for their own transaction, not for the commit debounce, or
+    // each batch would use up most of an idle period.
     const storedCountAfterEachSlice: number[] = [];
     while (
       idleCallbacks.pendingCount() > 0 &&
@@ -223,15 +226,15 @@ describe('async storage efficiency: collection', () => {
       );
     }
 
-    // Ten 25-entry batches fit into each idle period, so 500 removals take
-    // two idle callbacks instead of ten.
+    // All four removal batches fit into the first idle period; waiting for the
+    // commit debounce would spread them across several idle callbacks.
     expect({
       continuationScheduled: idleCallbacks.pendingCount(),
       storedCountAfterEachSlice,
       storedPayloads: collectionScope.collection.listStoredPayloads(),
     }).toMatchInlineSnapshot(`
       continuationScheduled: 0
-      storedCountAfterEachSlice: [251, 1]
+      storedCountAfterEachSlice: [1]
       storedPayloads: ['kept']
     `);
   });
@@ -239,21 +242,29 @@ describe('async storage efficiency: collection', () => {
   test('background maintenance keeps an entry another tab refreshed while it was suspended', async () => {
     const storeName = 'collection-stale-maintenance-plan';
     const sessionKey = 'sess1';
-    const cachedItemCount = 30;
+    // One full removal batch plus `cached-0`..`cached-2`.
+    const cachedItemCount = opfsMaintenanceRemoveBatchSize + 3;
     const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
-    const cachedItem = (index: number) => ({
-      value: { id: `cached-${index}`, name: 'Cached item' },
+    const cachedItem = (payload: string) => ({
+      value: { id: payload, name: 'Cached item' },
     });
-    // Seed in recency order so `cached-0` is the least recently used entry.
-    for (let index = 0; index < cachedItemCount; index++) {
-      collectionScope.collection.seedItem(
-        `cached-${index}`,
-        cachedItem(index),
-        { timestamp: TEST_INITIAL_TIME + index },
-      );
+    // Seed in recency order so `cached-0` is the least recently used entry
+    // and `recent-a` / `recent-b` are the most recent ones.
+    const seededPayloads = [
+      ...Array.from(
+        { length: cachedItemCount },
+        (_, index) => `cached-${index}`,
+      ),
+      'recent-a',
+      'recent-b',
+    ];
+    for (const [index, payload] of seededPayloads.entries()) {
+      collectionScope.collection.seedItem(payload, cachedItem(payload), {
+        timestamp: TEST_INITIAL_TIME + index,
+      });
     }
 
     const liveItem = { value: { id: 'live', name: 'Live item' } };
@@ -264,8 +275,8 @@ describe('async storage efficiency: collection', () => {
       // Room for the live item plus the two most recent cached entries.
       maxBytes: sumPersistedEntryBytes(
         getAsyncCollectionEntrySizeBytes('live', liveItem),
-        getAsyncCollectionEntrySizeBytes('cached-28', cachedItem(28)),
-        getAsyncCollectionEntrySizeBytes('cached-29', cachedItem(29)),
+        getAsyncCollectionEntrySizeBytes('recent-a', cachedItem('recent-a')),
+        getAsyncCollectionEntrySizeBytes('recent-b', cachedItem('recent-b')),
       ),
       storeName,
       sessionKey,
@@ -274,19 +285,19 @@ describe('async storage efficiency: collection', () => {
     env.apiStore.addItemToState('live', liveItem);
     await advanceTime(1200);
 
-    // The first slice plans to evict `cached-0`..`cached-27` and runs out of
-    // time after the first 25-entry batch, leaving `cached-0`..`cached-2`
+    // The first slice plans to evict every `cached-*` entry and runs out of
+    // time after the first full removal batch, leaving `cached-0`..`cached-2`
     // still planned for removal.
-    await idleCallbacks.runNext(() =>
-      collectionScope.collection.listStoredPayloads().length >
-      cachedItemCount + 1 - 25
-        ? 50
-        : 0,
+    await idleCallbacks.runNext(
+      createDeadlineUntilFileDeletes(
+        mockAdapter,
+        opfsMaintenanceRemoveBatchSize,
+      ),
     );
     expect(
       collectionScope.collection.listStoredPayloads().sort(),
     ).toMatchInlineSnapshot(
-      `['cached-0', 'cached-1', 'cached-2', 'cached-28', 'cached-29', 'live']`,
+      `['cached-0', 'cached-1', 'cached-2', 'live', 'recent-a', 'recent-b']`,
     );
 
     // While maintenance waits for the next idle period, another tab reads
@@ -310,37 +321,92 @@ describe('async storage efficiency: collection', () => {
 
     // The continuation re-checks the remaining plan: `cached-1` changed, so
     // it is kept while the unchanged entries are removed. Maintenance then
-    // re-plans with fresh metadata, which evicts the now older `cached-28`.
+    // re-plans with fresh metadata, which evicts the now older `recent-a`.
     while (idleCallbacks.pendingCount() > 0) {
       await idleCallbacks.runNext(() => 50);
     }
 
     expect(
       collectionScope.collection.listStoredPayloads().sort(),
-    ).toMatchInlineSnapshot(`['cached-1', 'cached-29', 'live']`);
+    ).toMatchInlineSnapshot(`['cached-1', 'live', 'recent-b']`);
+  });
+
+  test('background maintenance keeps the persisted cleanup policy of its namespace', async () => {
+    const storeName = 'collection-maintenance-keeps-policy';
+    const sessionKey = 'sess1';
+    const idleCallbacks = stubIdleCallbacks();
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    collectionScope.collection.seedItem('ignored-1', {
+      value: { id: 'ignored-1', name: 'Ignored cached item' },
+    });
+
+    const env = createCollectionEnv({
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      pinnedItems: ['pinned'],
+      storeName,
+      sessionKey,
+    });
+
+    // The flush persists the store's pinned keys as the namespace policy, so
+    // cold startup cleanup can respect them before the store mounts. It also
+    // schedules background maintenance for the ignored cached entry.
+    env.apiStore.addItemToState('pinned', {
+      value: { id: 'pinned', name: 'Pinned item' },
+    });
+    await advanceTime(1200);
+    while (idleCallbacks.pendingCount() > 0) {
+      await idleCallbacks.runNext(() => 50);
+    }
+
+    // Maintenance removed the ignored entry without resetting the policy the
+    // flush wrote, so the pinned key is still protected on the next cold start.
+    expect({
+      policy: getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/ci._i.r.json`,
+      ),
+      storedPayloads: collectionScope.collection.listStoredPayloads(),
+    }).toMatchInlineSnapshot(`
+      policy:
+        e:
+          "pinned: { a: 1735689601048, p: 'pinned', z: 78 }
+        s:
+          k: ['"pinned']
+
+      storedPayloads: ['pinned']
+    `);
   });
 
   test('background maintenance stops when the active session changes between removal batches', async () => {
     const storeName = 'collection-session-switch-maintenance';
-    const cachedItemCount = 30;
+    // One full removal batch plus `cached-0`..`cached-2`.
+    const cachedItemCount = opfsMaintenanceRemoveBatchSize + 3;
     let activeSessionKey = 'session-a';
     const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const sessionAScope = mockAdapter.scope(storeName, 'session-a');
     const sessionBScope = mockAdapter.scope(storeName, 'session-b');
-    const cachedItem = (index: number) => ({
-      value: { id: `cached-${index}`, name: 'Cached item' },
+    const cachedItem = (payload: string) => ({
+      value: { id: payload, name: 'Cached item' },
     });
     // Session A is far over budget. Session B cached two of the same items
     // and fits its budget, so nothing in B should ever be evicted.
-    for (let index = 0; index < cachedItemCount; index++) {
-      sessionAScope.collection.seedItem(`cached-${index}`, cachedItem(index), {
+    const sessionAPayloads = [
+      ...Array.from(
+        { length: cachedItemCount },
+        (_, index) => `cached-${index}`,
+      ),
+      'recent-a',
+      'recent-b',
+    ];
+    for (const [index, payload] of sessionAPayloads.entries()) {
+      sessionAScope.collection.seedItem(payload, cachedItem(payload), {
         timestamp: TEST_INITIAL_TIME + index,
       });
     }
-    for (const index of [0, 1]) {
-      sessionBScope.collection.seedItem(`cached-${index}`, cachedItem(index), {
+    for (const [index, payload] of ['cached-0', 'cached-1'].entries()) {
+      sessionBScope.collection.seedItem(payload, cachedItem(payload), {
         timestamp: TEST_INITIAL_TIME + index,
       });
     }
@@ -354,8 +420,8 @@ describe('async storage efficiency: collection', () => {
       // Room for the live item plus two cached entries.
       maxBytes: sumPersistedEntryBytes(
         getAsyncCollectionEntrySizeBytes('live', liveItem),
-        getAsyncCollectionEntrySizeBytes('cached-28', cachedItem(28)),
-        getAsyncCollectionEntrySizeBytes('cached-29', cachedItem(29)),
+        getAsyncCollectionEntrySizeBytes('recent-a', cachedItem('recent-a')),
+        getAsyncCollectionEntrySizeBytes('recent-b', cachedItem('recent-b')),
       ),
       storeName,
     });
@@ -363,17 +429,15 @@ describe('async storage efficiency: collection', () => {
     env.apiStore.addItemToState('live', liveItem);
     await advanceTime(1200);
 
-    // Session A plans to evict `cached-0`..`cached-27`. The user switches to
-    // session B while the first 25-entry batch is being committed, before the
+    // Session A plans to evict every `cached-*` entry. The user switches to
+    // session B right after the first full batch is committed, before the
     // batch holding `cached-0`..`cached-2` starts in the same idle period.
+    const firstBatchCommitted = createDeadlineUntilFileDeletes(
+      mockAdapter,
+      opfsMaintenanceRemoveBatchSize,
+    );
     await idleCallbacks.runNext(() => {
-      if (
-        activeSessionKey === 'session-a' &&
-        sessionAScope.collection.listStoredPayloads().length <=
-          cachedItemCount + 1 - 25
-      ) {
-        activeSessionKey = 'session-b';
-      }
+      if (firstBatchCommitted() === 0) activeSessionKey = 'session-b';
       return 50;
     });
     while (idleCallbacks.pendingCount() > 0) {
@@ -385,7 +449,7 @@ describe('async storage efficiency: collection', () => {
       sessionA: sessionAScope.collection.listStoredPayloads().sort(),
       sessionB: sessionBScope.collection.listStoredPayloads().sort(),
     }).toMatchInlineSnapshot(`
-      sessionA: ['cached-0', 'cached-1', 'cached-2', 'cached-28', 'cached-29', 'live']
+      sessionA: ['cached-0', 'cached-1', 'cached-2', 'live', 'recent-a', 'recent-b']
       sessionB: ['cached-0', 'cached-1']
     `);
   });

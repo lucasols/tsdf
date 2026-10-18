@@ -1386,6 +1386,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     });
   }
 
+  getMaintenanceRemoveBatchSize(): number {
+    return getManagedDriverCapabilities(this.#driver)?.applyManagedCommit !==
+      undefined
+      ? PER_KEY_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE
+      : INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
+  }
+
   async commitToNamespaceNow<
     TValue,
     TCustomMetadata extends Record<string, unknown>,
@@ -3236,6 +3243,24 @@ export function createAsyncStorageAdapter(
   driver: AsyncStorageDriver,
 ): AsyncStorageAdapter {
   return new ManagedAsyncStorageAdapter(driver);
+}
+
+/**
+ * Drivers with a per-key managed commit (IndexedDB) keep each maintenance
+ * transaction short. Drivers without one rewrite the whole namespace index on
+ * every commit, so larger batches avoid repeating that work for every few
+ * removals while still bounding concurrent driver requests.
+ */
+const PER_KEY_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE = 25;
+const INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE = 250;
+
+/** Number of keys idle-deadline maintenance removes per commit. */
+export function getAsyncStorageMaintenanceRemoveBatchSize(
+  adapter: AsyncStorageAdapter | null,
+): number {
+  return adapter instanceof ManagedAsyncStorageAdapter
+    ? adapter.getMaintenanceRemoveBatchSize()
+    : PER_KEY_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
 }
 
 /**

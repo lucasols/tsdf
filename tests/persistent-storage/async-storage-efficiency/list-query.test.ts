@@ -2,6 +2,8 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import type { TSDFDebugLogEntry } from '../../../src/debug';
+import { createAsyncStorageAdapter } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
@@ -19,10 +21,12 @@ import {
 import {
   captureHookRemount,
   createDocumentEnv,
+  createDeadlineUntilFileDeletes,
   createListQueryEnv,
   flushInvalidationPersistence,
   getAsyncListItemEntrySizeBytes,
   getAsyncListQueryEntrySizeBytes,
+  opfsMaintenanceRemoveBatchSize,
   rawItemPayload,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
@@ -39,17 +43,27 @@ describe('async storage efficiency: list-query', () => {
   test('item maintenance keeps an item another tab offline-protected while it was suspended', async () => {
     const storeName = 'list-query-stale-maintenance-plan';
     const sessionKey = 'sess1';
-    const cachedItemCount = 30;
+    // One full removal batch plus `cached||0`..`cached||2`.
+    const cachedItemCount = opfsMaintenanceRemoveBatchSize + 3;
     const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const cachedItem = (index: number) => ({ id: index, name: 'Cached item' });
-    // Seed in recency order so `cached||0` is the least recently used item.
+    // Seed in recency order so `cached||0` is the least recently used item
+    // and `recent||1` / `recent||2` are the most recent ones.
+    const seededItems = [
+      ...Array.from({ length: cachedItemCount }, (_, index) => ({
+        tableId: 'cached',
+        id: index,
+      })),
+      { tableId: 'recent', id: 1 },
+      { tableId: 'recent', id: 2 },
+    ];
     const cachedStorageKeys: string[] = [];
-    for (let index = 0; index < cachedItemCount; index++) {
+    for (const [index, { tableId, id }] of seededItems.entries()) {
       cachedStorageKeys.push(
-        listQueryScope.listQuery.seedItem('cached', index, cachedItem(index), {
+        listQueryScope.listQuery.seedItem(tableId, id, cachedItem(id), {
           timestamp: TEST_INITIAL_TIME + index,
         }).storageKey,
       );
@@ -64,12 +78,12 @@ describe('async storage efficiency: list-query', () => {
       maxItemBytes: sumPersistedEntryBytes(
         getAsyncListItemEntrySizeBytes(rawItemPayload('live', 1), liveItem),
         getAsyncListItemEntrySizeBytes(
-          rawItemPayload('cached', 28),
-          cachedItem(28),
+          rawItemPayload('recent', 1),
+          cachedItem(1),
         ),
         getAsyncListItemEntrySizeBytes(
-          rawItemPayload('cached', 29),
-          cachedItem(29),
+          rawItemPayload('recent', 2),
+          cachedItem(2),
         ),
       ),
       storeName,
@@ -79,23 +93,23 @@ describe('async storage efficiency: list-query', () => {
     env.apiStore.addItemToState(rawItemPayload('live', 1), liveItem);
     await advanceTime(1200);
 
-    // The first slice plans to evict `cached||0`..`cached||27` and runs out of
-    // time after the first 25-item batch, leaving `cached||0`..`cached||2`
-    // still planned for removal.
-    await idleCallbacks.runNext(() =>
-      listQueryScope.listQuery.listStoredItemKeys().length >
-      cachedItemCount + 1 - 25
-        ? 50
-        : 0,
+    // The first slice plans to evict every `cached||*` item and runs out of
+    // time after the first full removal batch, leaving
+    // `cached||0`..`cached||2` still planned for removal.
+    await idleCallbacks.runNext(
+      createDeadlineUntilFileDeletes(
+        mockAdapter,
+        opfsMaintenanceRemoveBatchSize,
+      ),
     );
     expect(listQueryScope.listQuery.listStoredItemKeys().sort())
       .toMatchInlineSnapshot(`
         - '"cached||0'
         - '"cached||1'
         - '"cached||2'
-        - '"cached||28'
-        - '"cached||29'
         - '"live||1'
+        - '"recent||1'
+        - '"recent||2'
       `);
 
     // While maintenance waits for the next idle period, another tab marks
@@ -114,8 +128,111 @@ describe('async storage efficiency: list-query', () => {
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
     ).toMatchInlineSnapshot(
-      `['"cached||1', '"cached||28', '"cached||29', '"live||1']`,
+      `['"cached||1', '"live||1', '"recent||1', '"recent||2']`,
     );
+  });
+
+  test('query maintenance keeps a query another tab refreshed and defers item cleanup to a fresh plan', async () => {
+    const storeName = 'list-query-stale-query-plan';
+    const sessionKey = 'sess1';
+    // One full removal batch plus the `old-0`..`old-2` queries.
+    const oldQueryCount = opfsMaintenanceRemoveBatchSize + 3;
+    const idleCallbacks = stubIdleCallbacks();
+
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+    // Seed in recency order so `old-0` is the least recently used query and
+    // `recent` is the most recent one.
+    const seededQueries = [
+      ...Array.from({ length: oldQueryCount }, (_, index) => ({
+        tableId: `old-${index}`,
+      })),
+      { tableId: 'recent' },
+    ];
+    for (const [index, query] of seededQueries.entries()) {
+      listQueryScope.listQuery.seedQuery(query, [], {
+        timestamp: TEST_INITIAL_TIME + index,
+      });
+    }
+    // An ignored cached item that item maintenance removes.
+    listQueryScope.listQuery.seedItem('ignored', 1, {
+      id: 1,
+      name: 'Ignored cached item',
+    });
+
+    const env = createListQueryEnv({
+      // Stores with an `ignoreItems` filter enforce the byte budgets during
+      // background maintenance instead of evicting inline on flush.
+      ignoreItems: (payload) => payload.startsWith('ignored||'),
+      // Room for the most recent query only.
+      maxQueryBytes: getAsyncListQueryEntrySizeBytes({ tableId: 'recent' }, []),
+      storeName,
+      sessionKey,
+    });
+
+    env.apiStore.addItemToState(rawItemPayload('live', 1), {
+      id: 1,
+      name: 'Live item',
+    });
+    await advanceTime(1200);
+
+    // The first slice plans to evict every `old-*` query and runs out of time
+    // after the first full removal batch, leaving `old-0`..`old-2` planned.
+    await idleCallbacks.runNext(
+      createDeadlineUntilFileDeletes(
+        mockAdapter,
+        opfsMaintenanceRemoveBatchSize,
+      ),
+    );
+
+    // While maintenance waits for the next idle period, another tab reads the
+    // `old-1` query, making it the most recently used one.
+    const siblingAdapter = createAsyncStorageAdapter(
+      new OpfsAsyncStorageDriver(),
+    );
+    await resolveAfterAllTimers(
+      siblingAdapter
+        .openNamespace(listQueryScope.listQuery.queryNamespace)
+        .commit({
+          touches: [
+            {
+              key: listQueryScope.listQuery.queryKey({ tableId: 'old-1' }),
+              lastAccessAt: Date.now(),
+            },
+          ],
+        }),
+    );
+    siblingAdapter.resetForTests?.();
+
+    // The continuation keeps the refreshed query and stops before item
+    // cleanup, since items would be judged against an outdated query set.
+    await idleCallbacks.runNext(() => 50);
+    const afterStaleSlice = {
+      queries: listQueryScope.listQuery.listStoredQueryKeys().sort(),
+      items: listQueryScope.listQuery.listStoredItemKeys().sort(),
+    };
+
+    // The rescheduled pass re-plans from fresh metadata: `old-1` is now the
+    // most recent query, so `recent` is evicted, and item cleanup runs.
+    while (idleCallbacks.pendingCount() > 0) {
+      await idleCallbacks.runNext(() => 50);
+    }
+
+    expect({
+      afterStaleSlice,
+      afterRescheduledPass: {
+        queries: listQueryScope.listQuery.listStoredQueryKeys().sort(),
+        items: listQueryScope.listQuery.listStoredItemKeys().sort(),
+      },
+    }).toMatchInlineSnapshot(`
+      afterRescheduledPass:
+        items: ['"live||1']
+        queries: ['{tableId:"old-1"}']
+
+      afterStaleSlice:
+        items: ['"ignored||1', '"live||1']
+        queries: ['{tableId:"old-1"}', '{tableId:"recent"}']
+    `);
   });
 
   test('expiration cleanup removes expired queries and items through namespace manifests only', async () => {
