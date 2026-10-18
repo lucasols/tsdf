@@ -2294,6 +2294,7 @@ export function createCollectionStore<
     itemKey: string;
     payload: ItemPayload;
     item: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined;
+    hadPendingFetch: boolean;
   };
 
   /**
@@ -2401,6 +2402,10 @@ export function createCollectionStore<
             itemKey,
             payload: itemPayload,
             item: klona(store.state[itemKey]),
+            hadPendingFetch: getScheduler(
+              itemKey,
+              itemPayload,
+            ).hasPendingRequest(itemKey),
           }))
         : [];
 
@@ -2432,16 +2437,16 @@ export function createCollectionStore<
 
         if (optimisticRollbackSnapshots.length > 0) {
           const restoredItemKeys: string[] = [];
-          // An item deleted mid-fetch lost its fetch work with the delete, so
-          // restoring its `loading`/`refetching` status must resume that
-          // fetch, even when no hook is mounted to react to an invalidation
+          // Deleting an item drops its pending fetch work (an in-flight or
+          // delayed refetch), so restoring it must resume that work, even
+          // when no hook is mounted to react to an invalidation
           const interruptedFetchPayloads: ItemPayload[] = [];
 
           for (const snapshot of optimisticRollbackSnapshots) {
             if (
-              !store.state[snapshot.itemKey] &&
-              (snapshot.item?.status === 'loading' ||
-                snapshot.item?.status === 'refetching')
+              snapshot.item &&
+              snapshot.hadPendingFetch &&
+              !store.state[snapshot.itemKey]
             ) {
               interruptedFetchPayloads.push(snapshot.payload);
             }

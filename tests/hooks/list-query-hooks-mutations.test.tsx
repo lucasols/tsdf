@@ -1066,3 +1066,44 @@ test.each([
     `);
   },
 );
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item with a delayed refetch pending still refetches it ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+      useBatchFetch,
+      mediumPriorityDelayMs: 2_000,
+    });
+
+    // A medium priority refetch of the item waits for its delay
+    env.serverTable.updateItem('users||1', { name: 'Renamed' });
+    env.scheduleItemFetch('mediumPriority', 'users||1');
+    await advanceTime(100);
+    expect(env.getItemQueryState('users||1')?.status).toBe('success');
+
+    // The delete drops the delayed refetch, then fails
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback resumes the dropped refetch, so the item doesn't keep its
+    // old name
+    expect(env.apiStore.getItemState('users||1')?.name).toMatchInlineSnapshot(
+      `"Renamed"`,
+    );
+  },
+);

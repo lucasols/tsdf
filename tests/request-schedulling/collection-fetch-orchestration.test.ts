@@ -689,3 +689,43 @@ test.each([
       `);
   },
 );
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item with a delayed refetch pending still refetches it ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch, mediumPriorityDelayMs: 2_000 },
+    );
+
+    // A medium priority refetch of item1 waits for its delay
+    env.serverTable.setItem('item1', { v: 1 });
+    env.scheduleFetch('mediumPriority', 'item1');
+    await advanceTime(100);
+    expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+
+    // The delete drops the delayed refetch, then fails
+    act(() => {
+      void env.apiStore.performMutation('item1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('item1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback resumes the dropped refetch, so item1 doesn't keep its old
+    // value
+    expect(
+      env.apiStore.getItemState('item1')?.data?.value,
+    ).toMatchInlineSnapshot(`v: 1`);
+  },
+);

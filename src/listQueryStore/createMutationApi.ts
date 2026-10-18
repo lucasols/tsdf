@@ -64,6 +64,7 @@ type ItemSchedulerWithMutation<ItemPayload extends ValidPayload> =
       fetchType: FetchType,
       payload: { payload: ItemPayload; fields?: string[] },
     ) => unknown;
+    hasPendingRequest: (key: string) => boolean;
   };
 
 type CreateMutationApiOptions<
@@ -319,6 +320,7 @@ export function createMutationApi<
       | Map<string, DroppedFieldInvalidation>
       | undefined;
     invalidationWasTriggered: boolean;
+    hadPendingFetch: boolean;
   };
   type MutationQueryRollbackSnapshot = {
     queryKey: string;
@@ -361,11 +363,11 @@ export function createMutationApi<
   }): void {
     if (itemSnapshots.length === 0 && querySnapshots.length === 0) return;
 
-    // An item deleted mid-fetch lost its fetch work with the delete, so
-    // restoring its `loading`/`refetching` status must resume that fetch,
-    // even when no hook is mounted to react to an invalidation. With partial
-    // resources the fetched fields are only known once some were loaded;
-    // otherwise the item is invalidated so its hooks refetch their fields.
+    // Deleting an item drops its pending fetch work (an in-flight or delayed
+    // refetch), so restoring it must resume that work, even when no hook is
+    // mounted to react to an invalidation. With partial resources the fetched
+    // fields are only known once some were loaded; otherwise the item is
+    // invalidated so its hooks refetch their fields.
     const interruptedFetches: {
       itemKey: string;
       payload: ItemPayload;
@@ -373,14 +375,13 @@ export function createMutationApi<
     }[] = [];
     const interruptedFetchPayloadsToInvalidate: ItemPayload[] = [];
 
-    for (const { itemKey, itemQuery, loadedFields } of itemSnapshots) {
-      if (
-        itemQuery &&
-        !store.state.itemQueries[itemKey] &&
-        (itemQuery.status === 'loading' || itemQuery.status === 'refetching')
-      ) {
-        if (!fetchItemFn) continue;
-
+    for (const {
+      itemKey,
+      itemQuery,
+      loadedFields,
+      hadPendingFetch,
+    } of itemSnapshots) {
+      if (itemQuery && hadPendingFetch && !store.state.itemQueries[itemKey]) {
         if (partialResources && !loadedFields) {
           interruptedFetchPayloadsToInvalidate.push(itemQuery.payload);
         } else {
@@ -1552,27 +1553,34 @@ export function createMutationApi<
     };
 
     if (affectedItemEntries) {
-      itemRollbackSnapshots = affectedItemEntries.map(({ itemKey }) => {
-        const pendingInvalidationFields =
-          itemPendingInvalidationFields.get(itemKey);
-        const droppedFieldInvalidations =
-          itemDroppedFieldInvalidations.get(itemKey);
-        return {
-          itemKey,
-          item: klona(store.state.items[itemKey]),
-          itemQuery: klona(store.state.itemQueries[itemKey]),
-          loadedFields: klona(store.state.itemLoadedFields[itemKey]),
-          invalidationFields: klona(
-            store.state.itemFieldInvalidationFields[itemKey],
-          ),
-          pendingInvalidationFields:
-            pendingInvalidationFields && new Map(pendingInvalidationFields),
-          pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
-          droppedFieldInvalidations:
-            droppedFieldInvalidations && new Map(droppedFieldInvalidations),
-          invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
-        };
-      });
+      itemRollbackSnapshots = affectedItemEntries.map(
+        ({ itemKey, payload: itemPayload }) => {
+          const pendingInvalidationFields =
+            itemPendingInvalidationFields.get(itemKey);
+          const droppedFieldInvalidations =
+            itemDroppedFieldInvalidations.get(itemKey);
+          return {
+            itemKey,
+            item: klona(store.state.items[itemKey]),
+            itemQuery: klona(store.state.itemQueries[itemKey]),
+            loadedFields: klona(store.state.itemLoadedFields[itemKey]),
+            invalidationFields: klona(
+              store.state.itemFieldInvalidationFields[itemKey],
+            ),
+            pendingInvalidationFields:
+              pendingInvalidationFields && new Map(pendingInvalidationFields),
+            pendingFullInvalidation: itemsPendingFullInvalidation.get(itemKey),
+            droppedFieldInvalidations:
+              droppedFieldInvalidations && new Map(droppedFieldInvalidations),
+            invalidationWasTriggered: itemInvalidationWasTriggered.has(itemKey),
+            hadPendingFetch:
+              !!fetchItemFn &&
+              getOrCreateItemScheduler(itemKey, itemPayload).hasPendingRequest(
+                itemKey,
+              ),
+          };
+        },
+      );
     }
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });

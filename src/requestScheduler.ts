@@ -260,6 +260,20 @@ export class RequestScheduler<T> {
     );
   }
 
+  /** Whether the request has a fetch in flight, queued or delayed */
+  hasPendingRequest(requestId: string): boolean {
+    const { phase, pending } = this.#state;
+    return (
+      pending.scheduledRequests.has(requestId) ||
+      pending.rtuDelayed.has(requestId) ||
+      pending.mediumPriorityDelayed.has(requestId) ||
+      (phase.type === 'coalescing' && phase.pendingRequests.has(requestId)) ||
+      (phase.type === 'fetching' &&
+        (phase.fetchingRequests.has(requestId) ||
+          phase.rtuAfterFetch.has(requestId)))
+    );
+  }
+
   get fetchIsInProgress(): boolean {
     return this.#state.phase.type === 'fetching';
   }
@@ -299,6 +313,10 @@ export class RequestScheduler<T> {
 
   syncExternalFetchStart(requestIds: string[], startedAt: number): void {
     for (const requestId of requestIds) {
+      // The mutation lock ignores the sibling fetch's confirmed snapshot, so
+      // its start must not supersede the requests queued until the lock ends
+      if (this.#state.pending.mutationsInProgress.has(requestId)) continue;
+
       this.setLastFetchStartTimeForRequest(requestId, startedAt);
     }
   }
