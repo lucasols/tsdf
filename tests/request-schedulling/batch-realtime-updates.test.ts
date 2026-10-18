@@ -201,4 +201,74 @@ describe('realtime updates on a shared batch scheduler', () => {
       "
     `);
   });
+
+  test('a fetch replacing an aborted batch is still sent when the replayed realtime updates fill a batch', async () => {
+    const env = createCollectionStoreTestEnv(
+      {
+        'api1-item1': { v: 1 },
+        'api1-item2': { v: 2 },
+        'api1-item3': { v: 3 },
+        'api1-item4': { v: 4 },
+        'api1-item5': { v: 5 },
+      },
+      {
+        useBatchFetch: true,
+        maxBatchSize: 2,
+        usesRealTimeUpdates: true,
+        dynamicRealtimeThrottleMs: () => 100,
+      },
+    );
+
+    // Load items 1 and 2 so the realtime throttle has a baseline fetch duration
+    env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api1-item2');
+    await flushAllTimers();
+    env.clearTimeline();
+
+    // A slow refetch of items 1 and 2 is in flight, and items 3 and 4 receive
+    // realtime updates to be refetched after it
+    env.serverTable.setFetchDurations('api1-item1', 3000);
+    env.serverTable.setFetchDurations('api1-item2', 3000);
+    env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api1-item2');
+    await advanceTime(1000);
+    env.scheduleFetch('realtimeUpdate', 'api1-item3');
+    env.scheduleFetch('realtimeUpdate', 'api1-item4');
+
+    // A mutation on item 1 aborts the batch, then item 5 is fetched before
+    // the aborted request settles. Replacing it replays the two realtime
+    // updates, which fill a batch and start a fetch right away.
+    env.addTimelineComments('beforeNextAction', [
+      'item1 mutation aborts the batch, then item5 is fetched',
+    ]);
+    void env.performClientUpdateAction('api1-item1', { v: 10 });
+    env.scheduleFetch('highPriority', 'api1-item5');
+
+    await flushAllTimers();
+
+    // item 5 is fetched after the realtime updates batch instead of throwing
+    // an invalid phase error and being dropped
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      800ms | -- timeline-cleared
+      .     | [api1-item1] scheduled-fetch-triggered
+      .     | 🟠 >list-fetch-started (value: {"itemIds":["api1-item1","api1-item2"]})
+      1.8s  | -- item1 mutation aborts the batch, then item5 is fetched
+      .     | 🟠 <list-fetch-aborted 🚫
+      .     | ⬜ [api1-item1] >mutation-started (value: {"v":10})
+      .     | scheduled-rt-fetch-started
+      .     | scheduled-rt-fetch-started
+      .     | [api1-item5] scheduled-fetch-scheduled
+      .     | 🟡 >list-fetch-started (value: {"itemIds":["api1-item3","api1-item4"]})
+      2.6s  | 🟡 <list-fetch-finished (value: {"count":2})
+      2.61s | 🟢 >list-fetch-started (value: {"itemIds":["api1-item2","api1-item5"]})
+      2.64s | ⬜ [api1-item1] <mutation-data-persisted (value: {"v":10})
+      3.41s | 🟢 <list-fetch-finished (value: {"count":2})
+      3.42s | 🔵 [api1-item1] >fetch-started
+      4.22s | 🔵 [api1-item1] <fetch-finished (value: {"v":10})
+      "
+    `);
+    expect(env.apiStore.getItemState('api1-item5')?.status).toBe('success');
+  });
 });

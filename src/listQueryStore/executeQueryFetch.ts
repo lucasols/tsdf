@@ -169,14 +169,19 @@ export async function executeQueryFetch<
       const { payload, limit, fields } = fetchPayload;
 
       // An offset loadMore continues after the loaded items, which may have
-      // changed since it was scheduled, e.g. when it is the retry of a loadMore
-      // aborted by a mutation that removed an item from the list
+      // shrunk since it was scheduled, e.g. when it is the retry of a loadMore
+      // aborted by a mutation that removed an item from the list. Items added
+      // locally (e.g. optimistic creates) aren't part of the server pages
+      // loaded so far, so they never move the offset forward.
       const isAppendLoadMore =
         !!offsetPagination &&
         fetchPayload.type === 'loadMore' &&
         fetchPayload.offset > 0;
       const offset = isAppendLoadMore
-        ? (store.state.queries[queryKey]?.items.length ?? fetchPayload.offset)
+        ? Math.min(
+            fetchPayload.offset,
+            store.state.queries[queryKey]?.items.length ?? fetchPayload.offset,
+          )
         : fetchPayload.offset;
 
       try {

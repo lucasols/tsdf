@@ -504,7 +504,20 @@ export class RequestScheduler<T> {
       abort.controller.abort();
     }
 
+    const discardedRequests = [...pending.scheduledRequests.values()];
+    if (phase.type === 'coalescing') {
+      discardedRequests.push(...phase.pendingRequests.values());
+    } else if (phase.type === 'fetching') {
+      discardedRequests.push(...phase.fetchingRequests.values());
+    }
+
     this.#state = this.#createInitialState();
+
+    // Callers awaiting the discarded requests read the store's current state
+    // instead of waiting for their timeout
+    for (const request of discardedRequests) {
+      this.#finalizePendingRequestCallbacks(request, true);
+    }
   }
 
   /** Re-evaluates the pending delayed realtime update fetch against the
@@ -706,21 +719,24 @@ export class RequestScheduler<T> {
       return 'scheduled';
     }
 
-    if (this.#state.phase.type === 'fetching') {
-      const shouldAbortCurrentFetch = this.#shouldCurrentFetchBeAborted();
+    if (
+      this.#state.phase.type === 'fetching' &&
+      this.#shouldCurrentFetchBeAborted()
+    ) {
+      this.#forceAbortCurrentFetch();
+    }
 
-      if (shouldAbortCurrentFetch) {
-        this.#forceAbortCurrentFetch();
-      } else {
-        this.#addToScheduledRequests(
-          requestId,
-          payload,
-          fetchType,
-          startTime,
-          remoteStartCancelable,
-        );
-        return 'scheduled';
-      }
+    // Force-aborting starts the work queued behind the aborted fetch, which
+    // can start a new fetch right away when it fills a batch
+    if (this.#state.phase.type === 'fetching') {
+      this.#addToScheduledRequests(
+        requestId,
+        payload,
+        fetchType,
+        startTime,
+        remoteStartCancelable,
+      );
+      return 'scheduled';
     }
 
     if (this.#state.phase.type === 'coalescing') {
@@ -963,10 +979,16 @@ export class RequestScheduler<T> {
       }
     }
 
-    this.#state.abort.controller = null;
+    // A fetch replaced before it settled must not touch the state of the fetch
+    // that replaced it
+    if (this.#state.abort.controller === abortController) {
+      this.#state.abort.controller = null;
+    }
 
     if (!this.#isCurrentFetch(fetchId)) {
-      this.#state.timing.lastFetchStartTime = prevFetchStartTime;
+      if (this.#state.abort.lastFetchId === fetchId) {
+        this.#state.timing.lastFetchStartTime = prevFetchStartTime;
+      }
       return false;
     }
 
@@ -1507,9 +1529,14 @@ export class RequestScheduler<T> {
       const shouldAbortNow = shouldAbortFetch || anyMutation;
 
       if (shouldAbortNow) {
-        this.#state.lastFetchWasAborted = true;
-        for (const requestId of requests.keys()) {
-          this.#state.lastAbortedRequests.add(requestId);
+        // Only the current fetch records its aborted requests: a replaced
+        // fetch settling late would mark the requests of the fetch that
+        // replaced it, e.g. retries, as aborted
+        if (this.#isCurrentFetch(fetchId)) {
+          this.#state.lastFetchWasAborted = true;
+          for (const requestId of requests.keys()) {
+            this.#state.lastAbortedRequests.add(requestId);
+          }
         }
         abortController.abort();
       }

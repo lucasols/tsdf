@@ -1269,6 +1269,60 @@ describe('offset pagination - mutations', () => {
       env.apiStore.getQueryState({ tableId: 'users' })?.items,
     ).toMatchInlineSnapshot(`['"users||2', '"users||3', '"users||4']`);
   });
+
+  test('loadMore interrupted by an optimistic create still requests the next page', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 2,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+
+    // Load the first page: users 1 and 2
+    env.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' });
+    await flushAllTimers();
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Request the next page from offset 2, then optimistically append a new
+    // user while it is in flight. The append aborts the loadMore, which is
+    // retried after the create ends.
+    env.apiStore.loadMore({ tableId: 'users' });
+    await advanceTime(100);
+    void env.apiStore.performMutation('users||7', {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState(
+          'users||7',
+          { id: 7, name: 'User 7' },
+          {
+            addItemToQueries: {
+              queries: { tableId: 'users' },
+              appendTo: 'end',
+            },
+          },
+        );
+      },
+      mutation: () =>
+        env.serverTable.delayedSetItem('users||7', { id: 7, name: 'User 7' }),
+    });
+
+    await flushAllTimers();
+
+    // The appended user isn't part of the server's first page, so the retry
+    // still requests offset 2. Continuing after the 3 loaded items would skip
+    // users||3.
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+        - { limit: 2, offset: 2 }
+        - { limit: 2, offset: 2 }
+      `);
+    expect(
+      env.apiStore.getQueryState({ tableId: 'users' })?.items,
+    ).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||7', '"users||3', '"users||4']`,
+    );
+  });
 });
 
 describe('offset pagination - awaitListQueryFetch', () => {

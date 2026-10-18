@@ -475,16 +475,16 @@ test('awaitFetch calls interrupted by a mutation resolve with the retried batch 
   // instead of an AbortedStoreError for the interrupted batch
   expect({ item1: await item1Promise, item2: await item2Promise })
     .toMatchInlineSnapshot(`
-    item1:
-      data:
-        value: { v: 1 }
-      error: null
+      item1:
+        data:
+          value: { v: 1 }
+        error: null
 
-    item2:
-      data:
-        value: { v: 2 }
-      error: null
-  `);
+      item2:
+        data:
+          value: { v: 2 }
+        error: null
+    `);
 });
 
 test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
@@ -526,6 +526,43 @@ test('deleting an item while its batch refetch is in flight keeps it deleted', a
   `);
   expect(env.apiStore.getItemState('item1')).toBe(null);
   expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+});
+
+test('awaitFetch interrupted by deleting the item resolves without waiting for the timeout', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 } },
+    { testScenario: 'loaded' },
+  );
+
+  const fetchResult = createLoggerStore();
+  void env.apiStore.awaitFetch('item1').then((result) => {
+    fetchResult.add({ error: result.error?.message ?? null });
+  });
+  await advanceTime(100);
+  fetchResult.addMark('item1 is deleted while its awaited fetch is in flight');
+
+  // The delete aborts the fetch and drops its retry along with the item's
+  // scheduler
+  void env.apiStore.performMutation('item1', {
+    optimisticUpdate: () => {
+      env.apiStore.deleteItemState('item1');
+    },
+    mutation: () => env.serverTable.delayedRemoveItem('item1'),
+  });
+
+  // The caller learns right away that the item is gone instead of waiting
+  // 30s for a timeout error
+  await advanceTime(10);
+  expect(fetchResult.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> item1 is deleted while its awaited fetch is in flight
+
+    -> error: Not found
+    "
+  `);
+
+  await flushAllTimers();
 });
 
 test.each([
