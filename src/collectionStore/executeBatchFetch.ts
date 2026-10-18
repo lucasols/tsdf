@@ -88,6 +88,13 @@ export async function executeBatchFetch<
       );
 
       if (!fetchResult.ok) {
+        if (fetchCtx.shouldAbort()) {
+          for (const { requestId } of requests) {
+            results.set(requestId, false);
+          }
+          return results;
+        }
+
         const error = normalizeFetchResultError(fetchResult, errorNormalizer);
 
         store.produceState(

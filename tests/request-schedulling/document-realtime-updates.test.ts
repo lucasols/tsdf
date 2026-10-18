@@ -383,7 +383,6 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
     3.34s | 2  | ⬛ <mutation-data-persisted (value: 2)
     .     | 2  | -- mutation 2 completes, new RTU fetch starts
     3.39s | 2  | received-ws-data-change-event
-    3.7s  | 2  | scheduled-rt-fetch-started
     3.71s | 2  | 🟡 >fetch-started
     4.51s | 2  | 🟡 <fetch-finished (value: 2)
     "
@@ -541,7 +540,6 @@ test('rtu mutations without optimistic updates', async () => {
     3.34s | 0  | ⬛ <mutation-data-persisted (value: 2)
     .     | 0  | -- mutation 2 completes, RTU fetch updates UI
     3.39s | 0  | received-ws-data-change-event
-    3.7s  | 0  | scheduled-rt-fetch-started
     3.71s | 0  | 🟡 >fetch-started
     4.51s | 0  | 🟡 <fetch-finished (value: 2)
     .     | 2  | ui-changed

@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -306,4 +306,101 @@ test('coalesces multiple fetches for the same item', async () => {
   expect(env.apiStore.getItemState('item1')?.data?.value).toMatchInlineSnapshot(
     `v: 1`,
   );
+});
+
+test('fetch interrupted by a mutation is retried after the mutation ends', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 } },
+    { testScenario: 'loaded' },
+  );
+
+  renderHook(() => {
+    const { status, data } = env.apiStore.useItem('item1');
+    env.trackItemUI('item1', `${status}:${data?.value.v ?? '-'}`);
+  });
+
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', 'item1');
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation without revalidation starts while the refetch is in flight',
+  ]);
+  void env.performClientUpdateAction('item1', { v: 1 });
+
+  await flushAllTimers();
+
+  // The aborted refetch must not leave the item stuck on refetching: it is
+  // retried once the mutation lock is released
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1     |
+    0     | success:0 | ui-initialized
+    10ms  | success:0 | 🔴 >fetch-started
+    810ms | success:0 | 🔴 <fetch-finished (value: {"v":0})
+    .     | success:0 | scheduled-fetch-triggered
+    820ms | success:0 | 🟠 >fetch-started
+    910ms | success:0 | -- Mutation without revalidation starts while the refetch is in flight
+    .     | success:0 | 🟠 <fetch-aborted 🚫
+    .     | success:0 | ⬜ >mutation-started (value: {"v":1})
+    1.75s | success:0 | ⬜ <mutation-data-persisted (value: {"v":1})
+    2.12s | success:0 | 🟡 >fetch-started
+    2.92s | success:0 | 🟡 <fetch-finished (value: {"v":1})
+    .     | success:1 | ui-changed
+    "
+  `);
+  expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+});
+
+test('mutation on one item does not drop an in-flight batch fetch of other items', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  renderHook(() => {
+    const item1 = env.apiStore.useItem('item1');
+    const item2 = env.apiStore.useItem('item2');
+    env.trackItemUI('item1', `${item1.status}:${item1.data?.value.v ?? '-'}`);
+    env.trackItemUI('item2', `${item2.status}:${item2.data?.value.v ?? '-'}`);
+  });
+
+  await flushAllTimers();
+
+  // Both items are refetched in the same batch request
+  env.scheduleFetch('highPriority', 'item1');
+  env.scheduleFetch('highPriority', 'item2');
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation on item1 starts while the item1+item2 batch fetch is in flight',
+  ]);
+  void env.performClientUpdateAction('item1', { v: 1 });
+
+  await flushAllTimers();
+
+  // Neither item may stay stuck on refetching: item2 is refetched as soon as
+  // the aborted batch settles and item1 after its mutation ends
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1     | item2     |
+    0     | success:0 | success:0 | [item1, item2] ui-initialized
+    10ms  | success:0 | success:0 | 🔴 [item1] >fetch-started
+    810ms | success:0 | success:0 | 🔴 [item1] <fetch-finished (value: {"v":0})
+    .     | success:0 | success:0 | [item1] scheduled-fetch-triggered
+    820ms | success:0 | success:0 | 🟠 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    910ms | success:0 | success:0 | -- Mutation on item1 starts while the item1+item2 batch fetch is in flight
+    .     | success:0 | success:0 | 🟠 <list-fetch-aborted 🚫
+    .     | success:0 | success:0 | ⬜ [item1] >mutation-started (value: {"v":1})
+    1.63s | success:0 | success:0 | 🟡 [item2] >fetch-started
+    1.75s | success:0 | success:0 | ⬜ [item1] <mutation-data-persisted (value: {"v":1})
+    2.43s | success:0 | success:0 | 🟡 [item2] <fetch-finished (value: {"v":0})
+    2.44s | success:0 | success:0 | 🟢 [item1] >fetch-started
+    3.24s | success:0 | success:0 | 🟢 [item1] <fetch-finished (value: {"v":1})
+    .     | success:1 | success:0 | [item1] ui-changed
+    "
+  `);
+  expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+  expect(env.apiStore.getItemState('item2')?.status).toBe('success');
 });

@@ -815,3 +815,91 @@ test('a mounted item that never loaded fetches immediately on a realtime invalid
   expect(item2.result.current.status).toBe('success');
   expect(item2.result.current.data?.name).toBe('User 2 updated');
 });
+
+test('query refetch interrupted by an item mutation is retried after the mutation ends', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const { status, items } = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { returnRefetchingStatus: true, disableRefetchOnMount: true },
+    );
+
+    renders.add({ status, firstItem: items[0]?.name });
+  });
+
+  // Refetch the query, then mutate one of its items while it is in flight.
+  // The mutation locks the query and aborts the refetch to avoid a stale commit.
+  env.scheduleFetch('highPriority', { tableId: 'users' });
+  await advanceTime(100);
+  renders.addMark('item mutation starts');
+  void env.performClientItemUpdateAction('users||1', { name: 'Renamed' });
+
+  await flushAllTimers();
+
+  // The aborted refetch is retried after the mutation instead of leaving the
+  // query stuck on refetching, and it commits the mutated server value
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ firstItem: User 1
+    -> status: refetching ⋅ firstItem: User 1
+
+    >>> item mutation starts
+
+    -> status: success ⋅ firstItem: Renamed
+    "
+  `);
+});
+
+test('item mutation does not error or drop an in-flight batch fetch of other items', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+    useBatchFetch: true,
+  });
+
+  const renders = createLoggerStore();
+
+  renderHook(() => {
+    const item1 = env.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+    const item2 = env.apiStore.useItem('users||2', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      item1: `${item1.status}:${item1.data?.name}`,
+      item2: `${item2.status}:${item2.data?.name}`,
+    });
+  });
+
+  // Both items are refetched in the same batch request
+  env.scheduleItemFetch('highPriority', 'users||1');
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await advanceTime(100);
+  renders.addMark('users||1 mutation starts');
+  void env.performClientItemUpdateAction('users||1', { name: 'Renamed' });
+
+  await flushAllTimers();
+
+  // The aborted batch must not surface as an error, and both items are
+  // retried: users||2 right after the aborted batch settles and users||1
+  // after its mutation ends
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> item1: success:User 1 ⋅ item2: success:User 2
+    -> item1: refetching:User 1 ⋅ item2: refetching:User 2
+
+    >>> users||1 mutation starts
+
+    -> item1: refetching:User 1 ⋅ item2: success:User 2
+    -> item1: success:Renamed ⋅ item2: success:User 2
+    "
+  `);
+});

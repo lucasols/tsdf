@@ -73,10 +73,7 @@ type SchedulerPhase<T> =
       fetchId: number;
       startTime: number;
       /** Requests being fetched with their await callbacks */
-      fetchingRequests: Map<
-        string,
-        { awaitCallbacks: Array<(wasAborted: boolean) => void> }
-      >;
+      fetchingRequests: Map<string, PendingRequest<T>>;
       /** Realtime updates received during the fetch, keyed by requestId, to
        * be rescheduled after it completes */
       rtuAfterFetch: Map<string, QueuedRequest<T>>;
@@ -414,8 +411,6 @@ export class RequestScheduler<T> {
     const currentCount = pending.mutationsInProgress.get(requestId) ?? 0;
     pending.mutationsInProgress.set(requestId, currentCount + 1);
 
-    abort.abortBoundary = abort.lastFetchId;
-
     if (phase.type === 'coalescing') {
       const request = phase.pendingRequests.get(requestId);
       if (request) {
@@ -429,10 +424,27 @@ export class RequestScheduler<T> {
       }
     }
 
-    if (phase.type === 'fetching') {
-      if (phase.fetchingRequests.has(requestId) && abort.controller) {
-        abort.controller.abort();
-        abort.controller = null;
+    // Only a fetch that includes the mutated request can commit stale data.
+    // Batch schedulers share one fetch across requests, so a fetch of other
+    // requests must keep running.
+    if (phase.type === 'fetching' && phase.fetchingRequests.has(requestId)) {
+      abort.abortBoundary = phase.fetchId;
+      abort.controller?.abort();
+      abort.controller = null;
+
+      // The aborted fetch commits nothing for any of its requests, so all of
+      // them are retried: the mutated ones when their mutation ends and the
+      // others as soon as the aborted fetch settles
+      const addedAt = Date.now();
+      for (const [fetchingRequestId, request] of phase.fetchingRequests) {
+        this.#state.lastAbortedRequests.add(fetchingRequestId);
+        this.#addToScheduledRequests(
+          fetchingRequestId,
+          request.payload,
+          request.priority,
+          addedAt,
+          request.remoteStartCancelable,
+        );
       }
     }
 
@@ -847,12 +859,10 @@ export class RequestScheduler<T> {
       this.setLastFetchStartTimeForRequest(requestId, startTime);
     }
 
-    const fetchingRequests = new Map<
-      string,
-      { awaitCallbacks: Array<(wasAborted: boolean) => void> }
-    >();
+    const fetchingRequests = new Map<string, PendingRequest<T>>();
     for (const [requestId, request] of requests) {
       fetchingRequests.set(requestId, {
+        ...request,
         awaitCallbacks: [...request.awaitCallbacks],
       });
     }

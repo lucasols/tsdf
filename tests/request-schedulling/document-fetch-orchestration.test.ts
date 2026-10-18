@@ -960,3 +960,40 @@ test('low priority fetch during mutation inside throttle window', async () => {
     "
   `);
 });
+
+test('fetch interrupted by a mutation is retried after the mutation ends', async () => {
+  const env = createDocumentStoreTestEnv(0, { testScenario: 'idle' });
+
+  renderHook(() => {
+    const { status, data } = env.apiStore.useDocument();
+    env.trackUIChanges(`${status}:${data?.value ?? '-'}`);
+  });
+
+  // Mounting the hook starts the initial fetch
+  await advanceTime(100);
+
+  env.addTimelineComments('beforeNextAction', [
+    'Mutation without revalidation starts while the initial fetch is in flight',
+  ]);
+  void env.performClientUpdateAction(1);
+
+  await flushAllTimers();
+
+  // The aborted fetch must not leave the UI stuck on loading: it is retried
+  // once the mutation lock is released and commits the latest server value
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui          |
+    0     | "loading:-" | ui-initialized
+    10ms  | "loading:-" | 🔴 >fetch-started
+    100ms | "loading:-" | -- Mutation without revalidation starts while the initial fetch is in flight
+    .     | "loading:-" | 🔴 <fetch-aborted 🚫
+    .     | "loading:-" | ⬜ >mutation-started (value: 1)
+    940ms | "loading:-" | ⬜ <mutation-data-persisted (value: 1)
+    1.31s | "loading:-" | 🟠 >fetch-started
+    2.11s | "loading:-" | 🟠 <fetch-finished (value: 1)
+    .     | "success:1" | ui-changed
+    "
+  `);
+  expect(env.apiStore.store.state.status).toBe('success');
+});
