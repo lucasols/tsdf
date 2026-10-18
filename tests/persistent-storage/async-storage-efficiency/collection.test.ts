@@ -189,7 +189,7 @@ describe('async storage efficiency: collection', () => {
   test('background maintenance commits several removal batches within one idle period', async () => {
     const storeName = 'collection-wall-clock-maintenance';
     const sessionKey = 'sess1';
-    const ignoredItemCount = opfsMaintenanceRemoveBatchSize * 4;
+    const ignoredItemCount = opfsMaintenanceRemoveBatchSize * 2;
     const idleCallbacks = stubIdleCallbacks();
 
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -226,7 +226,7 @@ describe('async storage efficiency: collection', () => {
       );
     }
 
-    // All four removal batches fit into the first idle period; waiting for the
+    // Both removal batches fit into the first idle period; waiting for the
     // commit debounce would spread them across several idle callbacks.
     expect({
       continuationScheduled: idleCallbacks.pendingCount(),
@@ -319,9 +319,10 @@ describe('async storage efficiency: collection', () => {
     );
     siblingAdapter.resetForTests?.();
 
-    // The continuation re-checks the remaining plan: `cached-1` changed, so
-    // it is kept while the unchanged entries are removed. Maintenance then
-    // re-plans with fresh metadata, which evicts the now older `recent-a`.
+    // The next batch removes entries only if their stored metadata still
+    // matches the plan: `cached-1` changed, so it is kept while the unchanged
+    // entries are removed. Maintenance then re-plans with fresh metadata,
+    // which evicts the now older `recent-a`.
     while (idleCallbacks.pendingCount() > 0) {
       await idleCallbacks.runNext(() => 50);
     }

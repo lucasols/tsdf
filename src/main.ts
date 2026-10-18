@@ -91,6 +91,7 @@ export type {
   AsyncStorageDriverSetEntry,
   AsyncStorageMetadataOrder,
   AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitConditionalRemove,
   AsyncStorageNamespaceCommitTouch,
   AsyncStorageNamespaceCommitUpsert,
   AsyncStorageNamespaceGetResult,

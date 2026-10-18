@@ -6,6 +6,7 @@ import {
   createIndexedDbPersistentStorageForTests,
   type IndexedDbPersistentStorageOperation,
 } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
+import type { AsyncStorageNamespaceCommitConditionalRemove } from '../../src/persistentStorage/types';
 import { pick } from '../utils/genericTestUtils';
 import { getParsedIndexedDbRecordData } from '../utils/indexedDbPersistentStorageOptimizationTestUtils';
 import { createIndexedDbPersistentStorageTestStore } from '../utils/indexedDbPersistentStorageTestStore';
@@ -253,6 +254,56 @@ describe('indexeddb persistent storage adapter', () => {
       type: 'syncSessionProtectedKeys'
       values: ['["sess1","protected-doc","d","document"]']
     `);
+
+    adapter.resetForTests?.();
+  });
+
+  test('conditional removes keep entries changed after they were read inside the commit transaction', async () => {
+    const { adapter } = createIndexedDbPersistentStorageForTests({
+      databaseName: `tsdf-idb-conditional-${Math.random().toString(36).slice(2, 10)}`,
+    });
+    const scope = {
+      kind: 'collection.item',
+      sessionKey: 'sess1',
+      storeName: 'conditional-removes',
+    } as const;
+    const namespace = adapter.openNamespace<{ value: string }, { o?: true }>(
+      scope,
+    );
+
+    await namespace.commit({
+      upserts: ['a', 'b', 'c'].map((key) => ({
+        key,
+        value: { value: key },
+        version: 1,
+      })),
+    });
+
+    // Cleanup plans its removals from this metadata snapshot.
+    const plannedRemoves = (await namespace.listMetadata()).map(
+      (entry): AsyncStorageNamespaceCommitConditionalRemove => ({
+        key: entry.key,
+        lastAccessAt: entry.lastAccessAt,
+        sizeBytes: entry.sizeBytes,
+        version: entry.version,
+        offlineProtected: entry.customMetadata.o === true,
+      }),
+    );
+
+    // After planning, `b` is read again and `c` becomes offline-protected.
+    await namespace.commit({
+      touches: [{ key: 'b', lastAccessAt: Date.now() + 60_000 }],
+    });
+    await adapter.syncSessionProtectedKeys(
+      'sess1',
+      [serializeProtectedRef({ ...scope, key: 'c' })],
+      [],
+    );
+
+    await namespace.commit({ conditionalRemoves: plannedRemoves });
+
+    // Only the unchanged `a` is removed.
+    expect(await namespace.listKeys()).toMatchInlineSnapshot(`['b', 'c']`);
 
     adapter.resetForTests?.();
   });

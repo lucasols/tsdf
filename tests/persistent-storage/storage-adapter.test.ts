@@ -26,6 +26,7 @@ import type {
   AsyncStorageDiscoveredScope,
   AsyncStorageDriver,
   AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitConditionalRemove,
   AsyncStorageNamespaceScope,
   PersistentStorageSchema,
 } from '../../src/persistentStorage/types';
@@ -888,6 +889,66 @@ describe('persistent storage integration', () => {
       value:
         nested: { count: 1 }
     `);
+  });
+
+  test('async adapter conditional removes keep entries that changed after they were read', async () => {
+    const driver = createInMemoryAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driver);
+    const namespace = adapter.openNamespace<{ value: string }>({
+      sessionKey: 'sess1',
+      storeName: 'async-conditional-removes',
+      kind: 'collection.item',
+    });
+
+    const seedPromise = namespace.commit({
+      upserts: ['a', 'b', 'c', 'd'].map((key) => ({
+        key,
+        value: { value: key },
+        version: 1,
+      })),
+    });
+    await flushAllTimers();
+    await seedPromise;
+
+    // Cleanup plans its removals from this metadata snapshot.
+    const plannedRemoves = (await namespace.listMetadata()).map(
+      (entry): AsyncStorageNamespaceCommitConditionalRemove => ({
+        key: entry.key,
+        lastAccessAt: entry.lastAccessAt,
+        sizeBytes: entry.sizeBytes,
+        version: entry.version,
+        offlineProtected: entry.customMetadata.o === true,
+      }),
+    );
+
+    // `b` is read after planning, so its access time no longer matches.
+    vi.setSystemTime(TEST_INITIAL_TIME + 60 * 60 * 1000);
+    const touchPromise = namespace.commit({ touches: [{ key: 'b' }] });
+    await flushAllTimers();
+    await touchPromise;
+
+    // Within one batching window: `c` gets a write queued before the
+    // conditional removes and `d` one queued after them. Both writes win.
+    const writesAndRemoves = Promise.all([
+      namespace.commit({
+        upserts: [{ key: 'c', value: { value: 'c updated' }, version: 1 }],
+      }),
+      namespace.commit({ conditionalRemoves: plannedRemoves }),
+      namespace.commit({
+        upserts: [{ key: 'd', value: { value: 'd updated' }, version: 1 }],
+      }),
+    ]);
+    await flushAllTimers();
+    await writesAndRemoves;
+
+    // Only the unchanged `a` is removed.
+    expect(
+      await Promise.all(
+        ['a', 'b', 'c', 'd'].map(
+          async (key) => (await namespace.get(key))?.value.value ?? null,
+        ),
+      ),
+    ).toMatchInlineSnapshot(`[null, 'b', 'c updated', 'd updated']`);
   });
 
   test('async adapter returns cloned payload snapshots from the read cache', async () => {

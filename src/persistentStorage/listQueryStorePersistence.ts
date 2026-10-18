@@ -2366,11 +2366,10 @@ export function setupListQueryPersistence<
     // The namespace resolves the active session on every call, so the run
     // stops once it no longer matches the session it planned for.
     const isSessionCurrent = () => config.getSessionKey() === sessionKey;
-    const readMetadata = () =>
-      listAllPersistentStorageNamespaceMetadata(queryNamespace, {
-        order: 'lru-desc',
-      });
-    const metadataEntries = await readMetadata();
+    const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
+      queryNamespace,
+      { order: 'lru-desc' },
+    );
     if (!isSessionCurrent()) {
       knownPersistedQueryKeys = null;
       return incompleteResult;
@@ -2378,8 +2377,7 @@ export function setupListQueryPersistence<
     if (idleContext.isCanceled()) return incompleteResult;
 
     // The plan is built from this snapshot even if scanning spans several
-    // idle callbacks; removals re-check entries changed after it was read.
-    const metadataContinuationCount = idleContext.getContinuationCount();
+    // idle callbacks; removals keep entries that changed after it was read.
     const protectedQueryKeys = new Set<string>();
     const removalEntries: typeof metadataEntries = [];
     const validEntries: Array<{
@@ -2437,15 +2435,10 @@ export function setupListQueryPersistence<
 
     const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
       removalEntries,
-      metadataContinuationCount,
-      readMetadata,
       isAsyncStorageMetadataOfflineProtected,
-      async (batchKeys) => {
-        await queryNamespace.commit({ removes: batchKeys }, true);
-        // The batch was committed for the planned session; skip in-memory
-        // bookkeeping that would now apply to another session's caches.
-        if (!isSessionCurrent()) return;
-        for (const queryKey of batchKeys) {
+      (entries) => queryNamespace.removeEntriesIfUnchanged(entries),
+      (removedKeys) => {
+        for (const queryKey of removedKeys) {
           const entry = budgetEvictedEntries.get(queryKey);
           if (entry === undefined) continue;
           rememberBudgetEvictedEntry(
@@ -2835,11 +2828,10 @@ export function setupListQueryPersistence<
     // The namespace resolves the active session on every call, so the run
     // stops once it no longer matches the session it planned for.
     const isSessionCurrent = () => config.getSessionKey() === sessionKey;
-    const readMetadata = () =>
-      listAllPersistentStorageNamespaceMetadata(itemNamespace, {
-        order: 'lru-desc',
-      });
-    const itemMetadataEntries = await readMetadata();
+    const itemMetadataEntries = await listAllPersistentStorageNamespaceMetadata(
+      itemNamespace,
+      { order: 'lru-desc' },
+    );
     if (!isSessionCurrent()) {
       knownPersistedItemKeys = null;
       return;
@@ -2847,8 +2839,7 @@ export function setupListQueryPersistence<
     if (idleContext.isCanceled()) return;
 
     // The plan is built from this snapshot even if scanning spans several
-    // idle callbacks; removals re-check entries changed after it was read.
-    const metadataContinuationCount = idleContext.getContinuationCount();
+    // idle callbacks; removals keep entries that changed after it was read.
     const protectedItemKeys = new Set<string>();
     const removalEntries: typeof itemMetadataEntries = [];
     const ignoredItemKeys = new Set<string>();
@@ -2912,15 +2903,10 @@ export function setupListQueryPersistence<
 
     const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
       removalEntries,
-      metadataContinuationCount,
-      readMetadata,
       isAsyncStorageMetadataOfflineProtected,
-      async (batchKeys) => {
-        await itemNamespace.commit({ removes: batchKeys }, true);
-        // The batch was committed for the planned session; skip in-memory
-        // bookkeeping that would now apply to another session's caches.
-        if (!isSessionCurrent()) return;
-        for (const itemKey of batchKeys) {
+      (entries) => itemNamespace.removeEntriesIfUnchanged(entries),
+      (removedKeys) => {
+        for (const itemKey of removedKeys) {
           const entry = budgetEvictedEntries.get(itemKey);
           if (entry !== undefined) {
             rememberBudgetEvictedEntry(

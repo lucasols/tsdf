@@ -1030,11 +1030,10 @@ export function setupCollectionPersistence<
     // The namespace resolves the active session on every call, so the run
     // stops once it no longer matches the session it planned for.
     const isSessionCurrent = () => config.getSessionKey() === sessionKey;
-    const readMetadata = () =>
-      listAllPersistentStorageNamespaceMetadata(namespace, {
-        order: 'lru-desc',
-      });
-    const metadataEntries = await readMetadata();
+    const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
+      namespace,
+      { order: 'lru-desc' },
+    );
     if (!isSessionCurrent()) {
       knownPersistedKeys = null;
       return;
@@ -1042,8 +1041,7 @@ export function setupCollectionPersistence<
     if (idleContext.isCanceled() || metadataEntries.length === 0) return;
 
     // The plan is built from this snapshot even if scanning spans several
-    // idle callbacks; removals re-check entries changed after it was read.
-    const metadataContinuationCount = idleContext.getContinuationCount();
+    // idle callbacks; removals keep entries that changed after it was read.
     const protectedItemKeys = new Set<string>();
     const removalEntries: typeof metadataEntries = [];
     const ignoredItemKeys = new Set<string>();
@@ -1104,15 +1102,10 @@ export function setupCollectionPersistence<
 
     const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
       removalEntries,
-      metadataContinuationCount,
-      readMetadata,
       isAsyncStorageMetadataOfflineProtected,
-      async (batchKeys) => {
-        await namespace.commit({ removes: batchKeys }, true);
-        // The batch was committed for the planned session; skip in-memory
-        // bookkeeping that would now apply to another session's caches.
-        if (!isSessionCurrent()) return;
-        for (const itemKey of batchKeys) {
+      (entries) => namespace.removeEntriesIfUnchanged(entries),
+      (removedKeys) => {
+        for (const itemKey of removedKeys) {
           if (
             ignoredItemKeys.has(itemKey) ||
             budgetEvictedItemKeys.has(itemKey)

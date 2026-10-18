@@ -1,5 +1,7 @@
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import type { ValidPayload } from '../utils/storeShared';
 import type { IdleCleanupContext } from './scheduleIdleCleanup';
+import type { AsyncStorageNamespaceCommitConditionalRemove } from './types';
 
 const MAINTENANCE_SORT_CHUNK_SIZE = 100;
 const MAINTENANCE_LOOP_CHUNK_SIZE = 25;
@@ -89,78 +91,55 @@ type AsyncMaintenanceMetadataEntry = {
 };
 
 /**
- * Removes planned async maintenance entries in bounded commits. Idle
- * continuations let other code and tabs write, so after each continuation the
- * remaining plan is checked against freshly read metadata and entries changed
- * since planning are skipped as stale. The plan itself is never restarted, so
- * every deadline makes progress. `shouldContinue` is checked before every read
- * and commit so a plan never outlives the session it was built for.
+ * Removes planned async maintenance entries in bounded batches. Each batch is
+ * a conditional remove, so entries other code or tabs changed since planning
+ * are kept as stale in the same write instead of being deleted through an
+ * outdated plan. The plan itself is never restarted, so every deadline makes
+ * progress. `shouldContinue` is checked around every batch so a plan never
+ * outlives the session it was built for; `onRemoved` only runs while it holds.
  */
 export async function removeAsyncMaintenanceEntriesIfUnchanged<
   T extends AsyncMaintenanceMetadataEntry,
 >(
   plannedEntries: T[],
-  metadataContinuationCount: number,
-  readMetadata: () => Promise<T[]>,
   isOfflineProtected: (customMetadata: T['customMetadata']) => boolean,
-  commitRemoves: (keys: string[]) => Promise<void>,
+  removeIfUnchanged: (
+    entries: AsyncStorageNamespaceCommitConditionalRemove[],
+  ) => Promise<ReadonlySet<string> | null>,
+  onRemoved: (keys: string[]) => void,
   batchSize: number,
   shouldContinue: () => boolean,
   idleContext: IdleCleanupContext,
 ): Promise<{ completed: boolean; hasStaleEntries: boolean }> {
   let hasStaleEntries = false;
-  let validatedContinuationCount = metadataContinuationCount;
-  let pendingEntries = plannedEntries;
-  let batchStart = 0;
 
-  while (batchStart < pendingEntries.length) {
+  for (
+    let batchStart = 0;
+    batchStart < plannedEntries.length;
+    batchStart += batchSize
+  ) {
     if (!(await idleContext.yieldIfNeeded()) || !shouldContinue()) {
       return { completed: false, hasStaleEntries };
     }
 
-    if (idleContext.getContinuationCount() !== validatedContinuationCount) {
-      validatedContinuationCount = idleContext.getContinuationCount();
-      const currentMetadata = await readMetadata();
-      if (idleContext.isCanceled() || !shouldContinue()) {
-        return { completed: false, hasStaleEntries };
-      }
-      // Failed driver reads also come back empty, so re-plan instead of
-      // treating every pending entry as removed elsewhere.
-      if (currentMetadata.length === 0) {
-        return { completed: true, hasStaleEntries: true };
-      }
-
-      const currentEntries = new Map<string, T>();
-      for (const entry of currentMetadata) {
-        currentEntries.set(entry.key, entry);
-      }
-
-      pendingEntries = pendingEntries.slice(batchStart).filter((planned) => {
-        const current = currentEntries.get(planned.key);
-        // Already removed elsewhere.
-        if (current === undefined) return false;
-
-        const unchanged =
-          current.lastAccessAt === planned.lastAccessAt &&
-          current.sizeBytes === planned.sizeBytes &&
-          current.version === planned.version &&
-          isOfflineProtected(current.customMetadata) ===
-            isOfflineProtected(planned.customMetadata);
-        if (!unchanged) hasStaleEntries = true;
-        return unchanged;
-      });
-      batchStart = 0;
-      if (pendingEntries.length === 0) break;
-    }
-
-    const batchKeys = pendingEntries
+    const batch = plannedEntries
       .slice(batchStart, batchStart + batchSize)
-      .map((entry) => entry.key);
-    batchStart += batchSize;
-    await commitRemoves(batchKeys);
-    if (idleContext.isCanceled() || !shouldContinue()) {
+      .map((entry) => ({
+        key: entry.key,
+        lastAccessAt: entry.lastAccessAt,
+        sizeBytes: entry.sizeBytes,
+        version: entry.version,
+        offlineProtected: isOfflineProtected(entry.customMetadata),
+      }));
+    const staleKeys = await removeIfUnchanged(batch);
+    if (staleKeys === null || idleContext.isCanceled() || !shouldContinue()) {
       return { completed: false, hasStaleEntries };
     }
+
+    if (staleKeys.size > 0) hasStaleEntries = true;
+    onRemoved(
+      filterAndMap(batch, ({ key }) => (staleKeys.has(key) ? false : key)),
+    );
   }
 
   return { completed: true, hasStaleEntries };

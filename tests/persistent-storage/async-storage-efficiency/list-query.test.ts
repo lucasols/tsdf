@@ -118,9 +118,10 @@ describe('async storage efficiency: list-query', () => {
       cachedStorageKeys[1] ?? '',
     ]);
 
-    // The continuation re-checks the remaining plan: `cached||1` changed, so
-    // it is kept while the unchanged items are removed. Maintenance then
-    // re-plans with fresh metadata, where the protected item stays.
+    // The next batch removes items only if their stored metadata still
+    // matches the plan: `cached||1` changed, so it is kept while the
+    // unchanged items are removed. Maintenance then re-plans with fresh
+    // metadata, where the protected item stays.
     while (idleCallbacks.pendingCount() > 0) {
       await idleCallbacks.runNext(() => 50);
     }

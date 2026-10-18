@@ -17,6 +17,7 @@ import {
   getNamespaceId,
   getPersistedNamespaceId,
   getPayloadRecordKey,
+  matchesConditionalRemove,
   normalizeStaticPolicy,
   parsePersistedAsyncNamespaceKind,
   parseAsyncStorageRecordKey,
@@ -1128,7 +1129,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         currentCustomMetadata: Record<string, unknown> | undefined,
       ) => Record<string, unknown> | undefined;
     },
-  ): Promise<void> {
+  ): Promise<ReadonlySet<string>> {
     const startTime =
       import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
     const database = await this.#getDatabase();
@@ -1142,6 +1143,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     );
     const upserts = args.upserts ?? [];
     const removes = [...new Set(args.removes ?? [])];
+    const conditionalRemoves = args.conditionalRemoves ?? [];
     const touches = args.touches ?? [];
     const scopeId = createScopeId(
       scope.sessionKey,
@@ -1151,6 +1153,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     const uniqueKeys = [
       ...new Set([
         ...removes,
+        ...conditionalRemoves.map((remove) => remove.key),
         ...touches.map((touch) => touch.key),
         ...upserts.map((upsert) => upsert.key),
       ]),
@@ -1179,6 +1182,27 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         }
       }),
     );
+
+    // Checked inside the same readwrite transaction as the removal.
+    const staleConditionalRemoveKeys = new Set<string>();
+    for (const remove of conditionalRemoves) {
+      const existing = existingEntries.get(remove.key);
+      // Already removed.
+      if (existing === undefined) continue;
+      if (
+        matchesConditionalRemove(
+          remove,
+          existing.a,
+          existing.z,
+          existing.v ?? 1,
+          existing.o === 1,
+        )
+      ) {
+        removes.push(remove.key);
+      } else {
+        staleConditionalRemoveKeys.add(remove.key);
+      }
+    }
 
     for (const key of removes) {
       entryStore.delete(createEntryPrimaryKey(scope, key));
@@ -1292,6 +1316,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         .map((upsert) => upsert.key)
         .sort((left, right) => left.localeCompare(right)),
     });
+    return staleConditionalRemoveKeys;
   }
 
   async readNamespaceIndexState(
