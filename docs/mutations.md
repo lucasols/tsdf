@@ -81,7 +81,7 @@ The payload can be:
 
 ## Mutation Lifecycle
 
-1. **Lock**: The scheduler is locked for the affected items/queries, preventing concurrent fetches. An in-flight fetch for them is aborted so it can't commit stale data, and it is retried once the lock is released
+1. **Lock**: The scheduler is locked for the affected items/queries, preventing concurrent fetches. An in-flight fetch for them is aborted so it can't commit stale data, and it is retried once the lock is released. Calls awaiting the aborted fetch (e.g. `awaitFetch`, `getItemFromStateOrFetch`) resolve with the retry's result
 2. **Optimistic update**: If provided, runs immediately. If it returns `false`, the mutation is cancelled
 3. **Debounce** (optional): Waits for `ms` milliseconds. During debounce, the window close is blocked
 4. **Execute mutation**: The async mutation function runs

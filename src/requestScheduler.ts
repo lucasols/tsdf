@@ -446,30 +446,34 @@ export class RequestScheduler<T> {
 
         // A request queued during the aborted fetch is newer than the retried
         // one, so its payload takes precedence
-        const queued = pending.scheduledRequests.get(fetchingRequestId);
-        if (queued) {
+        let retry = pending.scheduledRequests.get(fetchingRequestId);
+        if (retry) {
           if (this.#coalescePayload) {
-            queued.payload = this.#coalescePayload(
+            retry.payload = this.#coalescePayload(
               request.payload,
-              queued.payload,
+              retry.payload,
             );
           }
-          queued.priority = getHigherPriorityFetchType(
-            queued.priority,
+          retry.priority = getHigherPriorityFetchType(
+            retry.priority,
             request.priority,
           );
-          queued.remoteStartCancelable =
-            queued.remoteStartCancelable && request.remoteStartCancelable;
-          continue;
+          retry.remoteStartCancelable =
+            retry.remoteStartCancelable && request.remoteStartCancelable;
+        } else {
+          retry = {
+            payload: request.payload,
+            priority: request.priority,
+            addedAt,
+            awaitCallbacks: [],
+            remoteStartCancelable: request.remoteStartCancelable,
+          };
+          pending.scheduledRequests.set(fetchingRequestId, retry);
         }
 
-        this.#addToScheduledRequests(
-          fetchingRequestId,
-          request.payload,
-          request.priority,
-          addedAt,
-          request.remoteStartCancelable,
-        );
+        // Callers awaiting the aborted fetch resolve with the retry's result
+        retry.awaitCallbacks.push(...request.awaitCallbacks);
+        request.awaitCallbacks.length = 0;
       }
     }
 

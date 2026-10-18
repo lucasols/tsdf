@@ -438,6 +438,35 @@ describe('awaitFetch timing', () => {
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
+  test('awaitFetch interrupted by a mutation resolves with the data fetched after the mutation', async () => {
+    const env = createDocumentStoreTestEnv(0, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
+
+    const fetchPromise = env.apiStore.awaitFetch();
+
+    // Let the awaited fetch start
+    await vi.advanceTimersByTimeAsync(100);
+    expect(env.serverMock.numOfStartedFetches).toBe(1);
+
+    // The mutation aborts the in-flight fetch, which is retried after it ends
+    const mutationPromise = env.performClientUpdateAction(1, {
+      duration: 1200,
+    });
+
+    await flushAllTimers();
+    await mutationPromise;
+
+    // The awaiting call gets the retry's result, with the mutated value,
+    // instead of an AbortedStoreError for the interrupted fetch
+    expect(await fetchPromise).toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+    `);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
   test('three awaitFetch calls triggered outside each coalescing window coalesce during ongoing fetch', async () => {
     const env = createDocumentStoreTestEnv(1, {
       testScenario: 'loaded',

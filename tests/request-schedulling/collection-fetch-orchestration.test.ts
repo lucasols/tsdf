@@ -453,6 +453,40 @@ test('retries of a batch aborted by a mutation join the next fetch of another it
   `);
 });
 
+test('awaitFetch calls interrupted by a mutation resolve with the retried batch fetches', async () => {
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { testScenario: 'loaded', useBatchFetch: true },
+  );
+
+  // Both awaited fetches are sent in the same batch request
+  const item1Promise = env.apiStore.awaitFetch('item1');
+  const item2Promise = env.apiStore.awaitFetch('item2');
+  await advanceTime(100);
+
+  // The mutation on item1 aborts the whole batch: item2 is retried as soon as
+  // the aborted request settles and item1 after its mutation ends
+  env.serverTable.updateItem('item2', { v: 2 });
+  void env.performClientUpdateAction('item1', { v: 1 });
+
+  await flushAllTimers();
+
+  // Both callers get the retries' results, including the mutated item1 value,
+  // instead of an AbortedStoreError for the interrupted batch
+  expect({ item1: await item1Promise, item2: await item2Promise })
+    .toMatchInlineSnapshot(`
+    item1:
+      data:
+        value: { v: 1 }
+      error: null
+
+    item2:
+      data:
+        value: { v: 2 }
+      error: null
+  `);
+});
+
 test('deleting an item while its batch refetch is in flight keeps it deleted', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 }, item2: { v: 0 } },
