@@ -1,5 +1,7 @@
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import type { ValidPayload } from '../utils/storeShared';
 import type { IdleCleanupContext } from './scheduleIdleCleanup';
+import type { AsyncStorageNamespaceCommitConditionalRemove } from './types';
 
 const MAINTENANCE_SORT_CHUNK_SIZE = 100;
 const MAINTENANCE_LOOP_CHUNK_SIZE = 25;
@@ -80,6 +82,69 @@ export function serializeJsonForStorage(value: unknown): {
   return { rawValue, sizeBytes: getSerializedStringSize(rawValue) };
 }
 
+type AsyncMaintenanceMetadataEntry = {
+  customMetadata: Record<string, unknown>;
+  key: string;
+  lastAccessAt: number;
+  sizeBytes?: number;
+  version: number;
+};
+
+/**
+ * Removes planned async maintenance entries in bounded batches. Each batch is
+ * a conditional remove, so entries other code or tabs changed since planning
+ * are kept as stale in the same write instead of being deleted through an
+ * outdated plan. The plan itself is never restarted, so every deadline makes
+ * progress. `shouldContinue` is checked around every batch so a plan never
+ * outlives the session it was built for; `onRemoved` only runs while it holds.
+ */
+export async function removeAsyncMaintenanceEntriesIfUnchanged<
+  T extends AsyncMaintenanceMetadataEntry,
+>(
+  plannedEntries: T[],
+  isOfflineProtected: (customMetadata: T['customMetadata']) => boolean,
+  removeIfUnchanged: (
+    entries: AsyncStorageNamespaceCommitConditionalRemove[],
+  ) => Promise<ReadonlySet<string> | null>,
+  onRemoved: (keys: string[]) => void,
+  batchSize: number,
+  shouldContinue: () => boolean,
+  idleContext: IdleCleanupContext,
+): Promise<{ completed: boolean; hasStaleEntries: boolean }> {
+  let hasStaleEntries = false;
+
+  for (
+    let batchStart = 0;
+    batchStart < plannedEntries.length;
+    batchStart += batchSize
+  ) {
+    if (!(await idleContext.yieldIfNeeded()) || !shouldContinue()) {
+      return { completed: false, hasStaleEntries };
+    }
+
+    const batch = plannedEntries
+      .slice(batchStart, batchStart + batchSize)
+      .map((entry) => ({
+        key: entry.key,
+        lastAccessAt: entry.lastAccessAt,
+        sizeBytes: entry.sizeBytes,
+        version: entry.version,
+        offlineProtected: isOfflineProtected(entry.customMetadata),
+      }));
+    const staleKeys = await removeIfUnchanged(batch);
+    if (staleKeys === null || idleContext.isCanceled() || !shouldContinue()) {
+      return { completed: false, hasStaleEntries };
+    }
+
+    if (staleKeys.size > 0) hasStaleEntries = true;
+    onRemoved(
+      filterAndMap(batch, ({ key }) => (staleKeys.has(key) ? false : key)),
+    );
+  }
+
+  return { completed: true, hasStaleEntries };
+}
+
 export type ByteBudgetResult = {
   keptKeys: Set<string>;
   unprotectedBytes: number;
@@ -148,7 +213,7 @@ export function keepEntriesWithinByteBudget<T>(
   return { keptKeys, unprotectedBytes };
 }
 
-/** Deadline-aware variant used by synchronous localStorage maintenance. */
+/** Deadline-aware variant used by background storage maintenance. */
 export async function keepEntriesWithinByteBudgetDuringIdle<T>(
   entries: T[],
   getKey: (entry: T) => string,

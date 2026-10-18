@@ -10,6 +10,7 @@ import {
   compareMetadata,
   getNamespaceId,
   getPayloadRecordKey,
+  matchesConditionalRemove,
   normalizeStaticPolicy,
   parseProtectedRef,
   PAYLOAD_RECORD_PREFIX,
@@ -38,6 +39,8 @@ import type {
   AsyncStorageMaintenanceState,
   AsyncStorageMetadataOrder,
   AsyncStorageNamespaceCommitArgs,
+  ManagedAsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitConditionalRemove,
   AsyncStorageNamespaceCommitUpsert,
   AsyncStorageNamespaceGetResult,
   AsyncStorageNamespaceHandle,
@@ -74,7 +77,7 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   return value;
 }
 
-function isOfflineProtectedMetadata(
+export function isAsyncStorageMetadataOfflineProtected(
   customMetadata: Record<string, unknown> | undefined,
 ): boolean {
   return customMetadata?.o === true;
@@ -88,7 +91,7 @@ export function getProtectedKeysFromMetadata(
 ): Set<string> {
   const keys = new Set<string>();
   for (const entry of entries) {
-    if (isOfflineProtectedMetadata(entry.customMetadata)) {
+    if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
       keys.add(entry.key);
     }
   }
@@ -143,15 +146,15 @@ export function mergeManagedAsyncStorageCustomMetadata(
       protectedKeysSnapshotSet?.has(
         serializeProtectedRef({ ...scope, key }),
       ) === true ||
-        isOfflineProtectedMetadata(nextCustomMetadata) ||
-        isOfflineProtectedMetadata(currentCustomMetadata),
+        isAsyncStorageMetadataOfflineProtected(nextCustomMetadata) ||
+        isAsyncStorageMetadataOfflineProtected(currentCustomMetadata),
     );
   }
 
   return setOfflineProtectionMetadata(
     mergedCustomMetadata,
-    isOfflineProtectedMetadata(nextCustomMetadata) ||
-      isOfflineProtectedMetadata(currentCustomMetadata),
+    isAsyncStorageMetadataOfflineProtected(nextCustomMetadata) ||
+      isAsyncStorageMetadataOfflineProtected(currentCustomMetadata),
   );
 }
 const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
@@ -426,9 +429,13 @@ type AsyncStorageManagedMetadataListArgs = {
 };
 
 export type AsyncStorageManagedDriverCapabilities = {
+  /** Resolves with the `conditionalRemoves` keys kept because they changed. */
   applyManagedCommit?: (
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+    args: ManagedAsyncStorageNamespaceCommitArgs<
+      unknown,
+      Record<string, unknown>
+    >,
     helpers: {
       mergeOfflineProtectionMetadata: (
         key: string,
@@ -436,7 +443,7 @@ export type AsyncStorageManagedDriverCapabilities = {
         currentCustomMetadata: Record<string, unknown> | undefined,
       ) => Record<string, unknown> | undefined;
     },
-  ) => Promise<void>;
+  ) => Promise<ReadonlySet<string> | undefined>;
   clearManagedNamespace?: (scope: AsyncStorageNamespaceScope) => Promise<void>;
   listManagedKeys?: (scope: AsyncStorageNamespaceScope) => Promise<string[]>;
   listManagedMetadata?: (
@@ -866,10 +873,10 @@ class ManagedAsyncStorageNamespaceHandle<
     return keys.map((key) => entryByKey.get(key) ?? null);
   }
 
-  commit(
+  async commit(
     args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<void> {
-    return this.#adapter.queueCommitToNamespace(this.#scope, args);
+    await this.#adapter.queueCommitToNamespace(this.#scope, args);
   }
 
   async listKeys(): Promise<string[]> {
@@ -1028,18 +1035,24 @@ export function unregisterAsyncStartupStoreCleanup(
 
 type PendingNamespaceCommit = {
   cancelFlush: (() => void) | null;
+  conditionalRemoves: Map<string, AsyncStorageNamespaceCommitConditionalRemove>;
   inFlightBarrierKeys: Set<string> | null;
   flushPromise: Promise<void> | null;
   hasStaticPolicyUpdate: boolean;
   removes: Set<string>;
   scope: AsyncStorageNamespaceScope;
+  /** Conditional removes skipped because a later write queued for the key. */
+  staleConditionalRemoveKeys: Set<string>;
   staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
   touches: Map<string, number>;
   upserts: Map<
     string,
     AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>
   >;
-  waiters: Array<{ reject: (error: unknown) => void; resolve: () => void }>;
+  waiters: Array<{
+    reject: (error: unknown) => void;
+    resolve: (staleConditionalRemoveKeys: ReadonlySet<string>) => void;
+  }>;
 };
 
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
@@ -1117,7 +1130,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
       await Promise.all(
         scopesToClear.map((scope) =>
-          this.#clearManagedNamespaceUnlocked(scope),
+          this.#clearManagedNamespaceUnlocked(scope, false),
         ),
       );
     });
@@ -1153,7 +1166,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
         const refs: string[] = [];
         for (const entry of metadataEntries) {
-          if (isOfflineProtectedMetadata(entry.customMetadata)) {
+          if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
             refs.push(serializeProtectedRef({ ...scope, key: entry.key }));
           }
         }
@@ -1250,8 +1263,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             const existingMetadata = indexEntries.get(key);
             if (existingMetadata === undefined) continue;
             if (
-              isOfflineProtectedMetadata(existingMetadata.customMetadata) ===
-              shouldProtect
+              isAsyncStorageMetadataOfflineProtected(
+                existingMetadata.customMetadata,
+              ) === shouldProtect
             ) {
               continue;
             }
@@ -1336,29 +1350,43 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       return (
         pending.upserts.has(key) ||
         pending.removes.has(key) ||
+        pending.conditionalRemoves.has(key) ||
         pending.inFlightBarrierKeys?.has(key) === true
       );
     });
   }
 
+  /** Resolves with the `conditionalRemoves` keys kept because they changed. */
   async queueCommitToNamespace<
     TValue,
     TCustomMetadata extends Record<string, unknown>,
   >(
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
-  ): Promise<void> {
+    args: ManagedAsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<ReadonlySet<string>> {
     const pending = this.#getOrCreatePendingNamespaceCommit(scope);
     const now = Date.now();
 
     for (const touch of args.touches ?? []) {
+      this.#cancelPendingConditionalRemove(pending, touch.key);
       pending.touches.set(touch.key, touch.lastAccessAt ?? now);
     }
 
     for (const remove of args.removes ?? []) {
       pending.upserts.delete(remove);
       pending.touches.delete(remove);
+      pending.conditionalRemoves.delete(remove);
       pending.removes.add(remove);
+    }
+
+    for (const remove of args.conditionalRemoves ?? []) {
+      // A queued write changes the entry after the caller read it.
+      if (pending.upserts.has(remove.key) || pending.touches.has(remove.key)) {
+        pending.staleConditionalRemoveKeys.add(remove.key);
+        continue;
+      }
+      if (pending.removes.has(remove.key)) continue;
+      pending.conditionalRemoves.set(remove.key, remove);
     }
 
     if ('staticPolicy' in args) {
@@ -1367,6 +1395,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     for (const upsert of args.upserts ?? []) {
+      this.#cancelPendingConditionalRemove(pending, upsert.key);
       pending.removes.delete(upsert.key);
       pending.upserts.set(
         upsert.key,
@@ -1380,9 +1409,45 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     this.#schedulePendingNamespaceFlush(pending);
 
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<ReadonlySet<string>>((resolve, reject) => {
       pending.waiters.push({ resolve, reject });
     });
+  }
+
+  /** A later write wins over a queued conditional remove of the same key. */
+  #cancelPendingConditionalRemove(
+    pending: PendingNamespaceCommit,
+    key: string,
+  ): void {
+    if (pending.conditionalRemoves.delete(key)) {
+      pending.staleConditionalRemoveKeys.add(key);
+    }
+  }
+
+  getMaintenanceRemoveBatchSize(): number {
+    return getManagedDriverCapabilities(this.#driver)?.applyManagedCommit !==
+      undefined
+      ? PER_KEY_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE
+      : INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
+  }
+
+  async commitToNamespaceNow<
+    TValue,
+    TCustomMetadata extends Record<string, unknown>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+    args: ManagedAsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<ReadonlySet<string>> {
+    const committed = this.queueCommitToNamespace(scope, args);
+    // A flush already in flight leaves these writes queued for the next one.
+    const flushed = this.flushPendingNamespaceCommit(scope).then(() =>
+      this.flushPendingNamespaceCommit(scope),
+    );
+    const [staleConditionalRemoveKeys] = await Promise.all([
+      committed,
+      flushed,
+    ]);
+    return staleConditionalRemoveKeys;
   }
 
   async flushPendingNamespaceCommit(
@@ -1429,6 +1494,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     const upserts = [...pending.upserts.values()];
     const removes = [...pending.removes];
+    const conditionalRemoves = [...pending.conditionalRemoves.values()];
+    const staleConditionalRemoveKeys = pending.staleConditionalRemoveKeys;
     const hasStaticPolicyUpdate = pending.hasStaticPolicyUpdate;
     const staticPolicy = pending.staticPolicy;
     const touches = [...pending.touches.entries()].map(
@@ -1437,11 +1504,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const inFlightBarrierKeys = new Set([
       ...pending.upserts.keys(),
       ...pending.removes,
+      ...pending.conditionalRemoves.keys(),
     ]);
     const waiters = [...pending.waiters];
     pending.hasStaticPolicyUpdate = false;
     pending.upserts = new Map();
     pending.removes = new Set();
+    pending.conditionalRemoves = new Map();
+    pending.staleConditionalRemoveKeys = new Set();
     pending.staticPolicy = null;
     pending.touches = new Map();
     pending.waiters = [];
@@ -1451,12 +1521,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     if (
       upserts.length === 0 &&
       removes.length === 0 &&
+      conditionalRemoves.length === 0 &&
       touches.length === 0 &&
       !hasStaticPolicyUpdate
     ) {
       this.#pendingNamespaceCommits.delete(namespaceKey);
       for (const waiter of waiters) {
-        waiter.resolve();
+        waiter.resolve(staleConditionalRemoveKeys);
       }
       return;
     }
@@ -1464,10 +1535,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     pending.flushPromise = this.#applyManagedCommit(scope, {
       upserts,
       removes,
+      ...(conditionalRemoves.length > 0 ? { conditionalRemoves } : {}),
       ...(hasStaticPolicyUpdate ? { staticPolicy } : {}),
       touches,
     })
-      .then(() => {
+      .then((committedStaleKeys) => {
+        for (const key of committedStaleKeys) {
+          staleConditionalRemoveKeys.add(key);
+        }
         const currentBucket = getBucketId(Date.now());
         for (const touch of touches) {
           this.#recentTouchedBuckets.set(
@@ -1483,7 +1558,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         }
         this.#pruneRecentTouchedBuckets(currentBucket);
         for (const waiter of waiters) {
-          waiter.resolve();
+          waiter.resolve(staleConditionalRemoveKeys);
         }
       })
       .catch((error: unknown) => {
@@ -1835,12 +1910,19 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     await this.#runWithSessionWriterLock(scope.sessionKey, async () => {
-      await this.#clearManagedNamespaceUnlocked(scope);
+      await this.#clearManagedNamespaceUnlocked(scope, true);
     });
   }
 
+  /**
+   * Commits still pending here were queued after the clear was requested,
+   * because both clear paths flush first. A namespace clear keeps them so
+   * they flush once the writer lock is released; a session clear discards
+   * them with the session data.
+   */
   async #clearManagedNamespaceUnlocked(
     scope: AsyncStorageNamespaceScope,
+    keepPendingCommits: boolean,
   ): Promise<void> {
     const managedCapabilities = getManagedDriverCapabilities(this.#driver);
     if (managedCapabilities?.clearManagedNamespace !== undefined) {
@@ -1852,7 +1934,17 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     this.#broadcastNamespaceInvalidation(scope, 'clear');
     const namespaceKey = getNamespaceId(scope);
     this.#observedScopes.delete(namespaceKey);
-    this.#pendingNamespaceCommits.delete(namespaceKey);
+    const pending = this.#pendingNamespaceCommits.get(namespaceKey);
+    if (pending && keepPendingCommits) {
+      this.#schedulePendingNamespaceFlush(pending);
+    } else if (pending) {
+      this.#pendingNamespaceCommits.delete(namespaceKey);
+      // The discarded writes' callers still need to settle.
+      pending.cancelFlush?.();
+      for (const waiter of pending.waiters) {
+        waiter.resolve(pending.staleConditionalRemoveKeys);
+      }
+    }
     this.clearRecentTouchedBucketsForNamespace(scope);
   }
 
@@ -1871,35 +1963,47 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     };
   }
 
+  /** Resolves with the `conditionalRemoves` keys kept because they changed. */
   async #applyManagedCommit(
     scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
-  ): Promise<void> {
+    args: ManagedAsyncStorageNamespaceCommitArgs<
+      unknown,
+      Record<string, unknown>
+    >,
+  ): Promise<ReadonlySet<string>> {
     const upserts = args.upserts ?? [];
     const removes = [...new Set(args.removes ?? [])];
+    const conditionalRemoves = args.conditionalRemoves ?? [];
     const touches = args.touches ?? [];
     const touchedKeys = [...new Set(touches.map((touch) => touch.key))];
 
     const managedCapabilities = getManagedDriverCapabilities(this.#driver);
     if (managedCapabilities?.applyManagedCommit !== undefined) {
-      await managedCapabilities.applyManagedCommit(scope, args, {
-        mergeOfflineProtectionMetadata: (
-          key,
-          nextCustomMetadata,
-          currentCustomMetadata,
-        ) =>
-          mergeManagedAsyncStorageCustomMetadata(
-            currentCustomMetadata,
-            nextCustomMetadata,
-            getSessionProtectedKeysSnapshot(scope.sessionKey),
-            scope,
+      const reportedStaleKeys = await managedCapabilities.applyManagedCommit(
+        scope,
+        args,
+        {
+          mergeOfflineProtectionMetadata: (
             key,
-          ),
-      });
+            nextCustomMetadata,
+            currentCustomMetadata,
+          ) =>
+            mergeManagedAsyncStorageCustomMetadata(
+              currentCustomMetadata,
+              nextCustomMetadata,
+              getSessionProtectedKeysSnapshot(scope.sessionKey),
+              scope,
+              key,
+            ),
+        },
+      );
       this.#advanceNamespaceReadCacheGeneration(scope);
       this.#invalidateCachedNamespaceIndexState(scope);
 
       for (const key of removes) {
+        this.#invalidateCachedPayloadValue(scope, key);
+      }
+      for (const { key } of conditionalRemoves) {
         this.#invalidateCachedPayloadValue(scope, key);
       }
 
@@ -1908,9 +2012,19 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       }
 
       this.#broadcastNamespaceInvalidation(scope, 'commit');
-      return;
+      // A driver that doesn't report results can't have verified any entry.
+      return (
+        reportedStaleKeys ??
+        new Set(conditionalRemoves.map((remove) => remove.key))
+      );
     }
 
+    // Another tab's write may land before its invalidation message reaches
+    // this tab, so conditional removes are checked against the persisted
+    // index rather than the cached one.
+    if (conditionalRemoves.length > 0) {
+      this.#invalidateCachedNamespaceIndexState(scope);
+    }
     const currentIndexState = await this.#readNamespaceIndexStateUsingDriver(
       this.#driver,
       scope,
@@ -1919,6 +2033,32 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       currentIndexState.valid && currentIndexState.entries !== null
         ? currentIndexState.entries
         : new Map<string, InternalManagedMetadataRecord>();
+
+    // Checked against the same index this commit rewrites, inside the session
+    // writer lock, so no other locked write lands between check and removal.
+    const staleConditionalRemoveKeys = new Set<string>();
+    for (const remove of conditionalRemoves) {
+      if (!currentIndexState.valid) {
+        staleConditionalRemoveKeys.add(remove.key);
+        continue;
+      }
+      const metadata = indexEntries.get(remove.key);
+      // Already removed.
+      if (metadata === undefined) continue;
+      if (
+        matchesConditionalRemove(
+          remove,
+          metadata.lastAccessAt,
+          metadata.sizeBytes,
+          metadata.version,
+          isAsyncStorageMetadataOfflineProtected(metadata.customMetadata),
+        )
+      ) {
+        removes.push(remove.key);
+      } else {
+        staleConditionalRemoveKeys.add(remove.key);
+      }
+    }
 
     const now = Date.now();
     const touchesByKey = new Map(
@@ -2052,6 +2192,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     this.#broadcastNamespaceInvalidation(scope, 'commit');
+    return staleConditionalRemoveKeys;
   }
 
   async #removeManagedKeysUsingDriver(
@@ -2353,10 +2494,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const created: PendingNamespaceCommit = {
       scope,
       cancelFlush: null,
+      conditionalRemoves: new Map(),
       inFlightBarrierKeys: null,
       flushPromise: null,
       hasStaticPolicyUpdate: false,
       removes: new Set(),
+      staleConditionalRemoveKeys: new Set(),
       staticPolicy: null,
       touches: new Map(),
       upserts: new Map(),
@@ -3007,7 +3150,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     for (const [key, metadata] of indexState.entries.entries()) {
       const isProtected =
-        isOfflineProtectedMetadata(metadata.customMetadata) ||
+        isAsyncStorageMetadataOfflineProtected(metadata.customMetadata) ||
         args.protectedRefs?.has(
           serializeProtectedRef({ ...args.scope, key }),
         ) === true;
@@ -3221,6 +3364,69 @@ export function createAsyncStorageAdapter(
 ): AsyncStorageAdapter {
   return new ManagedAsyncStorageAdapter(driver);
 }
+
+/**
+ * Drivers with a per-key managed commit (IndexedDB) keep each maintenance
+ * transaction short. Drivers without one rewrite the whole namespace index on
+ * every commit, so larger batches avoid repeating that work for every few
+ * removals while still bounding concurrent driver requests.
+ */
+const PER_KEY_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE = 25;
+const INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE = 250;
+
+/** Number of keys idle-deadline maintenance removes per commit. */
+export function getAsyncStorageMaintenanceRemoveBatchSize(
+  adapter: AsyncStorageAdapter | null,
+): number {
+  // Other adapters re-list the whole namespace for every batch, so they get
+  // the larger batches too.
+  return adapter instanceof ManagedAsyncStorageAdapter
+    ? adapter.getMaintenanceRemoveBatchSize()
+    : INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
+}
+
+/**
+ * Removes entries only while they still have the metadata the caller read,
+ * without waiting for the namespace batching debounce. Resolves with the keys
+ * kept because they changed. Managed adapters check and remove atomically;
+ * other adapters only get a best-effort metadata re-read before removing.
+ */
+export async function removeAsyncStorageNamespaceEntriesIfUnchanged(
+  adapter: AsyncStorageAdapter,
+  scope: AsyncStorageNamespaceScope,
+  entries: AsyncStorageNamespaceCommitConditionalRemove[],
+): Promise<ReadonlySet<string>> {
+  if (adapter instanceof ManagedAsyncStorageAdapter) {
+    return adapter.commitToNamespaceNow(scope, { conditionalRemoves: entries });
+  }
+
+  const namespace = adapter.openNamespace(scope);
+  const currentEntries = new Map(
+    (await namespace.listMetadata()).map((entry) => [entry.key, entry]),
+  );
+  const removes: string[] = [];
+  const staleKeys = new Set<string>();
+  for (const remove of entries) {
+    const current = currentEntries.get(remove.key);
+    if (current === undefined) continue;
+    if (
+      matchesConditionalRemove(
+        remove,
+        current.lastAccessAt,
+        current.sizeBytes,
+        current.version,
+        isAsyncStorageMetadataOfflineProtected(current.customMetadata),
+      )
+    ) {
+      removes.push(remove.key);
+    } else {
+      staleKeys.add(remove.key);
+    }
+  }
+  if (removes.length > 0) await namespace.commit({ removes });
+  return staleKeys;
+}
+
 export function serializeProtectedRef(
   ref: AsyncStorageProtectedEntryRef,
 ): string {

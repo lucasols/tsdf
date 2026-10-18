@@ -1,6 +1,8 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { createAsyncStorageAdapter } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { getDefaultMaxBytesForScope } from '../../../src/persistentStorage/persistentStorageDefaults';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import {
@@ -16,14 +18,20 @@ import {
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
+  createChunkBudgetDeadline,
+  createDeadlineUntilFileDeletes,
   createCollectionEnv,
   createDocumentEnv,
+  createWallClockDeadline,
   flushInvalidationPersistence,
   getAsyncCollectionEntrySizeBytes,
+  LARGE_MAINTENANCE_TEST_OPTIONS,
+  opfsMaintenanceRemoveBatchSize,
   setProtectedKeysSnapshot,
   settleStartupBackgroundScan,
   sumPersistedEntryBytes,
   setupAsyncStorageEfficiencyTestSuite,
+  stubIdleCallbacks,
   syncEntriesOfflineProtectedFromSiblingTab,
   waitForScheduledCleanup,
 } from './shared';
@@ -62,6 +70,407 @@ async function getCollectionPayloadDeleteTarget(args: {
 }
 
 describe('async storage efficiency: collection', () => {
+  test(
+    'background maintenance bounds removal work to the idle deadline and resumes with a timeout budget',
+    LARGE_MAINTENANCE_TEST_OPTIONS,
+    async () => {
+      const storeName = 'collection-deadline-maintenance';
+      const sessionKey = 'sess1';
+      // Two full removal batches plus one entry.
+      const ignoredItemCount = opfsMaintenanceRemoveBatchSize * 2 + 1;
+      const idleCallbacks = stubIdleCallbacks();
+
+      const mockAdapter = createOpfsPersistentStorageTestStore();
+      const collectionScope = mockAdapter.scope(storeName, sessionKey);
+      for (let index = 0; index < ignoredItemCount; index++) {
+        const payload = `ignored-${index}`;
+        collectionScope.collection.seedItem(payload, {
+          value: { id: payload, name: 'Ignored cached item' },
+        });
+      }
+
+      const env = createCollectionEnv({
+        ignoreItems: (payload) => payload.startsWith('ignored-'),
+        storeName,
+        sessionKey,
+      });
+
+      // A normal store update schedules maintenance for the preloaded entries.
+      env.apiStore.addItemToState('kept', {
+        value: { id: 'kept', name: 'Kept live item' },
+      });
+      await advanceTime(1200);
+
+      // Exhaust the first deadline after one bounded removal commit. The other
+      // ignored entries must remain until a continuation receives more time.
+      const firstSliceCapture =
+        startOpfsPersistentStorageOperationCapture(mockAdapter);
+      await idleCallbacks.runNext(
+        createDeadlineUntilFileDeletes(
+          mockAdapter,
+          opfsMaintenanceRemoveBatchSize,
+        ),
+      );
+      const firstSliceOperations = firstSliceCapture.finish().timelineString;
+
+      expect({
+        continuationScheduled: idleCallbacks.pendingCount(),
+        payloadDeletes: firstSliceOperations.match(/🗑️/g)?.length ?? 0,
+        storedEntryCount:
+          collectionScope.collection.listStoredPayloads().length,
+      }).toMatchInlineSnapshot(`
+        continuationScheduled: 1
+        payloadDeletes: 250
+        storedEntryCount: 252
+      `);
+
+      // A timeout-fired continuation has no usable browser deadline. The
+      // synthetic budget still lets this small remainder finish.
+      const performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
+      await idleCallbacks.runNext(() => 0, true);
+      performanceNowSpy.mockRestore();
+
+      expect({
+        continuationScheduled: idleCallbacks.pendingCount(),
+        storedPayloads: collectionScope.collection.listStoredPayloads(),
+      }).toMatchInlineSnapshot(`
+        continuationScheduled: 0
+        storedPayloads: ['kept']
+      `);
+    },
+  );
+
+  test(
+    'background maintenance finishes when planning a large cache takes several idle deadlines',
+    LARGE_MAINTENANCE_TEST_OPTIONS,
+    async () => {
+      const storeName = 'collection-multi-deadline-maintenance';
+      const sessionKey = 'sess1';
+      const idleCallbacks = stubIdleCallbacks();
+
+      const mockAdapter = createOpfsPersistentStorageTestStore();
+      const collectionScope = mockAdapter.scope(storeName, sessionKey);
+      for (let index = 0; index < 200; index++) {
+        const payload = `ignored-${index}`;
+        collectionScope.collection.seedItem(payload, {
+          value: { id: payload, name: 'Ignored cached item' },
+        });
+      }
+
+      const env = createCollectionEnv({
+        ignoreItems: (payload) => payload.startsWith('ignored-'),
+        storeName,
+        sessionKey,
+      });
+      env.apiStore.addItemToState('kept', {
+        value: { id: 'kept', name: 'Kept live item' },
+      });
+      await advanceTime(1200);
+
+      // Each idle period only fits three chunks of work (~75 scanned entries),
+      // so scanning the 201 entries alone needs several deadlines. Maintenance
+      // must carry its progress across them instead of restarting each time.
+      const storedCountAfterEachSlice: number[] = [];
+      while (
+        idleCallbacks.pendingCount() > 0 &&
+        storedCountAfterEachSlice.length < 30
+      ) {
+        await idleCallbacks.runNext(createChunkBudgetDeadline(3));
+        storedCountAfterEachSlice.push(
+          collectionScope.collection.listStoredPayloads().length,
+        );
+      }
+
+      // Planning spans the first slices without deleting anything, then the
+      // removals are committed until only the live item remains and no
+      // continuation is left scheduled.
+      expect({
+        continuationScheduled: idleCallbacks.pendingCount(),
+        storedCountAfterEachSlice,
+        storedPayloads: collectionScope.collection.listStoredPayloads(),
+      }).toMatchInlineSnapshot(`
+        continuationScheduled: 0
+        storedCountAfterEachSlice: [201, 201, 201, 1]
+        storedPayloads: ['kept']
+      `);
+    },
+  );
+
+  test(
+    'background maintenance commits several removal batches within one idle period',
+    LARGE_MAINTENANCE_TEST_OPTIONS,
+    async () => {
+      const storeName = 'collection-wall-clock-maintenance';
+      const sessionKey = 'sess1';
+      const ignoredItemCount = opfsMaintenanceRemoveBatchSize * 2;
+      const idleCallbacks = stubIdleCallbacks();
+
+      const mockAdapter = createOpfsPersistentStorageTestStore();
+      const collectionScope = mockAdapter.scope(storeName, sessionKey);
+      for (let index = 0; index < ignoredItemCount; index++) {
+        const payload = `ignored-${index}`;
+        collectionScope.collection.seedItem(payload, {
+          value: { id: payload, name: 'Ignored cached item' },
+        });
+      }
+
+      const env = createCollectionEnv({
+        ignoreItems: (payload) => payload.startsWith('ignored-'),
+        storeName,
+        sessionKey,
+      });
+      env.apiStore.addItemToState('kept', {
+        value: { id: 'kept', name: 'Kept live item' },
+      });
+      await advanceTime(1200);
+
+      // Each idle period is a 50 ms browser deadline spent by real time, so
+      // the storage I/O of every removal batch counts against it. Batches must
+      // only wait for their own transaction, not for the commit debounce, or
+      // each batch would use up most of an idle period.
+      const storedCountAfterEachSlice: number[] = [];
+      while (
+        idleCallbacks.pendingCount() > 0 &&
+        storedCountAfterEachSlice.length < 30
+      ) {
+        await idleCallbacks.runNext(createWallClockDeadline(50));
+        storedCountAfterEachSlice.push(
+          collectionScope.collection.listStoredPayloads().length,
+        );
+      }
+
+      // Both removal batches fit into the first idle period; waiting for the
+      // commit debounce would spread them across several idle callbacks.
+      expect({
+        continuationScheduled: idleCallbacks.pendingCount(),
+        storedCountAfterEachSlice,
+        storedPayloads: collectionScope.collection.listStoredPayloads(),
+      }).toMatchInlineSnapshot(`
+        continuationScheduled: 0
+        storedCountAfterEachSlice: [1]
+        storedPayloads: ['kept']
+      `);
+    },
+  );
+
+  test(
+    'background maintenance keeps an entry another tab refreshed while it was suspended',
+    LARGE_MAINTENANCE_TEST_OPTIONS,
+    async () => {
+      const storeName = 'collection-stale-maintenance-plan';
+      const sessionKey = 'sess1';
+      // One full removal batch plus `cached-0`..`cached-2`.
+      const cachedItemCount = opfsMaintenanceRemoveBatchSize + 3;
+      const idleCallbacks = stubIdleCallbacks();
+
+      const mockAdapter = createOpfsPersistentStorageTestStore();
+      const collectionScope = mockAdapter.scope(storeName, sessionKey);
+      const cachedItem = (payload: string) => ({
+        value: { id: payload, name: 'Cached item' },
+      });
+      // Seed in recency order so `cached-0` is the least recently used entry
+      // and `recent-a` / `recent-b` are the most recent ones.
+      const seededPayloads = [
+        ...Array.from(
+          { length: cachedItemCount },
+          (_, index) => `cached-${index}`,
+        ),
+        'recent-a',
+        'recent-b',
+      ];
+      for (const [index, payload] of seededPayloads.entries()) {
+        collectionScope.collection.seedItem(payload, cachedItem(payload), {
+          timestamp: TEST_INITIAL_TIME + index,
+        });
+      }
+
+      const liveItem = { value: { id: 'live', name: 'Live item' } };
+      const env = createCollectionEnv({
+        // Stores with an `ignoreItems` filter enforce the byte budget during
+        // background maintenance instead of evicting inline on flush.
+        ignoreItems: (payload) => payload.startsWith('ignored-'),
+        // Room for the live item plus the two most recent cached entries.
+        maxBytes: sumPersistedEntryBytes(
+          getAsyncCollectionEntrySizeBytes('live', liveItem),
+          getAsyncCollectionEntrySizeBytes('recent-a', cachedItem('recent-a')),
+          getAsyncCollectionEntrySizeBytes('recent-b', cachedItem('recent-b')),
+        ),
+        storeName,
+        sessionKey,
+      });
+
+      env.apiStore.addItemToState('live', liveItem);
+      await advanceTime(1200);
+
+      // The first slice plans to evict every `cached-*` entry and runs out of
+      // time after the first full removal batch, leaving `cached-0`..`cached-2`
+      // still planned for removal.
+      await idleCallbacks.runNext(
+        createDeadlineUntilFileDeletes(
+          mockAdapter,
+          opfsMaintenanceRemoveBatchSize,
+        ),
+      );
+      expect(
+        collectionScope.collection.listStoredPayloads().sort(),
+      ).toMatchInlineSnapshot(
+        `['cached-0', 'cached-1', 'cached-2', 'live', 'recent-a', 'recent-b']`,
+      );
+
+      // While maintenance waits for the next idle period, another tab reads
+      // `cached-1`, making it the most recently used entry.
+      const siblingAdapter = createAsyncStorageAdapter(
+        new OpfsAsyncStorageDriver(),
+      );
+      await resolveAfterAllTimers(
+        siblingAdapter
+          .openNamespace(collectionScope.collection.namespace)
+          .commit({
+            touches: [
+              {
+                key: collectionScope.collection.itemKey('cached-1'),
+                lastAccessAt: Date.now(),
+              },
+            ],
+          }),
+      );
+      siblingAdapter.resetForTests?.();
+
+      // The next batch removes entries only if their stored metadata still
+      // matches the plan: `cached-1` changed, so it is kept while the unchanged
+      // entries are removed. Maintenance then re-plans with fresh metadata,
+      // which evicts the now older `recent-a`.
+      await idleCallbacks.runUntilIdle(() => 50);
+
+      expect(
+        collectionScope.collection.listStoredPayloads().sort(),
+      ).toMatchInlineSnapshot(`['cached-1', 'live', 'recent-b']`);
+    },
+  );
+
+  test('background maintenance keeps the persisted cleanup policy of its namespace', async () => {
+    const storeName = 'collection-maintenance-keeps-policy';
+    const sessionKey = 'sess1';
+    const idleCallbacks = stubIdleCallbacks();
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    collectionScope.collection.seedItem('ignored-1', {
+      value: { id: 'ignored-1', name: 'Ignored cached item' },
+    });
+
+    const env = createCollectionEnv({
+      ignoreItems: (payload) => payload.startsWith('ignored-'),
+      pinnedItems: ['pinned'],
+      storeName,
+      sessionKey,
+    });
+
+    // The flush persists the store's pinned keys as the namespace policy, so
+    // cold startup cleanup can respect them before the store mounts. It also
+    // schedules background maintenance for the ignored cached entry.
+    env.apiStore.addItemToState('pinned', {
+      value: { id: 'pinned', name: 'Pinned item' },
+    });
+    await advanceTime(1200);
+    await idleCallbacks.runUntilIdle(() => 50);
+
+    // Maintenance removed the ignored entry without resetting the policy the
+    // flush wrote, so the pinned key is still protected on the next cold start.
+    expect({
+      policy: getParsedOpfsFileData(
+        `tsdf/${sessionKey}/${storeName}/ci._i.r.json`,
+      ),
+      storedPayloads: collectionScope.collection.listStoredPayloads(),
+    }).toMatchInlineSnapshot(`
+      policy:
+        e:
+          "pinned: { a: 1735689601048, p: 'pinned', z: 78 }
+        s:
+          k: ['"pinned']
+
+      storedPayloads: ['pinned']
+    `);
+  });
+
+  test(
+    'background maintenance stops when the active session changes between removal batches',
+    LARGE_MAINTENANCE_TEST_OPTIONS,
+    async () => {
+      const storeName = 'collection-session-switch-maintenance';
+      // One full removal batch plus `cached-0`..`cached-2`.
+      const cachedItemCount = opfsMaintenanceRemoveBatchSize + 3;
+      let activeSessionKey = 'session-a';
+      const idleCallbacks = stubIdleCallbacks();
+
+      const mockAdapter = createOpfsPersistentStorageTestStore();
+      const sessionAScope = mockAdapter.scope(storeName, 'session-a');
+      const sessionBScope = mockAdapter.scope(storeName, 'session-b');
+      const cachedItem = (payload: string) => ({
+        value: { id: payload, name: 'Cached item' },
+      });
+      // Session A is far over budget. Session B cached two of the same items
+      // and fits its budget, so nothing in B should ever be evicted.
+      const sessionAPayloads = [
+        ...Array.from(
+          { length: cachedItemCount },
+          (_, index) => `cached-${index}`,
+        ),
+        'recent-a',
+        'recent-b',
+      ];
+      for (const [index, payload] of sessionAPayloads.entries()) {
+        sessionAScope.collection.seedItem(payload, cachedItem(payload), {
+          timestamp: TEST_INITIAL_TIME + index,
+        });
+      }
+      for (const [index, payload] of ['cached-0', 'cached-1'].entries()) {
+        sessionBScope.collection.seedItem(payload, cachedItem(payload), {
+          timestamp: TEST_INITIAL_TIME + index,
+        });
+      }
+
+      const liveItem = { value: { id: 'live', name: 'Live item' } };
+      const env = createCollectionEnv({
+        getSessionKey: () => activeSessionKey,
+        // Stores with an `ignoreItems` filter enforce the byte budget during
+        // background maintenance instead of evicting inline on flush.
+        ignoreItems: (payload) => payload.startsWith('ignored-'),
+        // Room for the live item plus two cached entries.
+        maxBytes: sumPersistedEntryBytes(
+          getAsyncCollectionEntrySizeBytes('live', liveItem),
+          getAsyncCollectionEntrySizeBytes('recent-a', cachedItem('recent-a')),
+          getAsyncCollectionEntrySizeBytes('recent-b', cachedItem('recent-b')),
+        ),
+        storeName,
+      });
+
+      env.apiStore.addItemToState('live', liveItem);
+      await advanceTime(1200);
+
+      // Session A plans to evict every `cached-*` entry. The user switches to
+      // session B right after the first full batch is committed, before the
+      // batch holding `cached-0`..`cached-2` starts in the same idle period.
+      const firstBatchCommitted = createDeadlineUntilFileDeletes(
+        mockAdapter,
+        opfsMaintenanceRemoveBatchSize,
+      );
+      await idleCallbacks.runNext(() => {
+        if (firstBatchCommitted() === 0) activeSessionKey = 'session-b';
+        return 50;
+      });
+      await idleCallbacks.runUntilIdle(() => 50);
+
+      // The session A plan must not be applied to session B's namespace.
+      expect({
+        sessionA: sessionAScope.collection.listStoredPayloads().sort(),
+        sessionB: sessionBScope.collection.listStoredPayloads().sort(),
+      }).toMatchInlineSnapshot(`
+        sessionA: ['cached-0', 'cached-1', 'cached-2', 'live', 'recent-a', 'recent-b']
+        sessionB: ['cached-0', 'cached-1']
+      `);
+    },
+  );
+
   test('expiration cleanup removes expired items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'collection-expiration';

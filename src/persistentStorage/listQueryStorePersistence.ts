@@ -16,10 +16,13 @@ import {
 import {
   buildPersistedStaticPolicy,
   estimateManagedAsyncStorageEntrySizeBytes,
+  getAsyncStorageMaintenanceRemoveBatchSize,
   getProtectedKeysFromMetadata,
+  isAsyncStorageMetadataOfflineProtected,
   mergeManagedAsyncStorageCustomMetadata,
   readAsyncStorageNamespaceIndexStateUsingDriver,
   registerAsyncStartupStoreCleanup,
+  removeAsyncStorageNamespaceEntriesIfUnchanged,
   serializeProtectedRef,
   unregisterAsyncStartupStoreCleanup,
   type AsyncStartupCleanupScopePlan,
@@ -56,6 +59,7 @@ import {
   getSerializedStringSize,
   keepEntriesWithinByteBudget,
   keepEntriesWithinByteBudgetDuringIdle,
+  removeAsyncMaintenanceEntriesIfUnchanged,
   serializeJsonForStorage,
 } from './persistenceUtils';
 import { getDefaultMaxBytesForScope } from './persistentStorageDefaults';
@@ -2351,83 +2355,141 @@ export function setupListQueryPersistence<
       return { completed: true, keptQueryKeys, managedQueryEntriesByKey };
     }
 
+    const incompleteResult: StoredQueryEvictionResult = {
+      completed: false,
+      keptQueryKeys: new Set(),
+      managedQueryEntriesByKey: null,
+    };
+    // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
+    if (idleContext === undefined) return incompleteResult;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return incompleteResult;
+
+    // The namespace resolves the active session on every call, so the run
+    // stops once it no longer matches the session it planned for.
+    const isSessionCurrent = () => config.getSessionKey() === sessionKey;
     const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
       queryNamespace,
       { order: 'lru-desc' },
     );
-    const protectedQueryKeys = getProtectedKeysFromMetadata(metadataEntries);
+    if (!isSessionCurrent()) {
+      knownPersistedQueryKeys = null;
+      return incompleteResult;
+    }
+    if (idleContext.isCanceled()) return incompleteResult;
 
-    const invalidQueryKeys: string[] = [];
+    // The plan is built from this snapshot even if scanning spans several
+    // idle callbacks; removals keep entries that changed after it was read.
+    const protectedQueryKeys = new Set<string>();
+    const removalEntries: typeof metadataEntries = [];
     const validEntries: Array<{
-      queryKey: string;
-      payload: unknown;
-      lastAccessAt: number;
+      entry: (typeof metadataEntries)[number];
       sizeBytes: number;
     }> = [];
 
-    for (const entry of metadataEntries) {
+    for (const [entryIndex, entry] of metadataEntries.entries()) {
+      if (
+        entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+        !(await idleContext.yieldIfNeeded())
+      ) {
+        return incompleteResult;
+      }
+
+      if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
+        protectedQueryKeys.add(entry.key);
+      }
       const payload = validateWithSchema(
         config.queryPayloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
-
       if (payload === null) {
-        invalidQueryKeys.push(entry.key);
-      } else {
-        validEntries.push({
-          queryKey: entry.key,
-          payload,
-          lastAccessAt: entry.lastAccessAt,
-          sizeBytes: rememberQueryMetadataSize(entry.key, entry.sizeBytes),
-        });
+        removalEntries.push(entry);
+        continue;
       }
+      validEntries.push({
+        entry,
+        sizeBytes: rememberQueryMetadataSize(entry.key, entry.sizeBytes),
+      });
     }
 
-    if (invalidQueryKeys.length > 0) {
-      await Promise.all(
-        invalidQueryKeys.map((queryKey) => queryNamespace.remove(queryKey)),
-      );
+    const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
+      validEntries,
+      ({ entry }) => entry.key,
+      ({ entry }) => entry.lastAccessAt,
+      ({ sizeBytes }) => sizeBytes,
+      ({ entry }) => pinnedQueryKeys.has(entry.key),
+      ({ entry }) => protectedQueryKeys.has(entry.key),
+      maxQueryBytes,
+      idleContext,
+    );
+    if (byteBudgetResult === null) return incompleteResult;
+
+    const { keptKeys: keptQueryKeys, unprotectedBytes } = byteBudgetResult;
+    const budgetEvictedEntries = new Map<
+      string,
+      (typeof metadataEntries)[number]
+    >();
+    for (const { entry } of validEntries) {
+      if (keptQueryKeys.has(entry.key)) continue;
+      budgetEvictedEntries.set(entry.key, entry);
+      removalEntries.push(entry);
     }
 
-    const { keptKeys: keptQueryKeys, unprotectedBytes: queryUnprotectedBytes } =
-      keepEntriesWithinByteBudget(
-        validEntries,
-        (entry) => entry.queryKey,
-        (entry) => entry.lastAccessAt,
-        (entry) => entry.sizeBytes,
-        (entry) => pinnedQueryKeys.has(entry.queryKey),
-        (entry) => protectedQueryKeys.has(entry.queryKey),
-        maxQueryBytes,
+    const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
+      removalEntries,
+      isAsyncStorageMetadataOfflineProtected,
+      (entries) =>
+        queryNamespace.removeEntriesIfUnchanged(
+          entries,
+          removeAsyncStorageNamespaceEntriesIfUnchanged,
+        ),
+      (removedKeys) => {
+        for (const queryKey of removedKeys) {
+          const entry = budgetEvictedEntries.get(queryKey);
+          if (entry === undefined) continue;
+          rememberBudgetEvictedEntry(
+            budgetEvictedQueryRecency,
+            queryKey,
+            entry.lastAccessAt,
+            querySnapshotByKey.get(queryKey),
+            storeRef !== null &&
+              Object.hasOwn(storeRef.state.queries, queryKey),
+          );
+          forgetPersistedQuery(queryKey);
+        }
+      },
+      getAsyncStorageMaintenanceRemoveBatchSize(
+        queryNamespace.getAsyncAdapter(),
+      ),
+      isSessionCurrent,
+      idleContext,
+    );
+    if (!removalResult.completed) {
+      if (!isSessionCurrent()) knownPersistedQueryKeys = null;
+      return incompleteResult;
+    }
+
+    if (removalResult.hasStaleEntries) {
+      // Queries changed during the run were kept; re-plan with fresh metadata
+      // before evicting items against an outdated query set.
+      knownPersistedQueryKeys = null;
+      scheduleAsyncStorageMaintenance(
+        `list-query:${sessionKey}:${config.storeName}`,
+        runMaintenance,
       );
+      return incompleteResult;
+    }
+
+    // An empty listing may be a reported storage error, so the next flush
+    // re-lists the keys instead of trusting an empty set.
+    knownPersistedQueryKeys =
+      metadataEntries.length === 0 ? null : keptQueryKeys;
     logQueryByteBudgetCleanup(
       'maintenance',
       validEntries.length,
       keptQueryKeys,
-      queryUnprotectedBytes,
+      unprotectedBytes,
     );
-
-    await Promise.all(
-      validEntries
-        .filter(({ queryKey }) => !keptQueryKeys.has(queryKey))
-        .map(({ queryKey }) => queryNamespace.remove(queryKey)),
-    );
-
-    for (const entry of validEntries) {
-      const { queryKey } = entry;
-      if (!keptQueryKeys.has(queryKey)) {
-        rememberBudgetEvictedEntry(
-          budgetEvictedQueryRecency,
-          queryKey,
-          entry.lastAccessAt,
-          querySnapshotByKey.get(queryKey),
-          storeRef !== null && Object.hasOwn(storeRef.state.queries, queryKey),
-        );
-        forgetPersistedQuery(queryKey);
-      }
-    }
-
-    knownPersistedQueryKeys = keptQueryKeys;
-
     return { completed: true, keptQueryKeys, managedQueryEntriesByKey: null };
   }
 
@@ -2771,97 +2833,141 @@ export function setupListQueryPersistence<
       return;
     }
 
+    // Async maintenance always runs through `scheduleAsyncStorageMaintenance`.
+    if (idleContext === undefined || sessionKey === false) return;
+
+    // The namespace resolves the active session on every call, so the run
+    // stops once it no longer matches the session it planned for.
+    const isSessionCurrent = () => config.getSessionKey() === sessionKey;
     const itemMetadataEntries = await listAllPersistentStorageNamespaceMetadata(
       itemNamespace,
       { order: 'lru-desc' },
     );
-    const protectedItemKeys = getProtectedKeysFromMetadata(itemMetadataEntries);
+    if (!isSessionCurrent()) {
+      knownPersistedItemKeys = null;
+      return;
+    }
+    if (idleContext.isCanceled()) return;
 
-    const invalidItemKeys: string[] = [];
-    const validItemEntries: Array<{
-      itemKey: string;
-      lastAccessAt: number;
-      payload: ItemPayload;
+    // The plan is built from this snapshot even if scanning spans several
+    // idle callbacks; removals keep entries that changed after it was read.
+    const protectedItemKeys = new Set<string>();
+    const removalEntries: typeof itemMetadataEntries = [];
+    const ignoredItemKeys = new Set<string>();
+    const persistedItemEntries: Array<{
+      entry: (typeof itemMetadataEntries)[number];
       sizeBytes: number;
     }> = [];
 
-    for (const entry of itemMetadataEntries) {
+    for (const [entryIndex, entry] of itemMetadataEntries.entries()) {
+      if (
+        entryIndex % MAINTENANCE_SCAN_CHUNK_SIZE === 0 &&
+        !(await idleContext.yieldIfNeeded())
+      ) {
+        return;
+      }
+
+      if (isAsyncStorageMetadataOfflineProtected(entry.customMetadata)) {
+        protectedItemKeys.add(entry.key);
+      }
       const payload = validateWithSchema(
         config.itemPayloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
-
       if (payload === null) {
-        invalidItemKeys.push(entry.key);
-      } else {
-        validItemEntries.push({
-          itemKey: entry.key,
-          lastAccessAt: entry.lastAccessAt,
-          payload,
-          sizeBytes: rememberItemMetadataSize(entry.key, entry.sizeBytes),
-        });
+        removalEntries.push(entry);
+        continue;
       }
-    }
-
-    if (invalidItemKeys.length > 0) {
-      await Promise.all(
-        invalidItemKeys.map((itemKey) => itemNamespace.remove(itemKey)),
-      );
-    }
-
-    const ignoredItemEntries = validItemEntries.filter(({ payload }) =>
-      shouldIgnoreItem(payload),
-    );
-
-    if (ignoredItemEntries.length > 0) {
-      await Promise.all(
-        ignoredItemEntries.map(({ itemKey }) => itemNamespace.remove(itemKey)),
-      );
-      for (const { itemKey } of ignoredItemEntries) {
-        forgetPersistedItem(itemKey);
+      if (shouldIgnoreItem(payload)) {
+        ignoredItemKeys.add(entry.key);
+        removalEntries.push(entry);
+        continue;
       }
+      persistedItemEntries.push({
+        entry,
+        sizeBytes: rememberItemMetadataSize(entry.key, entry.sizeBytes),
+      });
     }
 
-    const persistedItemEntries = validItemEntries.filter(
-      ({ payload }) => !shouldIgnoreItem(payload),
+    const byteBudgetResult = await keepEntriesWithinByteBudgetDuringIdle(
+      persistedItemEntries,
+      ({ entry }) => entry.key,
+      ({ entry }) => entry.lastAccessAt,
+      ({ sizeBytes }) => sizeBytes,
+      ({ entry }) => pinnedItemKeys.has(entry.key),
+      ({ entry }) => protectedItemKeys.has(entry.key),
+      maxItemBytes,
+      idleContext,
     );
+    if (byteBudgetResult === null) return;
 
-    const { keptKeys: keptItemKeys, unprotectedBytes } =
-      keepEntriesWithinByteBudget(
-        persistedItemEntries,
-        (entry) => entry.itemKey,
-        (entry) => entry.lastAccessAt,
-        (entry) => entry.sizeBytes,
-        (entry) => pinnedItemKeys.has(entry.itemKey),
-        (entry) => protectedItemKeys.has(entry.itemKey),
-        maxItemBytes,
+    const { keptKeys: keptItemKeys, unprotectedBytes } = byteBudgetResult;
+    const budgetEvictedEntries = new Map<
+      string,
+      (typeof itemMetadataEntries)[number]
+    >();
+    for (const { entry } of persistedItemEntries) {
+      if (keptItemKeys.has(entry.key)) continue;
+      budgetEvictedEntries.set(entry.key, entry);
+      removalEntries.push(entry);
+    }
+
+    const removalResult = await removeAsyncMaintenanceEntriesIfUnchanged(
+      removalEntries,
+      isAsyncStorageMetadataOfflineProtected,
+      (entries) =>
+        itemNamespace.removeEntriesIfUnchanged(
+          entries,
+          removeAsyncStorageNamespaceEntriesIfUnchanged,
+        ),
+      (removedKeys) => {
+        for (const itemKey of removedKeys) {
+          const entry = budgetEvictedEntries.get(itemKey);
+          if (entry !== undefined) {
+            rememberBudgetEvictedEntry(
+              budgetEvictedItemRecency,
+              itemKey,
+              entry.lastAccessAt,
+              itemSnapshotByKey.get(itemKey),
+              storeRef !== null && storeRef.state.items[itemKey] != null,
+            );
+          }
+          if (entry !== undefined || ignoredItemKeys.has(itemKey)) {
+            forgetPersistedItem(itemKey);
+          }
+        }
+      },
+      getAsyncStorageMaintenanceRemoveBatchSize(
+        itemNamespace.getAsyncAdapter(),
+      ),
+      isSessionCurrent,
+      idleContext,
+    );
+    if (!removalResult.completed) {
+      if (!isSessionCurrent()) knownPersistedItemKeys = null;
+      return;
+    }
+
+    if (removalResult.hasStaleEntries) {
+      // Items changed during the run were kept; re-plan with fresh metadata.
+      knownPersistedItemKeys = null;
+      scheduleAsyncStorageMaintenance(
+        `list-query:${sessionKey}:${config.storeName}`,
+        runMaintenance,
       );
+      return;
+    }
+
+    // An empty listing may be a reported storage error, so the next flush
+    // re-lists the keys instead of trusting an empty set.
+    knownPersistedItemKeys =
+      itemMetadataEntries.length === 0 ? null : keptItemKeys;
     logItemByteBudgetCleanup(
       'maintenance',
       persistedItemEntries.length,
       keptItemKeys,
       unprotectedBytes,
     );
-
-    await Promise.all(
-      persistedItemEntries
-        .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
-        .map(({ itemKey }) => itemNamespace.remove(itemKey)),
-    );
-    for (const { itemKey, lastAccessAt } of persistedItemEntries) {
-      if (!keptItemKeys.has(itemKey)) {
-        rememberBudgetEvictedEntry(
-          budgetEvictedItemRecency,
-          itemKey,
-          lastAccessAt,
-          itemSnapshotByKey.get(itemKey),
-          storeRef !== null && storeRef.state.items[itemKey] != null,
-        );
-        forgetPersistedItem(itemKey);
-      }
-    }
-
-    knownPersistedItemKeys = keptItemKeys;
   }
 
   async function flushPersistedState(): Promise<void> {

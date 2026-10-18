@@ -42,7 +42,10 @@ import { OFFLINE_SESSION_STATUS_STORE_NAME } from './storageEntryPrefixes';
 import type {
   AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
+  AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitConditionalRemove,
   AsyncStorageNamespaceKind,
+  AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
   AsyncStorageTouchMode,
   PersistentStorageBaseConfig,
@@ -68,8 +71,9 @@ let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
 const scheduledAsyncMaintenance = new Map<
   string,
   {
+    activeContext: IdleCleanupContext | null;
     cancel: (() => void) | null;
-    callback: () => Promise<void>;
+    callback: (context: IdleCleanupContext) => Promise<void>;
     running: boolean;
     rerunRequested: boolean;
   }
@@ -986,9 +990,26 @@ type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
+  /** The async adapter backing this handle, or `null` for `local-sync`. */
+  getAsyncAdapter(): AsyncStorageAdapter | null;
   commit(
     args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
   ): Promise<void>;
+  /**
+   * Async adapters only: removes entries whose metadata still matches through
+   * `removeEntries` and resolves with the keys kept because they changed, or
+   * `null` when nothing could be verified (no active session or a storage
+   * error). The remover is passed in so shared persistence code doesn't pull
+   * the async adapter implementation into sync-only bundles.
+   */
+  removeEntriesIfUnchanged(
+    entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    removeEntries: (
+      adapter: AsyncStorageAdapter,
+      scope: AsyncStorageNamespaceScope,
+      entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    ) => Promise<ReadonlySet<string>>,
+  ): Promise<ReadonlySet<string> | null>;
   readEntry(
     entryKey: string,
     options?: { touch?: AsyncStorageTouchMode },
@@ -1088,7 +1109,7 @@ export function createPersistentStorageNamespaceHandle<
     return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
   }
 
-  function getAsyncNamespace() {
+  function getAsyncNamespaceScope(): AsyncStorageNamespaceScope | null {
     if (asyncAdapter === null) return null;
 
     const sessionKey = config.getSessionKey();
@@ -1097,11 +1118,18 @@ export function createPersistentStorageNamespaceHandle<
     asyncAdapter.debugLogger = config.debugLogger;
     asyncAdapter.logger = config.logger;
 
-    return asyncAdapter.openNamespace<unknown, TMetadata>({
+    return {
       sessionKey,
       storeName: config.storeName,
       kind: asyncNamespaceKind,
-    });
+    };
+  }
+
+  function getAsyncNamespace() {
+    const scope = getAsyncNamespaceScope();
+    if (asyncAdapter === null || scope === null) return null;
+
+    return asyncAdapter.openNamespace<unknown, TMetadata>(scope);
   }
 
   if (asyncAdapter !== null) {
@@ -1124,8 +1152,8 @@ export function createPersistentStorageNamespaceHandle<
 
     try {
       if (asyncAdapter !== null) {
-        const namespace = getAsyncNamespace();
-        if (!namespace) {
+        const scope = getAsyncNamespaceScope();
+        if (scope === null) {
           if (import.meta.env.DEV) {
             logPersistentStorageOperation(
               debugContext,
@@ -1138,9 +1166,13 @@ export function createPersistentStorageNamespaceHandle<
           return;
         }
 
-        await namespace.commit({
+        const asyncArgs: AsyncStorageNamespaceCommitArgs<unknown, TMetadata> = {
           removes: args.removes,
-          staticPolicy: args.staticPolicy,
+          // The adapter treats a present `staticPolicy` key as a policy
+          // update, so only forward it when the caller set one.
+          ...('staticPolicy' in args
+            ? { staticPolicy: args.staticPolicy }
+            : {}),
           touches: args.touches,
           upserts: args.upserts?.map((upsert) => ({
             key: upsert.key,
@@ -1160,7 +1192,10 @@ export function createPersistentStorageNamespaceHandle<
             metadata:
               upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
           })),
-        });
+        };
+        await asyncAdapter
+          .openNamespace<unknown, TMetadata>(scope)
+          .commit(asyncArgs);
         if (import.meta.env.DEV) {
           logPersistentStorageOperation(
             debugContext,
@@ -2167,8 +2202,59 @@ export function createPersistentStorageNamespaceHandle<
     // No-op for namespaced handles: debouncing lives in the store integrations.
   }
 
+  function getAsyncAdapter(): AsyncStorageAdapter | null {
+    return asyncAdapter;
+  }
+
+  async function removeEntriesIfUnchanged(
+    entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    removeEntries: (
+      adapter: AsyncStorageAdapter,
+      scope: AsyncStorageNamespaceScope,
+      entries: AsyncStorageNamespaceCommitConditionalRemove[],
+    ) => Promise<ReadonlySet<string>>,
+  ): Promise<ReadonlySet<string> | null> {
+    const scope = getAsyncNamespaceScope();
+    if (asyncAdapter === null || scope === null) return null;
+
+    const startTime = import.meta.env.DEV
+      ? startPersistentStorageDebugTiming(debugContext)
+      : null;
+    const operationDetails = import.meta.env.DEV
+      ? { removes: entries.length, touches: 0, upserts: 0 }
+      : undefined;
+    try {
+      const staleKeys = await removeEntries(asyncAdapter, scope, entries);
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'commit',
+          'success',
+          startTime,
+          operationDetails,
+        );
+      }
+      return staleKeys;
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        logPersistentStorageOperation(
+          debugContext,
+          'commit',
+          'error',
+          startTime,
+          operationDetails,
+          error,
+        );
+      }
+      onPersistentStorageError?.(error);
+      return null;
+    }
+  }
+
   return {
+    getAsyncAdapter,
     commit,
+    removeEntriesIfUnchanged,
     readEntry,
     load,
     loadMany,
@@ -2430,6 +2516,7 @@ export function resetExpirationScanTracking(): void {
   localStorageMaintenanceRunning = false;
   for (const entry of scheduledAsyncMaintenance.values()) {
     entry.cancel?.();
+    entry.activeContext?.cancel();
   }
   scheduledAsyncMaintenance.clear();
   localStorageGlobalMaintenanceRequested = false;
@@ -2502,7 +2589,7 @@ export async function readProtectedStorageKeys(
 
 export function scheduleAsyncStorageMaintenance(
   maintenanceKey: string,
-  callback: () => Promise<void>,
+  callback: (context: IdleCleanupContext) => Promise<void>,
 ): void {
   const existing = scheduledAsyncMaintenance.get(maintenanceKey);
   if (existing) {
@@ -2515,6 +2602,7 @@ export function scheduleAsyncStorageMaintenance(
   }
 
   const entry = existing ?? {
+    activeContext: null,
     cancel: null,
     callback,
     running: false,
@@ -2523,12 +2611,19 @@ export function scheduleAsyncStorageMaintenance(
   entry.callback = callback;
   scheduledAsyncMaintenance.set(maintenanceKey, entry);
 
-  entry.cancel = scheduleIdleCleanup(() => {
+  entry.cancel = scheduleIdleCleanup((deadline) => {
     entry.cancel = null;
     entry.running = true;
+    const context = createIdleCleanupContext(deadline);
+    entry.activeContext = context;
 
-    void entry.callback().finally(() => {
+    void entry.callback(context).finally(() => {
+      context.cancel();
+      if (entry.activeContext === context) {
+        entry.activeContext = null;
+      }
       entry.running = false;
+      if (scheduledAsyncMaintenance.get(maintenanceKey) !== entry) return;
       if (entry.rerunRequested) {
         entry.rerunRequested = false;
         scheduleAsyncStorageMaintenance(maintenanceKey, entry.callback);

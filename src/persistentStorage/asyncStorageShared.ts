@@ -2,6 +2,7 @@ import { rc_parse_json, rc_string, rc_tuple } from 'runcheck';
 import type {
   AsyncStorageEntryMetadata,
   AsyncStorageMetadataOrder,
+  AsyncStorageNamespaceCommitConditionalRemove,
   AsyncStorageNamespaceKind,
   AsyncStorageNamespaceScope,
   AsyncStorageNamespaceStaticPolicy,
@@ -172,4 +173,20 @@ export function compareMetadata(
   }
 
   return left.key.localeCompare(right.key);
+}
+
+/** Whether an entry still has the metadata a conditional remove expects. */
+export function matchesConditionalRemove(
+  remove: AsyncStorageNamespaceCommitConditionalRemove,
+  lastAccessAt: number,
+  sizeBytes: number | undefined,
+  version: number,
+  offlineProtected: boolean,
+): boolean {
+  return (
+    remove.lastAccessAt === lastAccessAt &&
+    remove.sizeBytes === sizeBytes &&
+    remove.version === version &&
+    remove.offlineProtected === offlineProtected
+  );
 }

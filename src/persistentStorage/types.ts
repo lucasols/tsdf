@@ -117,6 +117,23 @@ export type AsyncStorageNamespaceCommitTouch = {
   lastAccessAt?: number;
 };
 
+/**
+ * Remove committed only while the stored entry still has the metadata the
+ * caller last read, so cleanup never acts on an outdated view of an entry.
+ */
+export type AsyncStorageNamespaceCommitConditionalRemove = {
+  /** Raw namespace key to remove. */
+  key: string;
+  /** Expected access timestamp. */
+  lastAccessAt: number;
+  /** Expected serialized size, `undefined` when the entry has none. */
+  sizeBytes: number | undefined;
+  /** Expected cache version. */
+  version: number;
+  /** Expected offline protection state. */
+  offlineProtected: boolean;
+};
+
 export type AsyncStorageNamespaceStaticPolicy = {
   maxBytes?: number;
   pinnedKeys?: string[];
@@ -135,6 +152,22 @@ export type AsyncStorageNamespaceCommitArgs<
   staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   /** Existing entries whose access metadata should be updated. */
   touches?: AsyncStorageNamespaceCommitTouch[];
+};
+
+/**
+ * Internal commit args used by adapters built with `createAsyncStorageAdapter`
+ * and their managed drivers.
+ */
+export type ManagedAsyncStorageNamespaceCommitArgs<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata> & {
+  /**
+   * Keys to remove only if their stored metadata still matches, checked in the
+   * same write as the removal. Entries that changed meanwhile, or that the
+   * driver cannot verify, are kept and reported back as stale.
+   */
+  conditionalRemoves?: AsyncStorageNamespaceCommitConditionalRemove[];
 };
 
 export type AsyncStorageMaintenanceState = {

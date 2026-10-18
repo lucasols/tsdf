@@ -131,6 +131,8 @@ Session-level `mutationQueueing` can allow or disallow durable offline mutation 
 
 TSDF does not choose a persistence adapter automatically. Pass one of the built-in adapters or a custom async adapter in every `persistentStorage` config.
 
+Scheduled collection and list-query maintenance is deadline-aware for every adapter. TSDF slices its own metadata validation, filtering, and byte-budget ordering across idle callbacks, carrying its progress from one callback to the next. Async adapters additionally commit removals in bounded batches, with each batch using a self-contained driver transaction or write; TSDF never keeps an IndexedDB, OPFS, or custom-driver transaction open while waiting for another idle deadline. Each batch is a conditional remove: the adapter checks every entry's access time, size, version, and offline protection against what the run planned from, in the same write that removes it, and keeps entries that changed meanwhile. TSDF then schedules another maintenance pass that plans from fresh metadata. Adapters created with `createAsyncStorageAdapter` (including the built-in OPFS and IndexedDB adapters) perform this check atomically; for other custom adapters TSDF re-reads metadata right before removing, so a write landing in between is not detected.
+
 ### `local-sync`
 
 - Uses managed `localStorage` entries.

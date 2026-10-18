@@ -7,6 +7,7 @@ import type { TSDFDebugLogEntry } from '../../../src/debug';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import {
   createAsyncStorageAdapter,
+  getAsyncStorageMaintenanceRemoveBatchSize,
   serializeProtectedRef,
 } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
@@ -15,6 +16,7 @@ import {
   setSessionProtectedKeysSnapshot,
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { OpfsAsyncStorageDriver } from '../../../src/persistentStorage/opfsAsyncStorageAdapter';
+import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
 import { createStoreManager } from '../../../src/storeManager';
@@ -109,6 +111,10 @@ export function setupAsyncStorageEfficiencyTestSuite(): void {
     localStorage.clear();
     resetMockBrowserOpfsForTests();
     opfsPersistentStorage.resetForTests?.();
+    // Cancel maintenance a timed-out test left suspended on its idle
+    // callbacks so it can't leak into the next test.
+    resetExpirationScanTracking();
+    vi.unstubAllGlobals();
     clearSessionProtectedKeysSnapshot('sess1');
     clearSessionProtectedKeysSnapshot('session1');
     clearSessionProtectedKeysSnapshot('user@example.com');
@@ -189,6 +195,8 @@ export function createDocumentEnv(options: {
 type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
+  getSessionKey?: () => string | false;
+  ignoreItems?: string[] | ((payload: string) => boolean);
   maxBytes?: number;
   pinnedItems?: string[];
   serverData?: Record<string, CollectionItemState>;
@@ -197,9 +205,11 @@ export function createCollectionEnv(options: {
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
-    getSessionKey: () => options.sessionKey ?? 'session1',
+    getSessionKey:
+      options.getSessionKey ?? (() => options.sessionKey ?? 'session1'),
     persistentStorage: {
       adapter: opfsPersistentStorage,
+      ignoreItems: options.ignoreItems,
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
       maxBytes: options.maxBytes,
@@ -219,6 +229,7 @@ export function storeItemKey(tableId: string, id: number): string {
 export function createListQueryEnv(options: {
   defaultQuerySize?: number;
   debugEntries?: TSDFDebugLogEntry[];
+  ignoreItems?: string[] | ((payload: string) => boolean);
   maxItemBytes?: number;
   maxQueryBytes?: number;
   maxQuerySize?: number;
@@ -249,6 +260,7 @@ export function createListQueryEnv(options: {
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {
       adapter: opfsPersistentStorage,
+      ignoreItems: options.ignoreItems,
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
@@ -354,3 +366,117 @@ function serializeProtectedNamespaceEntry(
     kind,
   });
 }
+
+/**
+ * Replaces `requestIdleCallback` with a manually driven queue so tests decide
+ * how much deadline budget each background maintenance slice receives.
+ */
+export function stubIdleCallbacks(): {
+  pendingCount: () => number;
+  runNext: (timeRemaining: () => number, didTimeout?: boolean) => Promise<void>;
+  runUntilIdle: (timeRemaining: () => number) => Promise<void>;
+} {
+  const idleCallbacks = new Map<number, IdleRequestCallback>();
+  let nextIdleCallbackId = 1;
+
+  vi.stubGlobal(
+    'requestIdleCallback',
+    (callback: IdleRequestCallback): number => {
+      const callbackId = nextIdleCallbackId++;
+      idleCallbacks.set(callbackId, callback);
+      return callbackId;
+    },
+  );
+  vi.stubGlobal('cancelIdleCallback', (callbackId: number): void => {
+    idleCallbacks.delete(callbackId);
+  });
+
+  async function runNext(
+    timeRemaining: () => number,
+    didTimeout = false,
+  ): Promise<void> {
+    const nextCallbackEntry = idleCallbacks.entries().next().value;
+    if (nextCallbackEntry === undefined) {
+      throw new Error('Expected a scheduled idle callback.');
+    }
+
+    const [callbackId, callback] = nextCallbackEntry;
+    idleCallbacks.delete(callbackId);
+    callback({ didTimeout, timeRemaining });
+    await advanceTime(500);
+  }
+
+  return {
+    pendingCount: () => idleCallbacks.size,
+    runNext,
+    /**
+     * Runs scheduled callbacks until none is left. Fails instead of hanging
+     * when maintenance keeps rescheduling itself.
+     */
+    async runUntilIdle(timeRemaining) {
+      for (
+        let runCount = 0;
+        idleCallbacks.size > 0 && runCount < MAX_IDLE_CALLBACK_RUNS;
+        runCount++
+      ) {
+        await runNext(timeRemaining);
+      }
+      if (idleCallbacks.size > 0) {
+        throw new Error(
+          `Idle callbacks still pending after ${MAX_IDLE_CALLBACK_RUNS} runs.`,
+        );
+      }
+    },
+  };
+}
+
+const MAX_IDLE_CALLBACK_RUNS = 30;
+
+/**
+ * Options for tests that seed several full maintenance removal batches; their
+ * real storage mock work can exceed the default timeout on loaded runners.
+ */
+export const LARGE_MAINTENANCE_TEST_OPTIONS = { timeout: 10_000 };
+
+/**
+ * Deadline whose budget is spent by maintenance checking it: each check stands
+ * for one chunk of scan, sort, or commit work in that idle period.
+ */
+export function createChunkBudgetDeadline(chunks: number): () => number {
+  let checks = 0;
+  return () => (checks++ < chunks ? 50 : 0);
+}
+
+/**
+ * Deadline that expires after `budgetMs` of (fake) wall-clock time, like a
+ * browser idle period, so awaited storage I/O spends the same budget.
+ */
+export function createWallClockDeadline(budgetMs: number): () => number {
+  const startedAt = Date.now();
+  return () => Math.max(0, budgetMs - (Date.now() - startedAt));
+}
+
+/**
+ * Deadline that expires once at least `deleteCount` more OPFS files were
+ * deleted, so a maintenance slice runs out of time right after a batch.
+ */
+export function createDeadlineUntilFileDeletes(
+  mockAdapter: MockOpfsAdapter,
+  deleteCount: number,
+): () => number {
+  const { operations } = mockAdapter.mockBrowserOpfs;
+  let scannedOperations = operations.length;
+  let deletedFiles = 0;
+  return () => {
+    for (; scannedOperations < operations.length; scannedOperations++) {
+      if (operations[scannedOperations]?.type === 'deleteFile') {
+        deletedFiles++;
+      }
+    }
+    return deletedFiles < deleteCount ? 50 : 0;
+  };
+}
+
+/** Keys OPFS background maintenance removes per commit. */
+export const opfsMaintenanceRemoveBatchSize =
+  getAsyncStorageMaintenanceRemoveBatchSize(opfsPersistentStorage);
