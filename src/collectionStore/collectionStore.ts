@@ -2432,6 +2432,19 @@ export function createCollectionStore<
 
         if (optimisticRollbackSnapshots.length > 0) {
           const restoredItemKeys: string[] = [];
+          // An item deleted mid-fetch lost its fetch work with the delete, so
+          // restoring its `loading`/`refetching` status must refetch it
+          const interruptedFetchPayloads: ItemPayload[] = [];
+
+          for (const snapshot of optimisticRollbackSnapshots) {
+            if (
+              !store.state[snapshot.itemKey] &&
+              (snapshot.item?.status === 'loading' ||
+                snapshot.item?.status === 'refetching')
+            ) {
+              interruptedFetchPayloads.push(snapshot.payload);
+            }
+          }
 
           runWithBroadcastConsistency('confirmed', () => {
             store.produceState(
@@ -2461,6 +2474,10 @@ export function createCollectionStore<
 
           if (restoredItemKeys.length > 0) {
             touchItemsAndMaybeEnforceLimits(restoredItemKeys);
+          }
+
+          if (interruptedFetchPayloads.length > 0) {
+            invalidateItem(interruptedFetchPayloads);
           }
         }
 

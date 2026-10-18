@@ -352,6 +352,20 @@ export function createMutationApi<
   }): void {
     if (itemSnapshots.length === 0 && querySnapshots.length === 0) return;
 
+    // An item deleted mid-fetch lost its fetch work with the delete, so
+    // restoring its `loading`/`refetching` status must refetch it
+    const interruptedFetchPayloads: ItemPayload[] = [];
+
+    for (const { itemKey, itemQuery } of itemSnapshots) {
+      if (
+        itemQuery &&
+        !store.state.itemQueries[itemKey] &&
+        (itemQuery.status === 'loading' || itemQuery.status === 'refetching')
+      ) {
+        interruptedFetchPayloads.push(itemQuery.payload);
+      }
+    }
+
     runWithBroadcastConsistency('confirmed', () => {
       store.produceState(
         (draftState) => {
@@ -441,6 +455,10 @@ export function createMutationApi<
         publishQuerySnapshot(snapshot.queryKey);
       }
     });
+
+    if (interruptedFetchPayloads.length > 0) {
+      invalidateItem(interruptedFetchPayloads);
+    }
   }
 
   function getCurrentOptimisticMutationQueryContext():

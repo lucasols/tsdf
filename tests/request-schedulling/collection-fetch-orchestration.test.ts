@@ -1,4 +1,6 @@
-import { renderHook } from '@testing-library/react';
+import { sleep } from '@ls-stack/utils/sleep';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -445,3 +447,66 @@ test('deleting an item while its batch refetch is in flight keeps it deleted', a
   expect(env.apiStore.getItemState('item1')).toBe(null);
   expect(env.apiStore.getItemState('item2')?.status).toBe('success');
 });
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches the restored item ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createCollectionStoreTestEnv(
+      { item1: { v: 0 }, item2: { v: 0 } },
+      { testScenario: 'loaded', useBatchFetch },
+    );
+
+    const ui = createLoggerStore();
+    renderHook(() => {
+      const item1 = env.apiStore.useItem('item1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+      ui.add({ item1: `${item1.status}:${item1.data?.value.v ?? '-'}` });
+    });
+
+    await flushAllTimers();
+
+    // The server has a newer value, so the refetch is needed
+    env.serverTable.setItem('item1', { v: 1 });
+    env.scheduleFetch('highPriority', 'item1');
+    env.scheduleFetch('highPriority', 'item2');
+    await advanceTime(100);
+    ui.addMark('item1 is deleted while its refetch is in flight');
+
+    // The delete aborts item1's refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('item1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('item1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback restores item1 mid-refetch, so it is refetched instead of
+    // staying on `refetching` with no fetch pending
+    expect(ui.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> item1: success:0
+      -> item1: refetching:0
+
+      >>> item1 is deleted while its refetch is in flight
+
+      -> item1: deleted:-
+      -> item1: refetching:0
+      -> item1: success:1
+      "
+    `);
+    expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+    expect(env.apiStore.getItemState('item2')?.status).toBe('success');
+  },
+);

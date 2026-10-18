@@ -1,3 +1,4 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
@@ -958,3 +959,66 @@ test('deleting an item while its batch refetch is in flight keeps it deleted', a
     "
   `);
 });
+
+test.each([
+  { scheduler: 'batch', useBatchFetch: true },
+  { scheduler: 'per-item', useBatchFetch: false },
+])(
+  'a failed delete of an item whose refetch was in flight refetches the restored item ($scheduler scheduler)',
+  async ({ useBatchFetch }) => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { items: ['users||1', 'users||2'] } },
+      useBatchFetch,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const item1 = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({ item1: `${item1.status}:${item1.data?.name}` });
+    });
+
+    await flushAllTimers();
+
+    // The server has a newer value, so the refetch is needed
+    env.serverTable.updateItem('users||1', { name: 'Renamed' });
+    env.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||2');
+    await advanceTime(100);
+    renders.addMark('users||1 is deleted while its refetch is in flight');
+
+    // The delete aborts the refetch and drops its retry, then fails
+    act(() => {
+      void env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.deleteItemState('users||1');
+        },
+        mutation: async () => {
+          await sleep(1200);
+          throw new Error('Delete failed');
+        },
+      });
+    });
+
+    await flushAllTimers();
+
+    // The rollback restores users||1 mid-refetch, so it is refetched instead
+    // of staying on `refetching` with no fetch pending
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> item1: success:User 1
+      -> item1: refetching:User 1
+
+      >>> users||1 is deleted while its refetch is in flight
+
+      -> item1: deleted:undefined
+      -> item1: refetching:User 1
+      -> item1: success:Renamed
+      "
+    `);
+  },
+);
