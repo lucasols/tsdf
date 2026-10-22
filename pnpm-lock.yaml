@@ -15,8 +15,8 @@ importers:
         specifier: ^0.3.5
         version: 0.3.5
       '@ls-stack/react-utils':
-        specifier: ^0.13.2
-        version: 0.13.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+        specifier: ^0.13.3
+        version: 0.13.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
         specifier: ^4.0.0
         version: 4.0.0
@@ -606,8 +606,8 @@ packages:
       eslint: ^9.33.0
       typescript: ^5.9.2
 
-  '@ls-stack/react-utils@0.13.2':
-    resolution: {integrity: sha512-HSp5wAG+yjYjLmNZovD7PWQ2lr12FRqgfU5gTDf7bIqHvZqmy/m9rrwptUssRZjQVZjGnXq2T36r/6hZlRxsSQ==}
+  '@ls-stack/react-utils@0.13.3':
+    resolution: {integrity: sha512-QBXos3OfMu2+VKKkKLS2uBl1zQqgxZWI1Hwn8WSLTWHCi25Zw0fAfhinOfbmhl7YqHANJIx/JD4UazPz1N4dzw==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18.0.0||^19.0.0'
@@ -3133,7 +3133,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@ls-stack/react-utils@0.13.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+  '@ls-stack/react-utils@0.13.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@evtmitter/react': 0.1.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/browser-utils': 0.3.5

@@ -90,7 +90,7 @@
   "dependencies": {
     "@evtmitter/react": "^0.1.0",
     "@ls-stack/browser-utils": "^0.3.5",
-    "@ls-stack/react-utils": "^0.13.2",
+    "@ls-stack/react-utils": "^0.13.3",
     "@ls-stack/utils": "^4.0.0",
     "@standard-schema/spec": "^1.1.0",
     "evtmitter": "^1.0.2",

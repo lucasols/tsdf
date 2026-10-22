@@ -1,5 +1,5 @@
 import { useConst } from '@ls-stack/react-utils/useConst';
-import { useLatestValue } from '@ls-stack/react-utils/useLatestValue';
+import { useLatestCb } from '@ls-stack/react-utils/useLatestValue';
 import { useTimeout } from '@ls-stack/react-utils/useTimeout';
 import { useEffect, useRef, useState } from 'react';
 
@@ -46,10 +46,10 @@ export function useListItemIsLoading({
     setWillBeRefetched(true);
   }
 
-  const latestIsLoadingOrRefetching = useLatestValue(
-    listIsLoading || isRefetching,
+  const getIsLoadingOrRefetching = useLatestCb(
+    () => listIsLoading || isRefetching,
   );
-  const latestLoadItemFallback = useLatestValue(loadItemFallback);
+  const latestLoadItemFallback = useLatestCb(loadItemFallback);
 
   useEffect(() => {
     if (isRefetching) {
@@ -70,8 +70,8 @@ export function useListItemIsLoading({
   useEffect(() => {
     if (willBeRefetched) {
       callFallbackLoadItemTimeout.call(() => {
-        if (!latestIsLoadingOrRefetching.insideEffect) {
-          latestLoadItemFallback.insideEffect();
+        if (!getIsLoadingOrRefetching()) {
+          latestLoadItemFallback();
 
           return;
         }
@@ -94,7 +94,7 @@ export function useListItemIsLoading({
   }, [
     resetWillBeRefetchedTimeout,
     willBeRefetched,
-    latestIsLoadingOrRefetching,
+    getIsLoadingOrRefetching,
     latestLoadItemFallback,
     callFallbackLoadItemTimeout,
   ]);
