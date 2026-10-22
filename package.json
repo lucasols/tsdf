@@ -97,7 +97,7 @@
     "klona": "^2.0.6",
     "runcheck": "^1.15.0",
     "t-result": "^0.6.1",
-    "t-state": "^9.9.1"
+    "t-state": "^10.0.0"
   },
   "simple-git-hooks": {
     "pre-commit": "node --no-warnings scripts/preCommitHook.ts"

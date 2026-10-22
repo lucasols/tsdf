@@ -55,7 +55,7 @@ export function useFindItem<
     },
     [findItemFn, selector],
   );
-  const selectedItem = store.useSelectorRC(selectedItemSelector, {
+  const selectedItem = store.useSelector(selectedItemSelector, {
     equalityFn: deepEqual,
   });
 

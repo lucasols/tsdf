@@ -2522,7 +2522,7 @@ export function createOfflineSession<
         [],
       );
 
-      return coordinator.store.useSelectorRC(statusSelector);
+      return coordinator.store.useSelector(statusSelector);
     },
     useOfflineEntities: () => {
       const coordinator = useSessionCoordinator();
@@ -2532,7 +2532,7 @@ export function createOfflineSession<
         [],
       );
 
-      return coordinator.store.useSelectorRC(entitiesSelector, {
+      return coordinator.store.useSelector(entitiesSelector, {
         equalityFn: deepEqual,
       });
     },
@@ -2543,7 +2543,7 @@ export function createOfflineSession<
         [],
       );
 
-      return coordinator.store.useSelectorRC(resolutionsSelector, {
+      return coordinator.store.useSelector(resolutionsSelector, {
         equalityFn: deepEqual,
       });
     },
@@ -2555,7 +2555,7 @@ export function createOfflineSession<
       );
 
       return castUploads<TUploadRef>(
-        coordinator.store.useSelectorRC(uploadsSelector, {
+        coordinator.store.useSelector(uploadsSelector, {
           equalityFn: deepEqual,
         }),
       );
@@ -2625,7 +2625,7 @@ export function useGlobalOfflineStatus(
     [],
   );
 
-  return coordinator.store.useSelectorRC(statusSelector);
+  return coordinator.store.useSelector(statusSelector);
 }
 
 /**
@@ -2641,7 +2641,7 @@ export function useGlobalOfflineEntities(
     [],
   );
 
-  return coordinator.store.useSelectorRC(entitiesSelector, {
+  return coordinator.store.useSelector(entitiesSelector, {
     equalityFn: deepEqual,
   });
 }
@@ -2658,7 +2658,7 @@ export function useGlobalOfflineResolutions(
     [],
   );
 
-  return coordinator.store.useSelectorRC(resolutionsSelector, {
+  return coordinator.store.useSelector(resolutionsSelector, {
     equalityFn: deepEqual,
   });
 }
@@ -2686,7 +2686,7 @@ export function useOfflineStoreEntitiesWithPayload(args: {
     [args.storeName],
   );
 
-  return coordinator.store.useSelectorRC(entitiesSelector, {
+  return coordinator.store.useSelector(entitiesSelector, {
     equalityFn: deepEqual,
   });
 }
@@ -2717,7 +2717,7 @@ export function useOfflineStoreStatus(args: {
     [],
   );
 
-  return coordinator.store.useSelectorRC(statusSelector);
+  return coordinator.store.useSelector(statusSelector);
 }
 
 /**
@@ -2743,7 +2743,7 @@ export function useOfflineStoreResolutions(args: {
     [args.storeName],
   );
 
-  return coordinator.store.useSelectorRC(resolutionsSelector, {
+  return coordinator.store.useSelector(resolutionsSelector, {
     equalityFn: deepEqual,
   });
 }

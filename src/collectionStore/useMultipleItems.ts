@@ -278,7 +278,7 @@ export function useMultipleItems<
     [activeOfflineOverlays, offlineEntitiesByKey, queriesWithId, selector],
   );
 
-  const storeState = store.useSelectorRC(resultSelector, {
+  const storeState = store.useSelector(resultSelector, {
     equalityFn: deepEqual,
   });
   const automaticRetryState = useConst<AutomaticFetchRetryState>(

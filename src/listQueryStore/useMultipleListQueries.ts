@@ -931,7 +931,7 @@ export function useMultipleListQueries<
     ],
   );
 
-  const storeState = store.useSelectorRC(resultSelector, {
+  const storeState = store.useSelector(resultSelector, {
     equalityFn: deepEqual,
   });
   const visibleStoreState = useMemo(() => {
@@ -1050,7 +1050,7 @@ export function useMultipleListQueries<
     selectVisibleItems,
     stickyDerivedQueryKeys,
   ]);
-  const autoFetchSignals = store.useSelectorRC(
+  const autoFetchSignals = store.useSelector(
     useCallback(
       (state: State) => {
         if (!partialResources) return [];

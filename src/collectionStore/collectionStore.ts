@@ -2090,7 +2090,7 @@ export function createCollectionStore<
       },
       [],
     );
-    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+    const offlineOverlays = offlineOverlayStore.useSelector(
       offlineOverlaysSelector,
     );
 

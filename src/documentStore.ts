@@ -1597,7 +1597,7 @@ export function createDocumentStore<
       (state: DocumentOfflineOverlay<State>) => state,
       [],
     );
-    const offlineOverlay = offlineOverlayStore.useSelectorRC(
+    const offlineOverlay = offlineOverlayStore.useSelector(
       offlineOverlaySelector,
     );
     const isOffScreenFromContext = useContext(IsOffScreenContext);
@@ -1644,7 +1644,7 @@ export function createDocumentStore<
       ],
     );
 
-    const storeState = store.useSelectorRC(storeStateSelector, {
+    const storeState = store.useSelector(storeStateSelector, {
       equalityFn: deepEqual,
     });
     const automaticRetryState = useConst<AutomaticFetchRetryState>(

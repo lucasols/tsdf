@@ -3060,7 +3060,7 @@ export function createListQueryStore<
       },
       [],
     );
-    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+    const offlineOverlays = offlineOverlayStore.useSelector(
       offlineOverlaysSelector,
     );
 
@@ -3155,7 +3155,7 @@ export function createListQueryStore<
       },
       [],
     );
-    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+    const offlineOverlays = offlineOverlayStore.useSelector(
       offlineOverlaysSelector,
     );
 
@@ -3242,7 +3242,7 @@ export function createListQueryStore<
       },
       [],
     );
-    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+    const offlineOverlays = offlineOverlayStore.useSelector(
       offlineOverlaysSelector,
     );
 

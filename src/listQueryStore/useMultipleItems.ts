@@ -587,7 +587,7 @@ export function useMultipleItems<
     ],
   );
 
-  const storeState = store.useSelectorRC(resultSelector, {
+  const storeState = store.useSelector(resultSelector, {
     equalityFn: deepEqual,
   });
   const visibleStoreState = useMemo(() => {
@@ -714,7 +714,7 @@ export function useMultipleItems<
     selector,
     storeState,
   ]);
-  const autoFetchSignals = store.useSelectorRC(autoFetchSignalSelector, {
+  const autoFetchSignals = store.useSelector(autoFetchSignalSelector, {
     equalityFn: deepEqual,
   });
   const automaticRetryState = useConst<AutomaticFetchRetryState>(

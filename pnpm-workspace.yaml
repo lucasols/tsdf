@@ -11,7 +11,7 @@ minimumReleaseAgeExclude:
   - '@ls-stack/browser-utils@0.3.5'
   - '@ls-stack/react-utils@0.13.2'
   - '@ls-stack/utils@4.0.0'
-  - t-state@9.9.1
+  - t-state@10.0.0
   - evtmitter@1.1.1
 
 onlyBuiltDependencies:

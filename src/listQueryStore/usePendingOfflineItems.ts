@@ -242,5 +242,5 @@ export function usePendingOfflineItems<
     ],
   );
 
-  return store.useSelectorRC(resultSelector, { equalityFn: deepEqual });
+  return store.useSelector(resultSelector, { equalityFn: deepEqual });
 }
