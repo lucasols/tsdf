@@ -8,9 +8,10 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - '@evtmitter/react@0.1.2'
-  - '@ls-stack/browser-utils@0.3.3'
-  - '@ls-stack/react-utils@0.13.0'
-  - '@ls-stack/utils@3.78.1 || 3.78.2'
+  - '@ls-stack/browser-utils@0.3.5'
+  - '@ls-stack/react-utils@0.13.2'
+  - '@ls-stack/utils@4.0.0'
+  - t-state@9.9.1
   - evtmitter@1.1.1
 
 onlyBuiltDependencies:

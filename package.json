@@ -89,15 +89,15 @@
   },
   "dependencies": {
     "@evtmitter/react": "^0.1.0",
-    "@ls-stack/browser-utils": "^0.3.0",
-    "@ls-stack/react-utils": "^0.13.0",
-    "@ls-stack/utils": "^3.76.0",
+    "@ls-stack/browser-utils": "^0.3.5",
+    "@ls-stack/react-utils": "^0.13.2",
+    "@ls-stack/utils": "^4.0.0",
     "@standard-schema/spec": "^1.1.0",
     "evtmitter": "^1.0.2",
     "klona": "^2.0.6",
     "runcheck": "^1.15.0",
     "t-result": "^0.6.1",
-    "t-state": "^9.8.2"
+    "t-state": "^9.9.1"
   },
   "simple-git-hooks": {
     "pre-commit": "node --no-warnings scripts/preCommitHook.ts"
