@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { build as buildPackage } from 'tsdown';
 import { build as buildApp, type Rolldown } from 'vite';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
 /**
  * These tests bundle the published `dist` output the same way a consumer app
@@ -16,10 +16,15 @@ const repoRoot = path.resolve(import.meta.dirname, '../..');
 // Strings that only exist inside the code we expect to be tree-shaken away
 const managedAsyncAdapterMarker = 'tsdf-async-write:';
 const opfsDriverMarker = 'Failed to open OPFS store directory';
+const indexedDbDriverMarker = 'IndexedDB transaction failed.';
 
 let consumerDir = '';
 
 beforeAll(async () => {
+  // `vitest.setup.ts` sets NODE_ENV to development, which would make Vite keep
+  // the `import.meta.env.DEV` branches. Bundle like a production consumer app.
+  vi.stubEnv('NODE_ENV', 'production');
+
   consumerDir = await mkdtemp(path.join(tmpdir(), 'tsdf-tree-shaking-'));
   const installedPackageDir = path.join(consumerDir, 'node_modules/tsdf');
   await mkdir(installedPackageDir, { recursive: true });
@@ -38,6 +43,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  vi.unstubAllEnvs();
   if (consumerDir) await rm(consumerDir, { recursive: true, force: true });
 });
 
@@ -53,7 +59,7 @@ async function bundleConsumerApp(entryCode: string): Promise<string> {
     build: {
       write: false,
       minify: true,
-      rollupOptions: {
+      rolldownOptions: {
         input: entryPath,
         // Only tsdf's own code matters here, its dependencies stay external
         external: (id) =>
@@ -75,7 +81,7 @@ async function bundleConsumerApp(entryCode: string): Promise<string> {
 }
 
 describe('apps that only use local-sync persistence', () => {
-  test('do not bundle the async storage adapter or the OPFS driver', async () => {
+  test('do not bundle the async storage adapter or the OPFS and IndexedDB drivers', async () => {
     // Every runtime export an app with only `local-sync` stores needs
     const bundle = await bundleConsumerApp(`
       import {
@@ -106,6 +112,8 @@ describe('apps that only use local-sync persistence', () => {
     expect(bundle).not.toContain(managedAsyncAdapterMarker);
     // The OPFS driver is only needed when `tsdf/opfs-storage` is imported
     expect(bundle).not.toContain(opfsDriverMarker);
+    // The IndexedDB driver is only needed when `tsdf/indexed-db-storage` is imported
+    expect(bundle).not.toContain(indexedDbDriverMarker);
   }, 30_000);
 });
 
@@ -120,4 +128,16 @@ test('apps using the OPFS adapter still bundle the async adapter and the OPFS dr
 
   expect(bundle).toContain(managedAsyncAdapterMarker);
   expect(bundle).toContain(opfsDriverMarker);
+}, 30_000);
+
+test('apps using the IndexedDB adapter still bundle the async adapter and the IndexedDB driver', async () => {
+  // Confirms the IndexedDB marker really identifies that driver
+  const bundle = await bundleConsumerApp(`
+    import { indexedDbPersistentStorage } from 'tsdf/indexed-db-storage';
+
+    globalThis.tsdfExports = [indexedDbPersistentStorage];
+  `);
+
+  expect(bundle).toContain(managedAsyncAdapterMarker);
+  expect(bundle).toContain(indexedDbDriverMarker);
 }, 30_000);
