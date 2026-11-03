@@ -179,6 +179,7 @@ function createAsyncIterator<T>(
       const iterator = await iteratorPromise;
       return iterator.next();
     },
+    [Symbol.asyncDispose]: () => Promise.resolve(),
   };
 }
 

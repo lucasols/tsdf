@@ -2172,49 +2172,52 @@ class SessionOfflineCoordinator {
 
   #scheduleRecoveryProbe(target: SessionRecoveryTarget): void {
     this.#scheduledRecoveryMode = target.mode;
-    this.#recoveryTimer = setTimeout(async () => {
+    this.#recoveryTimer = setTimeout(() => {
       this.#recoveryTimer = null;
       this.#scheduledRecoveryMode = null;
-
-      const nextTarget = this.#getDesiredRecoveryTarget();
-      if (nextTarget === null || nextTarget.mode !== target.mode) {
-        return;
-      }
-
-      let recovered = false;
-
-      try {
-        recovered = await nextTarget.recoveryCheck({
-          sessionKey: this.sessionKey,
-        });
-      } catch {
-        recovered = false;
-      }
-
-      const recoveryCheckAt = Date.now();
-
-      if (recovered) {
-        this.#recoveryAttempt = 0;
-        if (target.mode === 'network') {
-          this.setNetworkActive(false, { classified: false, recoveryCheckAt });
-          return;
-        }
-
-        this.setOutageActive(false, { recoveryCheckAt });
-        return;
-      }
-
-      this.#updateStatus((current: GlobalOfflineStatus) => ({
-        ...current,
-        lastRecoveryCheckAt: recoveryCheckAt,
-      }));
-
-      this.#recoveryAttempt += 1;
-      const nextProbeTarget = this.#getDesiredRecoveryTarget();
-      if (nextProbeTarget !== null && nextProbeTarget.mode === target.mode) {
-        this.#scheduleRecoveryProbe(nextProbeTarget);
-      }
+      void this.#runRecoveryProbe(target);
     }, this.#getRecoveryProbeDelay(target.recoveryProbe));
+  }
+
+  async #runRecoveryProbe(target: SessionRecoveryTarget): Promise<void> {
+    const nextTarget = this.#getDesiredRecoveryTarget();
+    if (nextTarget === null || nextTarget.mode !== target.mode) {
+      return;
+    }
+
+    let recovered = false;
+
+    try {
+      recovered = await nextTarget.recoveryCheck({
+        sessionKey: this.sessionKey,
+      });
+    } catch {
+      recovered = false;
+    }
+
+    const recoveryCheckAt = Date.now();
+
+    if (recovered) {
+      this.#recoveryAttempt = 0;
+      if (target.mode === 'network') {
+        this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+        return;
+      }
+
+      this.setOutageActive(false, { recoveryCheckAt });
+      return;
+    }
+
+    this.#updateStatus((current: GlobalOfflineStatus) => ({
+      ...current,
+      lastRecoveryCheckAt: recoveryCheckAt,
+    }));
+
+    this.#recoveryAttempt += 1;
+    const nextProbeTarget = this.#getDesiredRecoveryTarget();
+    if (nextProbeTarget !== null && nextProbeTarget.mode === target.mode) {
+      this.#scheduleRecoveryProbe(nextProbeTarget);
+    }
   }
 
   #syncRecoveryProbe(): void {
