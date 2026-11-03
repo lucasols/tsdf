@@ -4,4 +4,6 @@ import type { AsyncStorageAdapter } from './types';
 
 export const opfsPersistentStorage: AsyncStorageAdapter =
   /* @__PURE__ */
-  createAsyncStorageAdapter(new OpfsAsyncStorageDriver());
+  // The driver needs its own annotation: bundlers keep side-effectful
+  // arguments of pure calls, which would retain the whole OPFS driver.
+  createAsyncStorageAdapter(/* @__PURE__ */ new OpfsAsyncStorageDriver());

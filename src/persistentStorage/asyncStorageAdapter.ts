@@ -1055,6 +1055,17 @@ type PendingNamespaceCommit = {
   }>;
 };
 
+/**
+ * Managed adapters keyed by themselves. Helpers used by the `local-sync`
+ * persistence paths look adapters up here instead of using `instanceof`, so
+ * bundlers can drop the `ManagedAsyncStorageAdapter` class from apps that never
+ * create an async adapter.
+ */
+const managedAsyncStorageAdapters = new WeakMap<
+  AsyncStorageAdapter,
+  ManagedAsyncStorageAdapter
+>();
+
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
@@ -1078,6 +1089,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   constructor(driver: AsyncStorageDriver) {
     this.#driver = driver;
     registerAsyncStorageReadCacheParticipant(this);
+    managedAsyncStorageAdapters.set(this, this);
   }
 
   get debugLogger(): AsyncStorageAdapter['debugLogger'] {
@@ -3380,8 +3392,9 @@ export function getAsyncStorageMaintenanceRemoveBatchSize(
 ): number {
   // Other adapters re-list the whole namespace for every batch, so they get
   // the larger batches too.
-  return adapter instanceof ManagedAsyncStorageAdapter
-    ? adapter.getMaintenanceRemoveBatchSize()
+  const managedAdapter = adapter && managedAsyncStorageAdapters.get(adapter);
+  return managedAdapter
+    ? managedAdapter.getMaintenanceRemoveBatchSize()
     : INDEX_REWRITE_COMMIT_MAINTENANCE_REMOVE_BATCH_SIZE;
 }
 
@@ -3396,8 +3409,11 @@ export async function removeAsyncStorageNamespaceEntriesIfUnchanged(
   scope: AsyncStorageNamespaceScope,
   entries: AsyncStorageNamespaceCommitConditionalRemove[],
 ): Promise<ReadonlySet<string>> {
-  if (adapter instanceof ManagedAsyncStorageAdapter) {
-    return adapter.commitToNamespaceNow(scope, { conditionalRemoves: entries });
+  const managedAdapter = managedAsyncStorageAdapters.get(adapter);
+  if (managedAdapter) {
+    return managedAdapter.commitToNamespaceNow(scope, {
+      conditionalRemoves: entries,
+    });
   }
 
   const namespace = adapter.openNamespace(scope);
