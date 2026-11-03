@@ -83,11 +83,12 @@ The payload can be:
 
 1. **Lock**: The scheduler is locked for the affected items/queries, preventing concurrent fetches. An in-flight fetch for them is aborted so it can't commit stale data, and it is retried once the lock is released. Calls awaiting the aborted fetch (e.g. `awaitFetch`, `getItemFromStateOrFetch`) resolve with the retry's result
 2. **Optimistic update**: If provided, runs immediately. If it returns `false`, the mutation is cancelled
-3. **Debounce** (optional): Waits for `ms` milliseconds. During debounce, the window close is blocked
-4. **Execute mutation**: The async mutation function runs
-5. **On success**: Calls `onSuccess`, optionally invalidates data
-6. **On error**: Rolls back optimistic state, normalizes the error, and calls `onMutationError` with the `silentErrors` flag
-7. **Unlock**: The scheduler is unlocked, pending fetches resume
+3. **Block window close**: If the manager `blockWindowClose` option is set, window close is blocked until the mutation settles (including the debounce wait)
+4. **Debounce** (optional): Waits for `ms` milliseconds
+5. **Execute mutation**: The async mutation function runs
+6. **On success**: Calls `onSuccess`, optionally invalidates data
+7. **On error**: Rolls back optimistic state, normalizes the error, and calls `onMutationError` with the `silentErrors` flag
+8. **Unlock**: The scheduler is unlocked, pending fetches resume
 
 ## Return Value
 
@@ -157,7 +158,7 @@ await store.performMutation({
 });
 ```
 
-During the debounce period, the window close is blocked to prevent data loss.
+The window close stays blocked during the debounce period too, so a pending debounced mutation isn't lost if the tab is closed.
 
 Superseded calls never send their mutation, so their optimistic updates are handed to the call that superseded them: if that call fails, the state goes back to what it was before the first superseded call.
 
