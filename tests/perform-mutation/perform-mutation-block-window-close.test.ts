@@ -8,6 +8,7 @@ import {
   test,
   vi,
 } from 'vitest';
+import { mutationSkipped } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -154,8 +155,19 @@ describe('performMutation blockWindowClose', () => {
     await advanceTime(500);
     const result = await mutationPromise;
 
-    // The block is released even though the mutation failed
-    expect(result.ok).toBe(false);
+    // The block is released even though the mutation failed with the
+    // server error
+    assert(!result.ok);
+    expect(result.error).toMatchInlineSnapshot(`
+      Error#:
+        message: 'server error'
+        name: 'StoreMutationError'
+        kind: 'error'
+        code: 500
+        id: 'fetch-error'
+        cause:
+          Error#: { message: 'server error', name: 'Error' }
+    `);
     expect(unblock).toHaveBeenCalledTimes(1);
   });
 
@@ -183,6 +195,7 @@ describe('performMutation blockWindowClose', () => {
 
     // Both calls hold a block while waiting for the debounce
     expect(blockWindowClose).toHaveBeenCalledTimes(2);
+    expect(unblock).not.toHaveBeenCalled();
 
     await advanceTime(20);
     const [firstResult, secondResult] = await Promise.all([
@@ -192,7 +205,8 @@ describe('performMutation blockWindowClose', () => {
 
     // The superseded call is skipped, the last one is sent, and both
     // release their blocks
-    expect(firstResult.ok).toBe(false);
+    assert(!firstResult.ok);
+    expect(firstResult.error).toBe(mutationSkipped);
     assert(secondResult.ok);
     expect(secondResult.value).toBe('second');
     expect(unblock).toHaveBeenCalledTimes(2);
