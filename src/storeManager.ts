@@ -61,7 +61,7 @@ export type StoreManagerStoreDefaults = {
   readonly backgroundCoalescingDelayMs: number;
   /** Default adaptive throttle for real-time updates in attached stores. */
   readonly dynamicRealtimeThrottleMs: DynamicRealtimeThrottleMs;
-  /** Shared window-close blocker used by mutations in attached stores. */
+  /** Shared window-close blocker held by every mutation in attached stores from start until it settles. */
   readonly blockWindowClose: BlockWindowCloseHandler | null;
   /** Default focus revalidation policy for attached stores. */
   readonly revalidateOnWindowFocus: boolean | (() => boolean) | undefined;
@@ -270,7 +270,7 @@ export type CreateStoreManagerOptions<
   backgroundCoalescingDelayMs?: number;
   /** Default adaptive throttle for real-time updates in attached stores. Store-level values override it. */
   dynamicRealtimeThrottleMs?: DynamicRealtimeThrottleMs;
-  /** Shared window-close blocker used by mutations in attached stores. Pass `null` to disable. */
+  /** Shared window-close blocker held by every mutation in attached stores from start until it settles. Pass `null` to disable. */
   blockWindowClose?: BlockWindowCloseHandler | null;
   /** Global fallback for persistent storage failures when a store does not provide its own handler. */
   onPersistentStorageError?: PersistentStorageErrorHandler;

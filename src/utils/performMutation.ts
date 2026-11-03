@@ -57,9 +57,11 @@ export async function performMutationWithLifecycle<
       return Result.err(mutationSkipped);
     }
 
-    if (debounce) {
-      unblockWindowClose = blockWindowClose?.().unblock ?? null;
+    // Blocks window close for the whole pending mutation (debounce wait and
+    // request), so closing or reloading the tab doesn't drop it
+    unblockWindowClose = blockWindowClose?.().unblock ?? null;
 
+    if (debounce) {
       // Superseded calls never send their mutation, so their optimistic
       // changes are handed to the call that superseded them, which reverts
       // all of them if it fails, or completes them if it succeeds
