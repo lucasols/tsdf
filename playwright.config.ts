@@ -11,5 +11,12 @@ export default defineConfig({
     url: 'http://127.0.0.1:42173',
     reuseExistingServer: !process.env.CI,
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chrome',
+      // Uses the locally installed Google Chrome instead of a Playwright-managed
+      // Chromium build, so Playwright upgrades never trigger a browser download
+      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    },
+  ],
 });
