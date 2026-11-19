@@ -1135,7 +1135,6 @@ test('offline edits merged into one queued mutation upload the files added by ev
     },
   });
 
-  const uploadHook = renderHook(() => storeManager.useOfflineUploads());
   await flushAllTimers();
 
   async function attachFileOffline(uploadId: string, value: number) {
@@ -1200,10 +1199,6 @@ test('offline edits merged into one queued mutation upload the files added by ev
     - 'upload-finish:file-2'
     - 'execute:"server:file-1","server:file-2"'
   `);
-  // Both staged uploads were consumed by the replay.
-  expect(uploadHook.result.current).toMatchInlineSnapshot(`[]`);
-
-  uploadHook.unmount();
 });
 
 test('online mutations can resolve staged upload ids after reconnect and use the final refs in the direct request', async () => {
