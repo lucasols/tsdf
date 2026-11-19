@@ -1001,6 +1001,9 @@ function OfflineListScenario({
   );
   const offlineStatus = storeManager.useOfflineStatus();
   const offlineEntities = storeManager.useOfflineEntities();
+  const pendingItems = store.usePendingOfflineItems({
+    selector: (item) => item.name,
+  });
   const [newUserName, setNewUserName] = useState('');
 
   return (
@@ -1010,6 +1013,9 @@ function OfflineListScenario({
         {query.items.map((item) => item.name).join(',') || 'null'}
       </div>
       <div data-testid="offline-list-status">{query.status}</div>
+      <div data-testid="offline-list-pending-names">
+        {pendingItems.items.join(',') || 'none'}
+      </div>
       <div data-testid="offline-list-offline-mode">
         {offlineStatus.isOfflineMode ? 'offline' : 'online'}
       </div>

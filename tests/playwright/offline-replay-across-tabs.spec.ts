@@ -167,6 +167,8 @@ async function setTabHidden(page: Page, hidden: boolean): Promise<void> {
       get: () => isHidden,
     });
     document.dispatchEvent(new Event('visibilitychange'));
+    // Switching tabs in a real browser also moves the window focus
+    window.dispatchEvent(new Event(isHidden ? 'blur' : 'focus'));
   }, hidden);
 }
 
@@ -452,22 +454,30 @@ test('an edit is sent only once when a new tab opens while it is being replayed'
 });
 
 /**
- * Cuts or restores the connection of a single tab. Other tabs keep theirs,
- * which is what lets a new tab load the app while this one is still offline.
+ * Cuts the connection of a single tab and returns how to restore it. Other
+ * tabs keep theirs, which is what lets a new tab load the app while this one
+ * is still offline.
  */
-async function setTabOffline(
+async function cutTabConnection(
   context: BrowserContext,
   page: Page,
-  offline: boolean,
-): Promise<void> {
+): Promise<() => Promise<void>> {
+  // The emulation lasts as long as this DevTools session stays attached.
   const session = await context.newCDPSession(page);
-  await session.send('Network.emulateNetworkConditions', {
-    offline,
-    latency: 0,
-    downloadThroughput: -1,
-    uploadThroughput: -1,
-  });
-  await session.detach();
+  const emulate = (offline: boolean) =>
+    session.send('Network.emulateNetworkConditions', {
+      offline,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+    });
+
+  await session.send('Network.enable');
+  await emulate(true);
+
+  return async () => {
+    await emulate(false);
+  };
 }
 
 async function openListTab(
@@ -488,6 +498,17 @@ async function openListTab(
   await page.goto(`/?${searchParams.toString()}`);
   await expect(page.getByTestId('offline-list-status')).toHaveText('success');
   return page;
+}
+
+/** Creates a record in a tab. While offline the creation is queued. */
+async function createUser(page: Page, name: string): Promise<void> {
+  await page.getByTestId('offline-list-new-user-name').fill(name);
+  await page.getByTestId('offline-list-create-user').click();
+  // The tab that created the record shows it as a pending item
+  await expect(page.getByTestId('offline-list-pending-names')).toHaveText(name);
+  await expect(page.getByTestId('offline-list-pending-mutations')).toHaveText(
+    '1',
+  );
 }
 
 /** Names of the users the fixture server has, in creation order. */
@@ -537,15 +558,11 @@ test('a record created offline is not created twice when another tab already sen
   );
 
   // Tab 1 loses its connection and creates a record, which is queued.
-  await setTabOffline(context, creatingTab, true);
+  const restoreConnection = await cutTabConnection(context, creatingTab);
   await expect(creatingTab.getByTestId('offline-list-offline-mode')).toHaveText(
     'offline',
   );
-  await creatingTab.getByTestId('offline-list-new-user-name').fill('Linus');
-  await creatingTab.getByTestId('offline-list-create-user').click();
-  await expect(
-    creatingTab.getByTestId('offline-list-pending-mutations'),
-  ).toHaveText('1');
+  await createUser(creatingTab, 'Linus');
 
   // Tab 2 opens afterwards with a working connection. It loads the queued
   // creation from storage, leads the session and sends it.
@@ -568,7 +585,7 @@ test('a record created offline is not created twice when another tab already sen
   // The user goes back to tab 1, which reconnects and leads the session
   // again. Its creation was already sent, so it must not send it again.
   await setTabHidden(secondTab, true);
-  await setTabOffline(context, creatingTab, false);
+  await restoreConnection();
   await expect(creatingTab.getByTestId('offline-list-leadership')).toHaveText(
     'leader',
   );
@@ -578,8 +595,73 @@ test('a record created offline is not created twice when another tab already sen
   await expect(
     creatingTab.getByTestId('offline-list-pending-mutations'),
   ).toHaveText('0');
+  await expect(
+    creatingTab.getByTestId('offline-list-pending-names'),
+  ).toHaveText('none');
 
   await waitForStrayRequests(creatingTab);
+  expect(await getSentCreations(request, fixtureScopeId)).toBe('page-b');
+  expect(await getServerUserNames(request, fixtureScopeId)).toBe(
+    'Alice, Bob, Linus',
+  );
+});
+
+test('a record created offline in a background tab is created once after reconnecting', async ({
+  context,
+  request,
+  fixtureScopeId,
+}) => {
+  const storeId = 'follower-creation-list';
+  const followerTab = await openListTab(
+    context,
+    'page-a',
+    fixtureScopeId,
+    storeId,
+  );
+  const leaderTab = await openListTab(
+    context,
+    'page-b',
+    fixtureScopeId,
+    storeId,
+  );
+  await expect(followerTab.getByTestId('offline-list-leadership')).toHaveText(
+    'follower',
+  );
+
+  await context.setOffline(true);
+  for (const tab of [followerTab, leaderTab]) {
+    await expect(tab.getByTestId('offline-list-offline-mode')).toHaveText(
+      'offline',
+    );
+  }
+
+  // The record is created in the tab that does not lead the session, and the
+  // leading tab learns that there is pending work.
+  await createUser(followerTab, 'Linus');
+  await expect(
+    leaderTab.getByTestId('offline-list-pending-mutations'),
+  ).toHaveText('1');
+
+  await context.setOffline(false);
+
+  // Both tabs stay open and visible: the leading tab sends the creation, and
+  // the tab that created the record stops showing it as pending.
+  await expect
+    .poll(() => getSentCreations(request, fixtureScopeId))
+    .toBe('page-b');
+  for (const tab of [followerTab, leaderTab]) {
+    await expect(tab.getByTestId('offline-list-offline-mode')).toHaveText(
+      'online',
+    );
+    await expect(tab.getByTestId('offline-list-pending-mutations')).toHaveText(
+      '0',
+    );
+    await expect(tab.getByTestId('offline-list-pending-names')).toHaveText(
+      'none',
+    );
+  }
+
+  await waitForStrayRequests(leaderTab);
   expect(await getSentCreations(request, fixtureScopeId)).toBe('page-b');
   expect(await getServerUserNames(request, fixtureScopeId)).toBe(
     'Alice, Bob, Linus',

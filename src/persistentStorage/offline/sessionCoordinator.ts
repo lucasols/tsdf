@@ -52,12 +52,14 @@ import type {
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
+  OfflineQueueEntry,
   OfflineRecoveryProbeConfig,
   OfflineResolutionRecord,
   OfflineRuntimeConfig,
   OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
+  PersistedOfflineResolutionRecord,
 } from './types';
 import {
   COMPACT_OFFLINE_STATUS_FLAG,
@@ -89,20 +91,34 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
 };
 
 /**
- * Tells the other tabs that a store's persisted queue entries / resolutions
- * changed. Receivers reload only those records from storage, which keeps
- * every tab's in-memory queue in sync without sending the records themselves.
+ * A tab saved (`entry`) or removed (`null`) a queue entry of a store. Every
+ * tab keeps its own in-memory copy of the queue, so the others apply the same
+ * change: the leader replays entries queued by any tab, and no tab keeps an
+ * entry that was already replayed.
+ *
+ * The record travels in the message because another tab's storage write is not
+ * visible right away: each tab's process has its own copy of `localStorage`,
+ * updated asynchronously, so re-reading storage could return the old record.
  */
-type SessionStoreRecordsMessage = BrowserTabsMessageMeta & {
-  kind: 'offline-store-records';
+type SessionQueueEntryMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-queue-entry';
   storeName: string;
-  queueEntryIds: string[];
-  resolutionIds: string[];
+  entryId: string;
+  entry: OfflineQueueEntry | null;
+};
+
+/** Same as {@link SessionQueueEntryMessage}, for a resolution record. */
+type SessionResolutionMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-resolution';
+  storeName: string;
+  resolutionId: string;
+  resolution: PersistedOfflineResolutionRecord | null;
 };
 
 type OfflineSessionMessage =
   | SessionSnapshotMessage
-  | SessionStoreRecordsMessage
+  | SessionQueueEntryMessage
+  | SessionResolutionMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -125,10 +141,15 @@ type SessionRegistration = {
   storeName: string;
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
-  /** Another tab saved or removed these persisted records of the store. */
-  onRemoteRecordsChange?: (
-    queueEntryIds: string[],
-    resolutionIds: string[],
+  /** Another tab saved or removed (`null`) a queue entry of the store. */
+  onRemoteQueueEntryChange?: (
+    entryId: string,
+    entry: OfflineQueueEntry | null,
+  ) => void;
+  /** Another tab saved or removed (`null`) a resolution of the store. */
+  onRemoteResolutionChange?: (
+    resolutionId: string,
+    resolution: PersistedOfflineResolutionRecord | null,
   ) => void;
 };
 
@@ -722,12 +743,18 @@ class SessionOfflineCoordinator {
             this.#refreshLeadership();
             return;
           }
-          if (message.kind === 'offline-store-records') {
+          if (message.kind === 'offline-queue-entry') {
             this.#registrations
               .get(message.storeName)
-              ?.onRemoteRecordsChange?.(
-                message.queueEntryIds,
-                message.resolutionIds,
+              ?.onRemoteQueueEntryChange?.(message.entryId, message.entry);
+            return;
+          }
+          if (message.kind === 'offline-resolution') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteResolutionChange?.(
+                message.resolutionId,
+                message.resolution,
               );
             return;
           }
@@ -978,28 +1005,41 @@ class SessionOfflineCoordinator {
     }
   }
 
-  /**
-   * Announces to the other tabs which persisted queue entries / resolutions of
-   * a store were saved or removed by this tab. Call it after the write.
-   */
-  publishStoreRecordsChange(
+  /** Tells the other tabs that this tab saved or removed (`null`) a queue entry. */
+  publishQueueEntryChange(
     storeName: string,
-    queueEntryIds: string[],
-    resolutionIds: string[],
+    entryId: string,
+    entry: OfflineQueueEntry | null,
   ): void {
     if (this.#disposed) return;
 
     this.#browserTabs.coordinator.publish({
-      kind: 'offline-store-records',
+      kind: 'offline-queue-entry',
       storeName,
-      queueEntryIds,
-      resolutionIds,
+      entryId,
+      entry,
+    });
+  }
+
+  /** Tells the other tabs that this tab saved or removed (`null`) a resolution. */
+  publishResolutionChange(
+    storeName: string,
+    resolutionId: string,
+    resolution: PersistedOfflineResolutionRecord | null,
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-resolution',
+      storeName,
+      resolutionId,
+      resolution,
     });
   }
 
   /**
-   * Whether another tab of this session was seen. While `false`, this tab can
-   * trust its in-memory queue without re-checking storage.
+   * Whether another tab of this session was seen. While `false`, this tab is
+   * the only one changing the queue, so it can skip the cross-tab safeguards.
    */
   hasOtherTabs(): boolean {
     return this.#otherTabIds.size > 0;
@@ -2155,10 +2195,10 @@ class SessionOfflineCoordinator {
             : message.status,
           { isLeader: this.isLeader(), updatedAt: Date.now() },
         ),
-        // Stores attached in this tab keep their own records: their queue is
-        // kept in sync with storage, while the other tab's snapshot may have
-        // been taken before it saw this tab's latest change. The snapshot
-        // only fills in stores this tab has not loaded.
+        // Stores attached in this tab keep their own records: this tab's
+        // queue already follows every tab's changes, while the other tab's
+        // snapshot may have been taken before it saw this tab's latest one.
+        // The snapshot only fills in stores this tab has not loaded.
         entities: dedupeById([
           ...message.entities.filter(
             (entity) => !this.#storeContributions.has(entity.storeName),

@@ -180,6 +180,22 @@ Each store also exposes scoped APIs:
 
 List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query.
 
+## Multiple Tabs
+
+Tabs of the same session share one offline queue. Each tab can queue mutations, and every tab shows the same pending state, but only one tab sends the queued work:
+
+- The **leading tab** replays the queue: the visible tab, or the one that was visible most recently. `useOfflineStatus().isLeader` tells whether the current tab leads.
+- A mutation queued in any other tab is sent by the leading tab after the connection recovers, in the order the mutations were queued across tabs. No reload or tab switch is needed.
+- Every queued mutation is sent once. A cross-tab lock (Web Locks API) keeps two tabs from replaying a store's queue at the same time, and a tab drops an entry as soon as another tab reports it as sent, so it cannot send it again when it becomes the leading tab later.
+- When the leading tab is closed or hidden, a visible tab takes over. Leadership moves at most 500ms after the previous tab's last replay.
+
+Things to keep in mind:
+
+- A tab can only replay operations of stores it has created. Create the stores of a session in every tab (the usual module-level setup) so the leading tab can replay all of them.
+- Leadership follows visibility. If every remaining tab is hidden, queued work waits until one of them becomes visible.
+- While offline, each tab shows its own optimistic changes. Tabs converge once the queue is replayed and data is fetched again.
+- Sending is at-most-once per tab hand-off as far as the browser allows TSDF to coordinate. For mutations that must never be duplicated (for example payments), also make the server endpoint idempotent.
+
 ## Runtime Controls
 
 The store manager owns runtime controls for the shared session:

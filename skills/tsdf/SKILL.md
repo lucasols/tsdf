@@ -230,6 +230,8 @@ Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResoluti
 
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
+Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
+
 Docs: `docs/offline.md`.
 
 ## Real-time updates

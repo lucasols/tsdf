@@ -61,6 +61,11 @@ import {
 
 const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 3;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
+/**
+ * Time given to the other tabs to learn about the queue changes of the tab
+ * that just replayed, before one of them may replay.
+ */
+const REPLAY_HANDOFF_SETTLE_MS = 500;
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
 
@@ -499,7 +504,9 @@ export function createOfflineStoreController<
   let replayRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let hydratedSessionKey: string | null = null;
   let hydratedPromise: Promise<void> | null = null;
-  let remoteRecordsReload: Promise<void> = Promise.resolve();
+  let releaseReplayLock: (() => void) | null = null;
+  let heldReplayLockName: string | null = null;
+  let replayLockReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   let nextQueueOrder = 0;
   const replayRetryMaxFailures =
     sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
@@ -706,6 +713,7 @@ export function createOfflineStoreController<
     activeSession?.unregister?.();
     activeSession = null;
     resetReplayRetryState();
+    releaseHeldReplayLock();
     resolvedEntityRefBySerializedRef.clear();
     queueEntries.clear();
     resolutions.clear();
@@ -962,15 +970,31 @@ export function createOfflineStoreController<
       onOfflineCycle: () => {
         resetReplayRetryState();
       },
-      onRemoteRecordsChange: (queueEntryIds, resolutionIds) => {
-        // Chained so reloads are applied in the order the changes happened
-        remoteRecordsReload = remoteRecordsReload.then(() =>
-          reloadRecordsChangedByAnotherTab(queueEntryIds, resolutionIds).catch(
-            (error: unknown) => {
-              onPersistentStorageError?.(error);
-            },
-          ),
-        );
+      onRemoteQueueEntryChange: (entryId, entry) => {
+        applyRecordChangeFromAnotherTab(() => {
+          if (entry) {
+            queueEntries.set(entryId, entry);
+            nextQueueOrder = Math.max(nextQueueOrder, getQueueOrder(entry) + 1);
+            return;
+          }
+
+          queueEntries.delete(entryId);
+          countedReplayFailures.delete(entryId);
+          if (queueEntries.size === 0) clearReplayRetryTimer();
+        });
+      },
+      onRemoteResolutionChange: (resolutionId, resolution) => {
+        applyRecordChangeFromAnotherTab(() => {
+          if (
+            resolution &&
+            rc_parse(resolution, offlineResolutionRecordSchema).ok &&
+            operations[resolution.operation]
+          ) {
+            resolutions.set(resolutionId, resolution);
+          } else {
+            resolutions.delete(resolutionId);
+          }
+        });
       },
     });
 
@@ -1033,68 +1057,26 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Another tab saved or removed these persisted records. Storage is the
-   * source of truth shared by every tab, so re-read just those records to keep
-   * this tab's in-memory queue complete: the leader replays entries queued by
-   * any tab, and every tab stops showing an entry once it was replayed.
+   * Applies to this tab's in-memory queue a record change made by another tab,
+   * so the leader replays entries queued by any tab and every tab stops
+   * showing (and can never replay) an entry another tab already replayed.
    */
-  async function reloadRecordsChangedByAnotherTab(
-    queueEntryIds: string[],
-    resolutionIds: string[],
-  ): Promise<void> {
+  function applyRecordChangeFromAnotherTab(applyChange: () => void): void {
     const current = activeSession;
     if (!current) return;
 
-    // A hydration that started before the change may have read stale records
-    if (hydratedPromise) await hydratedPromise;
+    if (hydratedPromise) {
+      // The hydration in flight may have read the records before the change
+      const applyAfterHydration = (): void => {
+        applyRecordChangeFromAnotherTab(applyChange);
+      };
+      void hydratedPromise.then(applyAfterHydration, applyAfterHydration);
+      return;
+    }
     // Not hydrated yet: the eventual hydration reads the current records
     if (hydratedSessionKey !== current.sessionKey) return;
 
-    const [storedEntries, storedResolutions] = await Promise.all([
-      Promise.all(
-        queueEntryIds.map((entryId) =>
-          current.queueNamespace.load(entryId, { touch: 'never' }),
-        ),
-      ),
-      Promise.all(
-        resolutionIds.map((resolutionId) =>
-          current.resolutionNamespace.load(resolutionId, { touch: 'never' }),
-        ),
-      ),
-    ]);
-
-    if (!isActiveSessionState(current)) return;
-
-    for (const [index, entryId] of queueEntryIds.entries()) {
-      const storedEntry = storedEntries[index];
-
-      if (storedEntry) {
-        queueEntries.set(entryId, storedEntry);
-        nextQueueOrder = Math.max(
-          nextQueueOrder,
-          getQueueOrder(storedEntry) + 1,
-        );
-      } else {
-        queueEntries.delete(entryId);
-        countedReplayFailures.delete(entryId);
-      }
-    }
-    if (queueEntries.size === 0) clearReplayRetryTimer();
-
-    for (const [index, resolutionId] of resolutionIds.entries()) {
-      const storedResolution = storedResolutions[index];
-
-      if (
-        storedResolution &&
-        rc_parse(storedResolution, offlineResolutionRecordSchema).ok &&
-        operations[storedResolution.operation]
-      ) {
-        resolutions.set(resolutionId, storedResolution);
-      } else {
-        resolutions.delete(resolutionId);
-      }
-    }
-
+    applyChange();
     refreshDerivedState(current, true);
   }
 
@@ -2089,10 +2071,10 @@ export function createOfflineStoreController<
         rewrittenResolution.id,
         rewrittenResolution,
       );
-      args.current.session.publishStoreRecordsChange(
+      args.current.session.publishResolutionChange(
         storeName,
-        [],
-        [rewrittenResolution.id],
+        rewrittenResolution.id,
+        rewrittenResolution,
       );
       entityRefRewrites.push({
         previousEntityRefs: resolution.entityRefs,
@@ -2230,7 +2212,7 @@ export function createOfflineStoreController<
       queueEntries.set(entry.id, entry);
     }
     await session.queueNamespace.save(entry.id, entry);
-    session.session.publishStoreRecordsChange(storeName, [entry.id], []);
+    session.session.publishQueueEntryChange(storeName, entry.id, entry);
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2266,8 +2248,10 @@ export function createOfflineStoreController<
         clearReplayRetryTimer();
       }
     }
+    // Announced before the storage write: an entry that was replayed must
+    // leave the other tabs' queues as early as possible.
+    session.session.publishQueueEntryChange(storeName, entryId, null);
     await session.queueNamespace.remove(entryId);
-    session.session.publishStoreRecordsChange(storeName, [entryId], []);
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2284,7 +2268,11 @@ export function createOfflineStoreController<
       resolutions.set(resolution.id, resolution);
     }
     await session.resolutionNamespace.save(resolution.id, resolution);
-    session.session.publishStoreRecordsChange(storeName, [], [resolution.id]);
+    session.session.publishResolutionChange(
+      storeName,
+      resolution.id,
+      resolution,
+    );
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2301,7 +2289,7 @@ export function createOfflineStoreController<
       resolutions.delete(resolutionId);
     }
     await session.resolutionNamespace.remove(resolutionId);
-    session.session.publishStoreRecordsChange(storeName, [], [resolutionId]);
+    session.session.publishResolutionChange(storeName, resolutionId, null);
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -3135,17 +3123,24 @@ export function createOfflineStoreController<
     }
 
     replayScheduled = true;
-    const replayLockName = `tsdf:offline-replay:${current.sessionKey}:${storeName}`;
+    const replaySession = current;
     void replayQueue.resultifyAdd(async () => {
       try {
-        // Leadership is decided from tab presence messages, so for a moment
-        // two tabs can both consider themselves the leader (e.g. while it
-        // moves to the tab that just got focus). The lock makes sure only one
-        // of them replays this store's queue at a time.
-        const lockManager = getNavigatorLockManager();
-        await (lockManager === null
-          ? drainReplay()
-          : lockManager.request(replayLockName, drainReplay));
+        await acquireReplayLock(replaySession);
+        try {
+          await drainReplay(replaySession);
+        } finally {
+          if (replaySession.session.hasOtherTabs()) {
+            // Keep the lock while the other tabs catch up with what this tab
+            // just replayed, so none of them can send the same entries again.
+            replayLockReleaseTimer = setTimeout(
+              releaseHeldReplayLock,
+              REPLAY_HANDOFF_SETTLE_MS,
+            );
+          } else {
+            releaseHeldReplayLock();
+          }
+        }
       } finally {
         replayScheduled = false;
 
@@ -3153,14 +3148,93 @@ export function createOfflineStoreController<
         if (nextEntry?.syncState === 'needs-confirmation') {
           scheduleReplayRetry();
         }
+        // The session changed while this drain was running or waiting
+        if (!isActiveSessionState(replaySession)) void ensureReplayScheduled();
       }
     });
   }
 
-  async function drainReplay(): Promise<void> {
+  /**
+   * Second safeguard against sending an entry another tab already replayed, in
+   * case that tab's announcement has not arrived yet: a replayed entry is also
+   * removed from storage. Returns `false` after dropping such an entry.
+   */
+  async function isEntryStillStored(
+    entryId: string,
+    current: ActiveSessionState,
+  ): Promise<boolean> {
+    for (const isLastCheck of [false, true]) {
+      const storedEntry = await current.queueNamespace.load(entryId, {
+        touch: 'never',
+      });
+      if (!isActiveSessionState(current)) return false;
+      if (storedEntry || !queueEntries.has(entryId)) return true;
+
+      if (isLastCheck) break;
+      // An entry another tab just queued can reach this tab before the
+      // storage write it comes from does, so check again before dropping it.
+      await new Promise((resolve) => {
+        setTimeout(resolve, REPLAY_HANDOFF_SETTLE_MS);
+      });
+    }
+
+    queueEntries.delete(entryId);
+    countedReplayFailures.delete(entryId);
+    refreshDerivedState(current, true);
+    return false;
+  }
+
+  /**
+   * Leadership is decided from tab presence messages, so for a moment two tabs
+   * can both consider themselves the leader (e.g. while it moves to the tab
+   * that just got focus). This cross-tab lock makes sure only one of them
+   * replays this store's queue at a time.
+   */
+  async function acquireReplayLock(current: ActiveSessionState): Promise<void> {
+    const lockManager = getNavigatorLockManager();
+    if (lockManager === null) return;
+
+    if (replayLockReleaseTimer !== null) {
+      clearTimeout(replayLockReleaseTimer);
+      replayLockReleaseTimer = null;
+    }
+
+    const lockName = `tsdf:offline-replay:${current.sessionKey}:${storeName}`;
+    if (heldReplayLockName === lockName) return;
+    releaseHeldReplayLock();
+
+    await new Promise<void>((onAcquired) => {
+      lockManager
+        .request(
+          lockName,
+          () =>
+            new Promise<void>((release) => {
+              heldReplayLockName = lockName;
+              releaseReplayLock = release;
+              onAcquired();
+            }),
+        )
+        // Replaying without the lock is better than never replaying
+        .catch(onAcquired);
+    });
+  }
+
+  function releaseHeldReplayLock(): void {
+    if (replayLockReleaseTimer !== null) {
+      clearTimeout(replayLockReleaseTimer);
+      replayLockReleaseTimer = null;
+    }
+    releaseReplayLock?.();
+    releaseReplayLock = null;
+    heldReplayLockName = null;
+  }
+
+  async function drainReplay(replaySession: ActiveSessionState): Promise<void> {
     while (true) {
       const current = ensureActiveSession();
       if (!current) return;
+      // The lock held by this drain belongs to the session it started with
+      if (current.sessionKey !== replaySession.sessionKey) return;
       if (
         current.session.getStatus().isOfflineMode ||
         current.session.isReplayBlocked() ||
@@ -3182,26 +3256,15 @@ export function createOfflineStoreController<
         return;
       }
 
-      let nextEntry = queuedEntry;
-      if (current.session.hasOtherTabs()) {
-        // Another tab may have replayed or changed this entry right before
-        // this tab got the replay lock, with its announcement still on the
-        // way. Storage is already up to date, so check it before sending.
-        const storedEntry = await current.queueNamespace.load(queuedEntry.id, {
-          touch: 'never',
-        });
-        if (!isActiveSessionState(current)) return;
-
-        if (!storedEntry) {
-          queueEntries.delete(queuedEntry.id);
-          countedReplayFailures.delete(queuedEntry.id);
-          refreshDerivedState(current, true);
-          continue;
-        }
-
-        queueEntries.set(storedEntry.id, storedEntry);
-        nextEntry = storedEntry;
+      if (
+        current.session.hasOtherTabs() &&
+        !(await isEntryStillStored(queuedEntry.id, current))
+      ) {
+        continue;
       }
+      // The checks above are async: use the entry as the queue has it now
+      const nextEntry = queueEntries.get(queuedEntry.id);
+      if (!nextEntry) continue;
 
       const operation = operations[nextEntry.operation];
       if (!operation) {
