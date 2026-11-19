@@ -62,6 +62,8 @@ Store-specific options:
 | Collection Store | `payloadSchema`, `maxBytes`, `pinnedItems`, `ignoreItems`                                                                                 |
 | List Query Store | `itemPayloadSchema`, `queryPayloadSchema`, `maxItemBytes`, `maxQueryBytes`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
 
+> With [Partial Resources](./partial-resources.md), items are saved with only the fields loaded so far, and each restored item is validated against `schema`. Make the fields that hooks may leave out optional in the schema: an item saved without a required field is discarded when it is read back, so it is not available as cached data.
+
 > `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store manager's `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
 Enable `createStoreManager({ debugLogger: true, ... })` to inspect load, save/write, commit, clear, metadata, and offline protection persistence operations in development. Production-safe quota cleanup logs are emitted through the manager `logger` by default; they include the affected quota, configured byte budget, total unprotected bytes, and kept/evicted entry counts. Pass `logger: false` to disable them. Async adapters also emit timed `adapter-operation` entries with `durationMs` for concrete OPFS, IndexedDB, or custom driver work in development.

@@ -993,6 +993,107 @@ describe('opfs: list query store persistence', () => {
     `);
   });
 
+  test('a list requesting more fields than a loaded query holds shows a loading state, not an empty list, while the missing fields are fetched', async () => {
+    const usersQuery = { tableId: 'users' };
+    createListQueryOpfsTestStore({
+      storeName: 'lq-opfs-wider-fields-unrestorable-rows',
+      sessionKey: 'sess1',
+    });
+    const env = createEnv({
+      storeName: 'lq-opfs-wider-fields-unrestorable-rows',
+      sessionKey: 'sess1',
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [
+          { id: 1, name: 'Ada', age: 30 },
+          { id: 2, name: 'Grace', age: 40 },
+        ],
+      },
+    });
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ showMoreColumns }: { showMoreColumns: boolean }) => {
+        // The list as first shown: only ids. Rows holding only `id` are saved
+        // to storage but cannot be restored from it, since the storage schema
+        // requires `name` — so storage has the query without any usable row.
+        const idsOnly = env.apiStore.useListQuery(usersQuery, {
+          fields: ['id'],
+        });
+        // The same query read with more columns, mounted later.
+        const moreColumns = env.apiStore.useListQuery(
+          showMoreColumns && usersQuery,
+          { fields: ['id', 'name', 'age'] },
+        );
+        // Same, but opting into showing the cached columns meanwhile.
+        const moreColumnsKeepingRows = env.apiStore.useListQuery(
+          showMoreColumns && usersQuery,
+          { fields: ['id', 'name', 'age'], showPartialAsRefetching: true },
+        );
+
+        renders.add({
+          idsOnly: `${idsOnly.status} ${JSON.stringify(idsOnly.items)}`,
+          moreColumns: `${moreColumns.status} (isLoading: ${moreColumns.isLoading}) ${JSON.stringify(moreColumns.items)}`,
+          moreColumnsKeepingRows: `${moreColumnsKeepingRows.status} (loadingFields: ${moreColumnsKeepingRows.loadingFields?.join(',') ?? 'none'}) ${JSON.stringify(moreColumnsKeepingRows.items)}`,
+        });
+      },
+      { initialProps: { showMoreColumns: false } },
+    );
+    await flushAllTimers();
+
+    renders.addMark('more columns are shown');
+    act(() => {
+      rerender({ showMoreColumns: true });
+    });
+    await flushAllTimers();
+
+    // While `name` and `age` are fetched the wider list must not report
+    // `success` with no rows (an empty state): it is `loading`, or keeps the
+    // cached rows with `showPartialAsRefetching`. The ids-only list is not
+    // disturbed.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ idsOnly: loading []
+      ⋅ moreColumns: idle (isLoading: false) []
+      ⋅ moreColumnsKeepingRows: idle (loadingFields: none) []
+      └─
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: idle (isLoading: false) []
+      ⋅ moreColumnsKeepingRows: idle (loadingFields: none) []
+      └─
+
+      >>> more columns are shown
+
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: loading (isLoading: true) []
+      ⋅ moreColumnsKeepingRows: success (loadingFields: name,age) [{"id":1},{"id":2}]
+      └─
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: success (isLoading: false) [{"id":1,"name":"Ada","age":30},{"id":2,"name":"Grace","age":40}]
+      ⋅ moreColumnsKeepingRows: success (loadingFields: none) [{"id":1,"name":"Ada","age":30},{"id":2,"name":"Grace","age":40}]
+      └─
+      "
+    `);
+    // One fetch for the first list, one for the columns that were missing.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 2
+        - _type: 'list'
+          payload:
+            fields: ['age', 'id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 2
+      `);
+  });
+
   test('round-trip persistence preserves offset-pagination progress for loadMore', async () => {
     createOpfsPersistentStorageTestStore();
     const productsQuery = { tableId: 'products' };
