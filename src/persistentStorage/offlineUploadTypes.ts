@@ -20,6 +20,34 @@ export type OfflineUploadProgress = {
   totalBytes?: number;
 };
 
+/** Arguments for staging a session-scoped offline upload. */
+export type SaveOfflineUploadArgs = {
+  /** Stable upload id referenced by offline operation inputs. */
+  id: string;
+  /** File to stage until it can be uploaded. */
+  file: Blob | File;
+  /**
+   * App-defined, JSON-serializable metadata persisted with the upload. It is
+   * handed to the session `upload` transport and exposed on the `OfflineUpload`
+   * status entries. Saving over an existing id stores exactly this value, so
+   * omitting it leaves the upload without metadata.
+   */
+  metadata?: ValidPayload;
+};
+
+/** Arguments for replacing the file of a staged session-scoped offline upload. */
+export type ReplaceOfflineUploadArgs = {
+  /** Id of the staged upload to replace. */
+  id: string;
+  /** New file for the upload. */
+  file: Blob | File;
+  /**
+   * New metadata for the upload. Omit it to keep the metadata already saved
+   * for this id.
+   */
+  metadata?: ValidPayload;
+};
+
 /** Public metadata for a file staged for offline mutation replay. */
 export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   /** Stable upload id used by offline operation inputs. */
@@ -46,6 +74,12 @@ export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   progress?: OfflineUploadProgress;
   /** Last upload failure message, when any. */
   lastError?: { message: string };
+  /**
+   * App-defined metadata saved with the upload through `saveOfflineUpload` /
+   * `replaceOfflineUpload`. It is persisted with the upload record, so it is
+   * restored from storage after a reload and must be narrowed before use.
+   */
+  metadata?: ValidPayload;
 };
 
 /** Persisted offline upload record including the staged file object. */
@@ -93,6 +127,15 @@ export type OfflineUploadTransportContext = {
   sessionKey: string;
   /** File to upload. */
   file: File;
+  /**
+   * App-defined metadata saved with this upload, for request parameters that
+   * differ per upload (target kind, parent ids, ...). `undefined` when the
+   * upload was staged without metadata.
+   *
+   * The value is restored from storage, so it is typed as an unvalidated
+   * JSON-safe payload: parse it (e.g. with a `runcheck` schema) before use.
+   */
+  metadata?: ValidPayload;
   /** Reports upload progress back to TSDF. */
   onProgress: (progress: OfflineUploadProgress) => void;
 };

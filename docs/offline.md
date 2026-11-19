@@ -196,8 +196,8 @@ storeManager.resetOfflineRuntimeConfig();
 
 Configure uploads on `offlineSession.uploads` when queued mutations depend on local files. The manager exposes upload helpers:
 
-- `saveOfflineUpload({ id, file })`
-- `replaceOfflineUpload({ id, file })`
+- `saveOfflineUpload({ id, file, metadata? })`
+- `replaceOfflineUpload({ id, file, metadata? })`
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
@@ -236,6 +236,47 @@ Which one to pick:
 - Use `indexedDbOfflineUploadAdapter` when the app must support Safari before version 26. `opfsOfflineUploadAdapter` writes files with `FileSystemFileHandle.createWritable()`, which those Safari versions do not provide on the main thread, so staging an upload fails there.
 - Otherwise either adapter works. `opfsOfflineUploadAdapter` streams the file to disk when staging it, while `indexedDbOfflineUploadAdapter` reads the whole file into memory to store its bytes, so prefer OPFS for very large files when Safari before 26 is not a target.
 
-Both adapters behave the same from the manager's point of view: staged files are scoped by session key, restored with their original name, type, and last-modified date, and removed by `clearSessionStorage(...)` / `clearAllSessionStorage(...)` once the session's store manager has been created with that adapter. The upload adapter is independent from the stores' `persistentStorage.adapter`, so any combination is valid (for example `'local-sync'` stores with IndexedDB uploads).
+Both adapters behave the same from the manager's point of view: staged files are scoped by session key, restored with their original name, type, last-modified date, and [metadata](#upload-metadata), and removed by `clearSessionStorage(...)` / `clearAllSessionStorage(...)` once the session's store manager has been created with that adapter. The upload adapter is independent from the stores' `persistentStorage.adapter`, so any combination is valid (for example `'local-sync'` stores with IndexedDB uploads).
 
 Uploads staged through one adapter are not visible through the other, so switching adapters in a released app leaves previously staged files behind.
+
+### Upload metadata
+
+The session has a single `upload` transport, so uploads that need different request parameters (target kind, parent ids, ...) carry them as `metadata` instead of encoding them in the upload id:
+
+```ts
+const uploadMetadataSchema = rc_discriminated_union('kind', {
+  chat: { chatId: rc_string },
+  record: { tableId: rc_string },
+});
+
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    uploads: {
+      adapter: opfsOfflineUploadAdapter,
+      upload: ({ file, metadata, onProgress }) => {
+        // Restored from storage: validate before use.
+        const target = rc_parse(metadata, uploadMetadataSchema).unwrap();
+
+        return target.kind === 'chat'
+          ? uploadChatFile(target.chatId, file, onProgress)
+          : uploadRecordFile(target.tableId, file, onProgress);
+      },
+    },
+  },
+});
+
+await storeManager.saveOfflineUpload({
+  id: attachmentId,
+  file,
+  metadata: { kind: 'chat', chatId },
+});
+```
+
+- `metadata` is optional and must be a JSON-serializable `ValidPayload` (`string`, `number`, or a plain object).
+- It is persisted with the upload record, so it survives reloads, is passed to the `upload` transport both on replay and on `resolveOfflineUpload(s)`, and is exposed as `metadata` on the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()`.
+- Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata (including the ones persisted by older versions) reach the transport with `metadata: undefined`.
+- `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed.
+- Both built-in upload adapters (`opfsOfflineUploadAdapter` and `indexedDbOfflineUploadAdapter`) persist it. Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.

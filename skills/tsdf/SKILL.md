@@ -228,7 +228,7 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 
-Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). Shipped upload adapters for `offlineSession.uploads.adapter`: `opfsOfflineUploadAdapter` (from `tsdf`) and `indexedDbOfflineUploadAdapter` (from `tsdf/indexed-db-storage`; required for Safari < 26, where OPFS files cannot be written from the main thread).
+Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. Shipped upload adapters for `offlineSession.uploads.adapter`: `opfsOfflineUploadAdapter` (from `tsdf`) and `indexedDbOfflineUploadAdapter` (from `tsdf/indexed-db-storage`; required for Safari < 26, where OPFS files cannot be written from the main thread).
 
 Docs: `docs/offline.md`.
 

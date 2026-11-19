@@ -1177,3 +1177,470 @@ test('online mutations can resolve staged upload ids after reconnect and use the
       state: 'uploaded'
   `);
 });
+
+test('upload metadata is exposed by the upload status APIs and handed to the transport when a queued mutation replays its upload dependency', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-metadata-replay-session';
+  const replayEvents: Array<Record<string, unknown>> = [];
+
+  // Start offline so the staged upload and its dependent mutation both queue.
+  network.setOffline();
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        // One session transport serves every upload, so it depends on the
+        // per-upload metadata to know which request parameters to use.
+        upload: async ({ id, file, metadata }) => {
+          replayEvents.push({ transport: id, fileName: file.name, metadata });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+    1,
+    {
+      id: 'offline-upload-metadata-replay-doc',
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateWithAttachment: {
+              inputSchema: rc_object({
+                attachmentId: rc_string,
+                value: rc_number,
+              }),
+              kind: 'update',
+              dependsOnUploads: ({ input }) => [input.attachmentId],
+              execute: async (ctx) => {
+                replayEvents.push({
+                  execute: ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+                });
+                await env.serverMock.delayedSetData(ctx.input.value);
+                return { value: ctx.input.value };
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const uploadHook = renderHook(() => storeManager.useOfflineUploads());
+  await flushAllTimers();
+
+  // Stage the file together with the request parameters its upload will need.
+  (
+    await resolveAfterAllTimers(
+      storeManager.saveOfflineUpload({
+        id: 'asset-1',
+        file: new File(['chat attachment'], 'photo.png', {
+          type: 'image/png',
+          lastModified: 1,
+        }),
+        metadata: { kind: 'chat', chatId: 'chat-42' },
+      }),
+    )
+  ).unwrap();
+
+  // Both the hook and the imperative getter expose the metadata, so UI can
+  // describe a pending upload without decoding anything from its id.
+  expect(
+    uploadHook.result.current.map((upload) =>
+      pick(upload, ['id', 'state', 'metadata']),
+    ),
+  ).toMatchInlineSnapshot(`
+    - id: 'asset-1'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+      state: 'pending'
+  `);
+  expect(
+    storeManager
+      .getOfflineUploads()
+      .map((upload) => pick(upload, ['id', 'state', 'metadata'])),
+  ).toMatchInlineSnapshot(`
+    - id: 'asset-1'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+      state: 'pending'
+  `);
+
+  // The metadata is stored next to the rest of the upload record (key `d`).
+  expect(
+    getParsedOpfsFileData(
+      'tsdf-uploads/offline-upload-metadata-replay-session/asset-1/metadata.json',
+    ),
+  ).toMatchInlineSnapshot(`
+    c: 1735689612000
+    d: { chatId: 'chat-42', kind: 'chat' }
+    i: 'asset-1'
+    k: 'offline-upload-metadata-replay-session'
+    l: 1
+    m: 'image/png'
+    n: 'photo.png'
+    o: 'manual'
+    t: 'pending'
+    u: 1735689612000
+    z: 15
+  `);
+
+  // Queue the mutation that depends on the staged upload.
+  await resolveAfterAllTimers(
+    env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: () => Promise.resolve({ value: 3 }),
+      offline: {
+        operation: 'updateWithAttachment',
+        input: { attachmentId: 'asset-1', value: 3 },
+      },
+    }),
+  );
+
+  // Nothing is uploaded while the session is still offline.
+  expect(replayEvents).toMatchInlineSnapshot(`[]`);
+
+  // Reconnect so replay uploads the dependency before executing the mutation.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+
+  // The transport receives the metadata saved with the file, and the mutation
+  // then executes with the ref that upload resolved to.
+  expect(replayEvents).toMatchInlineSnapshot(`
+    - fileName: 'photo.png'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+      transport: 'asset-1'
+    - execute: 'server:asset-1'
+  `);
+
+  uploadHook.unmount();
+});
+
+test('upload metadata survives an app restart and reaches the transport when uploads are resolved online, while uploads staged without metadata keep working', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-metadata-restart-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  function createUploadManager() {
+    return createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id, file, metadata }) => {
+            transportCalls.push({ id, fileName: file.name, metadata });
+            return Promise.resolve(`server:${id}`);
+          },
+        },
+      },
+    });
+  }
+
+  // Stage every file while offline, so nothing can be uploaded before the
+  // restart.
+  network.setOffline();
+  const firstSession = createUploadManager();
+  await flushAllTimers();
+
+  // Two uploads need different request parameters from the same transport...
+  (
+    await resolveAfterAllTimers(
+      firstSession.saveOfflineUpload({
+        id: 'chat-file',
+        file: new File(['chat attachment'], 'photo.png', {
+          type: 'image/png',
+          lastModified: 1,
+        }),
+        metadata: { kind: 'chat', chatId: 'chat-42' },
+      }),
+    )
+  ).unwrap();
+  (
+    await resolveAfterAllTimers(
+      firstSession.saveOfflineUpload({
+        id: 'record-file',
+        file: new File(['record attachment'], 'invoice.pdf', {
+          type: 'application/pdf',
+          lastModified: 1,
+        }),
+        metadata: { kind: 'record', tableId: 'table-7', fieldId: 'files' },
+      }),
+    )
+  ).unwrap();
+  // ...and one is staged without metadata.
+  (
+    await resolveAfterAllTimers(
+      firstSession.saveOfflineUpload({
+        id: 'plain-file',
+        file: new File(['plain attachment'], 'notes.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+      }),
+    )
+  ).unwrap();
+
+  // An upload without metadata is persisted without the metadata key (`d`),
+  // which is exactly the record shape written before metadata existed. Loading
+  // it below therefore also covers records persisted by older versions.
+  expect(
+    getParsedOpfsFileData(
+      'tsdf-uploads/offline-upload-metadata-restart-session/plain-file/metadata.json',
+    ),
+  ).toMatchInlineSnapshot(`
+    c: 1735689612000
+    i: 'plain-file'
+    k: 'offline-upload-metadata-restart-session'
+    l: 1
+    m: 'text/plain'
+    n: 'notes.txt'
+    o: 'manual'
+    t: 'pending'
+    u: 1735689612000
+    z: 16
+  `);
+
+  // Simulate a full app restart: the uploads must come back from storage.
+  resetSessionForTests();
+  const restartedSession = createUploadManager();
+  const restartedUploadsHook = renderHook(() =>
+    restartedSession.useOfflineUploads(),
+  );
+  await flushAllTimers();
+
+  // The restored uploads expose the same metadata they were saved with.
+  expect(
+    restartedUploadsHook.result.current.map((upload) =>
+      pick(upload, ['id', 'state', 'metadata']),
+    ),
+  ).toMatchInlineSnapshot(`
+    - id: 'chat-file'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+      state: 'pending'
+    - { id: 'plain-file', state: 'pending' }
+    - id: 'record-file'
+      metadata: { fieldId: 'files', kind: 'record', tableId: 'table-7' }
+      state: 'pending'
+  `);
+  expect(transportCalls).toMatchInlineSnapshot(`[]`);
+
+  // Back online, the app resolves the staged uploads directly.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+
+  const chatRef = (
+    await resolveAfterAllTimers(
+      restartedSession.resolveOfflineUpload('chat-file'),
+    )
+  ).unwrap();
+  const otherRefs = (
+    await resolveAfterAllTimers(
+      restartedSession.resolveOfflineUploads(['record-file', 'plain-file']),
+    )
+  ).unwrap();
+
+  expect({ chatRef, otherRefs }).toMatchInlineSnapshot(`
+    chatRef: 'server:chat-file'
+    otherRefs: { plain-file: 'server:plain-file', record-file: 'server:record-file' }
+  `);
+
+  // Each transport call gets the restored metadata of its own upload, for
+  // both the single and the batch resolve APIs. The upload staged without
+  // metadata is still uploaded and simply receives no metadata.
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - fileName: 'photo.png'
+      id: 'chat-file'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+    - fileName: 'invoice.pdf'
+      id: 'record-file'
+      metadata: { fieldId: 'files', kind: 'record', tableId: 'table-7' }
+    - { fileName: 'notes.txt', id: 'plain-file' }
+  `);
+
+  // Finishing the upload keeps the metadata on the upload status entry.
+  expect(
+    restartedUploadsHook.result.current.map((upload) =>
+      pick(upload, ['id', 'state', 'metadata']),
+    ),
+  ).toMatchInlineSnapshot(`
+    - id: 'chat-file'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+      state: 'uploaded'
+    - { id: 'plain-file', state: 'uploaded' }
+    - id: 'record-file'
+      metadata: { fieldId: 'files', kind: 'record', tableId: 'table-7' }
+      state: 'uploaded'
+  `);
+
+  restartedUploadsHook.unmount();
+});
+
+test('replacing a staged upload keeps its metadata unless new metadata is provided', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-metadata-replace-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+  const uploadChanges = createLoggerStore();
+
+  network.setOffline();
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id, file, metadata }) => {
+          transportCalls.push({
+            id,
+            fileName: file.name,
+            fileText: await file.text(),
+            metadata,
+          });
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+  const uploadHook = renderHook(() => {
+    const upload = storeManager.useOfflineUploads()[0];
+
+    uploadChanges.add(
+      upload
+        ? pick(upload, ['fileName', 'metadata', 'state'])
+        : { state: 'no-upload' },
+    );
+  });
+  await flushAllTimers();
+  uploadChanges.reset();
+
+  uploadChanges.addMark('stage the upload with metadata');
+  (
+    await resolveAfterAllTimers(
+      storeManager.saveOfflineUpload({
+        id: 'attachment',
+        file: new File(['first draft'], 'draft.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+        metadata: { kind: 'record', tableId: 'table-7' },
+      }),
+    )
+  ).unwrap();
+
+  // The user picks another file for the same attachment: only the file is
+  // replaced, the upload still targets the same record.
+  uploadChanges.addMark('replace only the file');
+  (
+    await resolveAfterAllTimers(
+      storeManager.replaceOfflineUpload({
+        id: 'attachment',
+        file: new File(['final version'], 'final.txt', {
+          type: 'text/plain',
+          lastModified: 2,
+        }),
+      }),
+    )
+  ).unwrap();
+
+  // The attachment is moved to another record, so the replacement provides
+  // new metadata.
+  uploadChanges.addMark('replace the file and its metadata');
+  (
+    await resolveAfterAllTimers(
+      storeManager.replaceOfflineUpload({
+        id: 'attachment',
+        file: new File(['moved version'], 'moved.txt', {
+          type: 'text/plain',
+          lastModified: 3,
+        }),
+        metadata: { kind: 'record', tableId: 'table-9' },
+      }),
+    )
+  ).unwrap();
+
+  expect(uploadChanges.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> stage the upload with metadata
+
+    -> fileName: draft.txt ⋅ metadata: {kind:record, tableId:table-7} ⋅ state: pending
+
+    >>> replace only the file
+
+    -> fileName: final.txt ⋅ metadata: {kind:record, tableId:table-7} ⋅ state: pending
+
+    >>> replace the file and its metadata
+
+    -> fileName: moved.txt ⋅ metadata: {kind:record, tableId:table-9} ⋅ state: pending
+    "
+  `);
+
+  // The persisted record carries the latest file name and metadata.
+  expect(
+    getParsedOpfsFileData(
+      'tsdf-uploads/offline-upload-metadata-replace-session/attachment/metadata.json',
+    ),
+  ).toMatchInlineSnapshot(`
+    c: 1735689612000
+    d: { kind: 'record', tableId: 'table-9' }
+    i: 'attachment'
+    k: 'offline-upload-metadata-replace-session'
+    l: 3
+    m: 'text/plain'
+    n: 'moved.txt'
+    o: 'manual'
+    t: 'pending'
+    u: 1735689612018
+    z: 13
+  `);
+
+  // Uploading after the replacements sends the latest file with the latest
+  // metadata.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (
+    await resolveAfterAllTimers(storeManager.resolveOfflineUpload('attachment'))
+  ).unwrap();
+
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - fileName: 'moved.txt'
+      fileText: 'moved version'
+      id: 'attachment'
+      metadata: { kind: 'record', tableId: 'table-9' }
+  `);
+
+  uploadHook.unmount();
+});

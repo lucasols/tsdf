@@ -4,7 +4,10 @@ import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { indexedDbOfflineUploadAdapter } from '../../src/indexed-db-storage';
-import type { DocumentOfflineOperationDefinition } from '../../src/main';
+import type {
+  DocumentOfflineOperationDefinition,
+  OfflineUploadTransportContext,
+} from '../../src/main';
 import { clearSessionStorage, createStoreManager } from '../../src/main';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -42,11 +45,7 @@ afterEach(() => {
   resetIndexedDbOfflineUploadStorageForTests();
 });
 
-type UploadTransport = (ctx: {
-  id: string;
-  file: File;
-  onProgress: (progress: { progress: number }) => void;
-}) => Promise<string>;
+type UploadTransport = (ctx: OfflineUploadTransportContext) => Promise<string>;
 
 function createUploadSession(
   sessionKey: string,
@@ -683,6 +682,137 @@ test('after a restart, replay sends the restored file through the upload transpo
   expect(await getStoredUploads()).toMatchInlineSnapshot(`[]`);
 
   restartedHook.unmount();
+});
+
+test('upload metadata survives an app restart, is kept when only the file is replaced and reaches the transport, while uploads staged without metadata keep working', async () => {
+  const sessionKey = 'idb-upload-metadata-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+  const upload: UploadTransport = async ({ id, file, metadata }) => {
+    transportCalls.push({
+      id,
+      fileName: file.name,
+      fileText: await file.text(),
+      metadata,
+    });
+    return `server:${id}`;
+  };
+
+  // Stage every file while offline, so nothing is uploaded before the restart.
+  network.setOffline();
+  const session = createUploadSession(sessionKey, upload);
+  await flushAllTimers();
+
+  // One upload carries the request parameters its transport call will need...
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'chat-file',
+        file: textFile('chat attachment', 'photo.txt'),
+        metadata: { kind: 'chat', chatId: 'chat-42' },
+      }),
+    )
+  ).unwrap();
+  // ...and one is staged without metadata.
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'plain-file',
+        file: textFile('plain attachment', 'notes.txt'),
+      }),
+    )
+  ).unwrap();
+
+  // The metadata is stored with the rest of the upload record (key `d`). An
+  // upload without metadata is stored without that key, which is the record
+  // shape written before metadata existed.
+  expect(
+    (await getStoredUploads()).map((stored) => ({
+      key: stored.key,
+      metadata: pick(stored.metadata, ['d', 'n', 't']),
+    })),
+  ).toMatchInlineSnapshot(`
+    - key: 'idb-upload-metadata-session / chat-file'
+      metadata:
+        d: { chatId: 'chat-42', kind: 'chat' }
+        n: 'photo.txt'
+        t: 'pending'
+    - key: 'idb-upload-metadata-session / plain-file'
+      metadata: { n: 'notes.txt', t: 'pending' }
+  `);
+
+  restartApp();
+  const restartedSession = createUploadSession(sessionKey, upload);
+  const restartedUploadsHook = renderHook(() =>
+    restartedSession.useOfflineUploads(),
+  );
+  await flushAllTimers();
+
+  // The uploads restored from IndexedDB expose the metadata they were saved
+  // with.
+  expect(
+    restartedUploadsHook.result.current.map((restored) =>
+      pick(restored, ['id', 'state', 'metadata']),
+    ),
+  ).toMatchInlineSnapshot(`
+    - id: 'chat-file'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+      state: 'pending'
+    - { id: 'plain-file', state: 'pending' }
+  `);
+
+  // The user picks another file for the chat attachment: only the file is
+  // replaced, the upload still targets the same chat.
+  (
+    await resolveAfterAllTimers(
+      restartedSession.replaceOfflineUpload({
+        id: 'chat-file',
+        file: textFile('edited chat attachment', 'photo-edited.txt', 2),
+      }),
+    )
+  ).unwrap();
+  expect(transportCalls).toMatchInlineSnapshot(`[]`);
+
+  // Back online, the app resolves the staged uploads.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (
+    await resolveAfterAllTimers(
+      restartedSession.resolveOfflineUploads(['chat-file', 'plain-file']),
+    )
+  ).unwrap();
+
+  // Each transport call gets the restored metadata of its own upload together
+  // with the latest file. The upload staged without metadata is still
+  // uploaded and simply receives no metadata.
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - fileName: 'photo-edited.txt'
+      fileText: 'edited chat attachment'
+      id: 'chat-file'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+    - { fileName: 'notes.txt', fileText: 'plain attachment', id: 'plain-file' }
+  `);
+
+  // The state changes written while uploading (metadata-only writes) kept
+  // the upload metadata in IndexedDB.
+  expect(
+    (await getStoredUploads()).map((stored) => ({
+      key: stored.key,
+      metadata: pick(stored.metadata, ['d', 'n', 't']),
+    })),
+  ).toMatchInlineSnapshot(`
+    - key: 'idb-upload-metadata-session / chat-file'
+      metadata:
+        d: { chatId: 'chat-42', kind: 'chat' }
+        n: 'photo-edited.txt'
+        t: 'uploaded'
+    - key: 'idb-upload-metadata-session / plain-file'
+      metadata: { n: 'notes.txt', t: 'uploaded' }
+  `);
+
+  restartedUploadsHook.unmount();
 });
 
 test('manual uploads nobody consumed are removed from IndexedDB after one week online', async () => {

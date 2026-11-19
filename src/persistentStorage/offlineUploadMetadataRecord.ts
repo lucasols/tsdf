@@ -41,6 +41,7 @@ const compactUploadMetadataRecordSchema = rc_object({
   e: lastErrorSchema.optionalKey(),
   g: rc_number.optionalKey(),
   l: rc_number,
+  d: validPayloadSchema.optionalKey(),
 });
 
 /** Stored upload record without the file object, which adapters persist separately. */
@@ -69,6 +70,7 @@ export function toCompactUploadMetadataRecord(
       ? { g: record.lastOnlineSessionStartedAt }
       : {}),
     l: record.lastModified,
+    ...(record.metadata !== undefined ? { d: record.metadata } : {}),
   };
 }
 
@@ -109,5 +111,6 @@ export function parseCompactUploadMetadataRecord<
       ? { lastOnlineSessionStartedAt: compactRecord.g }
       : {}),
     lastModified: compactRecord.l,
+    ...(compactRecord.d !== undefined ? { metadata: compactRecord.d } : {}),
   };
 }
