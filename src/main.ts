@@ -154,6 +154,7 @@ export type {
   OfflineResolutionRecordForStore,
   OfflineResolutionRecordForOperation,
   OfflineSupersedeConfig,
+  OfflineExternalEntityRef,
   ListQueryOfflineEntityRef,
   ListQueryOfflineOperationDefinition,
   OfflineResolutionRecord,

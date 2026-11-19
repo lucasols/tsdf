@@ -82,6 +82,8 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
   entities: InternalGlobalOfflineEntity[];
+  /** Missing in snapshots sent by tabs running an older version. */
+  attemptedCreationEntityIds?: string[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
 };
@@ -100,6 +102,7 @@ type SessionReplayHead = {
 type SessionStoreContribution = {
   adapter: StorageAdapter;
   entities: InternalGlobalOfflineEntity[];
+  attemptedCreationEntityIds: string[];
   resolutions: OfflineResolutionRecord[];
   referencedUploadIds: string[];
   protectedKeys: string[];
@@ -110,6 +113,15 @@ type SessionRegistration = {
   storeName: string;
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
+  /**
+   * Called when another store of the session cancelled or discarded temp
+   * entities (serialized temp payloads) that will never exist on the server.
+   * Only registered by stores with `cancelledWith` operations.
+   */
+  onTempEntitiesCancelled?: (
+    sourceStoreName: string,
+    serializedTempIds: ReadonlySet<string>,
+  ) => Promise<void>;
 };
 
 type SessionCoordinatorOptions = {
@@ -157,6 +169,11 @@ const offlineRecoveryListeners = new Set<OfflineRecoveryListener>();
 type SessionStoreState = {
   status: GlobalOfflineStatus;
   entities: InternalGlobalOfflineEntity[];
+  /**
+   * Ids of the temp entities whose creation was already sent or waits for a
+   * manual resolution (see `ItemOfflineState.creationAttempted`).
+   */
+  attemptedCreationEntityIds: string[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
 };
@@ -740,6 +757,7 @@ class SessionOfflineCoordinator {
             bootstrapStatusFromLocalStorage: shouldBootstrapFromStorage,
           }),
         entities: [],
+        attemptedCreationEntityIds: [],
         resolutions: [],
         uploads: [],
       }),
@@ -1005,6 +1023,36 @@ class SessionOfflineCoordinator {
     if (replayHeadChanged) {
       this.#notifyGreenCycle();
     }
+  }
+
+  /**
+   * Lets the other stores of the session drop the queued work they declared
+   * as `cancelledWith` temp entities of `sourceStoreName` that will never
+   * exist on the server.
+   */
+  async notifyTempEntitiesCancelled(
+    sourceStoreName: string,
+    serializedTempIds: ReadonlySet<string>,
+  ): Promise<void> {
+    const pendingCleanups: Promise<void>[] = [];
+
+    for (const registration of this.#registrations.values()) {
+      if (
+        registration.storeName === sourceStoreName ||
+        !registration.onTempEntitiesCancelled
+      ) {
+        continue;
+      }
+
+      pendingCleanups.push(
+        registration.onTempEntitiesCancelled(
+          sourceStoreName,
+          serializedTempIds,
+        ),
+      );
+    }
+
+    await Promise.all(pendingCleanups);
   }
 
   canReplayEntry(args: {
@@ -1943,11 +1991,15 @@ class SessionOfflineCoordinator {
 
   #refreshAggregates(): void {
     const allEntities: InternalGlobalOfflineEntity[] = [];
+    const attemptedCreationEntityIds: string[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
     const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
     for (const contribution of this.#storeContributions.values()) {
       allEntities.push(...contribution.entities);
+      attemptedCreationEntityIds.push(
+        ...contribution.attemptedCreationEntityIds,
+      );
       allResolutions.push(...contribution.resolutions);
       for (const uploadId of contribution.referencedUploadIds) {
         referencedUploadIds.add(uploadId);
@@ -2074,7 +2126,7 @@ class SessionOfflineCoordinator {
     }
 
     this.store.setPartialState(
-      { entities, resolutions },
+      { entities, attemptedCreationEntityIds, resolutions },
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
@@ -2129,6 +2181,7 @@ class SessionOfflineCoordinator {
       kind: 'offline-session-snapshot',
       status,
       entities: this.store.state.entities,
+      attemptedCreationEntityIds: this.store.state.attemptedCreationEntityIds,
       resolutions: this.store.state.resolutions,
       uploads: this.store.state.uploads,
     });
@@ -2145,6 +2198,7 @@ class SessionOfflineCoordinator {
           updatedAt: Date.now(),
         }),
         entities: message.entities,
+        attemptedCreationEntityIds: message.attemptedCreationEntityIds ?? [],
         resolutions: message.resolutions,
         uploads: message.uploads,
       },
@@ -2814,6 +2868,7 @@ export function useOfflineStoreItemState(
         ? null
         : toItemOfflineState(
             getOfflineStoreEntityLookup(state.entities, storeName).get(itemKey),
+            state.attemptedCreationEntityIds,
           ),
     [itemKey, storeName],
   );

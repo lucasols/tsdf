@@ -373,7 +373,12 @@ Behavior:
   (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
 - `isUnsentCreation` - `true` while the item was created offline (a
   `tempEntity` / `tempEntities` operation) and the server has not confirmed it
-  yet, so it only exists locally under its temporary payload
+  yet, so it is only known locally under its temporary payload
+- `creationAttempted` - Only `true` for an unsent creation whose create
+  request is being sent, failed without telling whether the server got it, or
+  waits for a manual resolution: the server may already have the item. While
+  it is `false` the creation is still waiting in the queue and the server
+  never saw the item
 
 ### Items created offline
 
@@ -386,16 +391,22 @@ an edit made right after creating it) with `isUnsentCreation: false`.
 function onDeleteClick(itemPayload: UserPayload) {
   const offlineState = store.getItemOfflineState(itemPayload);
 
-  // The server never saw an unsent creation, so deleting it only discards
-  // local work: no need to ask before deleting for everyone.
-  if (offlineState?.isUnsentCreation || confirmDeleteForEveryone()) {
+  // The server never saw a creation that was not attempted, so deleting it
+  // only discards local work: no need to ask before deleting for everyone.
+  const onlyExistsLocally =
+    offlineState?.isUnsentCreation && !offlineState.creationAttempted;
+
+  if (onlyExistsLocally || confirmDeleteForEveryone()) {
     deleteUser(itemPayload);
   }
 }
 ```
 
 `isUnsentCreation` stays `true` while the creation itself is being sent, until
-the server result is reconciled.
+the server result is reconciled; `creationAttempted` is `true` during that
+time. See
+[Offline - Deleting entities created offline](./offline.md#deleting-entities-created-offline)
+for what a delete does in each case.
 
 ## useMultipleItems
 

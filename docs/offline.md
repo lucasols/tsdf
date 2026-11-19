@@ -130,7 +130,8 @@ All offline operations define:
 Collection and list-query operations also define:
 
 - `getEntityRefs({ input })` - Returns affected item/entity refs.
-- `dependsOn({ input })` - Optional dependencies on other offline entities.
+- `dependsOn({ input })` - Optional dependencies on other offline entities of the same store.
+- `cancelledWith({ input })` - Optional entities of other stores whose cancelled creation also drops this work. See [Deleting entities created offline](#deleting-entities-created-offline).
 
 Optional replay behavior:
 
@@ -142,6 +143,48 @@ Optional replay behavior:
 - `supersedes` - Prunes older queued work for the same entity.
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
+
+### Deleting entities created offline
+
+When the user deletes something that was created offline, the server may have never seen it. Declare this on the delete operation with `supersedes.dropSelfIfTempLifecycleCancelled`:
+
+```ts
+deleteTask: {
+  kind: 'delete',
+  inputSchema: deleteTaskSchema,
+  getEntityRefs: ({ input }) => [input.itemId],
+  supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true },
+  execute: async ({ input }) => {
+    try {
+      await api.deleteTask(input.itemId);
+    } catch (error) {
+      // The task is already gone: the delete is done
+      if (!isNotFoundError(error)) throw error;
+    }
+  },
+},
+```
+
+What happens depends on whether the creation was already sent:
+
+- **Never sent** (still waiting in the queue): nothing is sent. TSDF drops the creation, the queued edits of the entity, the delete itself and the queued work that depends on the entity (`dependsOn`), then removes the temporary entity from the store and its lists.
+- **Sent, or waiting for a manual resolution** (`syncing`, `needs-confirmation`, or queued again after a `retry`): the server may have the entity, so the creation is kept and the delete stays queued behind it. Once the server id is known the delete is sent with it. `execute` should treat a not-found answer as success, as above: the server answers not-found when the creation never reached it, or when an earlier delete attempt did.
+
+`getItemOfflineState(payload)` tells the two cases apart before deleting: `isUnsentCreation && !creationAttempted` means the delete only discards local work.
+
+Work queued in **other stores** for the cancelled entity is not known to its store. Declare the relation with `cancelledWith` in the other store's operation:
+
+```ts
+// comments store
+addComment: {
+  kind: 'create',
+  // ...inputSchema, tempEntity, getEntityRefs, execute
+  // `tasks` is the `id` of the store that owns the task
+  cancelledWith: ({ input }) => [{ storeName: 'tasks', entityRef: input.taskId }],
+},
+```
+
+When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. `cancelledWith` only drives this cleanup: it does not delay replay or rewrite the input when the task gets its server id, and it only reaches stores that are instantiated when the cancellation happens.
 
 ## Conflict Resolution
 
@@ -196,14 +239,14 @@ List-query stores additionally expose `usePendingOfflineItems(...)`, which retur
 
 ### Per-item state
 
-Collection and list-query stores expose `useItemOfflineState(itemPayload)` / `getItemOfflineState(itemPayload)` for per-row UI such as sync badges. They return `null` when the item has nothing queued, otherwise `{ syncState, pendingMutations, requiresResolution, isUnsentCreation }`:
+Collection and list-query stores expose `useItemOfflineState(itemPayload)` / `getItemOfflineState(itemPayload)` for per-row UI such as sync badges. They return `null` when the item has nothing queued, otherwise `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`:
 
 ```tsx
 const offlineState = userStore.useItemOfflineState({ id: 1 });
-// null | { syncState: 'pending', pendingMutations: 1, requiresResolution: false, isUnsentCreation: false }
+// null | { syncState: 'pending', pendingMutations: 1, requiresResolution: false, isUnsentCreation: false, creationAttempted: false }
 ```
 
-Prefer it over building a map from `useOfflineEntities()`: a component using the hook re-renders only when the state of its own item changes. `isUnsentCreation` is `true` for an item created offline until the server confirms it; after that the temporary payload returns `null` and the final payload reports the mutations still queued for the item. See [Hooks - useItemOfflineState](./hooks.md#useitemofflinestate).
+Prefer it over building a map from `useOfflineEntities()`: a component using the hook re-renders only when the state of its own item changes. `isUnsentCreation` is `true` for an item created offline until the server confirms it; after that the temporary payload returns `null` and the final payload reports the mutations still queued for the item. `creationAttempted` turns `true` once that creation starts being sent: before that, deleting the item only discards local work (see [Deleting entities created offline](#deleting-entities-created-offline)). See [Hooks - useItemOfflineState](./hooks.md#useitemofflinestate).
 
 Document stores hold a single entity, so they do not need a per-item reader: use `useDocument().pendingSync` or `useOfflineEntities()[0]`.
 

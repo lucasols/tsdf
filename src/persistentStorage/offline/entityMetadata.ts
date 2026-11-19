@@ -54,18 +54,27 @@ export function getOfflineStoreEntityLookup(
   return lookupsByStoreName.get(storeName) ?? emptyEntityLookup;
 }
 
+/**
+ * @param attemptedCreationEntityIds - ids of the session's temp entities
+ * whose creation was already sent or waits for a manual resolution
+ */
 export function toItemOfflineState(
   entity: GlobalOfflineEntity | undefined,
+  attemptedCreationEntityIds: readonly string[],
 ): ItemOfflineState | null {
   if (entity?.entityKind !== 'item') return null;
+
+  // Same rule as the stores' `unsentCreationItemKeys`: a temp entity that
+  // was not reconciled to its server payload yet.
+  const isUnsentCreation = entity.tempId !== undefined;
 
   return {
     syncState: entity.syncState,
     pendingMutations: entity.pendingMutations,
     requiresResolution: entity.requiresResolution,
-    // Same rule as the stores' `unsentCreationItemKeys`: a temp entity that
-    // was not reconciled to its server payload yet.
-    isUnsentCreation: entity.tempId !== undefined,
+    isUnsentCreation,
+    creationAttempted:
+      isUnsentCreation && attemptedCreationEntityIds.includes(entity.id),
   };
 }
 

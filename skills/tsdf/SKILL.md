@@ -224,7 +224,9 @@ type UserOps = DefineListQueryOfflineOperations<
 
 Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`, `getEntityRefs`, `execute`, and optionally `onSuccessExecute`. Use the `offline` option on `performMutation(...)` to route a mutation through the queue (returns `OfflineMutationResult<T>` with `kind: 'online' | 'queued'`).
 
-Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation }`, re-rendering only when that item's state changes.
+Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation, creationAttempted }`, re-rendering only when that item's state changes.
+
+Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with its queued edits, its `dependsOn` dependents and the work of other stores declaring it in `cancelledWith`; an attempted creation is kept and the delete replays after it with the server id (treat not-found as success in `execute`). See `docs/offline.md`.
 
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 

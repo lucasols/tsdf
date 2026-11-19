@@ -222,12 +222,14 @@ describe('list-query rows', () => {
       untouched: env.apiStore.getItemOfflineState('users||3'),
     }).toMatchInlineSnapshot(`
       editedOnce:
+        creationAttempted: '❌'
         isUnsentCreation: '❌'
         pendingMutations: 1
         requiresResolution: '❌'
         syncState: 'pending'
 
       editedTwice:
+        creationAttempted: '❌'
         isUnsentCreation: '❌'
         pendingMutations: 2
         requiresResolution: '❌'
@@ -259,19 +261,19 @@ describe('list-query rows', () => {
 
       >>> offline: rename Ada
 
-      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
 
       >>> offline: rename Ada again, then rename Grace
 
-      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||2 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
 
       >>> back online: the three renames replay in order
 
-      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||1 ⋅ offlineState: null
-      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||2 ⋅ offlineState: null
       "
     `);
@@ -307,6 +309,7 @@ describe('list-query rows', () => {
 
     // Nothing is left to sync by itself: the row needs a manual resolution.
     expect(env.apiStore.getItemOfflineState('users||2')).toMatchInlineSnapshot(`
+      creationAttempted: '❌'
       isUnsentCreation: '❌'
       pendingMutations: 0
       requiresResolution: '✅'
@@ -333,16 +336,16 @@ describe('list-query rows', () => {
 
       >>> offline: rename Grace to a name the server rejects
 
-      -> row: users||2 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
 
       >>> back online: every replay attempt is rejected
 
-      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||2 ⋅ offlineState: {syncState:resolution-required, pendingMutations:0, requiresResolution:✅, isUnsentCreation:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||2 ⋅ offlineState: {syncState:resolution-required, pendingMutations:0, requiresResolution:✅, isUnsentCreation:❌, creationAttempted:❌}
 
       >>> the user discards the rejected edit
 
@@ -394,12 +397,14 @@ describe('list-query rows', () => {
       editedOffline: env.apiStore.getItemOfflineState('users||1'),
     }).toMatchInlineSnapshot(`
       createdOffline:
+        creationAttempted: '❌'
         isUnsentCreation: '✅'
         pendingMutations: 2
         requiresResolution: '❌'
         syncState: 'pending'
 
       editedOffline:
+        creationAttempted: '❌'
         isUnsentCreation: '❌'
         pendingMutations: 1
         requiresResolution: '❌'
@@ -415,7 +420,9 @@ describe('list-query rows', () => {
     await flushAllTimers();
 
     // - While the creation is sent, the temp row keeps reporting its newest
-    //   queued mutation (the rename, still `pending`), so it does not render.
+    //   queued mutation (the rename, still `pending`). It renders once, to
+    //   report that the creation was attempted: from here on a delete handler
+    //   cannot assume that the server never saw the row.
     // - Once the server assigns `users||4`, the list swaps the temp row for the
     //   final one. It mounts before the queued rename is moved to the new id
     //   (first `null`), then reports that rename until it is synced, no longer
@@ -429,20 +436,21 @@ describe('list-query rows', () => {
       >>> offline: create Margaret
 
       -> row: temp:Margaret ⋅ offlineState: null
-      -> row: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅}
+      -> row: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:❌}
 
       >>> offline: rename the row that was just created
 
-      -> row: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅}
-      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:❌}
+      -> row: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
 
       >>> back online: the creation replays, then the renames
 
+      -> row: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
       -> row: users||4 ⋅ offlineState: null
-      -> row: users||4 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> row: users||4 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||4 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> row: users||4 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||4 ⋅ offlineState: null
-      -> row: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> row: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> row: users||1 ⋅ offlineState: null
       "
     `);
@@ -661,19 +669,19 @@ describe('collection items', () => {
 
       >>> offline: rename Ada, and Grace to a rejected name
 
-      -> item: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: users||2 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> item: users||1 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
 
       >>> back online: Ada syncs, Grace is rejected
 
-      -> item: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> item: users||1 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> item: users||1 ⋅ offlineState: null
-      -> item: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: users||2 ⋅ offlineState: {syncState:resolution-required, pendingMutations:0, requiresResolution:✅, isUnsentCreation:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:needs-confirmation, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: users||2 ⋅ offlineState: {syncState:resolution-required, pendingMutations:0, requiresResolution:✅, isUnsentCreation:❌, creationAttempted:❌}
       "
     `);
     expect({
@@ -682,6 +690,7 @@ describe('collection items', () => {
       untouched: env.apiStore.getItemOfflineState('users||3'),
     }).toMatchInlineSnapshot(`
       rejected:
+        creationAttempted: '❌'
         isUnsentCreation: '❌'
         pendingMutations: 0
         requiresResolution: '✅'
@@ -725,6 +734,7 @@ describe('collection items', () => {
     // A delete handler can tell that the server never saw this item.
     expect(env.apiStore.getItemOfflineState('temp:Margaret'))
       .toMatchInlineSnapshot(`
+        creationAttempted: '❌'
         isUnsentCreation: '✅'
         pendingMutations: 2
         requiresResolution: '❌'
@@ -737,6 +747,9 @@ describe('collection items', () => {
     });
     await flushAllTimers();
 
+    // As soon as the creation starts being sent, the temp item reports it as
+    // attempted: the server may know the item from here on.
+    //
     // Once the server assigns `users||4`:
     // - the queued rename moves to the final payload, which reports it until
     //   it is synced, no longer as an unsent creation
@@ -749,15 +762,16 @@ describe('collection items', () => {
 
       >>> offline: create Margaret, then rename her
 
-      -> item: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅}
-      -> item: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅}
+      -> item: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:❌}
+      -> item: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:❌}
 
       >>> back online: the creation replays, then the rename
 
-      -> item: users||4 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
-      -> item: temp:Margaret ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅}
+      -> item: temp:Margaret ⋅ offlineState: {syncState:pending, pendingMutations:2, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
+      -> item: users||4 ⋅ offlineState: {syncState:pending, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
+      -> item: temp:Margaret ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:✅, creationAttempted:✅}
       -> item: temp:Margaret ⋅ offlineState: null
-      -> item: users||4 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌}
+      -> item: users||4 ⋅ offlineState: {syncState:syncing, pendingMutations:1, requiresResolution:❌, isUnsentCreation:❌, creationAttempted:❌}
       -> item: users||4 ⋅ offlineState: null
       "
     `);
