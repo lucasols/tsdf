@@ -196,8 +196,8 @@ storeManager.resetOfflineRuntimeConfig();
 
 Configure uploads on `offlineSession.uploads` when queued mutations depend on local files. The manager exposes upload helpers:
 
-- `saveOfflineUpload({ id, file })`
-- `replaceOfflineUpload({ id, file })`
+- `saveOfflineUpload({ id, file, metadata? })`
+- `replaceOfflineUpload({ id, file, metadata? })`
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
@@ -205,3 +205,44 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `useOfflineUploads()`
 
 Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+
+### Upload metadata
+
+The session has a single `upload` transport, so uploads that need different request parameters (target kind, parent ids, ...) carry them as `metadata` instead of encoding them in the upload id:
+
+```ts
+const uploadMetadataSchema = rc_discriminated_union('kind', {
+  chat: { chatId: rc_string },
+  record: { tableId: rc_string },
+});
+
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    uploads: {
+      adapter: opfsOfflineUploadAdapter,
+      upload: ({ file, metadata, onProgress }) => {
+        // Restored from storage: validate before use.
+        const target = rc_parse(metadata, uploadMetadataSchema).unwrap();
+
+        return target.kind === 'chat'
+          ? uploadChatFile(target.chatId, file, onProgress)
+          : uploadRecordFile(target.tableId, file, onProgress);
+      },
+    },
+  },
+});
+
+await storeManager.saveOfflineUpload({
+  id: attachmentId,
+  file,
+  metadata: { kind: 'chat', chatId },
+});
+```
+
+- `metadata` is optional and must be a JSON-serializable `ValidPayload` (`string`, `number`, or a plain object).
+- It is persisted with the upload record, so it survives reloads, is passed to the `upload` transport both on replay and on `resolveOfflineUpload(s)`, and is exposed as `metadata` on the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()`.
+- Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata (including the ones persisted by older versions) reach the transport with `metadata: undefined`.
+- `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed.
+- Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.

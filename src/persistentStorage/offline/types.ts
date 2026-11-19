@@ -17,6 +17,8 @@ import type {
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,
   OfflineUpload,
+  ReplaceOfflineUploadArgs,
+  SaveOfflineUploadArgs,
 } from '../offlineUploadTypes';
 import type { PersistentStorageSchema } from '../types';
 import type { SchemaValidationError } from '../validateWithSchema';
@@ -512,12 +514,9 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
     ids: readonly string[],
   ) => Promise<Record<string, TUploadRef>>;
   /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
-  saveOfflineUpload: (args: { id: string; file: Blob | File }) => Promise<void>;
-  /** Replaces a previously stored session-scoped upload. */
-  replaceOfflineUpload: (args: {
-    id: string;
-    file: Blob | File;
-  }) => Promise<void>;
+  saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
+  /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
+  replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<File | null>;
   /** Deletes a stored upload when it is no longer referenced. */

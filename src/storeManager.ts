@@ -24,7 +24,11 @@ import type {
   OfflineSessionConfig,
 } from './persistentStorage/offline/types';
 import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
-import type { OfflineUpload } from './persistentStorage/offlineUploadTypes';
+import type {
+  OfflineUpload,
+  ReplaceOfflineUploadArgs,
+  SaveOfflineUploadArgs,
+} from './persistentStorage/offlineUploadTypes';
 import type { PersistentStorageErrorHandler } from './persistentStorage/types';
 import type { BrowserTabsPriorityTimings } from './utils/browserTabsPriority';
 import {
@@ -104,15 +108,13 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
     ids: readonly string[],
   ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;
   /** Saves a session-scoped upload locally for later dependency resolution. */
-  saveOfflineUpload: (args: {
-    id: string;
-    file: Blob | File;
-  }) => Promise<ResultType<void, Error>>;
-  /** Replaces a previously stored session-scoped upload. */
-  replaceOfflineUpload: (args: {
-    id: string;
-    file: Blob | File;
-  }) => Promise<ResultType<void, Error>>;
+  saveOfflineUpload: (
+    args: SaveOfflineUploadArgs,
+  ) => Promise<ResultType<void, Error>>;
+  /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
+  replaceOfflineUpload: (
+    args: ReplaceOfflineUploadArgs,
+  ) => Promise<ResultType<void, Error>>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
   /** Deletes a stored upload when it is no longer referenced. */
@@ -337,12 +339,12 @@ export function createStoreManager<
             () => resolvedOfflineSession.resolveOfflineUploads(ids),
             normalizeStoreManagerOfflineError,
           ),
-        saveOfflineUpload: (args: { id: string; file: Blob | File }) =>
+        saveOfflineUpload: (args: SaveOfflineUploadArgs) =>
           resultify(
             () => resolvedOfflineSession.saveOfflineUpload(args),
             normalizeStoreManagerOfflineError,
           ),
-        replaceOfflineUpload: (args: { id: string; file: Blob | File }) =>
+        replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) =>
           resultify(
             () => resolvedOfflineSession.replaceOfflineUpload(args),
             normalizeStoreManagerOfflineError,
