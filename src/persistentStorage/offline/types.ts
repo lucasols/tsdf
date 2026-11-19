@@ -17,6 +17,7 @@ import type {
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,
   OfflineUpload,
+  OfflineUploadFile,
   ReplaceOfflineUploadArgs,
   SaveOfflineUploadArgs,
 } from '../offlineUploadTypes';
@@ -529,6 +530,10 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** React hook subscribing to the session's upload list. */
   useOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
+  /** React hook reading the file of a staged upload while it is staged. */
+  useOfflineUploadFile: (
+    id: string | false | null | undefined,
+  ) => OfflineUploadFile;
 };
 
 /** @internal */

@@ -2,10 +2,21 @@ import type { ValidPayload } from '../utils/storeShared';
 import type {
   OfflineStoredUploadRecord,
   OfflineUpload,
+  OfflineUploadFile,
   OfflineUploadProgress,
   OfflineUploadSource,
   OfflineUploadState,
 } from './offlineUploadTypes';
+
+function createEmptyUploadFile(
+  status: 'idle' | 'loading' | 'missing',
+): OfflineUploadFile {
+  return { status, url: null, file: null, error: null };
+}
+
+export const idleUploadFile = createEmptyUploadFile('idle');
+export const loadingUploadFile = createEmptyUploadFile('loading');
+export const missingUploadFile = createEmptyUploadFile('missing');
 
 export function stripStoredUploadFile<
   TResolvedRef extends ValidPayload = ValidPayload,

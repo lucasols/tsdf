@@ -160,7 +160,16 @@ Upload methods:
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
 - `useOfflineUploads()`
+- `useOfflineUploadFile(id)` returns `{ status, url, file, error }` for a staged upload
 
 `metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
 
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.
+
+`useOfflineUploadFile(id)` is the render-time counterpart of `loadOfflineUpload(id)`: components using the same id share one read and one TSDF-managed object URL (`url`), which is revoked when no component uses it anymore or when the upload is replaced, deleted or consumed. Pass a falsy id to disable it. See [Offline: Rendering staged files](./offline.md#rendering-staged-files).
+
+```tsx
+const staged = storeManager.useOfflineUploadFile(localUploadId);
+
+return staged.status === 'success' ? <img src={staged.url} /> : null;
+```

@@ -48,6 +48,62 @@ export type ReplaceOfflineUploadArgs = {
   metadata?: ValidPayload;
 };
 
+/**
+ * File of a staged upload, as returned by
+ * `storeManager.useOfflineUploadFile(id)`.
+ *
+ * `url` is an object URL managed by TSDF: it is created once per staged file
+ * while at least one component uses the id, shared by every component using
+ * that id, and revoked shortly after the last one stops using it or as soon
+ * as the upload is replaced, deleted or leaves the session. Render it directly
+ * (e.g. `<img src={url}>`), never revoke it, and do not keep it outside of
+ * render: always use the latest value returned by the hook.
+ *
+ * Narrow on `status`:
+ *
+ * - `idle`: the hook was called with a falsy id.
+ * - `loading`: the staged file is being read. Files the session already holds
+ *   skip this state and are returned on the first render.
+ * - `success`: the file is staged; `url` and `file` are available.
+ * - `missing`: no upload with this id is staged in the active session (never
+ *   staged, deleted, expired, or already consumed by its mutation).
+ * - `error`: reading the staged file from the upload adapter failed.
+ */
+export type OfflineUploadFile =
+  | {
+      /** Current read status of the staged file. */
+      status: 'idle' | 'loading' | 'missing';
+      /** Managed object URL of the staged file, only set on `success`. */
+      url: null;
+      /** Staged file, only set on `success`. */
+      file: null;
+      /** Read failure, only set on `error`. */
+      error: null;
+    }
+  | {
+      /** The file is staged and ready to render. */
+      status: 'success';
+      /** Managed object URL of the staged file. Do not revoke it. */
+      url: string;
+      /**
+       * Staged file, for reading its contents. Use `url` to render it instead
+       * of creating another object URL from this file.
+       */
+      file: File;
+      /** Read failure, only set on `error`. */
+      error: null;
+    }
+  | {
+      /** Reading the staged file from the upload adapter failed. */
+      status: 'error';
+      /** Managed object URL of the staged file, only set on `success`. */
+      url: null;
+      /** Staged file, only set on `success`. */
+      file: null;
+      /** Failure reported by the upload adapter. */
+      error: Error;
+    };
+
 /** Public metadata for a file staged for offline mutation replay. */
 export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   /** Stable upload id used by offline operation inputs. */

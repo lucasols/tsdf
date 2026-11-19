@@ -747,6 +747,9 @@ test('offline manager api returns empty defaults when offline is not configured'
     resolutions: storeManager.useOfflineResolutions(),
     status: storeManager.useOfflineStatus(),
     uploads: storeManager.useOfflineUploads(),
+    // Without an offline session no upload can be staged, so any id is missing.
+    uploadFile: storeManager.useOfflineUploadFile('avatar'),
+    disabledUploadFile: storeManager.useOfflineUploadFile(false),
   }));
 
   (
@@ -782,6 +785,7 @@ test('offline manager api returns empty defaults when offline is not configured'
   (await storeManager.deleteOfflineUpload('avatar')).unwrap();
   expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
   expect(offlineHook.result.current).toMatchInlineSnapshot(`
+    disabledUploadFile: { error: null, file: null, status: 'idle', url: null }
     entities: []
     resolutions: []
 
@@ -795,6 +799,7 @@ test('offline manager api returns empty defaults when offline is not configured'
       sessionKey: 'shared-session'
       updatedAt: 1735689600000
 
+    uploadFile: { error: null, file: null, status: 'missing', url: null }
     uploads: []
   `);
 });
