@@ -1,13 +1,37 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
+import { act } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type {
+  OfflineHealthCheckContext,
+  OfflineHealthCheckResult,
+} from '../../src/main';
 import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { advanceTime } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
-import { docSchema } from './offlineTestShared';
+import {
+  HEALTH_CHECK_DURATION_MS,
+  createHealthCheckMock,
+  createOfflineUsersEnv,
+  healthRecoveryProbe,
+  trackOfflineSession,
+} from './offlineHealthCheckTestShared';
+import {
+  getOfflineQueueEntries,
+  type UpdateValueExecuteContext,
+  type UpdateValueOperations,
+} from './offlineReplayTestShared';
+import {
+  docMutationInputSchema,
+  docSchema,
+  getGlobalOfflineStatusSummary,
+  summarizeResolution,
+} from './offlineTestShared';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -609,4 +633,803 @@ test('stale async outage classifications are ignored after a newer failure settl
     'offline',
   );
   expect(newerFailureEnv.store.state.error?.id ?? null).not.toBe('offline');
+});
+
+// ---------------------------------------------------------------------------
+// `offlineSession.healthCheck`: one health check answers both "this request
+// failed: is it the network, an outage, or just this request?" and "are we
+// back?". The app wires its health endpoint once instead of in several hooks.
+// ---------------------------------------------------------------------------
+
+const userItemIds = ['users||1', 'users||2', 'users||3'];
+
+function getUsersErrors(env: ReturnType<typeof createOfflineUsersEnv>) {
+  return {
+    list:
+      env.store.state.queries[env.getQueryKey({ tableId: 'users' })]?.error
+        ?.message ?? null,
+    items: userItemIds.map(
+      (itemId) => env.getItemQueryState(itemId)?.error?.message ?? null,
+    ),
+  };
+}
+
+test('a burst of requests failing while the backend is down costs one health check and enters outage mode', async () => {
+  const sessionKey = 'health-check-outage-burst-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    healthCheck: { check: health.check },
+    outage: { enabled: true },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  // -- The backend goes down while a screen is loading --
+  // The three item requests are refused right away, the list request only
+  // fails after hanging for its whole duration.
+  health.setBackend('outage');
+  env.serverTable.setNextListFetchError('gateway timeout');
+  env.scheduleFetch('highPriority', { tableId: 'users' });
+  for (const itemId of userItemIds) {
+    env.serverTable.setNextFetchError(itemId, 'bad gateway');
+    env.scheduleItemFetch('highPriority', itemId);
+  }
+
+  // -- The item requests have failed and the health request is in flight --
+  await advanceTime(50);
+
+  // Three failures, a single health request: the failures share it.
+  expect(health.check).toHaveBeenCalledTimes(1);
+  // The check receives the session it runs for and a live abort signal.
+  const healthCheckCtx = health.check.mock.calls[0]?.[0];
+  expect({
+    sessionKey: healthCheckCtx?.sessionKey,
+    aborted: healthCheckCtx?.signal.aborted,
+  }).toMatchInlineSnapshot(`
+    aborted: '❌'
+    sessionKey: 'health-check-outage-burst-session'
+  `);
+  // Nothing is decided before the health endpoint answers.
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+
+  // -- The health endpoint answers "outage" --
+  session.log.addMark('the health endpoint answers "outage"');
+  await advanceTime(HEALTH_CHECK_DURATION_MS);
+
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-outage-burst-session'
+  `);
+
+  // -- The list request fails later, with the outage already known --
+  session.log.addMark('the list request fails after the outage is known');
+  await advanceTime(DEFAULT_FETCH_DURATION_MS);
+
+  // A failure that arrives while the session is already in offline mode is
+  // explained by it: no extra health request.
+  expect(health.check).toHaveBeenCalledTimes(1);
+
+  // Every request of the burst reports the offline state, not its own error.
+  expect(getUsersErrors(env)).toMatchInlineSnapshot(`
+    items: ['Offline', 'Offline', 'Offline']
+    list: 'Offline'
+  `);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+
+    >>> the health endpoint answers "outage"
+
+    -> at: 110ms ⋅ session: offline (outage) ⋅ healthChecks: 1
+
+    >>> the list request fails after the outage is known
+    "
+  `);
+
+  session.unmount();
+});
+
+test('a healthy backend leaves the session online, each failed request shows its own error and the answer is not reused', async () => {
+  const sessionKey = 'health-check-up-session';
+  const health = createHealthCheckMock();
+  const env = createOfflineUsersEnv(sessionKey, {
+    healthCheck: { check: health.check },
+    outage: { enabled: true },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  // -- Three item requests fail while the backend is healthy --
+  for (const itemId of userItemIds) {
+    env.serverTable.setNextFetchError(itemId, `${itemId} not found`);
+    env.scheduleItemFetch('highPriority', itemId);
+  }
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // One health request for the three failures. It answered "up", so the
+  // failures belong to their requests: the session stays online and every
+  // item shows its own error.
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'health-check-up-session'
+  `);
+  expect(getUsersErrors(env)).toMatchInlineSnapshot(`
+    items: ['users||1 not found', 'users||2 not found', 'users||3 not found']
+    list: null
+  `);
+
+  // -- Right after that answer the backend really goes down --
+  session.log.addMark('the backend goes down right after answering "up"');
+  health.setBackend('outage');
+  env.serverTable.setNextFetchError('users||1', 'bad gateway');
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // The "up" answer from a moment ago is not reused, otherwise it would hide
+  // the outage: this failure runs its own health request and finds it.
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(getUsersErrors(env)).toMatchInlineSnapshot(`
+    items: ['Offline', 'users||2 not found', 'users||3 not found']
+    list: null
+  `);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+
+    >>> the backend goes down right after answering "up"
+
+    -> at: 260ms ⋅ session: offline (outage) ⋅ healthChecks: 2
+    "
+  `);
+
+  session.unmount();
+});
+
+// Real case: the endpoint a queued mutation depends on (an upload service)
+// answers 503 while the API health check passes. "up" means the failure is
+// specific to that request, so the session must not go offline for it.
+test('a replayed mutation that keeps failing while the health check answers "up" uses its retry budget and ends in a retry-exhausted resolution', async () => {
+  const sessionKey = 'health-check-up-replay-session';
+  const storeName = 'health-check-up-replay-doc';
+  // The health endpoint answers "up" during the whole test.
+  const health = createHealthCheckMock();
+  const network = createOfflineNetworkMock();
+  network.install();
+  const execute = vi.fn<
+    (ctx: UpdateValueExecuteContext) => Promise<{ value: number }>
+  >(() => Promise.reject(new Error('upload service unavailable (503)')));
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        healthCheck: { check: health.check },
+        network: network.config,
+        outage: { enabled: true },
+        // Re-sending the mutation is safe, with a budget of 2 attempts.
+        classifyRetryableFailure: () => true,
+        replayRetry: { maxFailures: 2, intervalMs: 1_000 },
+      },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute,
+            onSuccessExecute: () => {},
+          },
+        },
+      },
+    },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  // -- The mutation is queued while the browser is offline --
+  act(() => {
+    network.goOffline();
+  });
+  await act(async () => {
+    await env.apiStore.performMutation({
+      mutation: () => Promise.reject(new Error('not sent while offline')),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+  });
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  // -- Back online: the 1st replay attempt fails with the 503 --
+  session.log.addMark('back online: 1st replay attempt fails');
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // The failure asked the health check, which answered "up": the session
+  // stays online and the mutation waits for its next attempt.
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+
+  // -- The 2nd attempt fails too: the retry budget is spent --
+  session.log.addMark('2nd replay attempt fails: retry budget spent');
+  await advanceTime(1_000 + HEALTH_CHECK_DURATION_MS);
+  await flushAllTimers();
+
+  // The mutation's own failure handling applied: it left the queue as a
+  // `retry-exhausted` resolution for the user to retry or discard.
+  expect(execute).toHaveBeenCalledTimes(2);
+  expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+    .toMatchInlineSnapshot(`
+      - error: 'upload service unavailable (503)'
+        input: 'value: 2'
+        kind: 'retry-exhausted'
+        on: 'document:document'
+        op: 'updateValue'
+    `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(0);
+
+  // One health check per failed attempt, and the session never went offline
+  // because of them: the only offline period is the browser one.
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+    -> at: 0ms ⋅ session: offline (network) ⋅ healthChecks: 0
+
+    >>> back online: 1st replay attempt fails
+
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+
+    >>> 2nd replay attempt fails: retry budget spent
+    "
+  `);
+
+  session.unmount();
+});
+
+test('recovery checks use the same health check: the outage ends when it answers "up" and the queued mutation is sent', async () => {
+  const sessionKey = 'health-check-outage-recovery-session';
+  const storeName = 'health-check-outage-recovery-doc';
+  const health = createHealthCheckMock();
+  const replayedInputs: { value: number }[] = [];
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        // No `outage.recoveryCheck` and no `classifyFailure`: the health
+        // check is the only thing the app wires.
+        healthCheck: { check: health.check },
+        outage: { enabled: true, recoveryProbe: healthRecoveryProbe },
+      },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              replayedInputs.push(input);
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  // -- The backend goes down: a mutation and a refetch fail together --
+  health.setBackend('outage');
+  const mutationPromise = env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 2;
+      });
+    },
+    mutation: () => Promise.reject(new Error('bad gateway')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+  const mutationResult = await mutationPromise;
+
+  // Both failures were classified by one health request: the mutation went
+  // to the offline queue instead of failing.
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(mutationResult.ok && mutationResult.value).toMatchInlineSnapshot(
+    `kind: 'queued'`,
+  );
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  // -- First recovery check: the backend is still down --
+  session.log.addMark('1st recovery check: still down');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isLeader: '✅'
+    isOfflineMode: '✅'
+    lastFailureAt: 1735689600100
+    lastRecoveryCheckAt: 1735689601200
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-outage-recovery-session'
+    updatedAt: 1735689601200
+  `);
+  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
+
+  // -- The backend comes back: the next recovery check sees it --
+  session.log.addMark('2nd recovery check: the backend is back');
+  health.setBackend('up');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+  await flushAllTimers();
+
+  // The same health check ended the outage, then the queued mutation was
+  // replayed.
+  expect(health.check).toHaveBeenCalledTimes(3);
+  expect(replayedInputs).toMatchInlineSnapshot(`- value: 2`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(0);
+  expect(env.serverMock.current).toBe(2);
+
+  // Recovering stops the checks: nothing runs on the success path.
+  await advanceTime(10 * healthRecoveryProbe.initialIntervalMs);
+  expect(health.check).toHaveBeenCalledTimes(3);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+    -> at: 100ms ⋅ session: offline (outage) ⋅ healthChecks: 1
+
+    >>> 1st recovery check: still down
+
+    -> at: 1200ms ⋅ session: offline (outage) ⋅ healthChecks: 2
+
+    >>> 2nd recovery check: the backend is back
+
+    -> at: 2300ms ⋅ session: online ⋅ healthChecks: 3
+    "
+  `);
+
+  session.unmount();
+});
+
+test('classifyFailure answers win over the health check, which only runs for failures classified as unknown', async () => {
+  const sessionKey = 'health-check-precedence-session';
+  const health = createHealthCheckMock();
+  // The app can tell some failures apart from the error alone and only needs
+  // the health endpoint for the ambiguous ones.
+  const classifyFailure = vi.fn((error: unknown) => {
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'validation failed') return 'ignore' as const;
+    if (message === 'service unavailable') return 'outage' as const;
+    return 'unknown' as const;
+  });
+  // The outage mode has its own recovery probe, which wins over the health
+  // check for outage recovery.
+  const outageRecoveryCheck = vi.fn(() => true);
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure,
+        healthCheck: { check: health.check },
+        outage: {
+          enabled: true,
+          recoveryCheck: outageRecoveryCheck,
+          recoveryProbe: healthRecoveryProbe,
+        },
+      },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  async function failFetchWith(message: string) {
+    session.log.addMark(`a fetch fails with "${message}"`);
+    env.serverMock.setNextFetchError(message);
+    env.apiStore.scheduleFetch('highPriority');
+    await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+    return env.store.state.error?.message ?? null;
+  }
+
+  // -- `ignore` is final: no health request, the fetch shows its error --
+  expect(await failFetchWith('validation failed')).toBe('validation failed');
+  expect(health.check).toHaveBeenCalledTimes(0);
+
+  // -- `unknown` asks the health check, which says the backend is fine --
+  expect(await failFetchWith('request timed out')).toBe('request timed out');
+  expect(health.check).toHaveBeenCalledTimes(1);
+
+  // -- `outage` is final: outage mode without a health request --
+  expect(await failFetchWith('service unavailable')).toBe('Offline');
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-precedence-session'
+  `);
+
+  // -- Outage recovery uses `outage.recoveryCheck`, not the health check --
+  session.log.addMark('outage recovery probe');
+  await advanceTime(healthRecoveryProbe.initialIntervalMs);
+
+  expect(outageRecoveryCheck).toHaveBeenCalledTimes(1);
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+
+    >>> a fetch fails with "validation failed"
+
+    >>> a fetch fails with "request timed out"
+
+    >>> a fetch fails with "service unavailable"
+
+    -> at: 310ms ⋅ session: offline (outage) ⋅ healthChecks: 1
+
+    >>> outage recovery probe
+
+    -> at: 1310ms ⋅ session: online ⋅ healthChecks: 1
+    "
+  `);
+
+  session.unmount();
+});
+
+test('the health check is never requested while the session gate is closed', async () => {
+  const sessionKey = 'health-check-gate-session';
+  const health = createHealthCheckMock();
+  // The backend is down the whole time; only the gate changes.
+  health.setBackend('outage');
+  let isOfflineLayerEnabled = false;
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        enabled: () => isOfflineLayerEnabled,
+        healthCheck: { check: health.check },
+        outage: { enabled: true },
+      },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+
+  // -- Gate closed: a failed fetch is a plain failed fetch --
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  expect(health.check).not.toHaveBeenCalled();
+  expect(env.store.state.error?.message).toBe('bad gateway');
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+
+  // -- Gate open: the same failure is now classified by the health check --
+  isOfflineLayerEnabled = true;
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(env.store.state.error?.message).toBe('Offline');
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-gate-session'
+  `);
+
+  // -- Gate closed again while in outage mode: recovery checks stop too --
+  isOfflineLayerEnabled = false;
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  // Well past the default outage recovery cadence (30s).
+  await advanceTime(120_000);
+
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(env.store.state.error?.message).toBe('bad gateway');
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+});
+
+test('an outage answer is ignored while outage mode is disabled at runtime', async () => {
+  const sessionKey = 'health-check-outage-disabled-session';
+  const health = createHealthCheckMock();
+  health.setBackend('outage');
+  const network = createOfflineNetworkMock();
+
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      healthCheck: { check: health.check },
+      network: network.config,
+      outage: { enabled: true },
+    },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+
+  // -- The app turns outage handling off; network mode stays enabled --
+  storeManager.setOfflineRuntimeConfig({ outage: { enabled: false } }).unwrap();
+
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // The health check ran (the failure could have been a network problem) but
+  // its "outage" answer cannot activate a disabled mode.
+  expect(health.check).toHaveBeenCalledTimes(1);
+  expect(env.store.state.error?.message).toBe('bad gateway');
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'health-check-outage-disabled-session'
+  `);
+
+  // -- Outage handling is turned back on --
+  storeManager.resetOfflineRuntimeConfig();
+
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(env.store.state.error?.message).toBe('Offline');
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '✅' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-outage-disabled-session'
+  `);
+});
+
+test('a health check that throws or never answers leaves the failure to its request instead of blocking it', async () => {
+  const sessionKey = 'health-check-broken-classification-session';
+  const health = createHealthCheckMock();
+  health.setBackend('outage');
+  let hangingCheckSignal: AbortSignal | undefined;
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        healthCheck: { check: health.check, timeoutMs: 5_000 },
+        outage: { enabled: true },
+      },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+  // What the user sees for the document, with the time of each change.
+  const renders = createLoggerStore();
+  const documentHook = renderHook(() => {
+    const doc = env.apiStore.useDocument({ returnRefetchingStatus: true });
+    renders.add({
+      at: `${Date.now() - TEST_INITIAL_TIME}ms`,
+      status: doc.status,
+      error: doc.error?.message,
+    });
+  });
+
+  // -- 1st failure (the fetch of the mounted document): the health check
+  // itself throws --
+  renders.addMark('1st failure: the health check throws');
+  health.check.mockImplementationOnce(() =>
+    Promise.reject(new Error('health endpoint misconfigured')),
+  );
+  env.serverMock.setNextFetchError('bad gateway');
+  await advanceTime(50);
+
+  // No answer means no evidence: the session stays online and the fetch
+  // fails with its own error.
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+
+  // -- 2nd failure: the health request hangs forever --
+  renders.addMark('2nd failure: the health request never answers');
+  health.check.mockImplementationOnce(
+    ({ signal }: OfflineHealthCheckContext) => {
+      hangingCheckSignal = signal;
+      return new Promise<OfflineHealthCheckResult>(() => {});
+    },
+  );
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  // The fetch fails and the health request starts a few ms from now.
+  await advanceTime(4_500);
+
+  // Still inside `timeoutMs` (5s): the fetch waits for the classification.
+  expect(hangingCheckSignal?.aborted).toBe(false);
+
+  renders.addMark('the health check times out');
+  await advanceTime(1_000);
+
+  // The session gave up on the check and told it so through the signal.
+  expect(hangingCheckSignal?.aborted).toBe(true);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+
+  // -- 3rd failure: the health check works again --
+  renders.addMark('3rd failure: the health check answers "outage"');
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+
+  // The session is not stuck on the hung request: a new check ran.
+  expect(health.check).toHaveBeenCalledTimes(3);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '✅', enabled: '✅' }
+    sessionKey: 'health-check-broken-classification-session'
+  `);
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ status: loading ⋅ error: undefined
+
+    >>> 1st failure: the health check throws
+
+    -> at: 10ms ⋅ status: error ⋅ error: bad gateway
+
+    >>> 2nd failure: the health request never answers
+
+    -> at: 60ms ⋅ status: loading ⋅ error: undefined
+
+    >>> the health check times out
+
+    -> at: 5060ms ⋅ status: error ⋅ error: bad gateway
+
+    >>> 3rd failure: the health check answers "outage"
+
+    -> at: 5560ms ⋅ status: loading ⋅ error: undefined
+    -> at: 5660ms ⋅ status: error ⋅ error: Offline
+    "
+  `);
+
+  documentHook.unmount();
+});
+
+test('a health check that throws or never answers during recovery keeps the outage and the next check can still end it', async () => {
+  const sessionKey = 'health-check-broken-recovery-session';
+  const health = createHealthCheckMock();
+  health.setBackend('outage');
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        healthCheck: { check: health.check, timeoutMs: 5_000 },
+        outage: { enabled: true, recoveryProbe: healthRecoveryProbe },
+      },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {},
+    },
+  });
+  const session = trackOfflineSession(sessionKey, health);
+
+  // -- Enter outage mode through a failed fetch --
+  env.serverMock.setNextFetchError('bad gateway');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(50 + HEALTH_CHECK_DURATION_MS);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(true);
+
+  // The backend is back from here on, but the health check misbehaves first.
+  health.setBackend('up');
+
+  // -- 1st recovery check throws --
+  session.log.addMark('1st recovery check throws');
+  health.check.mockImplementationOnce(() => {
+    throw new Error('health endpoint misconfigured');
+  });
+  await advanceTime(healthRecoveryProbe.initialIntervalMs);
+
+  // No answer is not a recovery: the outage stays.
+  expect(health.check).toHaveBeenCalledTimes(2);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(true);
+
+  // -- 2nd recovery check never answers --
+  session.log.addMark('2nd recovery check never answers');
+  health.check.mockImplementationOnce(
+    () => new Promise<OfflineHealthCheckResult>(() => {}),
+  );
+  await advanceTime(healthRecoveryProbe.initialIntervalMs);
+  expect(health.check).toHaveBeenCalledTimes(3);
+
+  // It is abandoned after `timeoutMs`, with the outage still active...
+  await advanceTime(5_000);
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(true);
+
+  // -- 3rd recovery check answers "up" --
+  // ...and the recovery loop goes on: the next check ends the outage.
+  session.log.addMark('3rd recovery check answers "up"');
+  await advanceTime(
+    healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
+  );
+
+  expect(health.check).toHaveBeenCalledTimes(4);
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+    outage: { active: '❌', enabled: '✅' }
+    sessionKey: 'health-check-broken-recovery-session'
+  `);
+  expect(session.log.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> at: 0ms ⋅ session: online ⋅ healthChecks: 0
+    -> at: 110ms ⋅ session: offline (outage) ⋅ healthChecks: 1
+
+    >>> 1st recovery check throws
+
+    -> at: 1110ms ⋅ session: offline (outage) ⋅ healthChecks: 2
+
+    >>> 2nd recovery check never answers
+
+    -> at: 7110ms ⋅ session: offline (outage) ⋅ healthChecks: 3
+
+    >>> 3rd recovery check answers "up"
+
+    -> at: 8210ms ⋅ session: online ⋅ healthChecks: 4
+    "
+  `);
+
+  session.unmount();
 });

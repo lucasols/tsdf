@@ -49,6 +49,8 @@ import type {
   GlobalOfflineStatus,
   OfflineFailureClassification,
   OfflineFailureContext,
+  OfflineHealthCheckConfig,
+  OfflineHealthCheckResult,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
@@ -130,6 +132,7 @@ const DEFAULT_NETWORK_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
   backoffMultiplier: 2,
   jitterRatio: 0.2,
 };
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const defaultGetIsOffline = () => !navigator.onLine;
 const INACTIVE_MODE = { enabled: false, active: false } as const;
 
@@ -402,7 +405,10 @@ type SessionRecoveryMode = 'network' | 'outage';
 
 type SessionRecoveryTarget = {
   mode: SessionRecoveryMode;
-  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+  /** Probe of the mode itself. Without one the session health check is used. */
+  recoveryCheck:
+    | ((ctx: { sessionKey: string }) => Promise<boolean> | boolean)
+    | undefined;
   recoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
 
@@ -422,6 +428,8 @@ type SessionCanonicalConfig = {
   };
   classifyFailure?: OfflineSessionConfig['classifyFailure'];
   classifyRetriableFailure?: OfflineSessionConfig['classifyRetryableFailure'];
+  healthCheck?: OfflineHealthCheckConfig['check'];
+  healthCheckTimeoutMs: number;
   outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
   outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
@@ -449,6 +457,9 @@ function toCanonicalConfig(
     },
     classifyFailure: config?.classifyFailure,
     classifyRetriableFailure: config?.classifyRetryableFailure,
+    healthCheck: config?.healthCheck?.check,
+    healthCheckTimeoutMs:
+      config?.healthCheck?.timeoutMs ?? DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
       config?.outage?.recoveryProbe,
@@ -503,6 +514,8 @@ function sameCanonicalConfig(
       right.mutationQueueingByDefault.outage &&
     left.classifyFailure === right.classifyFailure &&
     left.classifyRetriableFailure === right.classifyRetriableFailure &&
+    left.healthCheck === right.healthCheck &&
+    left.healthCheckTimeoutMs === right.healthCheckTimeoutMs &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
   );
@@ -670,6 +683,8 @@ class SessionOfflineCoordinator {
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
+  /** Health check in flight, shared by every caller asking meanwhile. */
+  #healthCheckInFlight: Promise<OfflineHealthCheckResult | null> | null = null;
   #classifiedNetworkActive = false;
   /** Last value of the session gate applied to the status. */
   #appliedSessionEnabled = true;
@@ -1418,7 +1433,8 @@ class SessionOfflineCoordinator {
     if (
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkRecoveryCheck
+      (this.#canonicalConfig.networkRecoveryCheck ||
+        this.#canonicalConfig.healthCheck)
     ) {
       this.#syncRecoveryProbe();
       return true;
@@ -1505,18 +1521,39 @@ class SessionOfflineCoordinator {
     error: unknown,
     ctx: OfflineFailureContext,
   ): Promise<OfflineFailureClassification> {
-    if (
-      !this.#canonicalConfig.classifyFailure ||
-      !this.#canClassifyFailures()
-    ) {
-      return 'ignore';
+    if (!this.#canClassifyFailures()) return 'ignore';
+
+    const { classifyFailure, healthCheck } = this.#canonicalConfig;
+    let result: OfflineFailureClassification | 'unknown' = 'unknown';
+
+    if (classifyFailure) {
+      const token = this.getClassificationToken();
+      result = await classifyFailure(error, ctx);
+
+      // An explicit answer overtaken by a newer classification is dropped.
+      // An `unknown` one decides nothing by itself: it goes on to the health
+      // check, whose answer is shared by every failure waiting for it
+      if (result !== 'unknown' && !this.isCurrentClassificationToken(token)) {
+        return 'ignore';
+      }
     }
 
-    const token = this.getClassificationToken();
-    const result = await this.#canonicalConfig.classifyFailure(error, ctx);
+    if (result === 'unknown') {
+      if (!healthCheck) return 'ignore';
 
-    if (!this.isCurrentClassificationToken(token)) {
-      return 'ignore';
+      // Already offline: the active mode explains the failure, and asking
+      // "are we back?" is the job of the recovery checks
+      if (this.store.state.status.outage.active) return 'outage';
+      if (this.store.state.status.network.active) return 'network';
+
+      const health = await this.#checkHealth(healthCheck);
+      if (health === null || health === 'up') return 'ignore';
+
+      result = health === 'outage' ? 'outage' : 'network';
+
+      // Every failure that shared the check gets here; the first one has
+      // already activated the mode
+      if (this.store.state.status[result].active) return result;
     }
 
     if (result === 'outage') {
@@ -1539,6 +1576,48 @@ class SessionOfflineCoordinator {
     }
 
     return 'ignore';
+  }
+
+  /**
+   * Runs `offlineSession.healthCheck`. While a check is in flight every
+   * caller (failing requests, a recovery tick) gets that same call instead of
+   * starting its own. A finished answer is not kept: an `up` reused for a
+   * later failure could hide an outage that started right after it.
+   *
+   * Resolves with `null` when the check gave no answer (it threw or timed
+   * out), which callers treat as "nothing learned".
+   */
+  #checkHealth(
+    check: OfflineHealthCheckConfig['check'],
+  ): Promise<OfflineHealthCheckResult | null> {
+    this.#healthCheckInFlight ??= this.#requestHealth(check).finally(() => {
+      this.#healthCheckInFlight = null;
+    });
+
+    return this.#healthCheckInFlight;
+  }
+
+  async #requestHealth(
+    check: OfflineHealthCheckConfig['check'],
+  ): Promise<OfflineHealthCheckResult | null> {
+    const abortController = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      return await Promise.race([
+        check({ sessionKey: this.sessionKey, signal: abortController.signal }),
+        new Promise<null>((resolve) => {
+          timeout = setTimeout(() => {
+            abortController.abort();
+            resolve(null);
+          }, this.#canonicalConfig.healthCheckTimeoutMs);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   /**
@@ -2309,15 +2388,18 @@ class SessionOfflineCoordinator {
       return null;
     }
 
+    const { networkRecoveryCheck, outageRecoveryCheck, healthCheck } =
+      this.#canonicalConfig;
+
     if (
       this.store.state.status.network.active &&
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkRecoveryCheck
+      (networkRecoveryCheck || healthCheck)
     ) {
       return {
         mode: 'network',
-        recoveryCheck: this.#canonicalConfig.networkRecoveryCheck,
+        recoveryCheck: networkRecoveryCheck,
         recoveryProbe: this.#canonicalConfig.networkRecoveryProbe,
       };
     }
@@ -2325,11 +2407,11 @@ class SessionOfflineCoordinator {
     if (
       this.store.state.status.outage.active &&
       !this.store.state.status.network.active &&
-      this.#canonicalConfig.outageRecoveryCheck
+      (outageRecoveryCheck || healthCheck)
     ) {
       return {
         mode: 'outage',
-        recoveryCheck: this.#canonicalConfig.outageRecoveryCheck,
+        recoveryCheck: outageRecoveryCheck,
         recoveryProbe: this.#canonicalConfig.outageRecoveryProbe,
       };
     }
@@ -2352,14 +2434,23 @@ class SessionOfflineCoordinator {
       return;
     }
 
+    const { healthCheck, outageRecoveryCheck } = this.#canonicalConfig;
     let recovered = false;
+    // Answer of the session health check, when the mode has no probe of its
+    // own
+    let health: OfflineHealthCheckResult | null = null;
 
-    try {
-      recovered = await nextTarget.recoveryCheck({
-        sessionKey: this.sessionKey,
-      });
-    } catch {
-      recovered = false;
+    if (nextTarget.recoveryCheck) {
+      try {
+        recovered = await nextTarget.recoveryCheck({
+          sessionKey: this.sessionKey,
+        });
+      } catch {
+        recovered = false;
+      }
+    } else if (healthCheck) {
+      health = await this.#checkHealth(healthCheck);
+      recovered = health === 'up';
     }
 
     // Disposed while the check was in flight: its answer must not touch the
@@ -2372,10 +2463,47 @@ class SessionOfflineCoordinator {
       this.#recoveryAttempt = 0;
       if (target.mode === 'network') {
         this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+
+        // A healthy backend also ends an outage that waits for the same
+        // health check, without spending a second check on it
+        if (
+          health === 'up' &&
+          !outageRecoveryCheck &&
+          this.store.state.status.outage.active &&
+          !this.store.state.status.network.active
+        ) {
+          this.setOutageActive(false, { recoveryCheckAt });
+        }
         return;
       }
 
       this.setOutageActive(false, { recoveryCheckAt });
+      return;
+    }
+
+    if (target.mode === 'network' && health === 'outage') {
+      // The backend is reachable again but down: the network cause is over.
+      // Outage mode takes over first (when it can be entered), so the
+      // session is not seen as online in between
+      if (!this.store.state.status.outage.active && this.#isOutageEnabled()) {
+        this.setOutageActive(true, { recoveryCheckAt });
+      }
+      this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+      return;
+    }
+
+    if (
+      target.mode === 'outage' &&
+      health === 'unreachable' &&
+      this.#isNetworkEnabled()
+    ) {
+      // Nothing can be said about the outage while the backend cannot be
+      // reached: it is kept, and network mode leads the recovery from here
+      this.setNetworkActive(true, {
+        classified: true,
+        recordFailureAt: true,
+        recoveryCheckAt,
+      });
       return;
     }
 

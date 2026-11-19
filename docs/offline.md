@@ -109,6 +109,81 @@ A mutation is also queued while online when older mutations for the same entitie
 
 Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
 
+## Health Check
+
+The session is in offline mode for one of two causes: `network` (this device cannot reach the backend) or `outage` (the backend is reached but down). Browser `online` / `offline` events only cover part of the first one. For everything else the app usually has one health endpoint that answers both "this request failed: is it the network, an outage, or just this request?" and "are we back?". Wire it once with `offlineSession.healthCheck`:
+
+```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    network: { enabled: true },
+    outage: { enabled: true },
+    healthCheck: {
+      check: async ({ signal }) => {
+        try {
+          const response = await fetch('/api/health', { signal });
+          return response.ok ? 'up' : 'outage';
+        } catch {
+          return 'unreachable';
+        }
+      },
+    },
+  },
+});
+```
+
+`check(ctx)` receives `{ sessionKey, signal }` and returns (or resolves to) one of:
+
+| Answer          | Meaning                                        | As a failure classification | As a recovery check             |
+| --------------- | ---------------------------------------------- | --------------------------- | ------------------------------- |
+| `'up'`          | The backend answered and is healthy            | The session stays online    | Offline mode ends               |
+| `'outage'`      | The backend was reached but is down            | Outage mode becomes active  | Outage mode (stays or replaces) |
+| `'unreachable'` | The backend cannot be reached from this device | Network mode becomes active | Network mode (stays or returns) |
+
+The session uses the same function in both places:
+
+- **Failure classification.** When a fetch, a mutation or the replay of a queued mutation fails, the session runs the check and applies the answer.
+- **Recovery checks.** While a mode is active because of a failure, its recovery probe runs the check on that mode's `recoveryProbe` cadence (network: 5s growing to 60s, outage: 30s growing to 5min by default). `'up'` ends the offline mode — both causes at once when both are active. `'outage'` during network mode means the device reaches the backend again but the backend is down: outage mode takes over. `'unreachable'` during outage mode activates network mode and keeps the outage, since nothing can be said about it until the backend is reachable. With a health check, `outage.recoveryCheck` is optional.
+
+In both places an answer only activates a mode that is enabled (`network.enabled` / `outage.enabled`, including runtime overrides). An answer for a disabled mode is ignored: a failed request is left to its own error.
+
+### `'up'` means the failure belongs to the request
+
+When the check answers `'up'` for a failed request, the session stays online and that request's own failure handling applies, even if the endpoint it called is down. For example, an upload endpoint answering 503 while the API health check passes:
+
+- a fetch or a direct mutation fails with its own error;
+- a queued mutation being replayed goes through `classifyRetryableFailure` and the `replayRetry` budget, and ends in a `retry-exhausted` resolution (see [Conflict Resolution](#conflict-resolution)).
+
+If the session should pause for that service instead, make `check` cover it (answer `'outage'` when it is down) or return `'outage'` for its failures from `classifyFailure`.
+
+### One request for many failures
+
+While a check is in flight, every failure and recovery tick that needs an answer waits for that same call: a burst of requests failing right when the backend goes down costs one health request. Failures that arrive while the session is already in offline mode do not run the check at all — the active mode explains them, and asking "are we back?" is the job of the recovery checks.
+
+A finished answer is never reused. A cached `'up'` could hide an outage that started right after it, so the next failure after a check has settled starts a new one. The check is never called on the success path.
+
+### With `classifyFailure` and `recoveryCheck`
+
+The health check is the fallback; the more specific hooks win:
+
+- `classifyFailure(error, ctx)` runs first. `'outage'`, `'network'` and `'ignore'` are final answers and the health check is not called for that failure. Return `'unknown'` when the error alone does not tell, to ask the health check. This keeps obvious request errors (validation, 404) from costing a health request:
+
+  ```ts
+  classifyFailure: (error) => (isClientError(error) ? 'ignore' : 'unknown'),
+  ```
+
+  Without `classifyFailure`, every failure asks the health check.
+
+- A mode with its own `recoveryCheck` (`network.recoveryCheck` / `outage.recoveryCheck`) keeps using it for its recovery; the health check is the recovery check of the modes that do not have one.
+
+### When the check gives no answer
+
+A check that throws, rejects, or takes longer than `healthCheck.timeoutMs` (default 10s) gives no answer and changes nothing: a failure being classified is left to its request, and a recovery check counts as "not recovered yet" and is retried on the normal cadence. `ctx.signal` is aborted on timeout so the health request can be cancelled. No answer is never read as `'unreachable'`: a broken or slow health endpoint is not evidence about connectivity, and the browser going offline is already detected by network mode. Return `'unreachable'` from `check` when the request itself fails, as in the example above.
+
+The check is not called while the [session gate](#session-gate) is closed, or while both modes are disabled and neither is still active.
+
 ## Revalidation After Recovering
 
 While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations are ignored, and cached data stays visible.
@@ -227,7 +302,7 @@ const storeManager = createStoreManager({
 
 While it returns `false` the session behaves as if no offline session existed:
 
-- it never enters offline mode: network detection is ignored and `classifyFailure` is not called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled
+- it never enters offline mode: network detection is ignored and neither `classifyFailure` nor `healthCheck` is called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled
 - fetches always go to the network and fail with their normal errors
 - mutations with an `offline` descriptor run as plain online mutations (see [Queuing Mutations](#queuing-mutations))
 
