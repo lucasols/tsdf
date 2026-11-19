@@ -73,13 +73,6 @@ function stripInternalEntityPayload(
   return publicEntity;
 }
 
-type SessionStoreState = {
-  status: GlobalOfflineStatus;
-  entities: InternalGlobalOfflineEntity[];
-  resolutions: OfflineResolutionRecord[];
-  uploads: OfflineUpload[];
-};
-
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
@@ -149,6 +142,73 @@ const appVersionByOfflineSession = new WeakMap<
   OfflineSession,
   string | undefined
 >();
+type OfflineRecoveryListener = (
+  sessionKey: string,
+  hasStoreRecovered: (storeName: string) => boolean,
+) => void;
+
+const offlineRecoveryListeners = new Set<OfflineRecoveryListener>();
+
+type SessionStoreState = {
+  status: GlobalOfflineStatus;
+  entities: InternalGlobalOfflineEntity[];
+  resolutions: OfflineResolutionRecord[];
+  uploads: OfflineUpload[];
+};
+
+/**
+ * The stores (by name) that cannot be revalidated against the server yet, or
+ * `null` when no store of the session can:
+ *
+ * - offline, or with queued mutations still to replay: anything fetched now
+ *   may predate the replayed mutations, in any store
+ * - a store with entities waiting for a manual resolution: a refetch would
+ *   replace the local changes the user still has to decide on
+ */
+function getStoresAwaitingRecovery(
+  state: SessionStoreState,
+): ReadonlySet<string> | null {
+  if (state.status.isOfflineMode) return null;
+
+  const storeNames = new Set<string>();
+
+  for (const entity of state.entities) {
+    if (entity.pendingMutations > 0) return null;
+    if (entity.requiresResolution) storeNames.add(entity.storeName);
+  }
+
+  return storeNames;
+}
+
+/**
+ * Subscribes to stores recovering in this tab (any session key; listeners
+ * filter by the key they care about). A store recovers when its session is
+ * back online with its queued mutations replayed and the store has no entity
+ * left waiting for a manual resolution: from then on its cached data can be
+ * revalidated against the server.
+ * @internal
+ */
+export function subscribeToOfflineRecovery(
+  listener: OfflineRecoveryListener,
+): () => void {
+  offlineRecoveryListeners.add(listener);
+
+  return () => {
+    offlineRecoveryListeners.delete(listener);
+  };
+}
+
+/**
+ * Whether the session is in offline mode in this tab, without creating or
+ * reconfiguring its coordinator (a session nothing tracks is online).
+ * @internal
+ */
+export function isSessionInOfflineMode(sessionKey: string | false): boolean {
+  if (sessionKey === false) return false;
+
+  return registry.get(sessionKey)?.getStatus().isOfflineMode ?? false;
+}
+
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
@@ -680,6 +740,29 @@ class SessionOfflineCoordinator {
       }),
     });
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    this.store.subscribe(({ prev, current }) => {
+      if (
+        prev.entities === current.entities &&
+        prev.status.isOfflineMode === current.status.isOfflineMode
+      ) {
+        return;
+      }
+
+      const awaitingStores = getStoresAwaitingRecovery(current);
+      if (awaitingStores === null) return;
+
+      const prevAwaitingStores = getStoresAwaitingRecovery(prev);
+      if (prevAwaitingStores?.size === 0) return;
+
+      for (const listener of offlineRecoveryListeners) {
+        listener(
+          sessionKey,
+          (storeName) =>
+            !awaitingStores.has(storeName) &&
+            (prevAwaitingStores === null || prevAwaitingStores.has(storeName)),
+        );
+      }
+    });
 
     this.#browserTabs =
       createBrowserTabsCoordinatorWithPriority<OfflineSessionMessage>(

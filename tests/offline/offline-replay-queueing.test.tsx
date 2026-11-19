@@ -1257,6 +1257,8 @@ test('ambiguous replay failures are discarded when the server confirms the mutat
     810ms | "value:2 sync:needs-confirmation pending:1" | 🔴 <fetch-finished (value: 1)
     5s    | "value:2 sync:syncing pending:1"            | ui-changed
     .     | "value:1 sync:none pending:0"               | ui-changed
+    5.01s | "value:1 sync:none pending:0"               | 🟠 >fetch-started
+    5.81s | "value:1 sync:none pending:0"               | 🟠 <fetch-finished (value: 1)
     "
   `);
 });
@@ -1400,6 +1402,8 @@ test('ambiguous replay failures are retried when the server confirms the mutatio
     5.101s | "value:2 sync:syncing pending:1"            | server-data-changed (value: 2)
     .      | "value:2 sync:syncing pending:1"            | offline:updateValue replay-finished
     .      | "value:2 sync:none pending:0"               | ui-changed
+    5.111s | "value:2 sync:none pending:0"               | 🔴 >fetch-started
+    5.911s | "value:2 sync:none pending:0"               | 🔴 <fetch-finished (value: 2)
     "
   `);
 });
@@ -1849,45 +1853,47 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
   // Full timeline showing the retry → resolve → retry → discard lifecycle.
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                           |
-    0     | "value:1 sync:none pending:0"                | ui-initialized
-    .     | "value:1 sync:pending pending:1"             | ui-changed
-    .     | "value:1 sync:pending pending:1"             | offline:updateValue queued
-    .     | "value:1 sync:pending pending:1"             | -- go online — exhaust the 3-attempt retry budget
-    .     | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    10ms  | "value:1 sync:needs-confirmation pending:1"  | 🔴 >fetch-started
-    810ms | "value:1 sync:needs-confirmation pending:1"  | 🔴 <fetch-finished (value: 1)
-    5s    | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:needs-confirmation pending:1"  | ui-changed
-    10s   | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
-    .     | "value:1 sync:resolution-required pending:0" | ui-changed
-    .     | "value:1 sync:resolution-required pending:0" | -- user resolves with "retry" — entry re-enqueued, 4th execute call succeeds
-    .     | "value:1 sync:pending pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | ui-changed
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:1 sync:syncing pending:1"             | server-data-changed (value: 2)
-    .     | "value:1 sync:syncing pending:1"             | offline:updateValue replay-finished
-    .     | "value:2 sync:none pending:0"                | ui-changed
-    11s   | "value:2 sync:none pending:0"                | -- go offline, queue another mutation, come back online — exhaust retries again
-    .     | "value:2 sync:pending pending:1"             | ui-changed
-    .     | "value:2 sync:pending pending:1"             | offline:updateValue queued
-    .     | "value:2 sync:syncing pending:1"             | ui-changed
-    .     | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:2 sync:needs-confirmation pending:1"  | ui-changed
-    16s   | "value:2 sync:syncing pending:1"             | ui-changed
-    .     | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:2 sync:needs-confirmation pending:1"  | ui-changed
-    21s   | "value:2 sync:syncing pending:1"             | ui-changed
-    .     | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
-    .     | "value:2 sync:syncing pending:1"             | offline:updateValue resolution-required
-    .     | "value:2 sync:resolution-required pending:0" | ui-changed
-    .     | "value:2 sync:resolution-required pending:0" | -- user resolves with "discard" — entry permanently removed
-    .     | "value:2 sync:none pending:0"                | ui-changed
+    time   | ui                                           |
+    0      | "value:1 sync:none pending:0"                | ui-initialized
+    .      | "value:1 sync:pending pending:1"             | ui-changed
+    .      | "value:1 sync:pending pending:1"             | offline:updateValue queued
+    .      | "value:1 sync:pending pending:1"             | -- go online — exhaust the 3-attempt retry budget
+    .      | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    10ms   | "value:1 sync:needs-confirmation pending:1"  | 🔴 >fetch-started
+    810ms  | "value:1 sync:needs-confirmation pending:1"  | 🔴 <fetch-finished (value: 1)
+    5s     | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:needs-confirmation pending:1"  | ui-changed
+    10s    | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue resolution-required
+    .      | "value:1 sync:resolution-required pending:0" | ui-changed
+    .      | "value:1 sync:resolution-required pending:0" | -- user resolves with "retry" — entry re-enqueued, 4th execute call succeeds
+    .      | "value:1 sync:pending pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | ui-changed
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:1 sync:syncing pending:1"             | server-data-changed (value: 2)
+    .      | "value:1 sync:syncing pending:1"             | offline:updateValue replay-finished
+    .      | "value:2 sync:none pending:0"                | ui-changed
+    10.01s | "value:2 sync:none pending:0"                | 🟠 >fetch-started
+    10.81s | "value:2 sync:none pending:0"                | 🟠 <fetch-finished (value: 2)
+    11.81s | "value:2 sync:none pending:0"                | -- go offline, queue another mutation, come back online — exhaust retries again
+    .      | "value:2 sync:pending pending:1"             | ui-changed
+    .      | "value:2 sync:pending pending:1"             | offline:updateValue queued
+    .      | "value:2 sync:syncing pending:1"             | ui-changed
+    .      | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:2 sync:needs-confirmation pending:1"  | ui-changed
+    16.81s | "value:2 sync:syncing pending:1"             | ui-changed
+    .      | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:2 sync:needs-confirmation pending:1"  | ui-changed
+    21.81s | "value:2 sync:syncing pending:1"             | ui-changed
+    .      | "value:2 sync:syncing pending:1"             | offline:updateValue replay-started
+    .      | "value:2 sync:syncing pending:1"             | offline:updateValue resolution-required
+    .      | "value:2 sync:resolution-required pending:0" | ui-changed
+    .      | "value:2 sync:resolution-required pending:0" | -- user resolves with "discard" — entry permanently removed
+    .      | "value:2 sync:none pending:0"                | ui-changed
     "
   `);
 });
@@ -2515,6 +2521,8 @@ test('ambiguous entries are periodically re-checked for server confirmation whil
     810ms | "value:2 sync:needs-confirmation pending:1" | 🔴 <fetch-finished (value: 1)
     5s    | "value:2 sync:syncing pending:1"            | ui-changed
     .     | "value:1 sync:none pending:0"               | ui-changed
+    5.01s | "value:1 sync:none pending:0"               | 🟠 >fetch-started
+    5.81s | "value:1 sync:none pending:0"               | 🟠 <fetch-finished (value: 1)
     "
   `);
 });
@@ -2735,6 +2743,8 @@ test('document offline mutations are queued durably and replay when the browser 
     1.2s  | "value:2 pending:yes" | server-data-changed (value: 2)
     .     | "value:2 pending:yes" | offline:updateValue replay-finished
     .     | "value:2 pending:no"  | ui-changed
+    1.21s | "value:2 pending:no"  | 🟠 >fetch-started
+    2.01s | "value:2 pending:no"  | 🟠 <fetch-finished (value: 2)
     "
   `);
   hook.unmount();
@@ -2953,4 +2963,134 @@ test('mutations queued via hybrid fallback enter the resolution queue after repl
         on: 'document:document'
         op: 'updateValue'
     `);
+});
+
+test('an edit made right after reconnecting is sent after the edits still waiting in the offline queue', async () => {
+  network.setOffline();
+
+  const sessionKey = 'offline-online-edit-ordering-session';
+  const storeName = 'offline-online-edit-ordering-store';
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }) => {
+              // Replaying over the connection that just came back is slow.
+              await env.serverMock.delayedSetData(input.value, {
+                durationMs: 3000,
+              });
+              return input;
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  function editValue(value: number) {
+    return env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = value;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(value);
+        return value;
+      },
+      offline: { operation: 'updateValue', input: { value } },
+    });
+  }
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(
+      `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
+    );
+    return doc;
+  });
+  await Promise.resolve();
+
+  // First edit happens offline, so it waits in the queue.
+  env.addTimelineComments('beforeNextAction', ['offline: edit the value to 2']);
+  await act(async () => {
+    await editValue(2);
+  });
+
+  // Back online: the queued edit starts replaying, and the user edits again
+  // before that replay reaches the server.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the queued edit starts replaying',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(500);
+
+  env.addTimelineComments('beforeNextAction', [
+    'the user edits the value to 3 while the first edit is still replaying',
+  ]);
+  let secondEdit: ReturnType<typeof editValue> | undefined;
+  act(() => {
+    secondEdit = editValue(3);
+  });
+  await flushAllTimers();
+  const secondEditResult = await secondEdit;
+
+  // The second edit is not sent on its own (it would reach the server before
+  // the older queued edit, which would then overwrite it): it is queued
+  // behind the first one, so the server receives 2 and then 3.
+  expect(secondEditResult?.ok).toBe(true);
+  // The value shown after everything settled comes from the server (the
+  // store revalidates once the queue is drained), so it proves the latest
+  // edit is the one that won there.
+  expect(hook.result.current.data).toMatchInlineSnapshot(`value: 3`);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui                    |
+    0     | "value:1 pending:no"  | ui-initialized
+    .     | "value:1 pending:no"  | -- offline: edit the value to 2
+    .     | "value:2 pending:no"  | ui-changed
+    .     | "value:2 pending:yes" | ui-changed
+    .     | "value:2 pending:yes" | offline:updateValue queued
+    .     | "value:2 pending:yes" | -- back online: the queued edit starts replaying
+    .     | "value:2 pending:yes" | offline:updateValue replay-started
+    10ms  | "value:2 pending:yes" | 🔴 >fetch-started
+    500ms | "value:2 pending:yes" | -- the user edits the value to 3 while the first edit is still replaying
+    .     | "value:2 pending:yes" | 🔴 <fetch-aborted 🚫
+    .     | "value:3 pending:yes" | ui-changed
+    .     | "value:3 pending:yes" | offline:updateValue queued
+    820ms | "value:3 pending:yes" | 🟠 >fetch-started
+    1.62s | "value:3 pending:yes" | 🟠 <fetch-finished (value: 1)
+    3s    | "value:3 pending:yes" | server-data-changed (value: 2)
+    .     | "value:3 pending:yes" | offline:updateValue replay-finished
+    .     | "value:3 pending:yes" | offline:updateValue replay-started
+    6s    | "value:3 pending:yes" | server-data-changed (value: 3)
+    .     | "value:3 pending:yes" | offline:updateValue replay-finished
+    .     | "value:3 pending:no"  | ui-changed
+    6.01s | "value:3 pending:no"  | 🟡 >fetch-started
+    6.81s | "value:3 pending:no"  | 🟡 <fetch-finished (value: 3)
+    "
+  `);
+
+  hook.unmount();
 });

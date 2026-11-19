@@ -538,6 +538,8 @@ describe('list-query replay', () => {
       .     | Ada, Grace, Linus edited  | success      | offline:patchUserName replay-started
       5.41s | Ada, Grace, Linus edited  | success      | [users||3] server-data-changed (value: {"name":"Linus edited"})
       .     | Ada, Grace, Linus edited  | success      | offline:patchUserName replay-finished
+      5.42s | Ada, Grace, Linus edited  | success      | 🔴 >list-fetch-started
+      6.22s | Ada, Grace, Linus edited  | success      | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
 
@@ -861,6 +863,8 @@ describe('list-query replay', () => {
       .     | Ada, Grace, Ada rebound, Linus rebound | offline:patchUserName replay-started
       7.81s | Ada, Grace, Ada rebound, Linus rebound | [users||4] server-data-changed (value: {"name":"Linus rebound"})
       .     | Ada, Grace, Ada rebound, Linus rebound | offline:patchUserName replay-finished
+      7.82s | Ada, Grace, Ada rebound, Linus rebound | 🔴 >list-fetch-started
+      8.62s | Ada, Grace, Ada rebound, Linus rebound | 🔴 <list-fetch-finished (value: {"count":4})
       "
     `);
 
@@ -1102,6 +1106,8 @@ describe('list-query replay', () => {
       .     | Ada, Grace, Linus edited  | success      | -- delete the temp row so the full lifecycle gets cancelled
       .     | Ada, Grace                | success      | [query-items] ui-changed
       .     | Ada, Grace                | success      | offline:deleteUser queued
+      3.02s | Ada, Grace                | success      | 🔴 >list-fetch-started
+      3.82s | Ada, Grace                | success      | 🔴 <list-fetch-finished (value: {"count":2})
       .     | Ada, Grace                | success      | -- go back online after the temp lifecycle was already cancelled
       "
     `);
@@ -1503,6 +1509,8 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
       .      | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent to cascade-clear all descendants
       .      | Ada, Grace                                     | ui-changed
+      13.02s | Ada, Grace                                     | 🔴 >list-fetch-started
+      13.82s | Ada, Grace                                     | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -1831,6 +1839,8 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-started
       15.41s | Ada, Grace, Linus blocked edit | success      | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
       .      | Ada, Grace, Linus blocked edit | success      | offline:patchUserName replay-finished
+      15.42s | Ada, Grace, Linus blocked edit | success      | 🔴 >list-fetch-started
+      16.22s | Ada, Grace, Linus blocked edit | success      | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
 
@@ -2041,6 +2051,8 @@ describe('list-query replay', () => {
       .      | Ada, Grace, Linus discarded edit | offline:createUser resolution-required
       .      | Ada, Grace, Linus discarded edit | offline:patchUserName resolution-required
       .      | Ada, Grace                       | ui-changed
+      13.02s | Ada, Grace                       | 🔴 >list-fetch-started
+      13.82s | Ada, Grace                       | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
 
@@ -2191,9 +2203,18 @@ describe('list-query replay', () => {
       name: 'Linus offline'
     `);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-    expect(
-      env.serverTable.getRequestHistory('list', { includeTime: false }),
-    ).toMatchInlineSnapshot(`[]`);
+    // The only list request is the revalidation that follows the replay. It
+    // starts after the temp row was reconciled (see the timeline below: the
+    // row never leaves the list), so the membership is preserved by the
+    // reconciliation itself, not by this refetch.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 50, offset: 0 }
+          returned_items: 3
+      `);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | query-items               | query-status |
@@ -2206,6 +2227,8 @@ describe('list-query replay', () => {
       4.21s | Ada, Grace, Linus offline | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
       .     | Ada, Grace, Linus offline | success      | offline:createUser replay-finished
       .     | Ada, Grace, Linus offline | success      | [query-items, query-items] ui-changed
+      4.22s | Ada, Grace, Linus offline | success      | 🔴 >list-fetch-started
+      5.02s | Ada, Grace, Linus offline | success      | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
 

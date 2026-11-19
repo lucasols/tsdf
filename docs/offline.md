@@ -105,6 +105,20 @@ await userStore.performMutation(
 
 When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`.
 
+A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them and then be overwritten, so it joins the queue and is replayed in the order the user made the changes.
+
+## Revalidation After Recovering
+
+While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations are ignored, and cached data stays visible.
+
+Each store attached to the manager revalidates by itself once it recovers, without the app having to invalidate anything:
+
+- the session left offline mode, and
+- its queued mutations finished replaying (data fetched earlier could predate them), and
+- the store has no entity left waiting for a manual resolution (a refetch would replace the local changes the user still has to decide on; resolving or discarding them triggers the revalidation).
+
+Mounted data refetches right away, unmounted data on its next mount. Stores with `usesRealTimeUpdates` revalidate with `realtimeUpdate` priority, other stores with `highPriority`. Tabs that are not focused revalidate when they get focus. Items that only exist locally (offline creations not sent yet) are skipped by invalidations, since there is nothing to fetch for them.
+
 ## Operation Definitions
 
 All offline operations define:

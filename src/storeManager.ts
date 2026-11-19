@@ -13,6 +13,7 @@ import {
 import {
   createDefaultStatus,
   createOfflineSession,
+  subscribeToOfflineRecovery,
 } from './persistentStorage/offline/sessionCoordinator';
 import type {
   GlobalOfflineEntity,
@@ -147,7 +148,13 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   getAllStoreIds: () => string[];
   /** Resets all registered stores except the ignored logical ids. */
   resetAll: (ignoreStores: string[]) => void;
-  /** Signals a shared real-time transport reconnect to all registered stores. */
+  /**
+   * Signals a shared real-time transport reconnect to all registered stores.
+   * Ignored while the offline session is in offline mode: each store is
+   * revalidated when it recovers (the session is back online, its queued
+   * mutations finished replaying and the store has nothing left waiting for
+   * a manual resolution).
+   */
   onTransportReconnect: () => void;
 } & StoreManagerOfflineApi<TUploadRef>;
 
@@ -155,10 +162,12 @@ type RegisteredStore = {
   id: string;
   reset: () => void;
   onTransportReconnect: () => void;
+  onOfflineRecovery: () => void;
 };
 
 type StoreManagerRegistry = {
   appVersion: string | undefined;
+  unsubscribeFromOfflineRecovery: (() => void) | undefined;
   browserTabsPresence: BrowserTabsPresencePriority | undefined;
   nextStoreRegistrationId: number;
   stores: Map<number, RegisteredStore>;
@@ -367,6 +376,7 @@ export function createStoreManager<
 
   const registry: StoreManagerRegistry = {
     appVersion,
+    unsubscribeFromOfflineRecovery: undefined,
     browserTabsPresence: undefined,
     nextStoreRegistrationId: 0,
     stores: new Map(),
@@ -449,9 +459,28 @@ export function registerStoreWithManager(
   registry.nextStoreRegistrationId += 1;
   registry.stores.set(registrationId, store);
 
+  if (
+    !registry.unsubscribeFromOfflineRecovery &&
+    storeManagerOfflineSessionRegistry.get(storeManager)
+  ) {
+    registry.unsubscribeFromOfflineRecovery = subscribeToOfflineRecovery(
+      (sessionKey, hasStoreRecovered) => {
+        if (storeManager.getSessionKey() !== sessionKey) return;
+
+        for (const registeredStore of [...registry.stores.values()]) {
+          if (hasStoreRecovered(registeredStore.id)) {
+            registeredStore.onOfflineRecovery();
+          }
+        }
+      },
+    );
+  }
+
   return () => {
     registry.stores.delete(registrationId);
     if (registry.stores.size === 0) {
+      registry.unsubscribeFromOfflineRecovery?.();
+      registry.unsubscribeFromOfflineRecovery = undefined;
       registry.browserTabsPresence?.close();
       registry.browserTabsPresence = undefined;
     }

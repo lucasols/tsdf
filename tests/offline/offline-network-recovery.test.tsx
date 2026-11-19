@@ -1,13 +1,17 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { advanceTime } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { docSchema } from './offlineTestShared';
+import { userRowSchema } from './offlineReplayTestShared';
+import { docSchema, listQueryQueryPayloadSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
 
@@ -435,4 +439,189 @@ test('coming back online after browser-driven network takeover clears the interr
     "
   `);
   statusHook.unmount();
+});
+
+function createRealtimeUsersEnv(sessionKey: string) {
+  return createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      usesRealTimeUpdates: true,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: {} },
+      },
+    },
+  );
+}
+
+function renderUsersList(
+  env: ReturnType<typeof createRealtimeUsersEnv>,
+  renders: ReturnType<typeof createLoggerStore>,
+) {
+  return renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { returnRefetchingStatus: true },
+    );
+
+    renders.add({
+      status: query.status,
+      names: query.items.map((item) => item.name),
+    });
+  });
+}
+
+test('a realtime transport reconnect while offline keeps the cached list untouched and revalidates it once when back online', async () => {
+  const env = createRealtimeUsersEnv('offline-reconnect-hold-session');
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+
+  env.serverTable.updateItem('users||1', { name: 'Ada (edited elsewhere)' });
+
+  // The websocket reconnects while the session is offline (e.g. a captive
+  // network): revalidating now could only fail, so nothing is invalidated.
+  renders.addMark('offline, then the realtime transport reconnects');
+  act(() => {
+    network.goOffline();
+  });
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  // Leaving offline mode revalidates by itself, without the app having to
+  // signal a reconnect again.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> offline, then the realtime transport reconnects
+
+    -> status: success ⋅ names: [Ada]
+
+    >>> back online
+
+    -> status: success ⋅ names: [Ada]
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada (edited elsewhere)]
+    "
+  `);
+  // One load plus the single revalidation after recovering.
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }).length,
+  ).toBe(2);
+
+  hook.unmount();
+});
+
+test('a reconnect revalidation deferred by the cooldown does not run after the session goes offline', async () => {
+  const env = createRealtimeUsersEnv('offline-reconnect-cooldown-session');
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+
+  // First reconnect revalidates right away; a second one inside the cooldown
+  // window is deferred to the end of the window.
+  renders.addMark('two reconnects in a row');
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  // The session goes offline before the deferred revalidation fires.
+  renders.addMark('offline before the deferred revalidation fires');
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  // The deferred revalidation is dropped: the list is not sent into a
+  // refetch that can only fail.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> two reconnects in a row
+
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada]
+
+    >>> offline before the deferred revalidation fires
+
+    -> status: success ⋅ names: [Ada]
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a document that failed to load offline loads by itself when the session comes back online', async () => {
+  const sessionKey = 'offline-recovery-document-session';
+  network.setOffline();
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+  const renders = createLoggerStore();
+
+  // Nothing is cached, so the offline mount can only show the offline error.
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({ status: doc.status, data: doc.data, error: doc.error?.id });
+  });
+  await flushAllTimers();
+
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // No remount or manual invalidation is needed to recover.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null ⋅ error: undefined
+    -> status: error ⋅ data: null ⋅ error: offline
+
+    >>> back online
+
+    -> status: loading ⋅ data: null ⋅ error: undefined
+    -> status: success ⋅ data: {value:1} ⋅ error: undefined
+    "
+  `);
+
+  hook.unmount();
 });

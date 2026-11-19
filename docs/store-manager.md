@@ -92,7 +92,7 @@ storeManager.onTransportReconnect();
 
 - `getAllStoreIds()` returns registered logical store ids.
 - `resetAll(ignoreStores)` resets all registered stores except the ignored ids.
-- `onTransportReconnect()` signals a shared real-time transport reconnect to all registered stores.
+- `onTransportReconnect()` signals a shared real-time transport reconnect to all registered stores. It is ignored while the offline session is in offline mode: stores revalidate by themselves when they recover (see [Revalidation After Recovering](./offline.md#revalidation-after-recovering)).
 
 Call each store's `dispose()` when the store instance is permanently discarded so it can unregister listeners and manager state.
 

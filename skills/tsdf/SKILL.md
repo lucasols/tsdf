@@ -228,6 +228,8 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 
+Recovery: while offline, `onTransportReconnect()` and focus revalidations are ignored; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities are still pending.
+
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
 Docs: `docs/offline.md`.

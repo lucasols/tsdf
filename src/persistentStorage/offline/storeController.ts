@@ -576,12 +576,66 @@ export function createOfflineStoreController<
     );
   }
 
+  function getOperationRawEntityRefs(
+    operation: AnyOfflineOperationDefinition,
+    operationName: string,
+    validatedInput: unknown,
+  ): unknown[] {
+    return typeof operation.getEntityRefs === 'function'
+      ? operation.getEntityRefs({ input: validatedInput })
+      : (storeAdapter.getEntityRefs?.({
+          operationName,
+          input: validatedInput,
+        }) ?? []);
+  }
+
+  /**
+   * Whether mutations queued earlier for the entities of this mutation are
+   * still waiting to reach the server (queued, replaying or unconfirmed).
+   */
+  function hasQueuedWorkForSameEntities(
+    prepared: PreparedQueuedMutation,
+  ): boolean {
+    if (queueEntries.size === 0) return false;
+
+    const entityRefs =
+      prepared.entityRefs ??
+      resolveNormalizedRefs(
+        getOperationRawEntityRefs(
+          prepared.operation,
+          prepared.operationName,
+          prepared.validatedInput,
+        ),
+      );
+
+    for (const entry of queueEntries.values()) {
+      for (const queuedEntityRef of entry.entityRefs) {
+        if (
+          entityRefs.some((entityRef) =>
+            isSameEntityRef(entityRef, queuedEntityRef),
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   function getInitialOfflineMutationAction(
     current: ActiveSessionState,
+    prepared: PreparedQueuedMutation,
   ): PreparedOfflineMutation['initialAction'] {
     const status = current.session.getStatus();
 
-    if (!status.isOfflineMode) return 'run';
+    if (!status.isOfflineMode) {
+      // Sent on its own, an online mutation would reach the server before
+      // the older mutations still queued for the same entities, which would
+      // then overwrite it (or it would target an entity that does not exist
+      // there yet). It joins the queue to keep the order the user made them.
+      return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
+    }
 
     const cause = getActiveMutationQueueingCause(current);
     if (cause === null) return 'run';
@@ -2659,13 +2713,11 @@ export function createOfflineStoreController<
       );
     }
 
-    const rawEntityRefs =
-      typeof operation.getEntityRefs === 'function'
-        ? operation.getEntityRefs({ input: validatedInput })
-        : (storeAdapter.getEntityRefs?.({
-            operationName,
-            input: validatedInput,
-          }) ?? []);
+    const rawEntityRefs = getOperationRawEntityRefs(
+      operation,
+      operationName,
+      validatedInput,
+    );
     const resolvedEntityRefs = resolveNormalizedRefs(rawEntityRefs);
     const hasTempLifecycle =
       tempEntity !== undefined || tempEntities !== undefined;
@@ -3312,7 +3364,7 @@ export function createOfflineStoreController<
     await current.session.refreshNetworkState();
 
     return {
-      initialAction: getInitialOfflineMutationAction(current),
+      initialAction: getInitialOfflineMutationAction(current, prepared),
       queueMutation: () => queuePreparedMutations(prepared),
       handleDirectSuccess: () =>
         clearOfflineStatusOnSuccess(prepared.currentSessionKey),

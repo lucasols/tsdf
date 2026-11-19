@@ -336,6 +336,8 @@ test('logging back into the same session replays durable offline mutations queue
     13.21s | "value:1 pending:yes" | server-data-changed (value: 2)
     .      | "value:1 pending:yes" | offline:updateValue replay-finished
     .      | "value:2 pending:no"  | ui-changed
+    13.22s | "value:2 pending:no"  | 🟡 >fetch-started
+    14.02s | "value:2 pending:no"  | 🟡 <fetch-finished (value: 2)
     "
   `);
   hook.unmount();
@@ -1771,13 +1773,15 @@ test('a store initialized while an earlier shared-session replay is already in f
   ).toMatchInlineSnapshot(`[]`);
   expect(restartedEnvA.timelineString).toMatchInlineSnapshot(`
     "
-    time  |
-    10ms  | -- the restarted session boots online and begins replaying the earliest queued store
-    .     | 🔴 >fetch-started
-    .     | offline:updateValue replay-started
-    810ms | 🔴 <fetch-finished (value: 1)
-    15.2s | server-data-changed (value: 2)
-    .     | offline:updateValue replay-finished
+    time   |
+    10ms   | -- the restarted session boots online and begins replaying the earliest queued store
+    .      | 🔴 >fetch-started
+    .      | offline:updateValue replay-started
+    810ms  | 🔴 <fetch-finished (value: 1)
+    15.2s  | server-data-changed (value: 2)
+    .      | offline:updateValue replay-finished
+    19.41s | 🟠 >fetch-started
+    20.21s | 🟠 <fetch-finished (value: 2)
     "
   `);
 
@@ -1790,6 +1794,8 @@ test('a store initialized while an earlier shared-session replay is already in f
     3.2s  | offline:updateValue replay-started
     4.4s  | server-data-changed (value: 3)
     .     | offline:updateValue replay-finished
+    4.41s | 🟠 >fetch-started
+    5.21s | 🟠 <fetch-finished (value: 3)
     "
   `);
 

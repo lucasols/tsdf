@@ -32,6 +32,7 @@ import {
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
+  isSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreEntitiesWithPayload,
   useOfflineStoreResolutions,
@@ -1368,6 +1369,10 @@ export function createListQueryStore<
   >({ debugName: `${id}:list-query-offline-overlays`, state: () => ({}) });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
+  // Items that only exist locally: offline creations not sent to the server
+  // yet (still queued, or waiting for a manual resolution). They cannot be
+  // refetched, so invalidations skip them.
+  const unsentCreationItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
 
@@ -2189,6 +2194,7 @@ export function createListQueryStore<
     () => {
       revalidateAfterIgnoredConfirmedSnapshots();
     },
+    unsentCreationItemKeys,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2324,6 +2330,12 @@ export function createListQueryStore<
         syncEntityOverlays: ({ entities, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)
             clearOfflineOverlays(sessionKey);
+          unsentCreationItemKeys.clear();
+          for (const entity of entities) {
+            if (entity.entityKind === 'item' && entity.tempId !== undefined) {
+              unsentCreationItemKeys.add(entity.entityKey);
+            }
+          }
           const activeItemKeys = new Set(
             entities
               .filter((entity) => entity.entityKind === 'item')
@@ -2507,6 +2519,7 @@ export function createListQueryStore<
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
+    unsentCreationItemKeys.clear();
   }
 
   function rebindOfflineOverlays(
@@ -3309,6 +3322,10 @@ export function createListQueryStore<
     );
   }
 
+  function getIsOfflineMode(): boolean {
+    return isSessionInOfflineMode(storeManager.getSessionKey());
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -3319,9 +3336,13 @@ export function createListQueryStore<
       invalidateQueryAndItems({ all: true, type: 'lowPriority' });
     },
     () => {
-      invalidateQueryAndItems({ all: true, type: 'realtimeUpdate' });
+      invalidateQueryAndItems({
+        all: true,
+        type: usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
+      });
     },
     reevaluateDelayedRTUs,
+    getIsOfflineMode,
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,
@@ -3690,6 +3711,7 @@ export function createListQueryStore<
     id,
     reset,
     onTransportReconnect,
+    onOfflineRecovery: focusLifecycle.onOfflineRecovery,
   });
 
   return {

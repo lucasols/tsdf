@@ -44,6 +44,7 @@ import {
 } from './persistentStorage/offline/mutationRuntime';
 import { isOfflineResolutionRecordForStore } from './persistentStorage/offline/offlineResolution.typeGuards';
 import {
+  isSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from './persistentStorage/offline/sessionCoordinator';
@@ -1126,6 +1127,10 @@ export function createDocumentStore<
     );
   }
 
+  function getIsOfflineMode(): boolean {
+    return isSessionInOfflineMode(storeManager.getSessionKey());
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -1136,11 +1141,12 @@ export function createDocumentStore<
       invalidateData('lowPriority');
     },
     () => {
-      invalidateData('realtimeUpdate');
+      invalidateData(usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority');
     },
     () => {
       scheduler.reevaluateDelayedRTU();
     },
+    getIsOfflineMode,
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,
@@ -1867,6 +1873,7 @@ export function createDocumentStore<
     id,
     reset,
     onTransportReconnect,
+    onOfflineRecovery: focusLifecycle.onOfflineRecovery,
   });
 
   return {

@@ -388,7 +388,9 @@ export type DerivedQueryContext = {
   /**
    * What caused derivation to run.
    * `sticky-offline` means a query that was derived offline is still sticking
-   * to the local derived view after reconnect, until explicit invalidation.
+   * to the local derived view after reconnect, until it is invalidated: by
+   * the app, or by the automatic revalidation that runs once the offline
+   * session recovered (queued mutations replayed).
    */
   deriveSource: DerivedQuerySource;
 };
