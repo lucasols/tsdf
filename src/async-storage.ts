@@ -1,2 +1,2 @@
-/* eslint-disable @ls-stack/no-reexport -- public async-storage subpath entry */
+/* fast-lint-disable no-reexport -- public async-storage subpath entry */
 export { createAsyncStorageAdapter } from './persistentStorage/asyncStorageAdapter';

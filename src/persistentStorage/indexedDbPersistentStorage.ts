@@ -1,16 +1,12 @@
 import {
   createIndexedDbPersistentStorage as createIndexedDbPersistentStorageInternal,
-  type IndexedDbPersistentStorageOptions as IndexedDbPersistentStorageOptionsInternal,
+  type IndexedDbPersistentStorageOptions,
 } from './indexedDbAsyncStorageAdapter';
 import type { AsyncStorageAdapter } from './types';
 
 export const indexedDbPersistentStorage: AsyncStorageAdapter =
   /* @__PURE__ */
   createIndexedDbPersistentStorageInternal();
-
-/** Options for creating the IndexedDB persistent storage adapter. */
-export type IndexedDbPersistentStorageOptions =
-  IndexedDbPersistentStorageOptionsInternal;
 
 export function createIndexedDbPersistentStorage(
   options: IndexedDbPersistentStorageOptions = {},
