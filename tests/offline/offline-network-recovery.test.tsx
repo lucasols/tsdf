@@ -1,3 +1,4 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
@@ -642,6 +643,55 @@ test('a document that failed to load offline loads by itself when the session co
   `);
 
   hook.unmount();
+});
+
+// A real recovery check is a request, so it takes a while. A fetch attempted
+// meanwhile re-reads the connectivity and re-arms the recovery probe; when the
+// in-flight check then settled it armed a second timer without cancelling
+// that one, leaving two probe loops running (and one more per repetition).
+test('fetches attempted while a recovery check is in flight do not multiply the recovery checks', async () => {
+  const sessionKey = 'classified-network-single-probe-loop-session';
+  const RECOVERY_CHECK_DURATION_MS = 100;
+  const recoveryCheckStartedAt: number[] = [];
+  // The backend stays unreachable during the whole test.
+  const recoveryCheck = vi.fn(async () => {
+    recoveryCheckStartedAt.push(Date.now() - TEST_INITIAL_TIME);
+    await sleep(RECOVERY_CHECK_DURATION_MS);
+    return false;
+  });
+  const env = createOfflineUsersEnv(sessionKey, {
+    classifyFailure: () => 'network' as const,
+    network: {
+      ...network.config,
+      recoveryCheck,
+      // One recovery check per second.
+      recoveryProbe: healthRecoveryProbe,
+    },
+  });
+
+  // -- Enter classified network mode through a failed fetch (at 10ms) --
+  env.serverTable.setNextFetchError('users||1', 'failed to fetch');
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await advanceTime(50);
+
+  // -- The 1st recovery check starts at 1010ms and is in flight --
+  await advanceTime(1_000);
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+
+  // -- The user opens two other items while that check is in flight --
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await advanceTime(20);
+  env.scheduleItemFetch('highPriority', 'users||3');
+  await advanceTime(RECOVERY_CHECK_DURATION_MS);
+
+  // -- Five more seconds in network mode --
+  await advanceTime(5 * (1_000 + RECOVERY_CHECK_DURATION_MS));
+
+  // Still a single loop: each check starts one interval after the previous
+  // one settled.
+  expect(recoveryCheckStartedAt).toMatchInlineSnapshot(
+    `[1010, 2110, 3210, 4310, 5410, 6510]`,
+  );
 });
 
 // ---------------------------------------------------------------------------

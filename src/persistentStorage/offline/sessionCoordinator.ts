@@ -2420,6 +2420,12 @@ class SessionOfflineCoordinator {
   }
 
   #scheduleRecoveryProbe(target: SessionRecoveryTarget): void {
+    // A probe may already be armed: the status can change while a recovery
+    // check is in flight, which re-arms the probe before that check settles
+    // and gets here too. Only one timer may survive, or each would keep its
+    // own probe loop running
+    if (this.#recoveryTimer !== null) clearTimeout(this.#recoveryTimer);
+
     this.#scheduledRecoveryMode = target.mode;
     this.#recoveryTimer = setTimeout(() => {
       this.#recoveryTimer = null;
