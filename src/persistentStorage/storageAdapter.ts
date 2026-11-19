@@ -1,4 +1,4 @@
-/* eslint-disable @ls-stack/no-reexport -- keeps async adapters tree-shakable from the local-sync adapter module */
+/* fast-lint-disable no-reexport -- keeps async adapters tree-shakable from the local-sync adapter module */
 import {
   addManagedLocalStorageMutationListener,
   clearManagedLocalStorageManifest,
