@@ -143,6 +143,8 @@ If you enable `showPartialAsRefetching`, the hook exposes `loadingFields` with t
 
 Invalidations are refetches, not new loads: when an invalidation (full or per-field) marks cached data as stale, hooks whose requested fields are still present keep the stale data visible while the refetch is in flight (with a `refetching` status when `returnRefetchingStatus` is enabled). Data is only hidden behind `loading` when a requested field was genuinely never loaded.
 
+The same holds across reloads with persistent storage: an item invalidated before the page was closed is persisted with every field its snapshot still holds, and is restored as stale cached data: shown right away, then refetched on mount (a hook with a `fields` selection refetches only the fields it requests). An invalidated fully-loaded (`'*'`) item still satisfies `fields: '*'` reads from cache, which keeps it readable when the app is reopened offline.
+
 ## Fields in Scheduling and Fetching
 
 Fields propagate through the scheduling and fetching APIs:
