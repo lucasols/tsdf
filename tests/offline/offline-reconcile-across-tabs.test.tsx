@@ -48,8 +48,10 @@ type Tab = 'creator' | 'other';
  *
  * Both tabs run in this test process, so they also share the offline session
  * coordinator, which a real browser gives to each tab separately and keeps in
- * sync through the same channel. The tab that creates the record must be
- * created last, so that it is the one that replays the queue.
+ * sync through the same channel. Because of that, the tab created last is
+ * the one that replays the queue: tests create the tabs in the order that
+ * makes the intended tab send the creation. Two real tabs are covered by
+ * `tests/playwright/offline-reconcile-across-tabs.spec.ts`.
  */
 function createSharedBrowser<TServerState>(
   name: string,

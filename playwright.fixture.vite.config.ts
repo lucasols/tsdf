@@ -285,6 +285,19 @@ function createFixtureApiPlugin(): Plugin {
           return;
         }
 
+        if (pathname === '/api/list/users/create' && req.method === 'POST') {
+          const body = await readJsonBody<{ name: string }>(req);
+          const createdUser: UserRow = {
+            id: Math.max(0, ...scope.state.users.map((user) => user.id)) + 1,
+            name: body.name,
+          };
+
+          addHistoryEntry(scope, req, pathname);
+          scope.state.users.push(createdUser);
+          sendJson(res, 200, createdUser);
+          return;
+        }
+
         const itemMatch = pathname.match(/^\/api\/item\/([^/]+)\/([^/]+)$/);
         if (itemMatch && req.method === 'GET') {
           const tableId = itemMatch[1];

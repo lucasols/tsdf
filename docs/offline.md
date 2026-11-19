@@ -144,6 +144,30 @@ Optional replay behavior:
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
 
+### Following a temp entity to its final payload
+
+When a queued creation is saved, TSDF replaces the temp payload with the final one: the item state, the query memberships (the saved item takes the place of the temp row) and the offline state of the item. This happens in every open tab of the session, whichever tab sent the creation.
+
+Code that keeps a temp payload outside the store (a route open on the record, a selection, an embedded frame that created it) can follow the record in two ways:
+
+```ts
+// Called in every tab when the creation is saved
+const stopListening = userStore.storeEvents.on(
+  'tempEntityReconciled',
+  ({ payload: { tempId, finalPayload } }) => {
+    if (openedUserPayload.id === tempId.id) openUser(finalPayload);
+  },
+);
+
+// Or ask later, for a payload that may still be the temp one
+const userPayload = userStore.resolveTempItemPayload(openedUserPayload);
+```
+
+`resolveTempItemPayload(payload)` returns the final payload once the item was saved, and the given payload otherwise. Collection and list-query stores have both the event and the lookup.
+
+- The mapping is kept in memory, for the tabs that were open when the creation was saved (the 1000 most recent creations per store). A tab opened or reloaded afterwards starts from the saved item and cannot resolve the old temp payload, so replace temp payloads kept in URLs when the event fires.
+- A tab that does not hold the temp item is still told about it and can resolve it.
+
 ### Deleting entities created offline
 
 When the user deletes something that was created offline, the server may have never seen it. Declare this on the delete operation with `supersedes.dropSelfIfTempLifecycleCancelled`:

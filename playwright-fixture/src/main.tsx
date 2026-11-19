@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
 import { indexedDbPersistentStorage } from '../../src/indexed-db-storage';
@@ -8,6 +8,7 @@ import {
   createDocumentStore,
   createListQueryStore,
   createStoreManager,
+  type ListQueryOfflineOperationDefinition,
   type StorageAdapter,
   type StoreError,
   type TSDFDebugLogger,
@@ -75,7 +76,8 @@ type ScenarioName =
   | 'list'
   | 'persist-document'
   | 'persist-collection'
-  | 'persist-list';
+  | 'persist-list'
+  | 'offline-list';
 
 function getQueryParams(): {
   pageId: string;
@@ -775,6 +777,241 @@ function PersistListScenario({
   );
 }
 
+const LOGICAL_OFFLINE_KEY = 'tsdf-fixture-logical-offline';
+const createUserInputSchema = rc_object({ name: rc_string });
+
+type OfflineListOperations = {
+  createUser: ListQueryOfflineOperationDefinition<
+    UserRow,
+    ListQueryPayload,
+    string,
+    { name: string },
+    unknown,
+    UserRow
+  >;
+};
+
+/**
+ * Connectivity is controlled by a flag shared by the tabs of the browser
+ * context, so that pages can still be opened while the app is "offline".
+ */
+function isLogicallyOffline(): boolean {
+  return window.localStorage.getItem(LOGICAL_OFFLINE_KEY) === '1';
+}
+
+function setLogicallyOffline(offline: boolean): void {
+  if (offline) {
+    window.localStorage.setItem(LOGICAL_OFFLINE_KEY, '1');
+  } else {
+    window.localStorage.removeItem(LOGICAL_OFFLINE_KEY);
+  }
+
+  window.dispatchEvent(new Event(offline ? 'offline' : 'online'));
+}
+
+function OfflineListScenario({
+  pageId,
+  storeId,
+  sessionKey,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+}) {
+  const [{ store, storeManager }] = useState(() => {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      get: () => !isLogicallyOffline(),
+    });
+
+    const manager = createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: { enabled: true, getIsOffline: isLogicallyOffline },
+      },
+    });
+
+    function createUserOnServer(name: string) {
+      return requestJson<UserRow>(pageId, '/api/list/users/create', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+    }
+
+    const listStore = createListQueryStore<
+      UserRow,
+      ListQueryPayload,
+      string,
+      false,
+      false,
+      OfflineListOperations
+    >({
+      id: storeId,
+      storeManager: manager,
+      fetchListFn: async (payload, size, { signal }) => {
+        const searchParams = new URLSearchParams({
+          tableId: payload.tableId,
+          limit: String(size),
+        });
+
+        return requestJson<{
+          items: Array<{ itemPayload: string; data: UserRow }>;
+          hasMore: boolean;
+        }>(pageId, `/api/list?${searchParams.toString()}`, { signal });
+      },
+      fetchItemFn: async (itemPayload, { signal }) => {
+        const [tableId, rowId] = itemPayload.split('||');
+
+        return requestJson<UserRow>(pageId, `/api/item/${tableId}/${rowId}`, {
+          signal,
+        });
+      },
+      lowPriorityThrottleMs: 10_000,
+      defaultQuerySize: 10,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: listItemSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: createUserInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: ({ input }) => createUserOnServer(input.name),
+            },
+          },
+        },
+      },
+    });
+
+    return { store: listStore, storeManager: manager };
+  });
+
+  const offlineStatus = storeManager.useOfflineStatus();
+  const query = store.useListQuery(
+    { tableId: 'users' },
+    { itemSelector: (item, itemPayload) => `${itemPayload}=${item.name}` },
+  );
+  // A page open on one record, the way an app keeps the id of the record it
+  // shows: it follows the record when its temporary id is replaced.
+  const [openedPayload, setOpenedPayload] = useState<string | null>(null);
+  const openedRecord = store.useItem(openedPayload);
+  const [reconciledLog, setReconciledLog] = useState<string[]>([]);
+
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key !== LOGICAL_OFFLINE_KEY) return;
+
+      window.dispatchEvent(
+        new Event(event.newValue === '1' ? 'offline' : 'online'),
+      );
+    }
+
+    window.addEventListener('storage', onStorage);
+    const stopListening = store.storeEvents.on(
+      'tempEntityReconciled',
+      ({ payload }) => {
+        setReconciledLog((log) => [
+          ...log,
+          `${payload.tempId}->${payload.finalPayload}`,
+        ]);
+        setOpenedPayload((current) =>
+          current === payload.tempId ? payload.finalPayload : current,
+        );
+      },
+    );
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      stopListening();
+    };
+  }, [store]);
+
+  return (
+    <section>
+      <h1>Offline List</h1>
+      <div data-testid="offline-list-mode">
+        {offlineStatus.isOfflineMode ? 'offline' : 'online'}
+      </div>
+      <div data-testid="offline-list-leader">
+        {offlineStatus.isLeader ? 'leader' : 'follower'}
+      </div>
+      <div data-testid="offline-list-status">{query.status}</div>
+      <div data-testid="offline-list-rows">{query.items.join(',')}</div>
+      <div data-testid="offline-list-opened-record">
+        {openedPayload === null
+          ? 'none'
+          : `${openedPayload}=${openedRecord.data?.name ?? 'null'}`}
+      </div>
+      <div data-testid="offline-list-reconciled">
+        {reconciledLog.join(',') || 'none'}
+      </div>
+      <div data-testid="offline-list-resolved-carol">
+        {store.resolveTempItemPayload('temp:Carol')}
+      </div>
+      <button
+        data-testid="offline-list-go-offline"
+        onClick={() => setLogicallyOffline(true)}
+        type="button"
+      >
+        go offline
+      </button>
+      <button
+        data-testid="offline-list-go-online"
+        onClick={() => setLogicallyOffline(false)}
+        type="button"
+      >
+        go online
+      </button>
+      <button
+        data-testid="offline-list-create-carol"
+        onClick={() => {
+          void store.performMutation('temp:Carol', {
+            optimisticUpdate: () => {
+              store.addItemToState(
+                'temp:Carol',
+                { id: -1, name: 'Carol' },
+                {
+                  addItemToQueries: {
+                    queries: [{ tableId: 'users' }],
+                    appendTo: 'end',
+                  },
+                },
+              );
+            },
+            mutation: () =>
+              requestJson<UserRow>(pageId, '/api/list/users/create', {
+                method: 'POST',
+                body: JSON.stringify({ name: 'Carol' }),
+              }),
+            offline: { operation: 'createUser', input: { name: 'Carol' } },
+          });
+        }}
+        type="button"
+      >
+        create Carol
+      </button>
+      <button
+        data-testid="offline-list-open-carol"
+        onClick={() => setOpenedPayload('temp:Carol')}
+        type="button"
+      >
+        open Carol
+      </button>
+    </section>
+  );
+}
+
 function App() {
   const {
     pageId,
@@ -860,6 +1097,13 @@ function App() {
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
           disableRefetchOnMount={disableRefetchOnMount}
+        />
+      ) : null}
+      {scenario === 'offline-list' ? (
+        <OfflineListScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
         />
       ) : null}
     </main>

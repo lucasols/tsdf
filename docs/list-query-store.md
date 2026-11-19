@@ -244,6 +244,7 @@ Behavior:
 | ----------------------------------------------------- | ----------------------------------------------------------------- |
 | `getOfflineEntities()` / `useOfflineEntities()`       | Read offline entities scoped to this store                        |
 | `getItemOfflineState(payload)`                        | Read the offline sync state of one item, `null` if nothing queued |
+| `resolveTempItemPayload(payload)`                     | Final payload of an item created offline once it was saved        |
 | `getOfflineResolutions()` / `useOfflineResolutions()` | Read manual conflict/retry resolutions scoped to this store       |
 | `parseOfflineResolutionConflict(resolution)`          | Narrow a persisted resolution to this store's operation types     |
 | `resolveOfflineResolution(id, operation, action)`     | Resolve, retry, discard, requeue, or commit an offline resolution |
@@ -289,7 +290,7 @@ kind so pending deletes do not need item hydration before they appear.
 | ------------- | ------------------------------------ | --------------------------------------------------------- |
 | `store`       | `Store<TSFDListQueryState>`          | Underlying t-state store                                  |
 | `events`      | `Emitter<ListQueryStoreEvents>`      | Invalidation events (`invalidateQuery`, `invalidateItem`) |
-| `storeEvents` | `Emitter<ListQueryStoreStoreEvents>` | Mutation lifecycle events                                 |
+| `storeEvents` | `Emitter<ListQueryStoreStoreEvents>` | Mutation lifecycle events and `tempEntityReconciled`      |
 
 ## Usage Example
 
