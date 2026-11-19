@@ -106,6 +106,12 @@ type OfflineStoreAdapter = {
     sessionKey: string;
     entities: GlobalOfflineEntity[];
   }) => void;
+  /**
+   * A queued mutation for these entities was discarded. Its optimistic
+   * changes are still applied to the store and no baseline exists to roll
+   * them back to, so the store refetches the entities from the server.
+   */
+  revalidateDiscardedEntities?: (entityRefs: OfflineEntityRef[]) => void;
 };
 
 type ActiveSessionState = {
@@ -2458,6 +2464,7 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
+      storeAdapter.revalidateDiscardedEntities?.(args.resolution.entityRefs);
       return;
     }
 
@@ -3324,7 +3331,9 @@ export function createOfflineStoreController<
               lastError,
             ),
           });
-          return;
+          // The entry left the queue (with its dependents), so the entries
+          // behind it are not waiting on it anymore: keep draining.
+          continue;
         }
 
         await persistEntry(entryToUse, current);

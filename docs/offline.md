@@ -158,10 +158,12 @@ await userStore.resolveOfflineResolution(resolutions[0].id, 'renameUser', {
 
 Supported resolution actions include:
 
-- `discard` - Drop the resolution record.
+- `discard` - Drop the resolution record. The optimistic changes of the discarded mutation cannot be rolled back locally, so TSDF refetches what the operation referenced (`getEntityRefs`): the document, the collection item, or the list query item together with the store's lists (the change may have moved or removed the row). Discarding a temp create removes the temp entity and everything queued on top of it.
 - `requeue` - Queue replacement input for an operation conflict.
 - `commit` - Accept an externally completed resolution result.
 - `retry` - Retry a retry-exhausted record.
+
+A mutation that exhausted its replay retries leaves the queue when it becomes a resolution record, so the mutations queued behind it keep replaying; only the ones that depend on it (queued on top of its temp entity) wait with it.
 
 Use `parseOfflineResolutionConflict(resolution)` to narrow a persisted resolution back to the operation-specific conflict/input type before rendering a manual resolution UI.
 
