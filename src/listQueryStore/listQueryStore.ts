@@ -2,6 +2,7 @@ import {
   isWindowFocused,
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { notNullish } from '@ls-stack/utils/assertions';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
@@ -2336,6 +2337,18 @@ export function createListQueryStore<
             clearOfflineOverlays(sessionKey);
 
           rebindOfflineOverlays(itemKeyRewrites);
+        },
+        revalidateDiscardedEntities: (entityRefs) => {
+          // Queries too: the discarded change may have removed the item from
+          // lists (a delete) or moved it between them.
+          invalidateQueryAndItems({
+            itemPayload: filterAndMap(
+              entityRefs,
+              (ref) => store.state.itemQueries[ref.entityKey]?.payload ?? false,
+            ),
+            queryPayload: () => true,
+            type: 'highPriority',
+          });
         },
         syncEntityOverlays: ({ entities, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)
