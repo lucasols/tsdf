@@ -1118,7 +1118,7 @@ test('offline edits merged into one queued mutation upload the files added by ev
             execute: async (ctx) => {
               replayEvents.push(
                 `execute:${ctx.input.attachmentIds
-                  .map((id) => String(ctx.uploads.resolvedRefsById[id]))
+                  .map((id) => JSON.stringify(ctx.uploads.resolvedRefsById[id]))
                   .join(',')}`,
               );
               await env.serverMock.delayedSetData(ctx.input.value);
@@ -1198,7 +1198,7 @@ test('offline edits merged into one queued mutation upload the files added by ev
     - 'upload-start:file-2'
     - 'upload-finish:file-1'
     - 'upload-finish:file-2'
-    - 'execute:server:file-1,server:file-2'
+    - 'execute:"server:file-1","server:file-2"'
   `);
   // Both staged uploads were consumed by the replay.
   expect(uploadHook.result.current).toMatchInlineSnapshot(`[]`);
