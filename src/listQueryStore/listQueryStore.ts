@@ -3230,6 +3230,7 @@ export function createListQueryStore<
       partialResources,
       offlineEntities,
       offlineOverlays,
+      isOfflineFetchModeActive,
     );
   };
 

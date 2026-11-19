@@ -20,6 +20,7 @@ import {
   filterActiveOfflineOverlays,
   hasPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
+import { offlineConnectivityError } from '../persistentStorage/offline/fetchRuntime';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import {
@@ -701,6 +702,7 @@ export function useMultipleListQueries<
           let staleOrMissingRequestedFields: Set<string> | undefined;
           let hasAnyIncompleteItem = false;
           let hasAnyStaleItem = false;
+          let hasMissingRequestedData = false;
           const statusCanBeOverridden =
             status === 'success' || status === 'refetching';
 
@@ -809,8 +811,10 @@ export function useMultipleListQueries<
               );
 
             if (!hasCachedItemsInState) {
+              hasMissingRequestedData = true;
               status = 'loading';
             } else if (someItemMissingFieldDataInState) {
+              hasMissingRequestedData = true;
               status = showPartialAsRefetching ? 'refetching' : 'loading';
             } else {
               // Requested fields are present in cached items; keep stale data
@@ -835,6 +839,7 @@ export function useMultipleListQueries<
             );
 
             if (hasAnyIncompleteItem) {
+              hasMissingRequestedData = true;
               if (!hasCachedItemsInState) {
                 status = 'loading';
               } else {
@@ -883,6 +888,20 @@ export function useMultipleListQueries<
 
           const shouldHideItemsWhileLoading =
             status === 'loading' && partialResources;
+          let error = effectiveQuery.query.error;
+
+          // The missing data cannot be fetched while offline (the fetch effect
+          // does not even try), so the read settles on the offline error
+          // instead of waiting on a `loading` that no fetch will resolve.
+          // Items stay hidden exactly as they would be while loading.
+          if (
+            hasMissingRequestedData &&
+            isOfflineMode &&
+            effectiveQuery.query.status === 'success'
+          ) {
+            status = 'error';
+            error = offlineConnectivityError;
+          }
 
           return {
             queryKey,
@@ -893,7 +912,7 @@ export function useMultipleListQueries<
                   item: state.items[itemKey],
                   itemPayload: state.itemQueries[itemKey]?.payload,
                 })),
-            error: effectiveQuery.query.error,
+            error,
             hasMore: isOfflineMode
               ? !!readFallbackQueryState &&
                 effectiveQuery.query.hasMore &&
@@ -1407,7 +1426,17 @@ export function useMultipleListQueries<
 
         // For partial resources, refetch when the requested field set changes
         // or when a full-resource hook is affected by field invalidation.
-        if (partialResources && !shouldFetch && effectiveQueryState) {
+        // These fetches target an already loaded query, so failing offline
+        // leaves it at `success` — which never trips the automatic retry
+        // lockout. While offline they are not scheduled at all (they would be
+        // retried on every effect run); recovering from offline mode
+        // invalidates the store, which refetches them.
+        if (
+          partialResources &&
+          !shouldFetch &&
+          effectiveQueryState &&
+          !isOfflineMode
+        ) {
           const isQueryFetchInFlight =
             effectiveQueryState.status === 'loading' ||
             effectiveQueryState.status === 'refetching' ||
@@ -1681,6 +1710,7 @@ export function useMultipleListQueries<
     itemsPendingFullInvalidation,
     getHighestPendingInvalidationPriority,
     getUnresolvedPendingInvalidationFields,
+    isOfflineMode,
     queryItemsHaveMissingRequestedData,
     stickyDerivedQueryKeys,
   ]);

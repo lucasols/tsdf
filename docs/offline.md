@@ -132,6 +132,13 @@ function UserName({ id }: { id: number }) {
 
 It also accepts the `StoreFetchError` returned by the `awaitFetch` methods, which resolve with the cached data while offline and with the offline error only when nothing is cached.
 
+With [partial resources](./partial-resources.md), "cached" is decided per hook, by the `fields` it requests:
+
+- A hook whose requested fields are all cached is a cached read: `status: 'success'`, `error: null`. Fields that were loaded and later invalidated count as cached — they stay visible and are refreshed after recovering.
+- A hook requesting fields that were never loaded has nothing usable to return for them, so it reports `status: 'error'` with the offline error, without attempting a fetch. Its data stays hidden as it would be while loading (`data: null`, `items: []`), or stays visible with `loadingFields` when `showPartialAsRefetching` is enabled.
+
+Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
+
 Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
 
 ## Revalidation After Recovering
