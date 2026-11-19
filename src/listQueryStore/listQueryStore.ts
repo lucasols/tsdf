@@ -1520,9 +1520,10 @@ export function createListQueryStore<
     const pendingFields = itemPendingInvalidationFields.get(itemKey);
     if (!pendingFields || pendingFields.size === 0) return loadedFields;
 
-    return Array.from(new Set([...loadedFields, ...pendingFields.keys()])).sort();
+    return Array.from(
+      new Set([...loadedFields, ...pendingFields.keys()]),
+    ).sort();
   }
-
 
   // Persistent storage setup
   const persistence = resolvedPersistentStorageConfig
