@@ -1,4 +1,5 @@
 import { opfsOfflineUploadAdapter } from '../../src/main';
+import { indexedDbOfflineUploadAdapter } from '../../src/persistentStorage/indexedDbOfflineUploadAdapter';
 import { __resetSessionOfflineCoordinatorRegistryForTests } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { __resetSessionProtectedKeysSnapshotForTests } from '../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { __resetOfflineUploadRegistryForTests } from '../../src/persistentStorage/offlineUploadRegistry';
@@ -21,4 +22,5 @@ export function resetSessionForTests(
 
   opfsPersistentStorage.resetForTests?.();
   opfsOfflineUploadAdapter.resetForTests?.();
+  indexedDbOfflineUploadAdapter.resetForTests?.();
 }

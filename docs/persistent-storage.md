@@ -36,6 +36,8 @@ Exported from async-storage subpaths:
 | `createIndexedDbPersistentStorage(options?)` | `tsdf/indexed-db-storage` | Creates an IndexedDB adapter, optionally with a database name |
 | `createAsyncStorageAdapter(driver)`          | `tsdf/async-storage`      | Wraps a custom async storage driver                           |
 
+`tsdf/indexed-db-storage` also exports `indexedDbOfflineUploadAdapter`, the IndexedDB adapter for [offline uploads](./offline.md#upload-adapters). It uses its own database and does not require persisting stores in IndexedDB.
+
 ## Configuration
 
 Each store accepts `persistentStorage` in options:

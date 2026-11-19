@@ -157,3 +157,5 @@ Upload methods:
 - `useOfflineUploads()`
 
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.
+
+Staged files are persisted by the adapter set on `offlineSession.uploads.adapter`. TSDF ships `opfsOfflineUploadAdapter` (from `tsdf`) and `indexedDbOfflineUploadAdapter` (from `tsdf/indexed-db-storage`). Use the IndexedDB adapter when the app must support Safari before version 26, where OPFS files cannot be written from the main thread. See [Offline uploads](./offline.md#upload-adapters) for details.

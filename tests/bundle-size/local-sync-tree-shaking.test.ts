@@ -17,6 +17,7 @@ const repoRoot = path.resolve(import.meta.dirname, '../..');
 const managedAsyncAdapterMarker = 'tsdf-async-write:';
 const opfsDriverMarker = 'Failed to open OPFS store directory';
 const indexedDbDriverMarker = 'IndexedDB transaction failed.';
+const indexedDbUploadAdapterMarker = 'tsdf-offline-uploads';
 
 let consumerDir = '';
 
@@ -114,6 +115,8 @@ describe('apps that only use local-sync persistence', () => {
     expect(bundle).not.toContain(opfsDriverMarker);
     // The IndexedDB driver is only needed when `tsdf/indexed-db-storage` is imported
     expect(bundle).not.toContain(indexedDbDriverMarker);
+    // Same for the IndexedDB offline upload adapter
+    expect(bundle).not.toContain(indexedDbUploadAdapterMarker);
   }, 30_000);
 });
 
@@ -140,4 +143,20 @@ test('apps using the IndexedDB adapter still bundle the async adapter and the In
 
   expect(bundle).toContain(managedAsyncAdapterMarker);
   expect(bundle).toContain(indexedDbDriverMarker);
+  // The upload adapter shares the entry but is only paid for when imported
+  expect(bundle).not.toContain(indexedDbUploadAdapterMarker);
+}, 30_000);
+
+test('apps using only the IndexedDB offline upload adapter bundle it without the IndexedDB storage driver', async () => {
+  const bundle = await bundleConsumerApp(`
+    import { indexedDbOfflineUploadAdapter } from 'tsdf/indexed-db-storage';
+
+    globalThis.tsdfExports = [indexedDbOfflineUploadAdapter];
+  `);
+
+  // Confirms the marker really identifies the upload adapter
+  expect(bundle).toContain(indexedDbUploadAdapterMarker);
+  // Staging uploads in IndexedDB does not require persisting stores there
+  expect(bundle).not.toContain(managedAsyncAdapterMarker);
+  expect(bundle).not.toContain(indexedDbDriverMarker);
 }, 30_000);

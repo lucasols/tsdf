@@ -35,6 +35,16 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+async function readBodyBytes(req: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks);
+}
+
 async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
 
@@ -172,6 +182,21 @@ function createFixtureApiPlugin(): Plugin {
 
         if (pathname === '/api/test/history' && req.method === 'GET') {
           sendJson(res, 200, { history: scope.requestHistory });
+          return;
+        }
+
+        if (pathname === '/api/upload' && req.method === 'POST') {
+          // Answers with a ref describing exactly what the server received, so
+          // tests can assert on the uploaded file name, type and bytes
+          const bytes = await readBodyBytes(req);
+          sendJson(res, 200, {
+            ref: [
+              'server',
+              req.headers['x-file-name'],
+              req.headers['content-type'],
+              bytes.toString('hex'),
+            ].join(':'),
+          });
           return;
         }
 

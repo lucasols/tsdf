@@ -204,4 +204,38 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `resolveOfflineUploads(ids)`
 - `useOfflineUploads()`
 
-Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`.
+
+### Upload adapters
+
+`offlineSession.uploads.adapter` decides where staged files are kept until they are uploaded. TSDF ships two adapters:
+
+| Adapter                         | Import From               | Stores staged files in                                |
+| ------------------------------- | ------------------------- | ----------------------------------------------------- |
+| `opfsOfflineUploadAdapter`      | `tsdf`                    | The origin private file system (OPFS)                 |
+| `indexedDbOfflineUploadAdapter` | `tsdf/indexed-db-storage` | A dedicated `tsdf-offline-uploads` IndexedDB database |
+
+```ts
+import { createStoreManager } from 'tsdf';
+import { indexedDbOfflineUploadAdapter } from 'tsdf/indexed-db-storage';
+
+const storeManager = createStoreManager({
+  getSessionKey: () => userId,
+  errorNormalizer,
+  offlineSession: {
+    uploads: {
+      adapter: indexedDbOfflineUploadAdapter,
+      upload: ({ file }) => uploadFile(file),
+    },
+  },
+});
+```
+
+Which one to pick:
+
+- Use `indexedDbOfflineUploadAdapter` when the app must support Safari before version 26. `opfsOfflineUploadAdapter` writes files with `FileSystemFileHandle.createWritable()`, which those Safari versions do not provide on the main thread, so staging an upload fails there.
+- Otherwise either adapter works. `opfsOfflineUploadAdapter` streams the file to disk when staging it, while `indexedDbOfflineUploadAdapter` reads the whole file into memory to store its bytes, so prefer OPFS for very large files when Safari before 26 is not a target.
+
+Both adapters behave the same from the manager's point of view: staged files are scoped by session key, restored with their original name, type, and last-modified date, and removed by `clearSessionStorage(...)` / `clearAllSessionStorage(...)` once the session's store manager has been created with that adapter. The upload adapter is independent from the stores' `persistentStorage.adapter`, so any combination is valid (for example `'local-sync'` stores with IndexedDB uploads).
+
+Uploads staged through one adapter are not visible through the other, so switching adapters in a released app leaves previously staged files behind.

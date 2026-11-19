@@ -14,6 +14,7 @@ import {
   type TSDFDebugLogEntry,
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/opfs-storage';
+import { OfflineUploadsScenario } from './offlineUploadsScenario';
 
 type ListQueryPayload = { tableId: 'users' };
 
@@ -75,7 +76,8 @@ type ScenarioName =
   | 'list'
   | 'persist-document'
   | 'persist-collection'
-  | 'persist-list';
+  | 'persist-list'
+  | 'offline-uploads';
 
 function getQueryParams(): {
   pageId: string;
@@ -850,6 +852,14 @@ function App() {
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
           disableRefetchOnMount={disableRefetchOnMount}
+        />
+      ) : null}
+      {scenario === 'offline-uploads' && resolvedSessionKey !== false ? (
+        <OfflineUploadsScenario
+          sessionKey={resolvedSessionKey}
+          uploadAdapterKey={new URLSearchParams(window.location.search).get(
+            'uploadAdapter',
+          )}
         />
       ) : null}
       {scenario === 'persist-list' ? (
