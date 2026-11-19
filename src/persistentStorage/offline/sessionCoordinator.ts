@@ -1063,6 +1063,45 @@ class SessionOfflineCoordinator {
     void this.#refreshUploadRetention();
   }
 
+  /**
+   * Deletes the given staged uploads unless queued work still needs them.
+   *
+   * Store controllers call this after a queue entry or resolution record left
+   * the queue for good (replayed, discarded, superseded, cancelled), passing
+   * the uploads that work depended on. It must run after the store synced its
+   * remaining references: they are aggregated session-wide, so an upload is
+   * kept while a queue entry or resolution record of any store references it.
+   *
+   * Uploads no queued work referenced are never passed here: the app stages a
+   * file before it queues the mutation, so being unreferenced alone must not
+   * delete an upload. Those are left to `deleteUpload` and to the retention
+   * window.
+   */
+  async deleteUnreferencedUploads(uploadIds: readonly string[]): Promise<void> {
+    if (
+      this.#disposed ||
+      // A store that has not reported its queue yet may reference the uploads.
+      this.#storeContributions.size !== this.#registrations.size
+    ) {
+      return;
+    }
+
+    try {
+      await this.#removeUploads(
+        uploadIds.filter(
+          (id) =>
+            this.#uploads.has(id) &&
+            !this.#referencedUploadIds.has(id) &&
+            !this.#uploadPromisesById.has(id),
+        ),
+      );
+    } catch (error) {
+      // The work that needed these uploads is already gone, so a failed
+      // removal only leaves them to the retention window.
+      this.#onPersistentStorageError?.(error);
+    }
+  }
+
   async resolveUploadIds(
     uploadIds: readonly string[],
   ): Promise<Record<string, ValidPayload>> {
@@ -1835,27 +1874,27 @@ class SessionOfflineCoordinator {
   }
 
   async #cleanupUnusedMutationUploads(): Promise<void> {
+    await this.#removeUploads(
+      [...this.#uploads.values()]
+        .filter((upload) => upload.source === 'mutation')
+        .map((upload) => upload.id)
+        .filter(
+          (id) =>
+            !this.#referencedUploadIds.has(id) &&
+            !this.#uploadPromisesById.has(id),
+        ),
+    );
+  }
+
+  async #removeUploads(ids: string[]): Promise<void> {
     const uploadsConfig = this.#uploadsConfig;
-    if (!uploadsConfig) return;
+    if (!uploadsConfig || ids.length === 0) return;
 
-    const removableIds = [...this.#uploads.values()]
-      .filter((upload) => upload.source === 'mutation')
-      .map((upload) => upload.id)
-      .filter(
-        (id) =>
-          !this.#referencedUploadIds.has(id) &&
-          !this.#uploadPromisesById.has(id),
-      );
-
-    if (removableIds.length === 0) return;
-
-    for (const id of removableIds) {
+    for (const id of ids) {
       this.#uploads.delete(id);
     }
     await Promise.all(
-      removableIds.map((id) =>
-        uploadsConfig.adapter.remove(this.sessionKey, id),
-      ),
+      ids.map((id) => uploadsConfig.adapter.remove(this.sessionKey, id)),
     );
     this.#syncUploadsState();
     void this.#refreshUploadRetention();

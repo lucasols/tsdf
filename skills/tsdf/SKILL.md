@@ -228,7 +228,7 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 
-Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
+Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. A staged upload is deleted automatically once the last queued mutation or resolution that declares it (`dependsOnUploads`) leaves the queue (replayed, discarded, superseded, cancelled); uploads no queued mutation used stay until `deleteOfflineUpload` or expiry. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
 Docs: `docs/offline.md`.
 

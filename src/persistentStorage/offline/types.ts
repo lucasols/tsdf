@@ -513,13 +513,21 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<Record<string, TUploadRef>>;
-  /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
+  /**
+   * Saves a session-scoped upload locally for later dependency resolution or
+   * ref usage. It is deleted automatically once the queued work that depends
+   * on it leaves the queue.
+   */
   saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
   /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
   replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<File | null>;
-  /** Deletes a stored upload when it is no longer referenced. */
+  /**
+   * Deletes a stored upload that no queued work references. Only needed for
+   * uploads no queued mutation used: the others are deleted with the work that
+   * depends on them.
+   */
   deleteOfflineUpload: (id: string) => Promise<void>;
   /** React hook subscribing to the session's global offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;
@@ -1342,7 +1350,11 @@ export type DocumentOfflineOperationDefinition<
     TUploadRef
   >
 > & {
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (
     ctx: OperationEntityRefsContext<DocumentOperationInput<TOptions>>,
   ) => string[];
@@ -1468,7 +1480,11 @@ export type CollectionOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
 } & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
 
@@ -1582,7 +1598,11 @@ export type ListQueryOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
     ? never

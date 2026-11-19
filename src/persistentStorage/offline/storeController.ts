@@ -2210,6 +2210,29 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Deletes the staged uploads that work items depended on, after those items
+   * left the queue for good (replayed, discarded, superseded, cancelled).
+   *
+   * Call it after `refreshDerivedState`, which reports the references that
+   * remain: the session keeps every upload a queue entry or resolution record
+   * of any store still needs. Attached uploads need no call, the session drops
+   * them as soon as nothing references them.
+   */
+  async function deleteOrphanedDependencyUploads(
+    current: ActiveSessionState,
+    removedWorkItems: Pick<OfflineQueueEntry, 'dependencyUploadIds'>[],
+  ): Promise<void> {
+    if (!isActiveSessionState(current)) return;
+
+    const uploadIds = removedWorkItems.flatMap(
+      (workItem) => workItem.dependencyUploadIds ?? [],
+    );
+    if (uploadIds.length === 0) return;
+
+    await current.session.deleteUnreferencedUploads(uploadIds);
+  }
+
   function collectTempCreateDescendants(args: {
     parentEntityKey: string;
     parentEntryId?: string;
@@ -2396,6 +2419,7 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
+      await deleteOrphanedDependencyUploads(args.current, [args.resolution]);
       return;
     }
 
@@ -2436,6 +2460,11 @@ export function createOfflineStoreController<
     rollbackTempCreatePendingEntity(args.resolution);
 
     refreshDerivedState(args.current);
+    await deleteOrphanedDependencyUploads(args.current, [
+      args.resolution,
+      ...descendantQueueEntries.values(),
+      ...descendantResolutions.values(),
+    ]);
   }
 
   function collectRetryResolutionChain(args: {
@@ -3015,6 +3044,14 @@ export function createOfflineStoreController<
     }
 
     refreshDerivedState(current);
+    // Superseded or cancelled entries will never replay, so the uploads only
+    // they depended on have no consumer left.
+    if (plannedMutation.removedEntries.length > 0) {
+      await deleteOrphanedDependencyUploads(
+        current,
+        plannedMutation.removedEntries,
+      );
+    }
     await ensureReplayScheduled();
   }
 
@@ -3080,6 +3117,7 @@ export function createOfflineStoreController<
       const operation = operations[nextEntry.operation];
       if (!operation) {
         await removeEntry(nextEntry.id, current);
+        void deleteOrphanedDependencyUploads(current, [nextEntry]);
         continue;
       }
 
@@ -3121,6 +3159,7 @@ export function createOfflineStoreController<
 
           if (shouldSkip) {
             await removeEntry(entryToUse.id, current);
+            void deleteOrphanedDependencyUploads(current, [entryToUse]);
             continue;
           }
         }
@@ -3198,6 +3237,9 @@ export function createOfflineStoreController<
         }
 
         refreshDerivedState(current);
+        // The replayed entry consumed its uploads. Not awaited, so removing
+        // the files does not hold back the next queued entry.
+        void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
         const lastError = { message: unknownToError(error).message };
         const classification = await current.session.classifyFailure(error, {
@@ -3384,6 +3426,7 @@ export function createOfflineStoreController<
     const operation = operations[operationName];
     if (!operation) {
       await removeResolution(resolutionId, current);
+      await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
       return;
     }
 
@@ -3482,6 +3525,9 @@ export function createOfflineStoreController<
           entityRefs: resolutionRecord.entityRefs,
         }),
       );
+      // The replacement input declared its own dependencies: uploads it kept
+      // are still referenced, the ones it dropped are not.
+      await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
       return;
     }
 
@@ -3506,6 +3552,7 @@ export function createOfflineStoreController<
         });
       }
       await removeResolution(resolutionId, current);
+      await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
       return;
     }
 

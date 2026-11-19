@@ -246,3 +246,20 @@ await storeManager.saveOfflineUpload({
 - Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata (including the ones persisted by older versions) reach the transport with `metadata: undefined`.
 - `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed.
 - Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.
+
+### Upload lifecycle
+
+A staged upload follows the queued work that depends on it:
+
+- While a queue entry or resolution record declares the upload through `dependsOnUploads`, the upload is kept. This includes a failed mutation waiting for a manual resolution, so `retry` still finds the file. `deleteOfflineUpload(id)` returns an error for an upload in this state.
+- When the last queue entry or resolution record that declares it leaves the queue, TSDF deletes the upload (its record and the stored file). It does not matter how the work ended:
+  - it replayed successfully, or `shouldSkipSync` dropped it;
+  - its resolution was discarded, together with the queued work discarded with it (the edits of an entity whose create was discarded);
+  - a later operation pruned it with `supersedes`, or cancelled it with its temp entity (`dropSelfIfTempLifecycleCancelled`);
+  - its conflict was resolved with `commit`, or with a `requeue` whose replacement input no longer declares the upload. Uploads the replacement input still declares are kept.
+- References are session-wide. An upload declared by queued mutations of several stores is deleted only after the last of them is gone.
+- An upload that no queued work declared yet is never deleted for being unreferenced: the app stages the file first and queues the mutation afterwards. It stays until a mutation that declares it is queued and leaves the queue, until the app calls `deleteOfflineUpload(id)`, or until it expires. Unreferenced uploads expire after the session has been online for one week without interruption (going offline restarts the window). This also applies to uploads the app resolves itself with `resolveOfflineUpload(s)` for an online mutation, because they never enter the queue.
+
+Because an upload is deleted with the last work that declares it, a mutation queued later cannot reuse its id: stage the file again with `saveOfflineUpload`.
+
+Files attached directly to a mutation (`upload: { ... }` in `performMutation`) belong to that single queued mutation and are deleted with it in the same situations.
