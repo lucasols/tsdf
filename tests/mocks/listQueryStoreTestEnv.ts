@@ -78,8 +78,9 @@ type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
 > &
   ([TRow] extends [never] ? never : unknown);
 
-type TestListQueryOfflineOperationsConfig<TRow extends Row> =
-  TestListQueryOfflineOperationsRegistry<TRow> | null;
+type TestListQueryOfflineOperationsConfig<
+  TRow extends Row,
+> = TestListQueryOfflineOperationsRegistry<TRow> | null;
 
 export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
 

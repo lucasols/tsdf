@@ -206,8 +206,9 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
 > &
   ([State] extends [never] ? never : unknown);
 
-type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
-  InternalDocumentOfflineOperations<State> | null;
+type DocumentOfflineOperationsConfig<
+  State extends ValidStoreState,
+> = InternalDocumentOfflineOperations<State> | null;
 
 function assertDocumentOfflineOperations(
   operations: DocumentOfflineOperationsConfig<ValidStoreState>,

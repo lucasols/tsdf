@@ -4,8 +4,8 @@
   "trailingComma": "all",
   "singleAttributePerLine": true,
   "printWidth": 80,
-  "experimentalSortImports": { "newlinesBetween": false },
-  "experimentalSortPackageJson": false,
+  "sortImports": { "newlinesBetween": false },
+  "sortPackageJson": false,
   "ignorePatterns": [
     "node_modules",
     "dist",

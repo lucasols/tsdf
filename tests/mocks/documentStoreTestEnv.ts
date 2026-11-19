@@ -54,8 +54,9 @@ type TestDocumentOfflineOperationsRegistry<D> = Record<
 > &
   ([D] extends [never] ? never : unknown);
 
-type TestDocumentOfflineOperationsConfig<D> =
-  TestDocumentOfflineOperationsRegistry<D> | null;
+type TestDocumentOfflineOperationsConfig<
+  D,
+> = TestDocumentOfflineOperationsRegistry<D> | null;
 
 type TestDocumentPersistentStorageConfig<
   D,

@@ -67,8 +67,9 @@ type TestCollectionOfflineOperationsRegistry<
 > &
   ([D] extends [never] ? never : unknown);
 
-type TestCollectionOfflineOperationsConfig<D extends Record<string, unknown>> =
-  TestCollectionOfflineOperationsRegistry<D> | null;
+type TestCollectionOfflineOperationsConfig<
+  D extends Record<string, unknown>,
+> = TestCollectionOfflineOperationsRegistry<D> | null;
 
 type TestCollectionPersistentStorageConfig<
   D extends Record<string, unknown>,
