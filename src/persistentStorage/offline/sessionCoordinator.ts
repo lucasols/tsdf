@@ -588,6 +588,7 @@ class SessionOfflineCoordinator {
   #onPersistentStorageError: ((error: unknown) => void) | undefined;
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
+  #storedUploadsRestore: Promise<void> | null = null;
   #referencedUploadIds = new Set<string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
@@ -770,16 +771,10 @@ class SessionOfflineCoordinator {
     this.#protectedKeys = [...protectedKeys].sort();
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
     if (this.#uploadsConfig) {
-      try {
-        const uploads = await this.#uploadsConfig.adapter.list(this.sessionKey);
-        if (hydrationToken === this.#hydrationToken) {
-          this.#uploads = new Map(uploads.map((upload) => [upload.id, upload]));
-          this.#syncUploadsState();
-          this.#scheduleUploadOnlineSessionStabilization();
-          void this.#refreshUploadRetention();
-        }
-      } catch (error) {
-        this.#onPersistentStorageError?.(error);
+      await this.#restoreStoredUploads();
+      if (hydrationToken === this.#hydrationToken) {
+        this.#scheduleUploadOnlineSessionStabilization();
+        void this.#refreshUploadRetention();
       }
     }
     void this.#persistSessionSnapshot();
@@ -1004,6 +999,7 @@ class SessionOfflineCoordinator {
       );
     }
 
+    await this.#restoreStoredUploads();
     const existing = this.#uploads.get(args.id);
     const nextRecord = createStoredUploadRecord(
       args.id,
@@ -1022,6 +1018,7 @@ class SessionOfflineCoordinator {
   }
 
   async replaceUpload(args: { id: string; file: Blob | File }): Promise<void> {
+    await this.#restoreStoredUploads();
     const existing = this.#uploads.get(args.id);
     if (existing?.state === 'uploading') {
       throw new Error(`Cannot replace upload "${args.id}" while uploading`);
@@ -1040,6 +1037,7 @@ class SessionOfflineCoordinator {
   }
 
   async deleteUpload(id: string): Promise<void> {
+    await this.#restoreStoredUploads();
     if (this.#referencedUploadIds.has(id)) {
       throw new Error(
         `Cannot delete upload "${id}" while it is still referenced`,
@@ -1480,12 +1478,43 @@ class SessionOfflineCoordinator {
     }
   }
 
+  /**
+   * Lists the stored uploads into memory, once per coordinator. Every upload
+   * operation that reads or changes a record waits for it first: the in-memory
+   * map is only authoritative after the stored records are in it, and a list
+   * result applied over newer changes would drop saved uploads and bring
+   * deleted ones back.
+   */
+  #restoreStoredUploads(): Promise<void> | undefined {
+    if (!this.#uploadsConfig) return undefined;
+
+    return (this.#storedUploadsRestore ??= this.#listStoredUploads(
+      this.#uploadsConfig,
+    ));
+  }
+
+  async #listStoredUploads(
+    uploadsConfig: OfflineSessionUploadsConfig,
+  ): Promise<void> {
+    try {
+      const uploads = await uploadsConfig.adapter.list(this.sessionKey);
+      this.#uploads = new Map(uploads.map((upload) => [upload.id, upload]));
+      this.#syncUploadsState();
+    } catch (error) {
+      this.#onPersistentStorageError?.(error);
+    }
+  }
+
   async #getUploadRecord(
     id: string,
   ): Promise<OfflineStoredUploadRecord | null> {
     const existing = this.#uploads.get(id);
     if (existing) return existing;
     if (!this.#uploadsConfig) return null;
+
+    await this.#restoreStoredUploads();
+    const restored = this.#uploads.get(id);
+    if (restored) return restored;
 
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
     if (loaded) {
