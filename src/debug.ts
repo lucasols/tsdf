@@ -58,7 +58,6 @@ export type TSDFDebugLogEntry = {
 
 function defaultConsoleDebugLogger(entry: TSDFDebugLogEntry): void {
   const consoleForLevel = globalThis.console[entry.level];
-  if (typeof consoleForLevel !== 'function') return;
 
   const details = entry.details
     ? { operation: entry.operation, ...entry.details }

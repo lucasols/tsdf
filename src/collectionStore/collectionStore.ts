@@ -127,7 +127,7 @@ import {
 } from './useMultipleItems';
 
 /** Lifecycle status for a cached collection item. */
-export type CollectionItemStatus = TSDFStatus;
+type CollectionItemStatus = TSDFStatus;
 
 /** Raw cached state for one collection item. */
 export type TSFDCollectionItem<
