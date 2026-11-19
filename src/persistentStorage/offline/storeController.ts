@@ -67,6 +67,8 @@ const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 3;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
+/** Temp ref -> final ref remaps kept per store for the session lifetime. */
+const MAX_RESOLVED_ENTITY_REFS = 1000;
 
 type OfflineStoreAdapter = {
   getEntityRefs?: (args: {
@@ -445,6 +447,16 @@ export type OfflineStoreController<
   }) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
   getItemOfflineState: (itemKey: string) => ItemOfflineState | null;
+  /**
+   * Latest known final ref of an entity created offline, or the ref itself
+   * while it was not reconciled (by this tab or another one) in this session.
+   */
+  resolveEntityRef: <TRef extends ValidPayload>(entityRef: TRef) => TRef;
+  /** Records the final ref of a temp entity reconciled by another tab. */
+  rememberReconciledEntityRef: (
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ) => void;
   getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
   parseOfflineResolutionConflict: <TName extends keyof TOperations & string>(
     resolution: OfflineResolutionRecordForStore<TOperations, TName>,
@@ -753,6 +765,25 @@ export function createOfflineStoreController<
       serializePayload(previousRef),
       resolveEntityRef(nextRef),
     );
+
+    // The table lives as long as the session: drop the oldest remaps so it
+    // cannot grow without bound in a long session.
+    if (resolvedEntityRefBySerializedRef.size > MAX_RESOLVED_ENTITY_REFS) {
+      for (const oldestSerializedRef of resolvedEntityRefBySerializedRef.keys()) {
+        resolvedEntityRefBySerializedRef.delete(oldestSerializedRef);
+        break;
+      }
+    }
+  }
+
+  function rememberReconciledEntityRef(
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ): void {
+    // Activating the session resets the table, so it must be active first.
+    if (!ensureActiveSession()) return;
+
+    rememberResolvedEntityRef(tempId, finalPayload);
   }
 
   function scheduleReplayRetry(): void {
@@ -3780,6 +3811,8 @@ export function createOfflineStoreController<
     queueMutation,
     getOfflineEntities,
     getItemOfflineState,
+    resolveEntityRef,
+    rememberReconciledEntityRef,
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,
