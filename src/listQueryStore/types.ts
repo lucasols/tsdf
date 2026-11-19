@@ -307,15 +307,15 @@ export type OptimisticListUpdate<
     item: ItemState,
     context: {
       /** Payload of the query being evaluated. */
-      queryPayload: QueryPayload;
+      readonly queryPayload: QueryPayload;
       /** Payload of the item being evaluated. */
-      itemPayload: ItemPayload;
+      readonly itemPayload: ItemPayload;
       /**
        * Whether the item is in the query's cached list right before this rule
        * is applied. Computed on first read, so it costs nothing when unused,
        * and must be read while `filterItem` is running.
        */
-      isInQuery: boolean;
+      readonly isInQuery: boolean;
     },
   ) => boolean | null;
   /** Where newly matching items should be inserted in affected query pages. */

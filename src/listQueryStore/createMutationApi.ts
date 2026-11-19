@@ -1408,7 +1408,9 @@ export function createMutationApi<
                   const itemPayloadFromState =
                     store.state.itemQueries[itemId]?.payload;
 
-                  if (!itemState || !itemPayloadFromState) return Infinity;
+                  if (!itemState || itemPayloadFromState === undefined) {
+                    return Infinity;
+                  }
 
                   return sort.sortBy(itemState, itemPayloadFromState);
                 },
