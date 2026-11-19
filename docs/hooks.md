@@ -329,6 +329,74 @@ Behavior:
 - `items` - Visible pending items (or selected items)
 - `deletedItems` - Payloads for pending deletes
 
+## useItemOfflineState
+
+**Stores**: [Collection Store](./collection-store.md), [List Query Store](./list-query-store.md)
+
+Returns the offline sync state of one item, or `null` when the item has nothing
+queued and no manual resolution waiting. It does not fetch anything. Use it for
+per-row sync badges:
+
+```tsx
+const Row = memo(function Row({ itemPayload }: { itemPayload: UserPayload }) {
+  const offlineState = store.useItemOfflineState(itemPayload);
+
+  if (!offlineState) return null;
+  if (offlineState.requiresResolution)
+    return <Badge>Needs your attention</Badge>;
+  if (offlineState.syncState === 'syncing') return <Badge>Syncing</Badge>;
+  return <Badge>Waiting to sync</Badge>;
+});
+```
+
+Behavior:
+
+- The component re-renders only when the state of its own item changes, not
+  when other items of the store are queued, replayed, or resolved
+- A falsy payload (`null`, `undefined`, `false`) returns `null`
+- Stores without offline support always return `null`
+- `store.getItemOfflineState(itemPayload)` reads the same state without
+  subscribing, for event handlers
+
+### Return value
+
+`null`, or an `ItemOfflineState`:
+
+- `syncState` - `'pending'` (waiting to be sent), `'syncing'` (being sent),
+  `'needs-confirmation'` (a send failed and it is not known whether it reached
+  the server, so it is re-checked or retried) or `'resolution-required'`. With
+  several mutations queued for the item this is the state of the newest one:
+  the item stays `'pending'` while its older mutations are sent
+- `pendingMutations` - Number of queued mutations of the item still waiting to
+  sync
+- `requiresResolution` - `true` while the item waits for a manual resolution
+  (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
+- `isUnsentCreation` - `true` while the item was created offline (a
+  `tempEntity` / `tempEntities` operation) and the server has not confirmed it
+  yet, so it only exists locally under its temporary payload
+
+### Items created offline
+
+An item created offline is tracked under its temporary payload until the server
+confirms it. After that the temporary payload returns `null`, and the final
+payload reports the mutations that are still queued for the item (for example
+an edit made right after creating it) with `isUnsentCreation: false`.
+
+```ts
+function onDeleteClick(itemPayload: UserPayload) {
+  const offlineState = store.getItemOfflineState(itemPayload);
+
+  // The server never saw an unsent creation, so deleting it only discards
+  // local work: no need to ask before deleting for everyone.
+  if (offlineState?.isUnsentCreation || confirmDeleteForEveryone()) {
+    deleteUser(itemPayload);
+  }
+}
+```
+
+`isUnsentCreation` stays `true` while the creation itself is being sent, until
+the server result is reconciled.
+
 ## useMultipleItems
 
 **Stores**: [Collection Store](./collection-store.md), [List Query Store](./list-query-store.md)

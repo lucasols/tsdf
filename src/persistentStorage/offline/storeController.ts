@@ -27,6 +27,10 @@ import {
 } from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import { parseWithSchema, validateWithSchema } from '../validateWithSchema';
+import {
+  getOfflineStoreEntityLookup,
+  toItemOfflineState,
+} from './entityMetadata';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import {
   getOfflineSessionAppVersion,
@@ -42,6 +46,7 @@ import {
   type OfflineEntityMutationKind,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
+  type ItemOfflineState,
   type OfflineMutationInput,
   type OfflineMutationQueueingCause,
   type OfflineMutationQueueingPolicy,
@@ -439,6 +444,7 @@ export type OfflineStoreController<
     upload?: OfflineMutationUploadsInput;
   }) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
+  getItemOfflineState: (itemKey: string) => ItemOfflineState | null;
   getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
   parseOfflineResolutionConflict: <TName extends keyof TOperations & string>(
     resolution: OfflineResolutionRecordForStore<TOperations, TName>,
@@ -3409,6 +3415,17 @@ export function createOfflineStoreController<
       .filter((entity) => entity.storeName === storeName);
   }
 
+  function getItemOfflineState(itemKey: string): ItemOfflineState | null {
+    const current = ensureActiveSession();
+    if (!current) return null;
+    return toItemOfflineState(
+      getOfflineStoreEntityLookup(
+        current.session.store.state.entities,
+        storeName,
+      ).get(itemKey),
+    );
+  }
+
   function getOfflineResolutions(): OfflineResolutionRecordForStore<TOperations>[] {
     return buildDerivedResolutionRecords();
   }
@@ -3616,6 +3633,7 @@ export function createOfflineStoreController<
     prepareForMutation,
     queueMutation,
     getOfflineEntities,
+    getItemOfflineState,
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,

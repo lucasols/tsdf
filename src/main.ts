@@ -136,6 +136,7 @@ export type {
   OfflineEntityMutationKind,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  ItemOfflineState,
   OfflineMutationInput,
   OfflineOperationKind,
   OfflineRuntimeConfig,

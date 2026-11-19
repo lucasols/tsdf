@@ -40,6 +40,10 @@ import {
 } from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import {
+  getOfflineStoreEntityLookup,
+  toItemOfflineState,
+} from './entityMetadata';
+import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from './sessionProtectionRegistry';
@@ -47,6 +51,7 @@ import type {
   GlobalOfflineEntity,
   InternalGlobalOfflineEntity,
   GlobalOfflineStatus,
+  ItemOfflineState,
   OfflineFailureClassification,
   OfflineFailureContext,
   OfflineMutationQueueingPolicy,
@@ -2785,6 +2790,37 @@ export function useOfflineStoreEntities(args: {
   const entities = useOfflineStoreEntitiesWithPayload(args);
 
   return useMemo(() => entities.map(stripInternalEntityPayload), [entities]);
+}
+
+/**
+ * React hook returning the offline state of one item of a store, or `null`
+ * when the item has no offline work. It reads the item through the keyed
+ * lookup shared by all readers and keeps the previous result while the state
+ * is unchanged, so a component re-renders only when its own item changes.
+ */
+export function useOfflineStoreItemState(
+  sessionKey: string | false,
+  inactiveScope: string,
+  storeName: string | undefined,
+  itemKey: string | null,
+): ItemOfflineState | null {
+  const coordinator = useSessionOfflineCoordinator(
+    resolveOfflineSessionScope(sessionKey, inactiveScope),
+    false,
+  );
+  const itemStateSelector = useCallback(
+    (state: SessionStoreState) =>
+      storeName === undefined || itemKey === null
+        ? null
+        : toItemOfflineState(
+            getOfflineStoreEntityLookup(state.entities, storeName).get(itemKey),
+          ),
+    [itemKey, storeName],
+  );
+
+  return coordinator.store.useSelector(itemStateSelector, {
+    equalityFn: deepEqual,
+  });
 }
 
 /**

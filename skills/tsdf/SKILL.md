@@ -71,11 +71,11 @@ Every store ships React hooks with consistent behavior:
 - Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `requireFreshData`, `selector`, `debouncePayload`.
 - Use `requireFreshData` sparingly. It unconditionally schedules a high-priority fetch on every enabled hook mount—even with successful cached data—and reports `loading` until that refresh succeeds or fails. Cached `data` remains available. Prefer normal cache behavior or targeted invalidation unless the component must wait for a new server response; broad use can substantially increase request volume. It overrides `disableRefetches` / `disableRefetchOnMount` and cannot be combined with `debouncePayload` on single-item or single-query hooks.
 
-| Store             | Hooks                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `DocumentStore`   | `useDocument`, `useListItem`, `useListItemIsLoading`, `useListItemIsDeleted`                                     |
-| `CollectionStore` | `useItem`, `useMultipleItems`, `useListItem*`                                                                    |
-| `ListQueryStore`  | `useListQuery`, `useMultipleListQueries`, `useItem`, `useMultipleItems`, `useFindItem`, `usePendingOfflineItems` |
+| Store             | Hooks                                                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `DocumentStore`   | `useDocument`, `useListItem`, `useListItemIsLoading`, `useListItemIsDeleted`                                                            |
+| `CollectionStore` | `useItem`, `useMultipleItems`, `useListItem*`, `useItemOfflineState`                                                                    |
+| `ListQueryStore`  | `useListQuery`, `useMultipleListQueries`, `useItem`, `useMultipleItems`, `useFindItem`, `usePendingOfflineItems`, `useItemOfflineState` |
 
 Return shape: `{ data, status, error, isLoading, ... }`. `status` is `'idle' | 'loading' | 'success' | 'error' | 'refetching'` plus `'loadingMore'` (list queries) or `'deleted'` (items).
 
@@ -224,7 +224,7 @@ type UserOps = DefineListQueryOfflineOperations<
 
 Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`, `getEntityRefs`, `execute`, and optionally `onSuccessExecute`. Use the `offline` option on `performMutation(...)` to route a mutation through the queue (returns `OfflineMutationResult<T>` with `kind: 'online' | 'queued'`).
 
-Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query).
+Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation }`, re-rendering only when that item's state changes.
 
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 
