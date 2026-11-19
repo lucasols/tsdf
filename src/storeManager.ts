@@ -121,7 +121,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;
-  /** Saves a session-scoped upload locally for later dependency resolution. */
+  /**
+   * Saves a session-scoped upload locally for later dependency resolution. It
+   * is deleted automatically once the queued work that depends on it leaves
+   * the queue.
+   */
   saveOfflineUpload: (
     args: SaveOfflineUploadArgs,
   ) => Promise<ResultType<void, Error>>;
@@ -131,7 +135,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => Promise<ResultType<void, Error>>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
-  /** Deletes a stored upload when it is no longer referenced. */
+  /**
+   * Deletes a stored upload that no queued work references. Only needed for
+   * uploads no queued mutation used: the others are deleted with the work that
+   * depends on them.
+   */
   deleteOfflineUpload: (id: string) => Promise<ResultType<void, Error>>;
   /** React hook subscribing to the manager's aggregated offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;

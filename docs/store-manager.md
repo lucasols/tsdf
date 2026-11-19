@@ -165,4 +165,6 @@ When the `upload` transport fails, `resolveOfflineUpload(s)` returns `Result.err
 
 `metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
 
+Staged uploads are deleted automatically when the last queued mutation or resolution record that depends on them leaves the queue (replayed, discarded, superseded or cancelled). `deleteOfflineUpload(id)` is only needed for uploads no queued mutation used, which otherwise expire after a week online, and it returns an error while queued work still references the upload. See [Offline: Upload lifecycle](./offline.md#upload-lifecycle).
+
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.
