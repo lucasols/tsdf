@@ -88,8 +88,21 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   uploads: OfflineUpload[];
 };
 
+/**
+ * Tells the other tabs that a store's persisted queue entries / resolutions
+ * changed. Receivers reload only those records from storage, which keeps
+ * every tab's in-memory queue in sync without sending the records themselves.
+ */
+type SessionStoreRecordsMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-store-records';
+  storeName: string;
+  queueEntryIds: string[];
+  resolutionIds: string[];
+};
+
 type OfflineSessionMessage =
   | SessionSnapshotMessage
+  | SessionStoreRecordsMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -112,6 +125,11 @@ type SessionRegistration = {
   storeName: string;
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
+  /** Another tab saved or removed these persisted records of the store. */
+  onRemoteRecordsChange?: (
+    queueEntryIds: string[],
+    resolutionIds: string[],
+  ) => void;
 };
 
 type SessionCoordinatorOptions = {
@@ -607,6 +625,8 @@ class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
+  /** Tabs of this session that sent anything on the session channel. */
+  #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
   #outageEnabledOverride: boolean | undefined;
   #mutationQueueingOverrides:
@@ -687,12 +707,28 @@ class SessionOfflineCoordinator {
         `session:${sessionKey}`,
         () => this.sessionKey,
         (message) => {
+          const isNewTab = !this.#otherTabIds.has(message.tabId);
+          this.#otherTabIds.add(message.tabId);
+
           if (message.kind === 'tab-status') {
             this.#browserTabs.priority.onTabStatusMessage(
               message.tabId,
               message,
             );
+            // Tabs only announce themselves when they open or change focus,
+            // so answer a newcomer: otherwise it never learns about this tab
+            // and can consider itself the leader alongside it.
+            if (isNewTab) this.#browserTabs.priority.publishLocalStatus();
             this.#refreshLeadership();
+            return;
+          }
+          if (message.kind === 'offline-store-records') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteRecordsChange?.(
+                message.queueEntryIds,
+                message.resolutionIds,
+              );
             return;
           }
           this.#applyRemoteSnapshot(message);
@@ -701,7 +737,28 @@ class SessionOfflineCoordinator {
         undefined,
         import.meta.env.DEV ? debugLogger : undefined,
         () => !isWindowAvailable() || !document.hidden,
-        undefined,
+        (noteFocusChange) => {
+          if (!isWindowAvailable()) return () => {};
+
+          // Leadership follows the visible tab. Re-evaluate it here as well:
+          // a tab that becomes the leader has to start replaying, and a tab
+          // being closed or hidden has to hand leadership over.
+          const onChange = (): void => {
+            noteFocusChange();
+            this.#refreshLeadership();
+          };
+
+          window.addEventListener('focus', onChange);
+          window.addEventListener('blur', onChange);
+          window.addEventListener('pagehide', onChange);
+          document.addEventListener('visibilitychange', onChange);
+          return () => {
+            window.removeEventListener('focus', onChange);
+            window.removeEventListener('blur', onChange);
+            window.removeEventListener('pagehide', onChange);
+            document.removeEventListener('visibilitychange', onChange);
+          };
+        },
         undefined,
         undefined,
         options.appVersion,
@@ -905,6 +962,7 @@ class SessionOfflineCoordinator {
   syncStoreData(
     storeName: string,
     contribution: SessionStoreContribution,
+    isRemoteChange = false,
   ): void {
     if (this.#disposed) return;
     const previousContribution = this.#storeContributions.get(storeName);
@@ -913,10 +971,38 @@ class SessionOfflineCoordinator {
       contribution.replayHead,
     );
     this.#storeContributions.set(storeName, contribution);
-    this.#refreshAggregates();
+    // A change made by another tab was already announced by that tab
+    this.#refreshAggregates(!isRemoteChange);
     if (replayHeadChanged) {
       this.#notifyGreenCycle();
     }
+  }
+
+  /**
+   * Announces to the other tabs which persisted queue entries / resolutions of
+   * a store were saved or removed by this tab. Call it after the write.
+   */
+  publishStoreRecordsChange(
+    storeName: string,
+    queueEntryIds: string[],
+    resolutionIds: string[],
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-store-records',
+      storeName,
+      queueEntryIds,
+      resolutionIds,
+    });
+  }
+
+  /**
+   * Whether another tab of this session was seen. While `false`, this tab can
+   * trust its in-memory queue without re-checking storage.
+   */
+  hasOtherTabs(): boolean {
+    return this.#otherTabIds.size > 0;
   }
 
   canReplayEntry(args: {
@@ -1853,7 +1939,7 @@ class SessionOfflineCoordinator {
     void this.#refreshUploadRetention();
   }
 
-  #refreshAggregates(): void {
+  #refreshAggregates(publish = true): void {
     const allEntities: InternalGlobalOfflineEntity[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
     const referencedUploadIds = new Set<string>();
@@ -1990,7 +2076,7 @@ class SessionOfflineCoordinator {
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
-    this.#publishSnapshot();
+    if (publish) this.#publishSnapshot();
     if (
       this.#uploadsConfig &&
       this.#uploads.size > 0 &&
@@ -2049,6 +2135,8 @@ class SessionOfflineCoordinator {
   #applyRemoteSnapshot(message: SessionSnapshotMessage): void {
     if (message.sentAt < this.#lastRemoteSnapshotAt) return;
     this.#lastRemoteSnapshotAt = message.sentAt;
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
+    const wasReplayBlocked = this.isReplayBlocked();
 
     this.store.setState(
       {
@@ -2065,6 +2153,10 @@ class SessionOfflineCoordinator {
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
     void this.#persistSessionSnapshot();
     this.#refreshLeadership();
+    // Another tab can report the recovery before this tab detects it. Without
+    // this, the tab's own detection would then find nothing left to change
+    // and its queued work would never be replayed.
+    this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
   #shouldPersistSessionSnapshot(): boolean {
