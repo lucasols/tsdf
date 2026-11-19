@@ -2305,7 +2305,7 @@ class SessionOfflineCoordinator {
   }
 
   #getDesiredRecoveryTarget(): SessionRecoveryTarget | null {
-    if (!this.isLeader() || this.#registrations.size === 0) {
+    if (this.#disposed || !this.isLeader() || this.#registrations.size === 0) {
       return null;
     }
 
@@ -2361,6 +2361,10 @@ class SessionOfflineCoordinator {
     } catch {
       recovered = false;
     }
+
+    // Disposed while the check was in flight: its answer must not touch the
+    // status, wake up the stores or re-arm the probe timer
+    if (this.#disposed) return;
 
     const recoveryCheckAt = Date.now();
 

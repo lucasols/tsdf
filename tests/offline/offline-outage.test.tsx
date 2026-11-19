@@ -6,6 +6,7 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { docSchema } from './offlineTestShared';
 
 beforeEach(() => {
@@ -434,6 +435,67 @@ test('recovery probes keep retrying after a rejected recovery check', async () =
     "
   `);
   statusHook.unmount();
+});
+
+// Sessions are torn down with `resetSessionForTests()` between tests and by
+// restart-style tests. A recovery check still in flight at that moment used to
+// re-arm the probe timer of the torn down session, which then kept probing
+// forever inside whatever test was running next.
+test('a session torn down while a recovery check is in flight stops probing', async () => {
+  const sessionKey = 'recovery-probe-teardown-session';
+  let answerRecoveryCheck: ((recovered: boolean) => void) | undefined;
+  const recoveryCheck = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        answerRecoveryCheck = resolve;
+      }),
+  );
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure: () => 'outage' as const,
+        outage: {
+          enabled: true,
+          recoveryCheck,
+          recoveryProbe: {
+            initialIntervalMs: 100,
+            maxIntervalMs: 100,
+            backoffMultiplier: 1,
+            jitterRatio: 0,
+          },
+        },
+      },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+
+  // Enter outage mode through a real fetch failure.
+  env.serverMock.setNextFetchError('boom');
+  env.apiStore.scheduleFetch('highPriority');
+  await advanceTime(25);
+
+  // The first recovery check starts and is left waiting for the backend.
+  await advanceTime(100);
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+
+  // The session is torn down while that check is still in flight...
+  resetSessionForTests();
+
+  // ...and only then the backend answers that it is still down.
+  answerRecoveryCheck?.(false);
+  await advanceTime(1_000);
+
+  // The torn down session must not schedule another probe.
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 // Protects against race conditions where a slow classifier could override a
