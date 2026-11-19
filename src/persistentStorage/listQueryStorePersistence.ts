@@ -278,6 +278,14 @@ export function setupListQueryPersistence<
     getItemKey?: (payload: ItemPayload) => string;
     getQueryKey?: (payload: QueryPayload) => string;
     getItemDerivedGroup?: (item: ItemState, itemPayload: ItemPayload) => string;
+    /**
+     * Maps the state's loaded fields of an in-state item to the ones to
+     * persist (the store restores fields stripped by pending invalidations).
+     */
+    getItemLoadedFieldsToPersist?: (
+      itemKey: string,
+      loadedFields: ItemLoadedFields | undefined,
+    ) => ItemLoadedFields | undefined;
   } = {},
 ): ListQueryPersistenceSetup<ItemState, QueryPayload, ItemPayload> {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
@@ -302,6 +310,7 @@ export function setupListQueryPersistence<
     options.getQueryKey ??
     ((payload: QueryPayload) => getCompositeKey(payload));
   const getItemDerivedGroup = options.getItemDerivedGroup;
+  const getItemLoadedFieldsToPersist = options.getItemLoadedFieldsToPersist;
   const pinnedItemKeys = new Set(
     (config.pinnedItems ?? []).map((payload) => resolveItemKey(payload)),
   );
@@ -3185,8 +3194,11 @@ export function setupListQueryPersistence<
         // governs" marker (e.g. after a mutation rollback) and must not be
         // resurrected from the previously persisted snapshot. The hydrated
         // fallback only applies to items that are not in state at all.
+        const stateLoadedFields = state.itemLoadedFields[itemKey];
         const loadedFields = hasItemInState
-          ? state.itemLoadedFields[itemKey]
+          ? getItemLoadedFieldsToPersist
+            ? getItemLoadedFieldsToPersist(itemKey, stateLoadedFields)
+            : stateLoadedFields
           : hydratedItem?.loadedFields;
 
         if (item === null || itemQuery == null) {
@@ -3611,8 +3623,11 @@ export function setupListQueryPersistence<
       // governs" marker (e.g. after a mutation rollback) and must not be
       // resurrected from the previously persisted snapshot. The hydrated
       // fallback only applies to items that are not in state at all.
+      const stateLoadedFields = state.itemLoadedFields[itemKey];
       const loadedFields = hasItemInState
-        ? state.itemLoadedFields[itemKey]
+        ? getItemLoadedFieldsToPersist
+          ? getItemLoadedFieldsToPersist(itemKey, stateLoadedFields)
+          : stateLoadedFields
         : hydratedItem?.loadedFields;
 
       if (item === null || itemQuery == null) {
