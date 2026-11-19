@@ -17,10 +17,10 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 

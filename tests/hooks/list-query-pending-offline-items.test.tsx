@@ -8,6 +8,7 @@ import {
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -23,7 +24,6 @@ import {
   listQueryQueryPayloadSchema,
 } from '../offline/offlineTestShared';
 import { flushAllTimers } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 
 let network = createOfflineNetworkMock();

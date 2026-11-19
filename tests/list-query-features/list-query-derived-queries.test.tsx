@@ -17,6 +17,7 @@ import type { DerivedQueriesConfig } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -26,7 +27,6 @@ import {
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { listQueryQueryPayloadSchema } from '../offline/offlineTestShared';
 import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import {
   getLocalStorageTree,

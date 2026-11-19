@@ -7,6 +7,7 @@ export default defineConfig({
     'async-storage': 'src/async-storage.ts',
     'indexed-db-storage': 'src/indexed-db-storage.ts',
     'opfs-storage': 'src/opfs-storage.ts',
+    testing: 'src/testing.ts',
   },
   clean: true,
   env: { TEST: false },

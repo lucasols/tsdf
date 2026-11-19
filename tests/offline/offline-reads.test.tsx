@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
@@ -16,7 +17,6 @@ import {
   pick,
   waitForScheduledCleanup,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { userRowSchema } from './offlineReplayTestShared';
 import {
   collectionSchema,

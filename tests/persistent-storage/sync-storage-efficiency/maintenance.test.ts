@@ -13,10 +13,10 @@ import {
 } from '../../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../../src/storeManager';
+import { createOfflineNetworkMock } from '../../../src/testing';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { normalizeError } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../../utils/networkMock';
 import {
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,

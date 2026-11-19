@@ -3,10 +3,10 @@ import { act } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();

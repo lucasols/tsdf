@@ -8,6 +8,8 @@ import {
   createDocumentStore,
   createListQueryStore,
   createStoreManager,
+  type DefineDocumentOfflineOperations,
+  type DefineOfflineOperation,
   type StorageAdapter,
   type StoreError,
   type TSDFDebugLogger,
@@ -75,7 +77,8 @@ type ScenarioName =
   | 'list'
   | 'persist-document'
   | 'persist-collection'
-  | 'persist-list';
+  | 'persist-list'
+  | 'offline-document';
 
 function getQueryParams(): {
   pageId: string;
@@ -775,6 +778,133 @@ function PersistListScenario({
   );
 }
 
+type OfflineDocumentOperations = DefineDocumentOfflineOperations<
+  DocumentState,
+  { setValue: DefineOfflineOperation<{ value: number }> }
+>;
+
+function OfflineDocumentScenario({
+  pageId,
+  storeId,
+  sessionKey,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+}) {
+  const [{ store, storeManager }] = useState(() => {
+    const manager = createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      // Default browser detection: the real network stays up in these tests
+      offlineSession: { network: { enabled: true } },
+    });
+    const documentStore = createDocumentStore<
+      DocumentState,
+      OfflineDocumentOperations
+    >({
+      id: storeId,
+      storeManager: manager,
+      fetchFn: (signal) =>
+        requestJson<DocumentState>(pageId, '/api/document', { signal }),
+      lowPriorityThrottleMs: 10_000,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: documentSchema,
+        offline: {
+          operations: {
+            setValue: {
+              inputSchema: documentSchema,
+              kind: 'update',
+              execute: ({ input }) =>
+                requestJson<DocumentState>(pageId, '/api/document/mutate', {
+                  method: 'POST',
+                  body: JSON.stringify({ value: input.value }),
+                }),
+              onSuccessExecute: ({ input }) => {
+                documentStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return { store: documentStore, storeManager: manager };
+  });
+
+  const document = store.useDocument({ returnRefetchingStatus: true });
+  const offlineStatus = storeManager.useOfflineStatus();
+  const offlineEntities = storeManager.useOfflineEntities();
+  // Counts forced offline toggles that finished persisting, so tests know
+  // when it is safe to reload
+  const [persistedToggleCount, setPersistedToggleCount] = useState(0);
+  const setForcedOfflineMode = (forced: boolean) => {
+    void storeManager.setForcedOfflineMode(forced).then(() => {
+      setPersistedToggleCount((current) => current + 1);
+    });
+  };
+
+  return (
+    <section>
+      <h1>Offline Document</h1>
+      <div data-testid="offline-doc-value">
+        {document.data ? String(document.data.value) : 'null'}
+      </div>
+      <div data-testid="offline-doc-status">{document.status}</div>
+      <div data-testid="offline-doc-offline-mode">
+        {offlineStatus.isOfflineMode ? 'offline' : 'online'}
+      </div>
+      <div data-testid="offline-doc-forced">
+        {offlineStatus.isForcedOffline ? 'forced' : 'not-forced'}
+      </div>
+      <div data-testid="offline-doc-pending">{offlineEntities.length}</div>
+      <div data-testid="offline-doc-persisted-toggles">
+        {persistedToggleCount}
+      </div>
+      <button
+        data-testid="offline-doc-force-offline"
+        onClick={() => setForcedOfflineMode(true)}
+        type="button"
+      >
+        force offline
+      </button>
+      <button
+        data-testid="offline-doc-release-offline"
+        onClick={() => setForcedOfflineMode(false)}
+        type="button"
+      >
+        release offline
+      </button>
+      <button
+        data-testid="offline-doc-mutate"
+        onClick={() => {
+          const nextValue = (document.data?.value ?? 0) + 1;
+
+          void store.performMutation({
+            optimisticUpdate: () => {
+              store.updateState((draft) => {
+                draft.value = nextValue;
+              });
+            },
+            mutation: () =>
+              requestJson<DocumentState>(pageId, '/api/document/mutate', {
+                method: 'POST',
+                body: JSON.stringify({ value: nextValue }),
+              }),
+            offline: { operation: 'setValue', input: { value: nextValue } },
+          });
+        }}
+        type="button"
+      >
+        mutate
+      </button>
+    </section>
+  );
+}
+
 function App() {
   const {
     pageId,
@@ -850,6 +980,13 @@ function App() {
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
           disableRefetchOnMount={disableRefetchOnMount}
+        />
+      ) : null}
+      {scenario === 'offline-document' ? (
+        <OfflineDocumentScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
         />
       ) : null}
       {scenario === 'persist-list' ? (

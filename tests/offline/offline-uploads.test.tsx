@@ -10,6 +10,7 @@ import {
   opfsOfflineUploadAdapter,
 } from '../../src/main';
 import { encodePathSegment } from '../../src/persistentStorage/opfsFileNaming';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -19,7 +20,6 @@ import {
   pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   getOpfsDirTree,
   getParsedOpfsFileData,

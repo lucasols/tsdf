@@ -86,6 +86,13 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
+  /**
+   * Present only on the snapshot published by the tab where forced offline
+   * mode was toggled. Every other tab applies it, while the
+   * `status.isForcedOffline` of regular snapshots is ignored: a stale snapshot
+   * from a tab that has not seen the toggle yet cannot undo it.
+   */
+  forcedOffline?: boolean;
 };
 
 type OfflineSessionMessage =
@@ -159,6 +166,7 @@ export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
     network: { enabled: false, active: false },
     outage: { enabled: false, active: false },
     isOfflineMode: false,
+    isForcedOffline: false,
     isLeader: true,
     updatedAt: Date.now(),
     lastFailureAt: null,
@@ -198,6 +206,7 @@ function serializeOfflineStatusSnapshot(status: GlobalOfflineStatus) {
             ...(status.outage.active ? { a: COMPACT_OFFLINE_STATUS_FLAG } : {}),
           }
         : undefined,
+    f: status.isForcedOffline ? COMPACT_OFFLINE_STATUS_FLAG : undefined,
     u: status.updatedAt,
     lf: status.lastFailureAt ?? undefined,
     lr: status.lastRecoveryCheckAt ?? undefined,
@@ -222,6 +231,7 @@ function normalizePersistedOfflineStatus(
       network,
       outage,
       isOfflineMode,
+      isForcedOffline: compactStatus.f === COMPACT_OFFLINE_STATUS_FLAG,
       isLeader: true,
       updatedAt:
         typeof compactStatus.u === 'number' ? compactStatus.u : Date.now(),
@@ -607,6 +617,12 @@ class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
+  /**
+   * Forced offline mode: network detection reports offline regardless of the
+   * real connectivity. Read synchronously from the persisted status at boot so
+   * the first operations after a reload are already treated as offline.
+   */
+  #forcedOffline = false;
   #networkEnabledOverride: boolean | undefined;
   #outageEnabledOverride: boolean | undefined;
   #mutationQueueingOverrides:
@@ -662,6 +678,8 @@ class SessionOfflineCoordinator {
     this.#hasCanonicalConfig = config !== undefined;
     this.#hasPersistedSessionSnapshot = bootstrappedLocalSnapshot !== null;
     this.#lastPersistedStatus = bootstrappedLocalSnapshot?.status ?? null;
+    this.#forcedOffline =
+      bootstrappedLocalSnapshot?.status.isForcedOffline ?? false;
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
     if (bootstrappedLocalSnapshot !== null) {
       defaultStatusBySession.set(sessionKey, bootstrappedLocalSnapshot.status);
@@ -696,6 +714,12 @@ class SessionOfflineCoordinator {
             return;
           }
           this.#applyRemoteSnapshot(message);
+          // Applied after the snapshot so this tab re-detects its own network
+          // state last, and regardless of snapshot staleness: it is an
+          // explicit user action, not derived state.
+          if (typeof message.forcedOffline === 'boolean') {
+            this.#applyForcedOffline(message.forcedOffline);
+          }
         },
         undefined,
         undefined,
@@ -827,6 +851,11 @@ class SessionOfflineCoordinator {
       this.#recreatePersistenceHandles({ enabled: true });
       this.#canonicalConfig = toCanonicalConfig(options.config);
       this.#hasCanonicalConfig = true;
+      // The constructor only reads the persisted status when it bootstraps
+      // from storage, so read the forced flag before the first network check.
+      this.#forcedOffline =
+        readPersistedLocalSessionSnapshot(this.sessionKey)?.status
+          .isForcedOffline ?? false;
       void this.hydrate();
       this.#refreshNetworkConfig();
       return;
@@ -1124,6 +1153,41 @@ class SessionOfflineCoordinator {
     this.#mutationQueueingOverrides = undefined;
   }
 
+  /**
+   * Turns forced offline mode on or off, shares it with the other tabs of the
+   * session and resolves once it is persisted.
+   */
+  setForcedOffline(forced: boolean): Promise<void> {
+    if (!this.#canonicalConfig.hasNetworkConfig) {
+      throw createForcedOfflineModeUnavailableError();
+    }
+
+    this.#applyForcedOffline(forced, true);
+    return this.#persistSessionSnapshot();
+  }
+
+  #applyForcedOffline(forced: boolean, isLocalToggle = false): void {
+    if (this.#forcedOffline === forced) return;
+
+    this.#forcedOffline = forced;
+    // A forced session is never "classified": recovery probes must not run
+    // while forced, and leaving forced mode must re-detect right away instead
+    // of waiting for a probe.
+    this.#classifiedNetworkActive = false;
+    this.store.setPartialState(
+      { status: this.#deriveLocalStatus(this.store.state.status) },
+      { action: 'offline-session-status' },
+    );
+    void this.#persistSessionSnapshot();
+    // Only the tab where the toggle happened announces it. A tab applying a
+    // remote toggle stays quiet until its own detection settles: its
+    // in-between status could put a tab that already recovered back offline.
+    if (isLocalToggle) this.#publishSnapshot(forced);
+    // Entering reports offline synchronously. Leaving goes through the regular
+    // detection, so it recovers and replays exactly like a real reconnect.
+    void this.refreshNetworkState();
+  }
+
   #browserReportsOnline(): boolean {
     return !isWindowAvailable() || navigator.onLine !== false;
   }
@@ -1218,7 +1282,12 @@ class SessionOfflineCoordinator {
 
     return this.#deriveLocalStatus({
       ...status,
-      network: { enabled: networkEnabled, active: status.network.active },
+      network: {
+        enabled: networkEnabled,
+        // Persisted and remote snapshots cannot clear a forced network mode
+        active:
+          status.network.active || (networkEnabled && this.#forcedOffline),
+      },
       outage: { enabled: outageEnabled, active: status.outage.active },
       isLeader: updates.isLeader ?? status.isLeader,
       updatedAt: updates.updatedAt ?? status.updatedAt,
@@ -1227,7 +1296,9 @@ class SessionOfflineCoordinator {
 
   #syncClassifiedNetworkStateFromStatus(status: GlobalOfflineStatus): void {
     this.#classifiedNetworkActive =
-      status.network.active && this.#browserReportsOnline();
+      status.network.active &&
+      !this.#forcedOffline &&
+      this.#browserReportsOnline();
   }
 
   #handleConnectivityChange(
@@ -1324,10 +1395,13 @@ class SessionOfflineCoordinator {
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isNetworkEnabled();
-    const nextActive = active;
-    this.#classifiedNetworkActive = nextActive
-      ? (options.classified ?? this.#classifiedNetworkActive)
-      : false;
+    // While forced, successful requests and recovery probes are not a
+    // recovery signal: only turning forced mode off clears network mode.
+    const nextActive = active || (nextEnabled && this.#forcedOffline);
+    this.#classifiedNetworkActive =
+      nextActive && !this.#forcedOffline
+        ? (options.classified ?? this.#classifiedNetworkActive)
+        : false;
 
     this.#updateStatus((current) => ({
       ...current,
@@ -1466,6 +1540,8 @@ class SessionOfflineCoordinator {
   }
 
   #getCurrentOfflineState(): boolean | Promise<boolean> {
+    if (this.#forcedOffline) return true;
+
     return (this.#canonicalConfig.getIsOffline ?? defaultGetIsOffline)();
   }
 
@@ -2007,7 +2083,11 @@ class SessionOfflineCoordinator {
   #deriveLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
     const isOfflineMode = getIsOfflineModeFromStatus(status);
 
-    return this.#stampLocalStatus({ ...status, isOfflineMode });
+    return this.#stampLocalStatus({
+      ...status,
+      isOfflineMode,
+      isForcedOffline: this.#forcedOffline,
+    });
   }
 
   #updateStatus(
@@ -2034,7 +2114,7 @@ class SessionOfflineCoordinator {
     return true;
   }
 
-  #publishSnapshot(): void {
+  #publishSnapshot(forcedOfflineToggle?: boolean): void {
     if (this.#disposed) return;
     const status = this.store.state.status;
     this.#browserTabs.coordinator.publish({
@@ -2043,6 +2123,9 @@ class SessionOfflineCoordinator {
       entities: this.store.state.entities,
       resolutions: this.store.state.resolutions,
       uploads: this.store.state.uploads,
+      ...(forcedOfflineToggle !== undefined
+        ? { forcedOffline: forcedOfflineToggle }
+        : undefined),
     });
   }
 
@@ -2069,6 +2152,7 @@ class SessionOfflineCoordinator {
 
   #shouldPersistSessionSnapshot(): boolean {
     return (
+      this.#forcedOffline ||
       this.store.state.status.isOfflineMode ||
       this.store.state.entities.length > 0 ||
       this.store.state.resolutions.length > 0 ||
@@ -2098,6 +2182,10 @@ class SessionOfflineCoordinator {
       return;
     }
 
+    // Also marked before the write settles: a status that stops needing
+    // persistence while this write is still pending (e.g. forced offline mode
+    // toggled on and off in a row) must still clear the snapshot afterwards.
+    this.#hasPersistedSessionSnapshot = true;
     await this.#sessionHandle.saveNow({ status: this.store.state.status });
     this.#hasPersistedSessionSnapshot = true;
     this.#lastPersistedStatus = this.store.state.status;
@@ -2259,6 +2347,12 @@ class SessionOfflineCoordinator {
     this.#sessionHandle.dispose();
     clearSessionProtectedKeysSnapshot(this.sessionKey);
   }
+}
+
+export function createForcedOfflineModeUnavailableError(): Error {
+  return new Error(
+    '[tsdf] Forced offline mode requires an active session key and `offlineSession.network` to be configured',
+  );
 }
 
 /**
@@ -2434,6 +2528,12 @@ export function createOfflineSession<
     },
     resetOfflineRuntimeConfig: () => {
       getActiveCoordinator()?.resetRuntimeConfig();
+    },
+    setForcedOfflineMode: async (forced) => {
+      const coordinator = getActiveCoordinator();
+      if (!coordinator) throw createForcedOfflineModeUnavailableError();
+
+      await coordinator.setForcedOffline(forced);
     },
     getOfflineStatus: () => {
       const sessionKey = getSessionKey();

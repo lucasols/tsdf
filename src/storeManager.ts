@@ -12,6 +12,7 @@ import {
 } from './debug';
 import {
   createDefaultStatus,
+  createForcedOfflineModeUnavailableError,
   createOfflineSession,
 } from './persistentStorage/offline/sessionCoordinator';
 import type {
@@ -89,6 +90,28 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => ResultType<void, Error>;
   /** Resets runtime controls back to the static session config. */
   resetOfflineRuntimeConfig: () => void;
+  /**
+   * Forces this manager's offline session into offline mode (or releases it)
+   * without cutting the real connection. Intended for manual, end-to-end and
+   * support testing of offline flows.
+   *
+   * While forced, the session's network detection reports offline regardless
+   * of `navigator.onLine` / `network.getIsOffline`: fetches are served from
+   * cache, offline-enabled mutations are queued and replay is paused. Passing
+   * `false` hands control back to the real detection, which recovers and
+   * replays like a normal reconnect.
+   *
+   * The flag is persisted per session key in `localStorage`, read
+   * synchronously at boot (the first fetches after a reload are already
+   * offline) and shared with the other tabs of the session. It stays on until
+   * it is turned off. `getOfflineStatus().isForcedOffline` reports it.
+   *
+   * The returned promise resolves once the flag is persisted, so it is safe to
+   * reload right after awaiting it. It resolves to `Result.err(...)` when
+   * there is no active session key or `offlineSession.network` is not
+   * configured.
+   */
+  setForcedOfflineMode: (forced: boolean) => Promise<ResultType<void, Error>>;
   /** Returns the latest aggregated offline status for this manager. */
   getOfflineStatus: () => GlobalOfflineStatus;
   /** Returns the latest aggregated offline entities for this manager. */
@@ -213,6 +236,8 @@ function createDisabledStoreManagerOfflineApi<
     getOfflineRuntimeConfig: () => defaultOfflineRuntimeConfig,
     setOfflineRuntimeConfig: () => Result.ok(undefined),
     resetOfflineRuntimeConfig: () => {},
+    setForcedOfflineMode: () =>
+      Promise.resolve(Result.err(createForcedOfflineModeUnavailableError())),
     getOfflineStatus,
     getOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     getOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
@@ -322,6 +347,11 @@ export function createStoreManager<
         resetOfflineRuntimeConfig: () => {
           resolvedOfflineSession.resetOfflineRuntimeConfig();
         },
+        setForcedOfflineMode: (forced: boolean) =>
+          resultify(
+            () => resolvedOfflineSession.setForcedOfflineMode(forced),
+            normalizeStoreManagerOfflineError,
+          ),
         getOfflineStatus: () => resolvedOfflineSession.getOfflineStatus(),
         getOfflineEntities: () => resolvedOfflineSession.getOfflineEntities(),
         getOfflineResolutions: () =>

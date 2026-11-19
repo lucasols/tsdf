@@ -11,10 +11,10 @@ import {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
 } from '../../src/main';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createServerTableMock } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const todoSchema = rc_object({ title: rc_string, completed: rc_boolean });
 const todoPayloadSchema = rc_string;

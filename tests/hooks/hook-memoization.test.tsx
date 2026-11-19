@@ -18,6 +18,7 @@ import type {
   DefineOfflineOperation,
 } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -37,7 +38,6 @@ import {
   listQueryQueryPayloadSchema,
 } from '../offline/offlineTestShared';
 import { flushAllTimers, range } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 
 beforeAll(() => {
   vi.useFakeTimers();
