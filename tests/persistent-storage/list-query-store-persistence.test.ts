@@ -874,7 +874,139 @@ describe('localStorage: list query store persistence', () => {
     ).toBe('*');
   });
 
-  test('a failed mutation rollback keeps a concurrent invalidation in state and in the persisted snapshot', async () => {
+  test('items invalidated before a reload are still shown from cache, including fields the server omitted', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-partial-invalidated-before-reload';
+    const sessionKey = 'sess1';
+    const requestedFields = ['id', 'name', 'email'];
+
+    // The server row has no `email`: the request loads the field, but the
+    // item snapshot does not carry it, so `inferFields` cannot vouch for it —
+    // only the loaded-fields metadata can.
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Cached' }] },
+    });
+
+    const { unmount } = renderHook(() => {
+      writerEnv.apiStore.useListQuery(usersQuery, { fields: requestedFields });
+    });
+    await flushAllTimers();
+    unmount();
+
+    // Everything gets invalidated (e.g. a realtime reconnect) and the tab is
+    // closed before any refetch: the invalidation must not erase which fields
+    // the persisted snapshot holds.
+    act(() => {
+      writerEnv.apiStore.invalidateQueryAndItems({
+        all: true,
+        type: 'realtimeUpdate',
+      });
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      getParsedLocalStorageValue(
+        itemStorageKey(storeName, sessionKey, 'users', 1),
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Cached' }
+      lf: ['email', 'id', 'name']
+      p: 'users||1'
+    `);
+
+    // After the reload the server cannot be reached (offline), so the cache
+    // is all the UI has.
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
+    readerEnv.serverTable.setNextListFetchError('offline');
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        fields: requestedFields,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+    await flushAllTimers();
+
+    // The cached row is visible from the first render and stays visible when
+    // the revalidation fails, instead of an endless loading state with no rows.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: error ⋅ names: [Cached]
+      "
+    `);
+  });
+
+  test("a fully-loaded ('*') item invalidated before a reload still satisfies a full read from cache", async () => {
+    const itemPayload = rawItemPayload('users', 1);
+    const storeName = 'lq-full-star-invalidated-before-reload';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Cached' }] },
+    });
+
+    writerEnv.apiStore.scheduleItemFetch('highPriority', itemPayload, {
+      fields: '*',
+    });
+    await flushAllTimers();
+
+    // The complete item is invalidated and the tab is closed before a refetch.
+    act(() => {
+      writerEnv.apiStore.invalidateItem(itemPayload, 'realtimeUpdate');
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
+    readerEnv.serverTable.setNextFetchError(itemPayload, 'offline');
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: '*',
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+    await flushAllTimers();
+
+    // The restored snapshot is still a complete item: it is shown right away
+    // and kept while the revalidation cannot reach the server.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      -> status: refetching ⋅ name: Cached
+      -> status: error ⋅ name: Cached
+      "
+    `);
+  });
+
+  test('a failed mutation rollback keeps a concurrent invalidation in state and the snapshot fields in storage', async () => {
     const itemPayload = rawItemPayload('users', 1);
     const storeName = 'lq-rollback-loaded-fields';
     const sessionKey = 'sess1';
@@ -930,7 +1062,9 @@ describe('localStorage: list query store persistence', () => {
       env.apiStore.invalidateItem(itemPayload);
     });
 
-    // A regular flush runs mid-mutation and persists the transient `lf: []`.
+    // A regular flush runs mid-mutation. The invalidation only marks the item
+    // as stale: the persisted entry keeps listing the fields its snapshot
+    // holds, so the cache stays usable if the tab is reloaded right now.
     await advanceTime(1100);
     expect(
       getParsedLocalStorageValue(
@@ -938,7 +1072,7 @@ describe('localStorage: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       d: { id: 1, name: 'Optimistic' }
-      lf: []
+      lf: ['id', 'name']
       p: 'users||1'
     `);
 
@@ -953,8 +1087,9 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    // The follow-up flush persists the reverted data with the invalidation's
-    // loaded fields, matching the state
+    // The invalidation is still pending in state (nothing was refetched), and
+    // the follow-up flush persists the reverted data with the fields the
+    // snapshot holds.
     expect(
       env.store.state.itemLoadedFields[storeItemKey('users', 1)],
     ).toMatchInlineSnapshot(`[]`);
@@ -964,7 +1099,7 @@ describe('localStorage: list query store persistence', () => {
       ),
     ).toMatchInlineSnapshot(`
       d: { id: 1, name: 'Client draft' }
-      lf: []
+      lf: ['id', 'name']
       p: 'users||1'
     `);
   });
