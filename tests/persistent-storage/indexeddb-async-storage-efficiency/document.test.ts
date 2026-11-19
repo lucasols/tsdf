@@ -2,13 +2,17 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { DOCUMENT_PERSISTED_ENTRY_KEY } from '../../../src/persistentStorage/documentEntryKey';
-import { advanceTime } from '../../utils/genericTestUtils';
+import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
+import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
   getIndexedDbStructureSnapshot,
   getParsedIndexedDbRecordData,
   startIndexedDbPersistentStorageOperationCapture,
+  startPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
 import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
+import { getLocalStorageTree } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
   createDocumentEnv,
@@ -18,6 +22,8 @@ import {
   settleIndexedDbStorageWithoutTimers,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
+  waitForScheduledCleanup,
+  wrappedDocumentSchema,
 } from './shared';
 
 setupAsyncStorageEfficiencyTestSuite();
@@ -565,5 +571,105 @@ describe('indexeddb async storage efficiency: document', () => {
         i: '["sess1","doc-offline-marker-flow","d"]'
         o: 1
       `);
+  });
+
+  test('localStorage entries left by the previous local-sync adapter are removed once the document persists to IndexedDB', async () => {
+    const storeName = 'doc-moved-from-local-sync';
+    const sessionKey = 'sess1';
+    const mockAdapter = createIndexedDbPersistentStorageTestStore();
+
+    // Previous app version: the same store persisted through `local-sync`.
+    const previousEnv = createDocumentStoreTestEnv(
+      { name: 'Cached document', value: 7 },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: wrappedDocumentSchema,
+        },
+      },
+    );
+    const previousHook = renderHook(() => previousEnv.apiStore.useDocument());
+    await flushAllTimers();
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.34 kb)
+      ├ _m (0.17 kb)
+      │ ├ g (0.04 kb)
+      │ └ r.s:sess1.doc-moved-from-local-sync.m (0.13 kb)
+      └ sess1.doc-moved-from-local-sync (0.16 kb)"
+    `);
+
+    // The tab is closed and the next app version, which moved the store to
+    // IndexedDB, boots from persisted storage only.
+    previousHook.unmount();
+    previousEnv.apiStore.dispose();
+    resetExpirationScanTracking();
+
+    const localStorageCapture = startPersistentStorageOperationCapture();
+    const env = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'Cached document', value: 7 },
+    });
+    const hook = renderHook(() => env.apiStore.useDocument());
+    // The leftovers cleanup is scheduled for idle time (2s timer fallback).
+    await advanceTime(2100);
+
+    // Startup pays a single manifest read to notice the leftovers. The idle
+    // cleanup then confirms no offline work is queued (`oq`, `oc`) and removes
+    // only this store's keys; the final key scan looks for list-query entries,
+    // which have no manifest.
+    expect(localStorageCapture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-moved-from-local-sync.m
+           |    └ (namespace index) | 0.06 kb
+           ·
+      2s   | 📖 #2 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.oq.m
+           |    └ (namespace index)
+      .    | 📖 #3 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.oc.m
+           |    └ (namespace index)
+      .    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-moved-from-local-sync.m
+           |    └ (namespace index) | 0.06 kb
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.doc-moved-from-local-sync (entry data)
+      .    | 🗑️ #1 ✅->❌ tsdf._m.r.s:sess1.doc-moved-from-local-sync.m
+           |    └ (namespace index)
+      .    | 📖 #5 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.ci.m
+           |    └ (namespace index)
+      .    | 📖 #6 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.li.m
+           |    └ (items index)
+      .    | 📖 #7 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.oe.m
+           |    └ (namespace index)
+      .    | 🔑[0] #8 ✅ tsdf._m.g (global maintenance)
+      "
+    `);
+
+    // Let the refetched document reach IndexedDB.
+    await flushInvalidationPersistence();
+    await waitForScheduledCleanup();
+
+    // Only maintenance bookkeeping is left in localStorage.
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.10 kb)
+      ├ _am.g (0.05 kb)
+      └ _m.g (0.05 kb)"
+    `);
+
+    // The document was refetched and now lives in IndexedDB only.
+    expect(hook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 7 }`,
+    );
+    const persistedRow = await getParsedIndexedDbRecordData<{ d: unknown }>(
+      mockAdapter,
+      {
+        key: [sessionKey, storeName, 'document', DOCUMENT_PERSISTED_ENTRY_KEY],
+        storeName: 'entries',
+      },
+    );
+    expect(persistedRow?.d).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 7 }`,
+    );
   });
 });
