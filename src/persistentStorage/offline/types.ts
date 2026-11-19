@@ -157,6 +157,14 @@ export type OfflineFailureContext = {
   operationName?: string;
   /** Session key used by browser tab and persistence scoping. */
   sessionKey: string;
+  /**
+   * Set when replaying `operationName` (`phase: 'sync'`) failed while
+   * resolving one of its `dependsOnUploads` uploads: the id of that upload.
+   * The error is then the one thrown by the session `upload` transport, and
+   * the operation's `execute` was not called. `undefined` for every failure
+   * that did not come from a dependency upload.
+   */
+  uploadId?: string;
 };
 
 /** Re-check strategy for recovery probing. Omitted fields use built-in defaults (which differ between network and outage modes). */
@@ -240,6 +248,10 @@ export type OfflineSessionConfig<
    * `network` activates network offline handling for future operations only
    * when `network.enabled` is true. Existing offline recovery may keep using
    * classifications until already-active work finishes recovering.
+   *
+   * Failures of the `uploads.upload` transport during replay are classified
+   * here too, with `ctx.uploadId` set: `outage` / `network` keep the upload
+   * `pending` and the dependent operation queued until the session recovers.
    */
   classifyFailure?: (
     error: unknown,
@@ -254,6 +266,11 @@ export type OfflineSessionConfig<
    * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
    * conflict checks can run before the mutation is promoted to manual
    * resolution.
+   *
+   * When `ctx.uploadId` is set the failure came from a dependency upload and
+   * the mutation was not sent: return `true` to run the upload again on the
+   * `replayRetry` cadence, or `false` for a permanent failure (file rejected),
+   * which moves the operation to manual resolution right away.
    */
   classifyRetryableFailure?: (
     error: unknown,
@@ -453,7 +470,10 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   enqueuedAt: number;
   /** Entity references involved in the resolution. */
   entityRefs: OfflineEntityRef[];
-  /** Last replay error snapshot captured before exhaustion. */
+  /**
+   * Last replay error snapshot captured before exhaustion. When a dependency
+   * upload failed permanently, this is the error of the `upload` transport.
+   */
   lastReplayError: { message: string };
   /** Resolution creation timestamp. */
   createdAt: number;
@@ -507,9 +527,16 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for the session. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  /**
+   * Resolves a staged upload id to its latest final ref, uploading first if
+   * needed. Rejects with the error thrown by the `upload` transport, leaving
+   * the upload `failed`; the session failure classifiers are not consulted.
+   */
   resolveOfflineUpload: (id: string) => Promise<TUploadRef>;
-  /** Resolves multiple staged upload ids to their latest final refs. */
+  /**
+   * Resolves multiple staged upload ids to their latest final refs. Rejects
+   * with the first transport error, like `resolveOfflineUpload`.
+   */
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<Record<string, TUploadRef>>;

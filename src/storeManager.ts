@@ -101,9 +101,23 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for this manager. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  /**
+   * Resolves a staged upload id to its latest final ref, uploading first if
+   * needed.
+   *
+   * When the `upload` transport fails, the result is `Result.err` with the
+   * transport error and the upload becomes `failed` with `lastError` set. The
+   * session failure classifiers are not consulted and nothing is retried
+   * automatically: call it again to run the upload again.
+   */
   resolveOfflineUpload: (id: string) => Promise<ResultType<TUploadRef, Error>>;
-  /** Resolves multiple staged upload ids to their latest final refs. */
+  /**
+   * Resolves multiple staged upload ids to their latest final refs.
+   *
+   * Fails as a whole with the first transport error, following the same rules
+   * as `resolveOfflineUpload`. Uploads that already succeeded stay `uploaded`
+   * and are not sent again by a later call.
+   */
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;

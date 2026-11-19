@@ -40,6 +40,7 @@ import {
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
+  type OfflineFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
   type OfflineMutationInput,
@@ -1891,29 +1892,21 @@ export function createOfflineStoreController<
     current: ActiveSessionState;
     entry: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
-      | 'input'
-      | 'createdAt'
-      | 'updatedAt'
-      | 'attachedUploadIds'
-      | 'dependencyUploadIds'
+      'input' | 'createdAt' | 'updatedAt' | 'attachedUploadIds'
     >;
+    resolvedRefsById: Record<string, ValidPayload>;
   }) {
-    const [fileEntries, resolvedRefsById] = await Promise.all([
-      Promise.all(
-        Object.entries(args.entry.attachedUploadIds ?? {}).map(
-          async ([uploadId, storedUploadId]) => {
-            const file = await args.current.session.loadUpload(storedUploadId);
-            if (!file) {
-              throw new Error(`Missing offline upload "${storedUploadId}"`);
-            }
-            return [uploadId, file] as const;
-          },
-        ),
+    const fileEntries = await Promise.all(
+      Object.entries(args.entry.attachedUploadIds ?? {}).map(
+        async ([uploadId, storedUploadId]) => {
+          const file = await args.current.session.loadUpload(storedUploadId);
+          if (!file) {
+            throw new Error(`Missing offline upload "${storedUploadId}"`);
+          }
+          return [uploadId, file] as const;
+        },
       ),
-      args.current.session.resolveUploadIds(
-        args.entry.dependencyUploadIds ?? [],
-      ),
-    ]);
+    );
     const filesById: Record<string, File> = Object.fromEntries(fileEntries);
 
     return {
@@ -1922,7 +1915,7 @@ export function createOfflineStoreController<
         enqueuedAt: args.entry.createdAt,
         updatedAt: args.entry.updatedAt,
       }),
-      uploads: { filesById, resolvedRefsById },
+      uploads: { filesById, resolvedRefsById: args.resolvedRefsById },
     };
   }
 
@@ -3110,6 +3103,9 @@ export function createOfflineStoreController<
         lastAttemptAt: Date.now(),
       };
       await persistEntry(entryToUse, current);
+      // Set when the replay failed while resolving a dependency upload, which
+      // means `execute` was never called for this attempt.
+      let failedUploadId: string | undefined;
 
       try {
         const shouldPrepareReplayCheckCtx = Boolean(
@@ -3178,13 +3174,27 @@ export function createOfflineStoreController<
           continue;
         }
 
+        const dependencyUploads = await current.session.resolveReplayUploadIds(
+          entryToUse.dependencyUploadIds ?? [],
+        );
+        if (dependencyUploads.failedUploadId !== undefined) {
+          failedUploadId = dependencyUploads.failedUploadId;
+          throw dependencyUploads.error;
+        }
+
         // WORKAROUND: The shared replay builder returns the runtime upload-ref
         // shape, and each operation rebinds that same value to its own
         // compile-time execute-context generic at the call boundary.
         const executeContext = __LEGIT_CAST__<
           Parameters<typeof operation.execute>[0],
           Awaited<ReturnType<typeof buildOperationExecuteContext>>
-        >(await buildOperationExecuteContext({ current, entry: entryToUse }));
+        >(
+          await buildOperationExecuteContext({
+            current,
+            entry: entryToUse,
+            resolvedRefsById: dependencyUploads.refs,
+          }),
+        );
         const result = await operation.execute(executeContext);
 
         if (entryToUse.tempIds) {
@@ -3212,21 +3222,22 @@ export function createOfflineStoreController<
         refreshDerivedState(current);
       } catch (error) {
         const lastError = { message: unknownToError(error).message };
-        const classification = await current.session.classifyFailure(error, {
+        const failureCtx: OfflineFailureContext = {
           phase: 'sync',
           storeType,
           operationName: entryToUse.operation,
           sessionKey: current.sessionKey,
-        });
+        };
+        if (failedUploadId !== undefined) failureCtx.uploadId = failedUploadId;
+
+        const classification = await current.session.classifyFailure(
+          error,
+          failureCtx,
+        );
         const allowReplayRetry =
           classification === 'ignore' &&
           !current.session.getStatus().isOfflineMode
-            ? await current.session.classifyRetriableFailure(error, {
-                phase: 'sync',
-                storeType,
-                operationName: entryToUse.operation,
-                sessionKey: current.sessionKey,
-              })
+            ? await current.session.classifyRetriableFailure(error, failureCtx)
             : false;
 
         if (
@@ -3266,7 +3277,19 @@ export function createOfflineStoreController<
           allowReplayRetry,
         };
 
-        if (allowReplayRetry && nextFailures >= replayRetryMaxFailures) {
+        const retriesExhausted =
+          allowReplayRetry && nextFailures >= replayRetryMaxFailures;
+        // `execute` never ran when a dependency upload failed, so there is
+        // nothing to confirm with the server: a failure that is not retried
+        // automatically skips `needs-confirmation` and goes straight to manual
+        // resolution.
+        const uploadWillNotBeRetried =
+          failedUploadId !== undefined && !allowReplayRetry;
+
+        if (retriesExhausted || uploadWillNotBeRetried) {
+          if (failedUploadId !== undefined) {
+            await current.session.markUploadFailed(failedUploadId);
+          }
           await persistManualResolutionChain({
             current,
             parentEntry: entryToUse,
@@ -3276,6 +3299,10 @@ export function createOfflineStoreController<
               lastError,
             ),
           });
+          // Same as when a `needs-confirmation` entry is promoted to manual
+          // resolution: the session is healthy, so the rest of the queue
+          // keeps replaying.
+          if (uploadWillNotBeRetried) continue;
           return;
         }
 

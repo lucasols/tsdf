@@ -1074,6 +1074,49 @@ class SessionOfflineCoordinator {
     return Object.fromEntries(entries);
   }
 
+  /**
+   * Resolves the dependency uploads of a replaying operation. A failure is
+   * returned with the id of the upload that caused it instead of thrown, and
+   * leaves that upload `pending`: replay classifies the failure first and
+   * calls `markUploadFailed` only when it gives up on the operation.
+   */
+  async resolveReplayUploadIds(
+    uploadIds: readonly string[],
+  ): Promise<
+    | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
+    | { failedUploadId: string; error: unknown }
+  > {
+    const refs: Record<string, ValidPayload> = {};
+    const failures: { failedUploadId: string; error: unknown }[] = [];
+
+    // Rethrowing settles `Promise.all` on the first failure, so it is reported
+    // without waiting for the uploads that are still running.
+    await Promise.all(
+      uploadIds.map(async (id) => {
+        try {
+          refs[id] = await this.#ensureUploadResolved(id, true);
+        } catch (error) {
+          failures.push({ failedUploadId: id, error });
+          throw error;
+        }
+      }),
+    ).catch(() => {});
+
+    return failures[0] ?? { refs };
+  }
+
+  /**
+   * Marks a dependency upload as `failed` after replay moved the operation
+   * that depends on it to manual resolution. Uploads that are no longer
+   * waiting on a failure (restarted or uploaded meanwhile) are left untouched.
+   */
+  async markUploadFailed(id: string): Promise<void> {
+    const record = this.#uploads.get(id);
+    if (record?.state !== 'pending' || !record.lastError) return;
+
+    await this.#updateUploadState({ id, state: 'failed' });
+  }
+
   isLeader(): boolean {
     return this.#browserTabs.priority.getPriorityRank() <= 1;
   }
@@ -1732,7 +1775,7 @@ class SessionOfflineCoordinator {
       lastError?: { message: string };
     },
   ): OfflineStoredUploadRecord {
-    return {
+    const nextRecord: OfflineStoredUploadRecord = {
       ...current,
       state: args.state,
       updatedAt: Date.now(),
@@ -1742,6 +1785,11 @@ class SessionOfflineCoordinator {
       ...(args.progress !== undefined ? { progress: args.progress } : {}),
       ...(args.lastError !== undefined ? { lastError: args.lastError } : {}),
     };
+
+    // A successful upload no longer reports the failure of earlier attempts.
+    if (args.state === 'uploaded') delete nextRecord.lastError;
+
+    return nextRecord;
   }
 
   async #updateUploadState(args: {
@@ -1767,7 +1815,14 @@ class SessionOfflineCoordinator {
     return nextRecord;
   }
 
-  async #ensureUploadResolved(id: string): Promise<ValidPayload> {
+  async #ensureUploadResolved(
+    id: string,
+    /**
+     * Replay decides what a transport failure means after classifying it, so
+     * the upload keeps waiting (`pending`) instead of becoming `failed` here.
+     */
+    forReplay = false,
+  ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
       throw new Error(`Unknown offline upload "${id}"`);
@@ -1843,7 +1898,7 @@ class SessionOfflineCoordinator {
         } catch (error) {
           await this.#updateUploadState({
             id,
-            state: 'failed',
+            state: forReplay ? 'pending' : 'failed',
             lastError: {
               message: error instanceof Error ? error.message : 'Upload failed',
             },
