@@ -1086,7 +1086,9 @@ export function createOfflineStoreController<
     operationName: TName,
     conflict: unknown,
   ): ParsedOfflineResolutionConflictResultForOperation<TOperations, TName> {
-    const operation = operations[operationName];
+    // Looked up by the untyped name, the operation may not be registered.
+    const registeredName: string = operationName;
+    const operation = operations[registeredName];
     if (!operation) {
       return Result.err(
         new OfflineResolutionConflictParseError({
@@ -2595,7 +2597,7 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     args: InternalQueuedMutationArgs<TName>,
   ): PreparedQueuedMutation {
-    const operationName = String(args.operation);
+    const operationName: string = args.operation;
     const operation = operations[operationName];
     if (!operation) {
       throw new Error(
@@ -3450,7 +3452,9 @@ export function createOfflineStoreController<
       );
     }
 
-    const operation = operations[operationName];
+    // Looked up by the untyped name, the operation may not be registered.
+    const registeredName: string = operationName;
+    const operation = operations[registeredName];
     if (!operation) {
       await removeResolution(resolutionId, current);
       return;
