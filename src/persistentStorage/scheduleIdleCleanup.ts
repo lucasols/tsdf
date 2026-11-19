@@ -36,7 +36,7 @@ function normalizeIdleDeadline(
 export function scheduleIdleCleanup(
   callback: (deadline: IdleCleanupDeadline) => void,
 ): () => void {
-  // eslint-disable-next-line @ls-stack/improved-no-unnecessary-condition -- allow runtime existence check
+  // fast-lint-disable-next-line improved-no-unnecessary-condition -- allow runtime existence check
   if (typeof requestIdleCallback === 'function') {
     const idleCallbackId = requestIdleCallback(
       (deadline) => callback(normalizeIdleDeadline(deadline)),
@@ -121,7 +121,7 @@ export const INITIAL_MAINTENANCE_CLEANUP_DELAY_MS = 10_000;
 export function scheduleInitialMaintenanceCleanup(
   callback: () => void,
 ): () => void {
-  // eslint-disable-next-line @ls-stack/improved-no-unnecessary-condition -- allow runtime existence check
+  // fast-lint-disable-next-line improved-no-unnecessary-condition -- allow runtime existence check
   if (typeof requestIdleCallback !== 'function') {
     const timeoutId = setTimeout(
       callback,
