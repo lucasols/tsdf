@@ -1,7 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_array, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
@@ -25,6 +25,10 @@ import {
   getParsedOpfsFileData,
 } from '../utils/persistentStorageOptimizationTestUtils';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
+import {
+  getOfflineQueueEntries,
+  getOfflineQueueEntryData,
+} from './offlineReplayTestShared';
 import { docSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -1046,6 +1050,158 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
       'tsdf-uploads/offline-upload-dependency-session/asset-1/metadata.json',
     ),
   ).toMatchInlineSnapshot(`null`);
+
+  uploadHook.unmount();
+});
+
+type AccumulatedAttachmentsOperations = {
+  setAttachments: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { attachmentIds: string[]; value: number } }
+  >;
+};
+
+test('offline edits merged into one queued mutation upload the files added by every edit before replaying', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-accumulation-session';
+  const replayEvents: string[] = [];
+
+  network.setOffline();
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id }) => {
+          replayEvents.push(`upload-start:${id}`);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          replayEvents.push(`upload-finish:${id}`);
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<
+    number,
+    AccumulatedAttachmentsOperations
+  >(1, {
+    id: 'offline-upload-accumulation-doc',
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          setAttachments: {
+            inputSchema: rc_object({
+              attachmentIds: rc_array(rc_string),
+              value: rc_number,
+            }),
+            kind: 'update',
+            dependsOnUploads: ({ input }) => input.attachmentIds,
+            // Queued edits of the document are merged into a single entry:
+            // files accumulate, the latest value wins.
+            accumulation: {
+              mergeInput: ({ existingInput, incomingInput }) => ({
+                attachmentIds: [
+                  ...existingInput.attachmentIds,
+                  ...incomingInput.attachmentIds,
+                ],
+                value: incomingInput.value,
+              }),
+            },
+            execute: async (ctx) => {
+              replayEvents.push(
+                `execute:${ctx.input.attachmentIds
+                  .map((id) => String(ctx.uploads.resolvedRefsById[id]))
+                  .join(',')}`,
+              );
+              await env.serverMock.delayedSetData(ctx.input.value);
+              return { value: ctx.input.value };
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const uploadHook = renderHook(() => storeManager.useOfflineUploads());
+  await flushAllTimers();
+
+  async function attachFileOffline(uploadId: string, value: number) {
+    (
+      await resolveAfterAllTimers(
+        storeManager.saveOfflineUpload({
+          id: uploadId,
+          file: new File([`body of ${uploadId}`], `${uploadId}.txt`, {
+            type: 'text/plain',
+            lastModified: 1,
+          }),
+        }),
+      )
+    ).unwrap();
+
+    await resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = value;
+          });
+        },
+        mutation: () => Promise.resolve({ value }),
+        offline: {
+          operation: 'setAttachments',
+          input: { attachmentIds: [uploadId], value },
+        },
+      }),
+    );
+  }
+
+  // Two offline edits, each adding one file. They are merged into one queued
+  // mutation whose input references both files.
+  await attachFileOffline('file-1', 2);
+  await attachFileOffline('file-2', 3);
+
+  expect(
+    getOfflineQueueEntries(sessionKey, 'offline-upload-accumulation-doc').map(
+      (entry) => getOfflineQueueEntryData(entry).input,
+    ),
+  ).toMatchInlineSnapshot(`
+    - attachmentIds: ['file-1', 'file-2']
+      value: 3
+  `);
+
+  // Reconnect: both files must be uploaded before the merged mutation runs,
+  // and it must receive the server ref of each one (not the local upload id).
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+
+  expect(replayEvents).toMatchInlineSnapshot(`
+    - 'upload-start:file-1'
+    - 'upload-start:file-2'
+    - 'upload-finish:file-1'
+    - 'upload-finish:file-2'
+    - 'execute:server:file-1,server:file-2'
+  `);
+  // Both staged uploads were consumed by the replay.
+  expect(uploadHook.result.current).toMatchInlineSnapshot(`[]`);
 
   uploadHook.unmount();
 });
