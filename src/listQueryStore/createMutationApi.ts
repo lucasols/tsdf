@@ -1362,18 +1362,20 @@ export function createMutationApi<
                   continue;
                 }
 
-                if (getItemIndex() !== -1) continue;
+                // Existing members skip the insertion but still reach the sort
+                // block below, their sort values may have changed.
+                if (getItemIndex() === -1) {
+                  if (invalidateQueries) {
+                    queriesToInvalidate.set(queryKey, payload);
+                  }
 
-                if (invalidateQueries) {
-                  queriesToInvalidate.set(queryKey, payload);
+                  if (appendNewTo === 'end') {
+                    queryState.items.push(itemKey);
+                  } else {
+                    queryState.items.unshift(itemKey);
+                  }
+                  changedQueryKeys.add(queryKey);
                 }
-
-                if (appendNewTo === 'end') {
-                  queryState.items.push(itemKey);
-                } else {
-                  queryState.items.unshift(itemKey);
-                }
-                changedQueryKeys.add(queryKey);
               } else {
                 if (!queryState) continue;
 
@@ -1400,6 +1402,10 @@ export function createMutationApi<
               if (!queryHasItem) continue;
 
               captureAndLockOptimisticMutationQuery(queryKey);
+
+              if (invalidateQueries) {
+                queriesToInvalidate.set(queryKey, payload);
+              }
 
               queryState.items = sortBy(
                 queryState.items,

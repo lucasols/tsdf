@@ -1,6 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
-import { act } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import {
   createListQueryStoreTestEnv,
@@ -513,6 +513,174 @@ test('optimistically sort items', () => {
       - { age: 34, id: 20, name: 'User 20', type: 'user' }
       - { age: 33, id: 4, name: 'User 4', type: 'user' }
       - { age: 31, id: 2, name: 'User 2', type: 'user' }
+  `);
+});
+
+test('a rule with filterItem and sort keeps the query sorted when its members change', () => {
+  const regularUsersQuery = { tableId: 'users', filters: byTypeFilter('user') };
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: { loaded: { queries: [regularUsersQuery] } },
+    optimisticListUpdates: [
+      {
+        // Membership and order of the query are declared in a single rule
+        queries: regularUsersQuery,
+        filterItem: (user) => user.type === 'user',
+        sort: { sortBy: (user) => user.age, order: 'asc' },
+      },
+    ],
+  });
+
+  const usersOrder = createLoggerStore();
+
+  function logUsersOrder() {
+    const itemKeys = env.apiStore.getQueryState(regularUsersQuery)?.items ?? [];
+
+    usersOrder.add({
+      regularUsers: itemKeys
+        .map((itemKey) => {
+          const user = env.store.state.items[itemKey];
+
+          return user ? `${user.name} (${user.age})` : 'missing';
+        })
+        .join(', '),
+    });
+  }
+
+  // The server returns the query already sorted by age
+  logUsersOrder();
+
+  usersOrder.addMark('the youngest member becomes older than two members');
+  env.apiStore.updateItemState('users||2', (user) => {
+    user.age = 36;
+  });
+  logUsersOrder();
+
+  usersOrder.addMark('a 34-year-old regular user is added');
+  env.apiStore.addItemToState('users||20', {
+    id: 20,
+    name: 'User 20',
+    age: 34,
+    type: 'user',
+  });
+  logUsersOrder();
+
+  usersOrder.addMark('a member is promoted to admin');
+  env.apiStore.updateItemState('users||6', (user) => {
+    user.type = 'admin';
+  });
+  logUsersOrder();
+
+  // - User 2 was already a member and still passes the filter, so it only
+  //   moves to its new sorted position
+  // - User 20 enters the query directly at its sorted position
+  // - User 6 leaves the query and the remaining members keep their order
+  expect(usersOrder.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> regularUsers: User 2 (31), User 4 (33), User 6 (35), User 8 (37), User 10 (39)
+
+    >>> the youngest member becomes older than two members
+
+    -> regularUsers: User 4 (33), User 6 (35), User 2 (36), User 8 (37), User 10 (39)
+
+    >>> a 34-year-old regular user is added
+
+    regularUsers: User 4 (33), User 20 (34), User 6 (35), User 2 (36), User 8 (37), User 10 (39)
+
+    >>> a member is promoted to admin
+
+    -> regularUsers: User 4 (33), User 20 (34), User 2 (36), User 8 (37), User 10 (39)
+    "
+  `);
+});
+
+test('a sort rule with invalidateQueries refetches the list once the mutation succeeds', async () => {
+  const regularUsersQuery = { tableId: 'users', filters: byTypeFilter('user') };
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: { loaded: { queries: [regularUsersQuery] } },
+    optimisticListUpdates: [
+      {
+        // The client sorts by age as a best guess, but the server owns the
+        // final order, so the rule asks for a refetch to settle it.
+        queries: regularUsersQuery,
+        sort: { sortBy: (user) => user.age, order: 'asc' },
+        invalidateQueries: true,
+      },
+    ],
+  });
+
+  const renders = createLoggerStore({ arrays: 'all' });
+
+  renderHook(() => {
+    const query = env.apiStore.useListQuery(regularUsersQuery, {
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      users: query.items.map((user) => `${user.name} (${user.age})`),
+    });
+  });
+
+  renders.addMark('User 2 age is changed to 36 with an optimistic update');
+  act(() => {
+    void env.apiStore.performMutation('users||2', {
+      // Only the sort rule can ask for a list refetch in this test
+      revalidateOnSuccess: false,
+      optimisticUpdate: (payload) => {
+        env.apiStore.updateItemState(payload, (user) => {
+          user.age = 36;
+        });
+      },
+      mutation: () =>
+        env.serverTable.delayedUpdateItem('users||2', { age: 36 }),
+    });
+  });
+
+  // The list is re-sorted right away, but the refetch asked by the rule waits
+  // for the mutation: refetching now would bring back the old server data.
+  await advanceTime(1199);
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }),
+  ).toMatchInlineSnapshot(`[]`);
+
+  renders.addMark('the mutation succeeds and the list is refetched');
+  await flushAllTimers();
+  cleanup();
+
+  // The list is refetched a single time after the mutation succeeds
+  expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+    .toMatchInlineSnapshot(`
+    - _type: 'list'
+      payload:
+        fields: '*'
+        filters:
+          - { field: 'type', op: 'eq', value: 'user' }
+        pos: { limit: 50, offset: 0 }
+      returned_items: 5
+  `);
+
+  // The server keeps its own order (by id), which replaces the client guess
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> users: [User 2 (31), User 4 (33), User 6 (35), User 8 (37), User 10 (39)]
+
+    >>> User 2 age is changed to 36 with an optimistic update
+
+    -> users: [User 4 (33), User 6 (35), User 2 (36), User 8 (37), User 10 (39)]
+
+    >>> the mutation succeeds and the list is refetched
+
+    -> users: [User 2 (36), User 4 (33), User 6 (35), User 8 (37), User 10 (39)]
+    "
+  `);
+
+  // The refetch starts right after the mutation finishes at 1.2s
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    1.2s  | server-data-changed (value: {"age":36})
+    1.21s | 🔴 >list-fetch-started
+    2.01s | 🔴 <list-fetch-finished (value: {"count":5})
+    "
   `);
 });
 
