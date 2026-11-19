@@ -294,8 +294,30 @@ export type OptimisticListUpdate<
 > = {
   /** Query payloads, or a predicate over query payloads, affected by this rule. */
   queries: QueryPayload | ((query: QueryPayload) => boolean) | QueryPayload[];
-  /** Restricts this rule to items that should belong in the affected query set. */
-  filterItem?: (item: ItemState) => boolean | null;
+  /**
+   * Decides whether an item belongs in each affected query. Called once per
+   * affected query, so a single rule can decide membership from
+   * `context.queryPayload` instead of needing one rule per query.
+   *
+   * - `true`: the item should be in the query (added if missing)
+   * - `false`: the item should not be in the query (removed if present)
+   * - `null`: keep the membership as is and skip this rule for the query
+   */
+  filterItem?: (
+    item: ItemState,
+    context: {
+      /** Payload of the query being evaluated. */
+      queryPayload: QueryPayload;
+      /** Payload of the item being evaluated. */
+      itemPayload: ItemPayload;
+      /**
+       * Whether the item is in the query's cached list right before this rule
+       * is applied. Computed on first read, so it costs nothing when unused,
+       * and must be read while `filterItem` is running.
+       */
+      isInQuery: boolean;
+    },
+  ) => boolean | null;
   /** Where newly matching items should be inserted in affected query pages. */
   appendNewTo?: 'start' | 'end';
   /**
