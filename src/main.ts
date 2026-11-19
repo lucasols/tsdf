@@ -120,6 +120,8 @@ export type {
   OfflineUploadSource,
   OfflineUploadState,
   OfflineUploadTransportContext,
+  ReplaceOfflineUploadArgs,
+  SaveOfflineUploadArgs,
 } from './persistentStorage/offlineUploadTypes';
 
 export type {

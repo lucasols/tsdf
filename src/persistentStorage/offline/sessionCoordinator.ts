@@ -997,6 +997,7 @@ class SessionOfflineCoordinator {
     id: string;
     file: Blob | File;
     source?: 'manual' | 'mutation';
+    metadata?: ValidPayload;
   }): Promise<void> {
     if (!this.#uploadsConfig) {
       throw new Error(
@@ -1016,12 +1017,17 @@ class SessionOfflineCoordinator {
       undefined,
       undefined,
       this.#getCurrentUploadOnlineSessionStartedAt(),
+      args.metadata,
     );
 
     await this.#saveUploadRecord(nextRecord);
   }
 
-  async replaceUpload(args: { id: string; file: Blob | File }): Promise<void> {
+  async replaceUpload(args: {
+    id: string;
+    file: Blob | File;
+    metadata?: ValidPayload;
+  }): Promise<void> {
     const existing = this.#uploads.get(args.id);
     if (existing?.state === 'uploading') {
       throw new Error(`Cannot replace upload "${args.id}" while uploading`);
@@ -1031,6 +1037,7 @@ class SessionOfflineCoordinator {
       id: args.id,
       file: args.file,
       source: existing?.source ?? 'manual',
+      metadata: args.metadata ?? existing?.metadata,
     });
   }
 
@@ -1781,6 +1788,7 @@ class SessionOfflineCoordinator {
             id,
             sessionKey: this.sessionKey,
             file,
+            metadata: queuedRecord.metadata,
             onProgress: (progress) => {
               void this.#updateUploadState({
                 id,
@@ -2498,15 +2506,15 @@ export function createOfflineSession<
         await coordinator.resolveUploadIds(ids),
       );
     },
-    saveOfflineUpload: ({ id, file }) => {
+    saveOfflineUpload: ({ id, file, metadata }) => {
       const coordinator = getActiveCoordinator();
       if (!coordinator) return Promise.resolve();
-      return coordinator.saveUpload({ id, file, source: 'manual' });
+      return coordinator.saveUpload({ id, file, metadata, source: 'manual' });
     },
-    replaceOfflineUpload: ({ id, file }) => {
+    replaceOfflineUpload: ({ id, file, metadata }) => {
       const coordinator = getActiveCoordinator();
       if (!coordinator) return Promise.resolve();
-      return coordinator.replaceUpload({ id, file });
+      return coordinator.replaceUpload({ id, file, metadata });
     },
     loadOfflineUpload: (id) => {
       const coordinator = getActiveCoordinator();
