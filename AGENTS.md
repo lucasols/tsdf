@@ -27,12 +27,20 @@ pnpm test
 # Run tests for changed files only
 pnpm test:changed
 
-# Full lint (TypeScript check + ESLint + Prettier)
+# Full lint (oxlint with type check + fast-lint + extra type check projects)
 pnpm lint
 
+# oxlint with auto-fix, also reports TypeScript type errors
+pnpm oxlint
+
+# fast-lint with auto-fix, runs the `@ls-stack` rules
+pnpm fast-lint
+
 # Type check only
-pnpm tsc
+pnpm typecheck
 ```
+
+Rules in `oxlint.config.ts` are disabled with `oxlint-disable*` comments, rules in `fast-lint.config.ts` with `fast-lint-disable*` comments.
 
 ### Running a Single Test
 
