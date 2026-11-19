@@ -3110,6 +3110,10 @@ export function setupListQueryPersistence<
           }
           continue;
         }
+        // A loaded query is complete again and is persisted as usual.
+        if (incompleteRestoredQueryKeys.size > 0) {
+          incompleteRestoredQueryKeys.delete(queryKey);
+        }
 
         const filteredItems = query.items.filter((itemKey) => {
           const hasItemInState = Object.hasOwn(state.items, itemKey);
@@ -3436,6 +3440,10 @@ export function setupListQueryPersistence<
 
     for (const [queryKey, query] of queryEntries) {
       if (query.status !== 'success' && !query.wasLoaded) continue;
+      // A loaded query is complete again and is persisted as usual.
+      if (incompleteRestoredQueryKeys.size > 0) {
+        incompleteRestoredQueryKeys.delete(queryKey);
+      }
 
       const filteredItems = query.items.filter((itemKey) => {
         const hasItemInState = Object.hasOwn(state.items, itemKey);
