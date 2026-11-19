@@ -2138,14 +2138,43 @@ class SessionOfflineCoordinator {
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
 
+    // This tab's own detection wins over another tab saying the network is
+    // back: tabs do not get the browser's online event at the same instant,
+    // and replaying on another tab's word would send requests that fail.
+    const isDetectedOffline =
+      this.#isNetworkEnabled() && this.#getCurrentOfflineState() === true;
+
     this.store.setState(
       {
-        status: this.#restampHydratedStatus(message.status, {
-          isLeader: this.isLeader(),
-          updatedAt: Date.now(),
-        }),
-        entities: message.entities,
-        resolutions: message.resolutions,
+        status: this.#restampHydratedStatus(
+          isDetectedOffline
+            ? {
+                ...message.status,
+                network: { ...message.status.network, active: true },
+              }
+            : message.status,
+          { isLeader: this.isLeader(), updatedAt: Date.now() },
+        ),
+        // Stores attached in this tab keep their own records: their queue is
+        // kept in sync with storage, while the other tab's snapshot may have
+        // been taken before it saw this tab's latest change. The snapshot
+        // only fills in stores this tab has not loaded.
+        entities: dedupeById([
+          ...message.entities.filter(
+            (entity) => !this.#storeContributions.has(entity.storeName),
+          ),
+          ...[...this.#storeContributions.values()].flatMap(
+            (contribution) => contribution.entities,
+          ),
+        ]),
+        resolutions: dedupeById([
+          ...message.resolutions.filter(
+            (resolution) => !this.#storeContributions.has(resolution.storeName),
+          ),
+          ...[...this.#storeContributions.values()].flatMap(
+            (contribution) => contribution.resolutions,
+          ),
+        ]),
         uploads: message.uploads,
       },
       { action: 'offline-session-remote' },
