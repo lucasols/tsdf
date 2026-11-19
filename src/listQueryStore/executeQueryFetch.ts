@@ -190,6 +190,11 @@ export async function executeQueryFetch<
       const appendToExisting =
         !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
 
+      // Tracked here instead of being read back from the caught exception: a
+      // chunk failure reaches the `catch` wrapped by the chunk queue, and an
+      // app error may use the `offline` id too.
+      let failedOffline = false;
+
       try {
         // A fetch that replaces the list in offset mode (a load, or a loadMore
         // merged with one) is split into chunks of at most maxInvalidationLimit
@@ -233,6 +238,7 @@ export async function executeQueryFetch<
                 }),
               ).then((result) => {
                 if (!result.ok) {
+                  if (result.offline) failedOffline = true;
                   throw result.offline
                     ? offlineConnectivityError
                     : result.error;
@@ -258,6 +264,7 @@ export async function executeQueryFetch<
               }),
           );
           if (!fetchResult.ok) {
+            if (fetchResult.offline) failedOffline = true;
             throw fetchResult.offline
               ? offlineConnectivityError
               : fetchResult.error;
@@ -303,19 +310,15 @@ export async function executeQueryFetch<
           return;
         }
 
-        const error =
-          exception &&
-          typeof exception === 'object' &&
-          'id' in exception &&
-          exception.id === 'offline'
-            ? offlineConnectivityError
-            : normalizeStoreError(exception, errorNormalizer);
+        const error = failedOffline
+          ? offlineConnectivityError
+          : normalizeStoreError(exception, errorNormalizer);
         store.produceState(
           (draft) => {
             const query = draft.queries[queryKey];
             if (!query) return;
 
-            if (error === offlineConnectivityError && query.wasLoaded) {
+            if (failedOffline && query.wasLoaded) {
               query.status = 'success';
               query.error = null;
             } else {

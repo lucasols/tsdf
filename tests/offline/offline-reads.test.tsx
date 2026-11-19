@@ -1,9 +1,11 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import { isOfflineStoreError, type StoreError } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -14,6 +16,7 @@ import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   flushAllTimers,
   pick,
+  resolveAfterAllTimers,
   waitForScheduledCleanup,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -156,6 +159,161 @@ test('when a document mounts offline with no cached snapshot, it returns the nor
   expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
 });
 
+test('when a document that kept its cached data after a failed refresh refetches offline, the offline error is not shown over the cached data', async () => {
+  const sessionKey = 'offline-read-document-error-then-offline-session';
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+  const renders = createLoggerStore();
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({
+      status: doc.status,
+      data: doc.data,
+      error: doc.error?.id ?? null,
+    });
+  });
+  await flushAllTimers();
+
+  // A refresh fails on the server: the document keeps showing the cached data
+  // together with the server error. This is the state the offline refetch
+  // below starts from.
+  renders.addMark('a refresh fails on the server');
+  env.serverMock.setNextFetchError('Internal server error');
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // The server copy changes while the session is offline, so the recovery
+  // below has something new to bring in.
+  env.serverMock.setData(2);
+
+  // Offline, the refetch cannot be sent. The cached data is all the hook can
+  // return, so it must not be covered by the offline error. (A document
+  // refetched from the error state reports `loading` while the attempt runs,
+  // online or offline.)
+  renders.addMark('offline, the document is refetched');
+  act(() => {
+    network.goOffline();
+  });
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // The refresh that could not run offline is still owed: recovering runs it
+  // without a remount or a manual invalidation.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ data: {value:1} ⋅ error: null
+
+    >>> a refresh fails on the server
+
+    -> status: error ⋅ data: {value:1} ⋅ error: fetch-error
+
+    >>> offline, the document is refetched
+
+    -> status: loading ⋅ data: {value:1} ⋅ error: null
+    -> status: success ⋅ data: {value:1} ⋅ error: null
+
+    >>> back online
+
+    -> status: success ⋅ data: {value:2} ⋅ error: null
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('isOfflineStoreError tells the offline error of a read with nothing cached apart from an app error that uses the same `offline` id', async () => {
+  const sessionKey = 'offline-read-is-offline-store-error-session';
+  network.setOffline();
+
+  // An app whose own error ids collide with TSDF's: its normalizer reports
+  // every server failure with the `offline` id too.
+  const appErrorNormalizer = (exception: Error): StoreError => ({
+    code: 503,
+    id: 'offline',
+    message: exception.message,
+  });
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: appErrorNormalizer,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+  const renders = createLoggerStore();
+
+  // Nothing is cached, so the offline mount can only expose the offline error.
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({
+      status: doc.status,
+      errorId: doc.error?.id ?? null,
+      isOfflineStoreError: isOfflineStoreError(doc.error),
+    });
+  });
+  await flushAllTimers();
+
+  // The `StoreFetchError` of the await APIs is recognised as well.
+  renders.addMark('awaitFetch while offline');
+  const awaitedWhileOffline = await resolveAfterAllTimers(
+    env.apiStore.awaitFetch(),
+  );
+  expect(isOfflineStoreError(awaitedWhileOffline.error)).toBe(true);
+
+  // Back online the server is failing: the fetch is sent this time and the
+  // app's own error comes back, sharing only the `offline` id.
+  renders.addMark('back online, the server is failing');
+  env.serverMock.setNextFetchError('Service unavailable');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ errorId: null ⋅ isOfflineStoreError: ❌
+    -> status: error ⋅ errorId: offline ⋅ isOfflineStoreError: ✅
+
+    >>> awaitFetch while offline
+
+    -> status: loading ⋅ errorId: null ⋅ isOfflineStoreError: ❌
+    -> status: error ⋅ errorId: offline ⋅ isOfflineStoreError: ✅
+
+    >>> back online, the server is failing
+
+    -> status: loading ⋅ errorId: null ⋅ isOfflineStoreError: ❌
+    -> status: error ⋅ errorId: offline ⋅ isOfflineStoreError: ❌
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('when the app starts offline, startup cleanup keeps an expired document cache available for offline reads', async () => {
   // Startup cleanup should not eagerly delete stale document data if that cache
   // is the only snapshot an offline session can still use.
@@ -277,6 +435,125 @@ test('when a loaded collection item refetches while offline, it keeps the last s
   hook.unmount();
 });
 
+test('when cached and uncached collection items are read together offline, only the uncached item shows the offline error and both load after recovering', async () => {
+  const sessionKey = 'offline-collection-mixed-cache-session';
+  const env = createCollectionStoreTestEnv(
+    { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
+    {
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      // Both items are requested in the same batch request, so the offline
+      // failure of that single request has to be split per item.
+      useBatchFetch: true,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: { operations: {} },
+      },
+    },
+  );
+
+  // Only the first user is loaded (and so cached) before going offline.
+  const firstUserHook = renderHook(() => env.apiStore.useItem('users||1'));
+  await flushAllTimers();
+  firstUserHook.unmount();
+
+  env.serverTable.updateItem('users||1', { name: 'Ada L.' });
+
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  const renders = createLoggerStore();
+  const hook = renderHook(() => {
+    const [cachedUser, uncachedUser] = env.apiStore.useMultipleItems([
+      { payload: 'users||1' },
+      { payload: 'users||2' },
+    ]);
+
+    renders.add({
+      cached: `${cachedUser?.status} (${cachedUser?.data?.value.name ?? 'no data'})`,
+      cachedError: cachedUser?.error?.id ?? null,
+      uncached: `${uncachedUser?.status} (${uncachedUser?.data?.value.name ?? 'no data'})`,
+      uncachedError: uncachedUser?.error?.id ?? null,
+    });
+
+    return { cachedUser, uncachedUser };
+  });
+  await flushAllTimers();
+
+  // The offline error of the uncached item is the one the app has to explain.
+  expect({
+    cachedUser: isOfflineStoreError(hook.result.current.cachedUser?.error),
+    uncachedUser: isOfflineStoreError(hook.result.current.uncachedUser?.error),
+  }).toMatchInlineSnapshot(`
+    cachedUser: '❌'
+    uncachedUser: '✅'
+  `);
+
+  // Recovering refetches both without a remount: the uncached item loads and
+  // the cached item, whose refresh could not run offline, gets the server
+  // change.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ cached: success (Ada)
+    ⋅ cachedError: null
+    ⋅ uncached: loading (no data)
+    ⋅ uncachedError: null
+    └─
+    ┌─
+    ⋅ cached: success (Ada)
+    ⋅ cachedError: null
+    ⋅ uncached: error (no data)
+    ⋅ uncachedError: offline
+    └─
+
+    >>> back online
+
+    ┌─
+    ⋅ cached: success (Ada)
+    ⋅ cachedError: null
+    ⋅ uncached: loading (no data)
+    ⋅ uncachedError: null
+    └─
+    ┌─
+    ⋅ cached: success (Ada L.)
+    ⋅ cachedError: null
+    ⋅ uncached: success (Grace)
+    ⋅ uncachedError: null
+    └─
+    "
+  `);
+  // Nothing was sent while offline: the first load, then one batch request
+  // for both items after recovering.
+  expect(env.serverTable.getRequestHistory('all', { includeTime: false }))
+    .toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+      - _type: 'list'
+        payload:
+          fields: '*'
+          itemIds: ['users||1', 'users||2']
+          pos: { offset: 0 }
+        returned_items: 2
+    `);
+
+  hook.unmount();
+});
+
 test('when a loaded list query refetches while offline, it keeps the last successful items as a success state', async () => {
   // This covers the list-query version of the document refetch case above: a
   // failed offline refetch must not blank a previously successful query.
@@ -349,6 +626,124 @@ test('when a loaded list query refetches while offline, it keeps the last succes
     .     | Ada         | success      | scheduled-fetch-triggered
     "
   `);
+
+  hook.unmount();
+});
+
+test('when a loaded offset-paginated list query refetches its pages in chunks while offline, it keeps the loaded pages as a success state', async () => {
+  const sessionKey = 'offline-list-query-chunked-refetch-session';
+  const usersQuery = { tableId: 'users' } as const;
+  const env = createListQueryStoreTestEnv(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+        { id: 3, name: 'Linus' },
+        { id: 4, name: 'Margaret' },
+      ],
+    },
+    {
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      // Pages of 2 and refetches limited to 2 items per request: once two
+      // pages are loaded, a refetch is split into two parallel chunk requests.
+      defaultQuerySize: 2,
+      offsetPagination: { maxInvalidationLimit: 2 },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: {} },
+      },
+    },
+  );
+  const renders = createLoggerStore();
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+
+    renders.add({
+      status: query.status,
+      items: query.items.join(', '),
+      error: query.error?.id ?? null,
+    });
+  });
+  await flushAllTimers();
+
+  // Load the second page, so the list holds more items than a single refetch
+  // request may ask for.
+  act(() => {
+    env.apiStore.loadMore(usersQuery);
+  });
+  await flushAllTimers();
+
+  env.serverTable.updateItem('users||1', { name: 'Ada L.' });
+
+  // The chunked refetch cannot be sent offline: the loaded pages stay visible
+  // without an error, like a refetch sent as a single request.
+  renders.addMark('offline, the list is refetched');
+  act(() => {
+    network.goOffline();
+  });
+  env.scheduleFetch('highPriority', usersQuery);
+  await flushAllTimers();
+
+  // The refetch is still owed and runs by itself after recovering.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ items: '' ⋅ error: null
+    -> status: success ⋅ items: Ada, Grace ⋅ error: null
+    -> status: loadingMore ⋅ items: Ada, Grace ⋅ error: null
+    -> status: success ⋅ items: Ada, Grace, Linus, Margaret ⋅ error: null
+
+    >>> offline, the list is refetched
+
+    -> status: success ⋅ items: Ada, Grace, Linus, Margaret ⋅ error: null
+
+    >>> back online
+
+    -> status: success ⋅ items: Ada, Grace, Linus, Margaret ⋅ error: null
+    -> status: success ⋅ items: Ada L., Grace, Linus, Margaret ⋅ error: null
+    "
+  `);
+  // Two page loads, nothing while offline, then the two chunks of the
+  // recovery refetch.
+  expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+    .toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 2, offset: 2 }
+        returned_items: 2
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 2, offset: 2 }
+        returned_items: 2
+    `);
 
   hook.unmount();
 });

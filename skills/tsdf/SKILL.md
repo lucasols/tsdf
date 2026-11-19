@@ -226,6 +226,8 @@ Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`
 
 Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query).
 
+Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
+
 Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
 
 Recovery: while offline, `onTransportReconnect()` and focus revalidations are ignored; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities are still pending.

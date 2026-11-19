@@ -107,6 +107,33 @@ When the online mutation succeeds, the result value is `{ kind: 'online', data }
 
 A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them and then be overwritten, so it joins the queue and is replayed in the order the user made the changes.
 
+## Reading While Offline
+
+While the session is in offline mode, fetches are not sent to the server. What a document, item or query reports depends on whether it has data to return:
+
+- **Cached data** (loaded earlier, or restored from persistent storage): the cached data stays visible with `status: 'success'` and `error: null`. A refetch attempted offline leaves it that way, so there is no offline error to hide in the UI.
+- **Nothing cached**: the read fails with `status: 'error'` and the offline error `{ code: 0, id: 'offline', message: 'Offline' }`. This is the only offline state the app has to explain to the user.
+
+Use `isOfflineStoreError(error)` to recognise that error instead of comparing `error.id` by hand. It matches the whole error shape, so an app error whose `errorNormalizer` also uses the `'offline'` id is not mistaken for it, and it narrows the error to the exported `OfflineStoreError` type:
+
+```tsx
+import { isOfflineStoreError } from 'tsdf';
+
+function UserName({ id }: { id: number }) {
+  const { data, error, isLoading } = userStore.useItem({ id });
+
+  if (isLoading) return <Spinner />;
+  if (isOfflineStoreError(error)) return <NotAvailableOffline />;
+  if (error) return <ErrorMessage error={error} />;
+
+  return <span>{data?.name}</span>;
+}
+```
+
+It also accepts the `StoreFetchError` returned by the `awaitFetch` methods, which resolve with the cached data while offline and with the offline error only when nothing is cached.
+
+Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
+
 ## Revalidation After Recovering
 
 While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations are ignored, and cached data stays visible.
