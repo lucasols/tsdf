@@ -1,5 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { act } from '@testing-library/react';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import {
   createListQueryStoreTestEnv,
@@ -7,6 +8,7 @@ import {
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import type { FilterOperator } from '../mocks/serverTableMock';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
 
@@ -66,6 +68,45 @@ function getQueryItems(
   return queriesRelatedToItem.map((item) =>
     item.query.items.map((itemKey) => env.store.state.items[itemKey]),
   );
+}
+
+/**
+ * Client-side copy of the server filters, like an app would write to decide
+ * list membership from the payload of the query being evaluated.
+ *
+ * Returns `null` for filters the client cannot evaluate from the item data.
+ */
+function userMatchesFilter(
+  user: UserRow,
+  filter: FilterOperator,
+): boolean | null {
+  if (filter.op === 'eq' && filter.field === 'type') {
+    return user.type === filter.value;
+  }
+
+  if (filter.op === 'range' && filter.field === 'age') {
+    return user.age >= filter.min && user.age <= filter.max;
+  }
+
+  return null;
+}
+
+/** Lists the item payloads of each query, in query order. */
+function getQueriesMembership(
+  env: ReturnType<typeof createListQueryStoreTestEnv<UserRow>>,
+  queries: Record<string, ListQueryParams>,
+) {
+  const membership: Record<string, string> = {};
+
+  for (const [label, query] of Object.entries(queries)) {
+    const itemKeys = env.apiStore.getQueryState(query)?.items ?? [];
+
+    membership[label] = itemKeys
+      .map((itemKey) => env.store.state.itemQueries[itemKey]?.payload)
+      .join(', ');
+  }
+
+  return membership;
 }
 
 test('filter items optimistically to queries', () => {
@@ -140,6 +181,220 @@ test('filter items optimistically to queries', () => {
         tableId: 'users'
       querySize: 6
       refetchOnMount: 'highPriority'
+  `);
+});
+
+test('a single rule decides the membership of each query from the query payload', () => {
+  const queries = {
+    admins: { tableId: 'users', filters: byTypeFilter('admin') },
+    regularUsers: { tableId: 'users', filters: byTypeFilter('user') },
+    usersAged20To30: { tableId: 'users', filters: byAgeRangeFilter(20, 30) },
+    regularUsersAged30To35: {
+      tableId: 'users',
+      filters: [...byTypeFilter('user'), ...byAgeRangeFilter(30, 35)],
+    },
+    regularGuests: { tableId: 'guests', filters: byTypeFilter('user') },
+  } satisfies Record<string, ListQueryParams>;
+
+  const env = createListQueryStoreTestEnv<UserRow>(
+    {
+      ...initialServerData,
+      guests: [
+        { id: 1, name: 'Guest 1', age: 25, type: 'user' },
+        { id: 2, name: 'Guest 2', age: 32, type: 'user' },
+      ],
+    },
+    {
+      testScenario: { loaded: { queries: Object.values(queries) } },
+      optimisticListUpdates: [
+        {
+          // One rule for every query: membership is decided per query, from
+          // the filters of the query being evaluated.
+          queries: () => true,
+          filterItem: (user, { queryPayload, itemPayload }) => {
+            // Rows do not carry their table, only the item payload does
+            if (!itemPayload.startsWith(`${queryPayload.tableId}||`)) {
+              return false;
+            }
+
+            return (queryPayload.filters ?? []).every(
+              (filter) => userMatchesFilter(user, filter) === true,
+            );
+          },
+        },
+      ],
+    },
+  );
+
+  const membership = createLoggerStore();
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('a 32-year-old regular user is added to the users table');
+  env.apiStore.addItemToState('users||20', {
+    id: 20,
+    name: 'User 20',
+    age: 32,
+    type: 'user',
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('the age of the new user changes to 25');
+  env.apiStore.updateItemState('users||20', (user) => {
+    user.age = 25;
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('the new user is promoted to admin');
+  env.apiStore.updateItemState('users||20', (user) => {
+    user.type = 'admin';
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  // users||20 only enters the queries whose own filters it matches, follows
+  // them as its data changes, and never leaks into the guests table query
+  // even when it matches that query's filters.
+  expect(membership.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10
+    ⋅ usersAged20To30: users||1, users||3, users||5, users||7, users||9
+    ⋅ regularUsersAged30To35: users||2, users||4, users||6
+    ⋅ regularGuests: guests||1, guests||2
+    └─
+
+    >>> a 32-year-old regular user is added to the users table
+
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10, users||20
+    ⋅ usersAged20To30: users||1, users||3, users||5, users||7, users||9
+    ⋅ regularUsersAged30To35: users||2, users||4, users||6, users||20
+    ⋅ regularGuests: guests||1, guests||2
+    └─
+
+    >>> the age of the new user changes to 25
+
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10, users||20
+    ⋅ usersAged20To30: users||1, users||3, users||5, users||7, users||9, users||20
+    ⋅ regularUsersAged30To35: users||2, users||4, users||6
+    ⋅ regularGuests: guests||1, guests||2
+    └─
+
+    >>> the new user is promoted to admin
+
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9, users||20
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10
+    ⋅ usersAged20To30: users||1, users||3, users||5, users||7, users||9, users||20
+    ⋅ regularUsersAged30To35: users||2, users||4, users||6
+    ⋅ regularGuests: guests||1, guests||2
+    └─
+    "
+  `);
+});
+
+test('a rule keeps the membership as is when the query has filters the client cannot evaluate', () => {
+  // Stands in for a server-side search: the client rule does not know how to
+  // evaluate it, so it cannot tell if an item should be added to the query.
+  const searchFilter: FilterOperator = {
+    op: 'startsWith',
+    field: 'name',
+    value: 'User 1',
+  };
+
+  const queries = {
+    admins: { tableId: 'users', filters: byTypeFilter('admin') },
+    adminsSearch: {
+      tableId: 'users',
+      filters: [...byTypeFilter('admin'), searchFilter],
+    },
+    regularUsers: { tableId: 'users', filters: byTypeFilter('user') },
+  } satisfies Record<string, ListQueryParams>;
+
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: { loaded: { queries: Object.values(queries) } },
+    optimisticListUpdates: [
+      {
+        queries: () => true,
+        filterItem: (user, { queryPayload, isInQuery }) => {
+          const filtersResults = (queryPayload.filters ?? []).map((filter) =>
+            userMatchesFilter(user, filter),
+          );
+          const matchesKnownFilters = !filtersResults.includes(false);
+
+          if (!filtersResults.includes(null)) return matchesKnownFilters;
+
+          // The query has a filter only the server can evaluate. An item
+          // already in the query is known to pass it, so it only has to keep
+          // matching the other filters. For an item outside the query there is
+          // no way to know, so it is kept as is.
+          return isInQuery ? matchesKnownFilters : null;
+        },
+      },
+    ],
+  });
+
+  const membership = createLoggerStore();
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('an admin outside the search results is updated');
+  env.apiStore.updateItemState('users||3', (user) => {
+    user.age = 50;
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('an admin inside the search results is updated');
+  env.apiStore.updateItemState('users||1', (user) => {
+    user.age = 50;
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  membership.addMark('the admin inside the search results becomes a user');
+  env.apiStore.updateItemState('users||1', (user) => {
+    user.type = 'user';
+  });
+  membership.add(getQueriesMembership(env, queries));
+
+  // - users||3 matches the admin filter of `adminsSearch`, but is not added to
+  //   it: the rule cannot evaluate the search, so it returns `null`.
+  // - users||1 stays in `adminsSearch` while it is still an admin.
+  // - users||1 leaves `adminsSearch` once it stops matching the admin filter,
+  //   and moves from `admins` to `regularUsers`.
+  expect(membership.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ adminsSearch: users||1
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10
+    └─
+
+    >>> an admin outside the search results is updated
+
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ adminsSearch: users||1
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10
+    └─
+
+    >>> an admin inside the search results is updated
+
+    ┌─
+    ⋅ admins: users||1, users||3, users||5, users||7, users||9
+    ⋅ adminsSearch: users||1
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10
+    └─
+
+    >>> the admin inside the search results becomes a user
+
+    ┌─
+    ⋅ admins: users||3, users||5, users||7, users||9
+    ⋅ adminsSearch: ''
+    ⋅ regularUsers: users||2, users||4, users||6, users||8, users||10, users||1
+    └─
+    "
   `);
 });
 
@@ -258,6 +513,174 @@ test('optimistically sort items', () => {
       - { age: 34, id: 20, name: 'User 20', type: 'user' }
       - { age: 33, id: 4, name: 'User 4', type: 'user' }
       - { age: 31, id: 2, name: 'User 2', type: 'user' }
+  `);
+});
+
+test('a rule with filterItem and sort keeps the query sorted when its members change', () => {
+  const regularUsersQuery = { tableId: 'users', filters: byTypeFilter('user') };
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: { loaded: { queries: [regularUsersQuery] } },
+    optimisticListUpdates: [
+      {
+        // Membership and order of the query are declared in a single rule
+        queries: regularUsersQuery,
+        filterItem: (user) => user.type === 'user',
+        sort: { sortBy: (user) => user.age, order: 'asc' },
+      },
+    ],
+  });
+
+  const usersOrder = createLoggerStore();
+
+  function logUsersOrder() {
+    const itemKeys = env.apiStore.getQueryState(regularUsersQuery)?.items ?? [];
+
+    usersOrder.add({
+      regularUsers: itemKeys
+        .map((itemKey) => {
+          const user = env.store.state.items[itemKey];
+
+          return user ? `${user.name} (${user.age})` : 'missing';
+        })
+        .join(', '),
+    });
+  }
+
+  // The server returns the query already sorted by age
+  logUsersOrder();
+
+  usersOrder.addMark('the youngest member becomes older than two members');
+  env.apiStore.updateItemState('users||2', (user) => {
+    user.age = 36;
+  });
+  logUsersOrder();
+
+  usersOrder.addMark('a 34-year-old regular user is added');
+  env.apiStore.addItemToState('users||20', {
+    id: 20,
+    name: 'User 20',
+    age: 34,
+    type: 'user',
+  });
+  logUsersOrder();
+
+  usersOrder.addMark('a member is promoted to admin');
+  env.apiStore.updateItemState('users||6', (user) => {
+    user.type = 'admin';
+  });
+  logUsersOrder();
+
+  // - User 2 was already a member and still passes the filter, so it only
+  //   moves to its new sorted position
+  // - User 20 enters the query directly at its sorted position
+  // - User 6 leaves the query and the remaining members keep their order
+  expect(usersOrder.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> regularUsers: User 2 (31), User 4 (33), User 6 (35), User 8 (37), User 10 (39)
+
+    >>> the youngest member becomes older than two members
+
+    -> regularUsers: User 4 (33), User 6 (35), User 2 (36), User 8 (37), User 10 (39)
+
+    >>> a 34-year-old regular user is added
+
+    regularUsers: User 4 (33), User 20 (34), User 6 (35), User 2 (36), User 8 (37), User 10 (39)
+
+    >>> a member is promoted to admin
+
+    -> regularUsers: User 4 (33), User 20 (34), User 2 (36), User 8 (37), User 10 (39)
+    "
+  `);
+});
+
+test('a sort rule with invalidateQueries refetches the list once the mutation succeeds', async () => {
+  const regularUsersQuery = { tableId: 'users', filters: byTypeFilter('user') };
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: { loaded: { queries: [regularUsersQuery] } },
+    optimisticListUpdates: [
+      {
+        // The client sorts by age as a best guess, but the server owns the
+        // final order, so the rule asks for a refetch to settle it.
+        queries: regularUsersQuery,
+        sort: { sortBy: (user) => user.age, order: 'asc' },
+        invalidateQueries: true,
+      },
+    ],
+  });
+
+  const renders = createLoggerStore({ arrays: 'all' });
+
+  renderHook(() => {
+    const query = env.apiStore.useListQuery(regularUsersQuery, {
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({
+      users: query.items.map((user) => `${user.name} (${user.age})`),
+    });
+  });
+
+  renders.addMark('User 2 age is changed to 36 with an optimistic update');
+  act(() => {
+    void env.apiStore.performMutation('users||2', {
+      // Only the sort rule can ask for a list refetch in this test
+      revalidateOnSuccess: false,
+      optimisticUpdate: (payload) => {
+        env.apiStore.updateItemState(payload, (user) => {
+          user.age = 36;
+        });
+      },
+      mutation: () =>
+        env.serverTable.delayedUpdateItem('users||2', { age: 36 }),
+    });
+  });
+
+  // The list is re-sorted right away, but the refetch asked by the rule waits
+  // for the mutation: refetching now would bring back the old server data.
+  await advanceTime(1199);
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }),
+  ).toMatchInlineSnapshot(`[]`);
+
+  renders.addMark('the mutation succeeds and the list is refetched');
+  await flushAllTimers();
+  cleanup();
+
+  // The list is refetched a single time after the mutation succeeds
+  expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+    .toMatchInlineSnapshot(`
+    - _type: 'list'
+      payload:
+        fields: '*'
+        filters:
+          - { field: 'type', op: 'eq', value: 'user' }
+        pos: { limit: 50, offset: 0 }
+      returned_items: 5
+  `);
+
+  // The server keeps its own order (by id), which replaces the client guess
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> users: [User 2 (31), User 4 (33), User 6 (35), User 8 (37), User 10 (39)]
+
+    >>> User 2 age is changed to 36 with an optimistic update
+
+    -> users: [User 4 (33), User 6 (35), User 2 (36), User 8 (37), User 10 (39)]
+
+    >>> the mutation succeeds and the list is refetched
+
+    -> users: [User 2 (36), User 4 (33), User 6 (35), User 8 (37), User 10 (39)]
+    "
+  `);
+
+  // The refetch starts right after the mutation finishes at 1.2s
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    1.2s  | server-data-changed (value: {"age":36})
+    1.21s | 🔴 >list-fetch-started
+    2.01s | 🔴 <list-fetch-finished (value: {"count":5})
+    "
   `);
 });
 

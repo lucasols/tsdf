@@ -74,7 +74,41 @@ filterItem: (item) => {
 
 - When `filterItem` returns `true` and the item is not in the query, it's added at the position specified by `appendNewTo`
 - When `filterItem` returns `false` and the item is in the query, it's removed
-- When `filterItem` returns `null`, the rule is skipped for that item
+- When `filterItem` returns `null`, the rule is skipped for that item in that query
+
+`filterItem` is called once for each matching query and receives a context object as second argument:
+
+| Field          | Description                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `queryPayload` | Payload of the query being evaluated                                                                                             |
+| `itemPayload`  | Payload of the item being evaluated                                                                                              |
+| `isInQuery`    | Whether the item is in the query right before the rule is applied. Computed on first read; read it while `filterItem` is running |
+
+With the query payload, one rule can decide membership for every query, instead of one rule per filter combination:
+
+```ts
+optimisticListUpdates: [
+  {
+    queries: () => true,
+    filterItem: (task, { queryPayload }) =>
+      taskBelongsToQuery(task, queryPayload),
+  },
+];
+```
+
+Return `null` for queries whose filters depend on data the client cannot evaluate (server-side search, permissions). `isInQuery` tells if the item already passed those filters on the server:
+
+```ts
+filterItem: (task, { queryPayload, isInQuery }) => {
+  const matchesLocalFilters = taskMatchesLocalFilters(task, queryPayload);
+
+  if (!queryPayload.search) return matchesLocalFilters;
+
+  // In the query: it already matched the search, so only the local filters
+  // can remove it. Not in the query: no way to know, keep as is.
+  return isInQuery ? matchesLocalFilters : null;
+};
+```
 
 ### appendNewTo
 
@@ -116,6 +150,8 @@ Schedules a background refetch of queries this rule mutated.
 ```ts
 invalidateQueries: true;
 ```
+
+With `invalidateQueries` enabled, a rule with `sort` refetches every matching query that contains the updated item on each update, even when the optimistic order did not change — the client can't tell whether the server order did.
 
 ## When Rules Are Applied
 
