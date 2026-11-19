@@ -1,6 +1,6 @@
-/* eslint-disable @ls-stack/no-reexport -- public IndexedDB storage subpath entry */
+/* fast-lint-disable no-reexport -- public IndexedDB storage subpath entry */
+export type { IndexedDbPersistentStorageOptions } from './persistentStorage/indexedDbAsyncStorageAdapter';
 export {
   createIndexedDbPersistentStorage,
   indexedDbPersistentStorage,
-  type IndexedDbPersistentStorageOptions,
 } from './persistentStorage/indexedDbPersistentStorage';
