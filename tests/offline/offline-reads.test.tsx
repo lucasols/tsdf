@@ -1335,6 +1335,7 @@ test('when rows show partial data while their missing fields load, going offline
 test('when the fetch of the missing fields of an item is what reveals a backend outage, the row shows the offline error without retrying and loads after the backend recovers', async () => {
   const sessionKey = 'offline-partial-item-outage';
   let backendIsUp = true;
+  let recoveryChecks = 0;
   const env = createListQueryStoreTestEnv(
     { users: [{ id: 1, name: 'Ada', age: 30, city: 'London' }] },
     {
@@ -1346,7 +1347,23 @@ test('when the fetch of the missing fields of an item is what reveals a backend 
           // No network signal here: offline mode is only known after a fetch
           // fails and is classified as an outage.
           classifyFailure: () => 'outage',
-          outage: { enabled: true, recoveryCheck: () => backendIsUp },
+          outage: {
+            enabled: true,
+            recoveryCheck: () => {
+              recoveryChecks++;
+              return backendIsUp;
+            },
+            // The default probe delays are randomized (jitter) and back off
+            // from 30s, so whether a probe runs inside the time windows of
+            // this test would depend on `Math.random()`. A fixed interval
+            // makes the backend be re-checked every 5s.
+            recoveryProbe: {
+              initialIntervalMs: 5_000,
+              maxIntervalMs: 5_000,
+              backoffMultiplier: 1,
+              jitterRatio: 0,
+            },
+          },
         },
       }),
       partialResources: partialUserResourcesConfig,
@@ -1387,8 +1404,10 @@ test('when the fetch of the missing fields of an item is what reveals a backend 
   // Long enough for the failed fetch and for several failed recovery probes.
   await advanceTime(30_000);
 
-  // One fetch attempt revealed the outage; the row then settles instead of
-  // re-rendering on every retry.
+  // The backend was re-checked while it was down...
+  expect(recoveryChecks).toMatchInlineSnapshot(`5`);
+  // ...but one fetch attempt was enough to reveal the outage, and the row
+  // then settles instead of re-rendering on every retry or failed probe.
   expect(renderCount).toMatchInlineSnapshot(`3`);
   expect(isOfflineStoreError(hook.result.current.error)).toBe(true);
 
