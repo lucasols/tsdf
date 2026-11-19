@@ -1,4 +1,4 @@
-/* eslint-disable @ls-stack/no-reexport -- this is needed for the lib */
+/* fast-lint-disable no-reexport -- this is needed for the lib */
 // Store creation functions
 export { createCollectionStore } from './collectionStore/collectionStore';
 export { createDocumentStore } from './documentStore';
