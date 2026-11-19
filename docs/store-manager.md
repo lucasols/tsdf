@@ -157,9 +157,11 @@ Upload methods:
 - `replaceOfflineUpload({ id, file, metadata? })` keeps the saved metadata unless new `metadata` is passed
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
-- `resolveOfflineUpload(id)`
-- `resolveOfflineUploads(ids)`
+- `resolveOfflineUpload(id)` uploads the staged file if needed and returns its final ref
+- `resolveOfflineUploads(ids)` does the same for several ids and fails as a whole with the first transport error
 - `useOfflineUploads()`
+
+When the `upload` transport fails, `resolveOfflineUpload(s)` returns `Result.err(error)` with the transport error and the upload becomes `failed` (`lastError` set). The session failure classifiers are not consulted and nothing is retried automatically; calling the method again runs the upload again, and `lastError` is cleared once it succeeds. Uploads that run as a dependency of a replayed offline operation are classified and retried by the session instead. See [Offline: Upload failure handling](./offline.md#upload-failure-handling).
 
 `metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
 

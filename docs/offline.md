@@ -246,3 +246,66 @@ await storeManager.saveOfflineUpload({
 - Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata (including the ones persisted by older versions) reach the transport with `metadata: undefined`.
 - `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed.
 - Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.
+
+### Upload failure handling
+
+The `upload` transport reports a failure by rejecting (throwing). What happens next depends on who started the upload.
+
+#### Dependency uploads during replay
+
+When a queued operation with `dependsOnUploads` replays, a transport failure is classified by the same session hooks as a failed `execute`: `classifyFailure(error, ctx)` and then `classifyRetryableFailure(error, ctx)`. `ctx` is the context of the operation being replayed (`phase: 'sync'`, `storeType`, `operationName`, `sessionKey`) plus `uploadId`, the id of the upload that failed. `execute` is not called for that attempt.
+
+- **Connection problem or outage** - `classifyFailure` returns `'network'` or `'outage'` (and that mode is enabled, as for any other failure). The session enters that mode, the upload goes back to `pending` (with `lastError` set) and the operation stays queued. Replay runs the upload again when the session recovers. The replay retry budget is not consumed, however long the outage lasts.
+- **Transient failure that is safe to repeat** - `classifyFailure` returns `'ignore'` and `classifyRetryableFailure` returns `true`. The upload goes back to `pending` and is sent again on the `replayRetry` cadence (`intervalMs`, 5s by default). After `maxFailures` attempts (3 by default) it is handled as a permanent failure.
+- **Permanent failure** (file too large, type not accepted) - no hook recognizes the error, which is the default. The upload becomes `failed` and the operation moves right away to a `retry-exhausted` resolution: `lastReplayError` carries the upload error and `dependencyUploadIds` lists the uploads it depends on. Resolving it with `retry` requeues the operation, which runs the upload again; `discard` removes the operation.
+
+`lastError` is cleared when an upload succeeds.
+
+The hooks are the only way to tell these cases apart, so the transport must throw errors they can recognize:
+
+```ts
+class UploadError extends Error {
+  kind: 'connection' | 'server-down' | 'rejected';
+
+  constructor(kind: UploadError['kind'], message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    network: { enabled: true, recoveryCheck: pingApi },
+    outage: { enabled: true, recoveryCheck: pingApi },
+    classifyFailure: (error) => {
+      if (error instanceof UploadError) {
+        if (error.kind === 'connection') return 'network';
+        if (error.kind === 'server-down') return 'outage';
+        return 'ignore'; // rejected file: manual resolution
+      }
+
+      return classifyApiError(error);
+    },
+    uploads: {
+      adapter: opfsOfflineUploadAdapter,
+      // Throws `UploadError` with the kind that matches what went wrong.
+      upload: ({ file, onProgress }) => uploadFile(file, onProgress),
+    },
+  },
+});
+```
+
+Check `ctx.uploadId !== undefined` when a classifier needs to treat upload failures differently from `execute` failures that throw the same error type.
+
+#### `resolveOfflineUpload(s)`
+
+When the app uploads a staged file itself, a transport failure is returned to the caller as `Result.err(error)` and the upload becomes `failed` with `lastError` set. The session hooks are not consulted, the session mode does not change, and nothing is retried automatically: the caller decides what to do, and calling `resolveOfflineUpload(s)` again runs the upload again.
+
+#### Upload states
+
+- `pending` - staged and waiting to be uploaded, including uploads waiting for an automatic retry (those have `lastError` set).
+- `uploading` - the transport is running.
+- `uploaded` - the transport returned the final ref (`resolvedRef`).
+- `failed` - the last attempt failed and TSDF will not retry on its own. A `failed` upload is never blocked: it is uploaded again the next time an operation that depends on it is replayed or `resolveOfflineUpload(s)` is called for it.
