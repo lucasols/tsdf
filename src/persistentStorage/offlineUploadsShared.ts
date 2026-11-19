@@ -14,9 +14,11 @@ function createEmptyUploadFile(
   return { status, url: null, file: null, error: null };
 }
 
-export const idleUploadFile = createEmptyUploadFile('idle');
-export const loadingUploadFile = createEmptyUploadFile('loading');
-export const missingUploadFile = createEmptyUploadFile('missing');
+export const idleUploadFile: OfflineUploadFile = createEmptyUploadFile('idle');
+export const loadingUploadFile: OfflineUploadFile =
+  createEmptyUploadFile('loading');
+export const missingUploadFile: OfflineUploadFile =
+  createEmptyUploadFile('missing');
 
 export function stripStoredUploadFile<
   TResolvedRef extends ValidPayload = ValidPayload,
