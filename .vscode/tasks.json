@@ -26,10 +26,10 @@
     },
     {
       "type": "npm",
-      "script": "eslint",
-      "problemMatcher": ["$eslint-stylish"],
-      "label": "eslint",
-      "detail": "CI=true eslint --ext .jsx,.js,.ts,.tsx src/ test/",
+      "script": "lint",
+      "problemMatcher": [],
+      "label": "lint",
+      "detail": "oxlint with type check + fast-lint",
       "presentation": { "clear": true }
     },
     {
