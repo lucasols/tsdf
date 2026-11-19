@@ -151,7 +151,7 @@ Schedules a background refetch of queries this rule mutated.
 invalidateQueries: true;
 ```
 
-A rule with `sort` refetches every matching query that contains the updated item, even when the optimistic order did not change — the client can't tell whether the server order did.
+With `invalidateQueries` enabled, a rule with `sort` refetches every matching query that contains the updated item on each update, even when the optimistic order did not change — the client can't tell whether the server order did.
 
 ## When Rules Are Applied
 
