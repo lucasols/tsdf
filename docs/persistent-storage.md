@@ -171,8 +171,8 @@ Use `createAsyncStorageAdapter(driver)` only when the built-in OPFS and IndexedD
 A driver is responsible for storing raw records by logical namespace:
 
 ```ts
-import { createAsyncStorageAdapter } from 'tsdf/async-storage';
 import type { AsyncStorageDriver } from 'tsdf';
+import { createAsyncStorageAdapter } from 'tsdf/async-storage';
 
 const driver: AsyncStorageDriver = {
   get: (scope, key) => customStore.get(scope, key),

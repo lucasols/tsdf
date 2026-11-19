@@ -16,7 +16,7 @@ description: >
 | `pnpm oxlint`    | `oxlint --type-check src/ tests/ --fix`         | Native rules + type errors (auto-fixes what it can) |
 | `pnpm fast-lint` | `fast-lint src/ tests/ --fix`                   | `@ls-stack` rules (auto-fixes what it can)          |
 | `pnpm typecheck` | `tsrs --fast` on every lib tsconfig             | Type checking only                                  |
-| `pnpm format`    | `oxfmt src/ tests/`                             | Formatting only                                     |
+| `pnpm format`    | `oxfmt`                                         | Formatting only, the whole repo                     |
 
 **Always use pnpm scripts** — never rely on IDE diagnostics, they may be outdated.
 

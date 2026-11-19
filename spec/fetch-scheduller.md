@@ -16,5 +16,3 @@ Low priority fetches are throttled to prevent overfetching. The same way redunda
 ## Request batching (new)
 
 Allow combining multiple requests into a single request.
-
-

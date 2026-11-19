@@ -29,8 +29,8 @@ export function createCollectionCacheLimits<
   function enforceCacheLimits(): void {
     if (maxItems === undefined || isEnforcingCacheLimits) return;
 
-    const cachedItems = Object.entries(store.state).flatMap(([itemKey, item]) =>
-      item !== null ? ([[itemKey, item]] as const) : [],
+    const cachedItems = Object.entries(store.state).flatMap(
+      ([itemKey, item]) => (item !== null ? ([[itemKey, item]] as const) : []),
     );
 
     if (cachedItems.length <= maxItems) return;
