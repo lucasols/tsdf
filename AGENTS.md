@@ -48,11 +48,18 @@ Rules in `oxlint.config.ts` are disabled with `oxlint-disable*` comments, rules 
 pnpm vitest run src/yourFile.test.ts
 ```
 
+### Subagents can run tests
+
+Subagents (reviewers, fixers and any other delegated agent) can and should run tests and type checks themselves to confirm a finding or validate a change, without asking: `pnpm test`, `pnpm vitest run <file>` and `pnpm typecheck` only read the repo and need no network.
+
+An agent told not to modify files must skip the commands that rewrite them: `pnpm lint`, `pnpm oxlint` and `pnpm fast-lint` run with `--fix`, and `vitest -u` updates snapshots.
+
 ## Git and Publishing Workflow
 
 These are pre-approved, do them without asking the user for confirmation:
 
 - Always deliver changes through a pull request: create a branch from `main`, commit, push and open the PR with `gh pr create`. Never commit directly to `main`
+- After pushing to a branch with an open PR, update the description sections the push made outdated with `gh pr edit`, without rereading the full diff. Leave it as is if it still matches
 - Publish packages only from `main`, after the PR with the changes is merged: switch to an up-to-date `main` and run `pkg-manager publish --type <patch|minor|major>` from the repo root
 
 ## Intent over literalism

@@ -1475,11 +1475,64 @@ export function createListQueryStore<
       })
     : null;
 
+  // Invalidation obligations that outlive the state-level
+  // `itemFieldInvalidationFields` record (which is consumed when a re-fetch
+  // starts). Shared by the fetch api (require-fresh imperative reads), the
+  // mutation api (which records invalidations) and the hooks. Each field maps
+  // to the highest priority it was invalidated with since it was last
+  // reloaded — hooks adopt the max over THEIR requested fields only, so a
+  // leftover high-priority obligation on an undisplayed field cannot escalate
+  // unrelated refetches. `null` means the obligation was adopted without a
+  // known priority (e.g. synced from another tab); later invalidations never
+  // downgrade a `null` entry to a known priority. When `null` entries are the
+  // only pending information for a hook's requested fields, the refetch is
+  // treated as untracked (ungated, immediate); when they are mixed with
+  // tracked-priority fields, the max over the KNOWN priorities wins — the
+  // unknown-priority fields simply ride along with that refetch.
+  const itemPendingInvalidationFields = new Map<
+    string,
+    Map<string, FetchType | null>
+  >();
+  // Items whose entire ('*') snapshot was invalidated, mapped to the highest
+  // priority of those invalidations. A fully-loaded ('*') item has no
+  // enumerable field list to store in `itemPendingInvalidationFields`, so this
+  // map is the durable "everything is stale" marker that survives partial
+  // refetches. It keeps other mounted hooks from trusting the stale snapshot
+  // via `inferFields` until the item is fully reloaded (`loadedFields === '*'`
+  // again).
+  const itemsPendingFullInvalidation = new Map<string, FetchType>();
+  /**
+   * Loaded fields to persist for an in-state item. An invalidation strips the
+   * stale fields from `itemLoadedFields` and keeps the baseline only in the
+   * in-memory tracking maps above, which do not survive a reload — persisting
+   * the stripped metadata would leave the cached snapshot unusable (every
+   * field `inferFields` cannot vouch for reads as never loaded). Restored
+   * items are always stale (`refetchOnMount`), so the snapshot is persisted
+   * with every field it still holds, stale or not.
+   */
+  function getItemLoadedFieldsToPersist(
+    itemKey: string,
+    loadedFields: ItemLoadedFields | undefined,
+  ): ItemLoadedFields | undefined {
+    if (loadedFields === undefined || loadedFields === '*') return loadedFields;
+    if (itemsPendingFullInvalidation.has(itemKey)) return '*';
+
+    const pendingFields = itemPendingInvalidationFields.get(itemKey);
+    if (!pendingFields || pendingFields.size === 0) return loadedFields;
+
+    return Array.from(
+      new Set([...loadedFields, ...pendingFields.keys()]),
+    ).sort();
+  }
+
   // Persistent storage setup
   const persistence = resolvedPersistentStorageConfig
     ? setupListQueryPersistence(resolvedPersistentStorageConfig, {
         getItemKey,
         getItemDerivedGroup: derivedQueries?.getItemGroup,
+        getItemLoadedFieldsToPersist: partialResources
+          ? getItemLoadedFieldsToPersist
+          : undefined,
         getQueryKey,
       })
     : null;
@@ -1912,32 +1965,6 @@ export function createListQueryStore<
     }));
   }
 
-  // Invalidation obligations that outlive the state-level
-  // `itemFieldInvalidationFields` record (which is consumed when a re-fetch
-  // starts). Shared by the fetch api (require-fresh imperative reads), the
-  // mutation api (which records invalidations) and the hooks. Each field maps
-  // to the highest priority it was invalidated with since it was last
-  // reloaded — hooks adopt the max over THEIR requested fields only, so a
-  // leftover high-priority obligation on an undisplayed field cannot escalate
-  // unrelated refetches. `null` means the obligation was adopted without a
-  // known priority (e.g. synced from another tab); later invalidations never
-  // downgrade a `null` entry to a known priority. When `null` entries are the
-  // only pending information for a hook's requested fields, the refetch is
-  // treated as untracked (ungated, immediate); when they are mixed with
-  // tracked-priority fields, the max over the KNOWN priorities wins — the
-  // unknown-priority fields simply ride along with that refetch.
-  const itemPendingInvalidationFields = new Map<
-    string,
-    Map<string, FetchType | null>
-  >();
-  // Items whose entire ('*') snapshot was invalidated, mapped to the highest
-  // priority of those invalidations. A fully-loaded ('*') item has no
-  // enumerable field list to store in `itemPendingInvalidationFields`, so this
-  // map is the durable "everything is stale" marker that survives partial
-  // refetches. It keeps other mounted hooks from trusting the stale snapshot
-  // via `inferFields` until the item is fully reloaded (`loadedFields === '*'`
-  // again).
-  const itemsPendingFullInvalidation = new Map<string, FetchType>();
   // Per-field invalidations of never-loaded fields, dropped from the stale
   // record so the field's first load stays immediate — kept here so a fetch
   // that was already in flight when the invalidation arrived (and whose
