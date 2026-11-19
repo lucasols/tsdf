@@ -662,6 +662,76 @@ describe('opfs: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['id', 'name']`);
   });
 
+  test('items invalidated before a reload are still shown from cache, including fields the server omitted', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-opfs-partial-invalidated-before-reload';
+    const sessionKey = 'sess1';
+    const requestedFields = ['id', 'name', 'email'];
+    createListQueryOpfsTestStore({ storeName, sessionKey });
+
+    // The server row has no `email`: the request loads the field, but the
+    // item snapshot does not carry it, so `inferFields` cannot vouch for it —
+    // only the loaded-fields metadata can.
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Cached' }] },
+    });
+
+    const { unmount } = renderHook(() => {
+      writerEnv.apiStore.useListQuery(usersQuery, { fields: requestedFields });
+    });
+    await flushAllTimers();
+    unmount();
+
+    // Everything gets invalidated (e.g. a realtime reconnect) and the tab is
+    // closed before any refetch: the invalidation must not erase which fields
+    // the persisted snapshot holds.
+    act(() => {
+      writerEnv.apiStore.invalidateQueryAndItems({
+        all: true,
+        type: 'realtimeUpdate',
+      });
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // After the reload the server cannot be reached (offline), so the cache
+    // is all the UI has.
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
+    readerEnv.serverTable.setNextListFetchError('offline');
+
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        fields: requestedFields,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+    await flushAllTimers();
+
+    // The cached row shows up as soon as the async storage is read and stays
+    // visible when the revalidation fails, instead of an endless loading
+    // state with no rows.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ names: []
+      -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: error ⋅ names: [Cached]
+      "
+    `);
+  });
+
   test("round-trip persistence preserves the fully-loaded ('*') marker for cached items", async () => {
     const storeName = 'lq-opfs-full-star-roundtrip';
     const sessionKey = 'sess1';

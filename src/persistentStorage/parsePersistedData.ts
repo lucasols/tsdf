@@ -51,7 +51,7 @@ export function normalizePersistentStorageDataSchema<
 >(
   schema: PersistentStorageDataSchema<TFinal, TStorage>,
 ): NormalizedPersistentStorageDataSchema<TFinal, TStorage> {
-  if (typeof schema === 'object' && 'storeSchema' in schema) {
+  if ('storeSchema' in schema) {
     return { mode: 'converted', ...schema };
   }
 
