@@ -876,6 +876,209 @@ test('uploads named metadata.json still rehydrate their original bytes after res
   expect(await restoredFile?.text()).toBe('real file bytes');
 });
 
+function createOpfsUploadSession(sessionKey: string) {
+  return createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
+    },
+  });
+}
+
+function textFile(content: string, name: string, lastModified: number): File {
+  return new File([content], name, { type: 'text/plain', lastModified });
+}
+
+/**
+ * Simulates a previous app run that staged the given uploads and was then
+ * closed, so the next session has to restore them from storage on startup.
+ */
+async function stageUploadsInPreviousAppRun(
+  sessionKey: string,
+  filesById: Record<string, File>,
+): Promise<void> {
+  const previousSession = createOpfsUploadSession(sessionKey);
+  await flushAllTimers();
+
+  for (const [id, file] of Object.entries(filesById)) {
+    (
+      await resolveAfterAllTimers(
+        previousSession.saveOfflineUpload({ id, file }),
+      )
+    ).unwrap();
+  }
+  await flushAllTimers();
+
+  resetSessionForTests();
+}
+
+test('a file staged while the session is still restoring stored uploads is listed together with the restored ones', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-hydration-save-session';
+
+  // Stay offline so the staged uploads are kept pending.
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    'staged-in-previous-run': textFile('old body', 'old.txt', 1),
+  });
+
+  // App startup: mounting the uploads hook starts the session, which begins
+  // restoring the stored uploads in the background...
+  const session = createOpfsUploadSession(sessionKey);
+  const uploadHook = renderHook(() => session.useOfflineUploads());
+
+  // ...and the user attaches a new file right away, before the restore
+  // finished.
+  (
+    await resolveAfterAllTimers(
+      session.saveOfflineUpload({
+        id: 'staged-during-startup',
+        file: textFile('new body', 'new.txt', 2),
+      }),
+    )
+  ).unwrap();
+  await flushAllTimers();
+
+  // Both the restored upload and the one staged during startup are listed.
+  // Apps derive the upload dependency ids of their mutations from this list,
+  // so a missing entry would leave the new file out of the next mutation.
+  expect(
+    uploadHook.result.current.map((upload) =>
+      pick(upload, ['id', 'fileName', 'state']),
+    ),
+  ).toMatchInlineSnapshot(`
+    - { fileName: 'new.txt', id: 'staged-during-startup', state: 'pending' }
+    - { fileName: 'old.txt', id: 'staged-in-previous-run', state: 'pending' }
+  `);
+  expect(
+    session.getOfflineUploads().map((upload) => upload.id),
+  ).toMatchInlineSnapshot(
+    `['staged-during-startup', 'staged-in-previous-run']`,
+  );
+  // The list matches what is stored.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+    "tsdf-uploads (1.01 kb)
+    └ offline-upload-hydration-save-session (0.98 kb)
+      ├ staged-during-startup (0.45 kb)
+      │ ├ binary.blob (0.04 kb)
+      │ └ metadata.json (0.38 kb)
+      └ staged-in-previous-run (0.46 kb)
+        ├ binary.blob (0.04 kb)
+        └ metadata.json (0.38 kb)"
+  `);
+
+  uploadHook.unmount();
+});
+
+test('an upload deleted while the session is still restoring stored uploads does not come back', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-hydration-delete-session';
+
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    'discarded-draft': textFile('draft body', 'draft.txt', 1),
+    'kept-attachment': textFile('attachment body', 'attachment.txt', 2),
+  });
+
+  // One of the stored uploads is slow to read, so the restore is still running
+  // well after the other one was already read from storage.
+  mockBrowserOpfs.setReadDelay(
+    'tsdf-uploads/offline-upload-hydration-delete-session/kept-attachment',
+    200,
+  );
+
+  // App startup: the stored uploads are being restored in the background...
+  const session = createOpfsUploadSession(sessionKey);
+  const uploadHook = renderHook(() => session.useOfflineUploads());
+  await advanceTime(20);
+
+  // ...while the app discards the draft attachment it knows by id.
+  (
+    await resolveAfterAllTimers(session.deleteOfflineUpload('discarded-draft'))
+  ).unwrap();
+  await flushAllTimers();
+
+  // The deleted upload must not be listed again once the restore finishes,
+  // otherwise the app would offer a file that no longer exists in storage.
+  expect(
+    uploadHook.result.current.map((upload) =>
+      pick(upload, ['id', 'fileName', 'state']),
+    ),
+  ).toMatchInlineSnapshot(
+    `- { fileName: 'attachment.txt', id: 'kept-attachment', state: 'pending' }`,
+  );
+  expect(
+    session.getOfflineUploads().map((upload) => upload.id),
+  ).toMatchInlineSnapshot(`['kept-attachment']`);
+  // The list matches what is stored.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+    "tsdf-uploads (0.56 kb)
+    └ offline-upload-hydration-delete-session (0.54 kb)
+      └ kept-attachment (0.46 kb)
+        ├ binary.blob (0.05 kb)
+        └ metadata.json (0.38 kb)"
+  `);
+
+  uploadHook.unmount();
+});
+
+test('replacing a file while the session is still restoring stored uploads updates the stored upload instead of starting a new one', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-hydration-replace-session';
+
+  network.setOffline();
+  await stageUploadsInPreviousAppRun(sessionKey, {
+    attachment: textFile('first draft', 'draft.txt', 1),
+  });
+
+  // The app stays closed for an hour.
+  await advanceTime(60 * 60 * 1000);
+
+  // App startup: the stored uploads are being restored in the background...
+  const session = createOpfsUploadSession(sessionKey);
+  const uploadHook = renderHook(() => session.useOfflineUploads());
+
+  // ...and the user picks another file for the same attachment right away.
+  (
+    await resolveAfterAllTimers(
+      session.replaceOfflineUpload({
+        id: 'attachment',
+        file: textFile('final version', 'final.txt', 2),
+      }),
+    )
+  ).unwrap();
+  await flushAllTimers();
+
+  // The replacement is applied on top of the stored upload: the file changes,
+  // while `createdAt` still is the time the upload was first staged, an hour
+  // before the replacement (`updatedAt`).
+  expect(
+    uploadHook.result.current.map((upload) => ({
+      ...pick(upload, ['id', 'fileName', 'state']),
+      createdAt: new Date(upload.createdAt).toISOString(),
+      updatedAt: new Date(upload.updatedAt).toISOString(),
+    })),
+  ).toMatchInlineSnapshot(`
+    - createdAt: '2025-01-01T00:00:00.003Z'
+      fileName: 'final.txt'
+      id: 'attachment'
+      state: 'pending'
+      updatedAt: '2025-01-01T01:00:12.013Z'
+  `);
+  expect(
+    getParsedOpfsFileData(
+      'tsdf-uploads/offline-upload-hydration-replace-session/attachment/binary.blob',
+    ),
+  ).toMatchInlineSnapshot(`"final version"`);
+
+  uploadHook.unmount();
+});
+
 type UploadDependencyOperations = {
   updateWithAttachment: DocumentOfflineOperationDefinition<
     { value: number },
