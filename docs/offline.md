@@ -143,6 +143,51 @@ Optional replay behavior:
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
 
+### Temp Entities in List Queries
+
+In a list-query store the pending entity is inserted as an item only, so it is not part of any list unless `optimisticListUpdates` rules match it. Declare `addToQueries` to add it to the lists that should show it while the mutation is queued:
+
+```ts
+createUser: {
+  inputSchema: createUserInputSchema,
+  kind: 'create',
+  getEntityRefs: ({ input }) => [`temp:${input.clientId}`],
+  tempEntity: {
+    buildPendingEntity: (input) => ({ id: input.clientId, name: input.name }),
+    // Same shape as the `addItemToQueries` option of `addItemToState`,
+    // or a function of the mutation input that returns it
+    addToQueries: (input) => ({
+      queries: { teamId: input.teamId },
+      appendTo: 'start',
+    }),
+    reconcileServerEntity: (result) => ({
+      finalPayload: result.id,
+      finalData: result,
+    }),
+  },
+  execute: ({ input }) => api.createUser(input),
+},
+```
+
+- The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
+- `queries` follows `addItemToState`: queries that are not in the store are skipped.
+- The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
+- When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. Discarding the queued mutation removes the row from its lists.
+- While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
+
+With `tempEntities`, each entry returned by `buildPendingEntities` declares its own `addToQueries`.
+
+With [partial resources](./partial-resources.md), the pending entity has no loaded-fields metadata, so only `inferFields` can vouch for it. Declare `loadedFields` (for example `'*'`) when the pending entity should count as loaded for hooks that read those fields: it cannot be fetched from the server before the mutation is replayed. The entity keeps the same loaded fields when it is reconciled to its final payload.
+
+```ts
+tempEntity: {
+  buildPendingEntity: (input) => ({ id: input.clientId, name: input.name }),
+  addToQueries: { queries: { teamId: 'team-1' }, appendTo: 'start' },
+  loadedFields: '*',
+  // ...
+},
+```
+
 ## Conflict Resolution
 
 Stores expose resolution APIs:

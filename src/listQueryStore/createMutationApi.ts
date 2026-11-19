@@ -44,6 +44,7 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type ItemLoadedFields,
+  type ListQueryAddItemToQueries,
   type PartialResourcesConfig,
   type TSDFItemQuery,
   type TSFDListQuery,
@@ -1560,11 +1561,9 @@ export function createMutationApi<
     itemPayload: ItemPayload,
     data: ItemState,
     options: {
-      addItemToQueries?: {
-        queries: QueryPayload[] | FilterQuery | QueryPayload;
-        appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
-      };
+      addItemToQueries?: ListQueryAddItemToQueries<QueryPayload, ItemPayload>;
     } = {},
+    loadedFields?: ItemLoadedFields,
   ) {
     const itemKey = getItemKey(itemPayload);
 
@@ -1572,6 +1571,9 @@ export function createMutationApi<
       store.produceState(
         (draftState) => {
           draftState.items[itemKey] = data;
+          if (loadedFields !== undefined) {
+            draftState.itemLoadedFields[itemKey] = loadedFields;
+          }
           draftState.itemQueries[itemKey] = {
             status: 'success',
             wasLoaded: true,

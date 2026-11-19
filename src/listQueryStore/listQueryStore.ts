@@ -119,6 +119,7 @@ import {
   type FieldsInput,
   type FieldsOption,
   type ItemLoadedFields,
+  type ListQueryAddItemToQueries,
   type ListQueryOfflineOverlay,
   type ListQueryStoreInitialData,
   type ListQueryUseMultipleItemsQuery,
@@ -721,13 +722,8 @@ type ListQueryAddItemToStateApi<
   itemPayload: ItemPayload,
   data: ItemState,
   options?: {
-    addItemToQueries?: {
-      queries:
-        | QueryPayload[]
-        | ListQueryFilterQuery<QueryPayload>
-        | QueryPayload;
-      appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
-    };
+    /** Queries that receive the item, and where it is inserted in them. */
+    addItemToQueries?: ListQueryAddItemToQueries<QueryPayload, ItemPayload>;
   },
 ) => void;
 
@@ -2198,7 +2194,10 @@ export function createListQueryStore<
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
-    offlineController = createOfflineStoreController<ResolvedOfflineOperations>(
+    offlineController = createOfflineStoreController<
+      ResolvedOfflineOperations,
+      QueryPayload
+    >(
       id,
       'listQuery',
       getSessionKeyForRuntime,
@@ -2237,13 +2236,21 @@ export function createListQueryStore<
             ),
           );
         },
-        applyPendingEntity: ({ tempId, pendingEntity }) => {
+        applyPendingEntity: ({
+          tempId,
+          pendingEntity,
+          addToQueries,
+          loadedFields,
+        }) => {
           if (!pendingEntity || typeof pendingEntity !== 'object') return;
           addItemToState(
             // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
             __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
             // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
             __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+            addToQueries && { addItemToQueries: addToQueries },
+            // Loaded fields are only tracked with partial resources
+            partialResources ? loadedFields : undefined,
           );
         },
         rollbackPendingEntity: ({ tempId }) => {
@@ -2277,9 +2284,12 @@ export function createListQueryStore<
               index: query.items.indexOf(tempItemKey),
             }))
             .filter(({ index }) => index !== -1);
+          // The final entity replaces the temp one, so it is as loaded as the
+          // temp entity was declared to be
+          const tempLoadedFields = store.state.itemLoadedFields[tempItemKey];
 
           deleteItemState(tempPayload);
-          addItemToState(finalPayload, finalData);
+          addItemToState(finalPayload, finalData, undefined, tempLoadedFields);
 
           storeEvents.emit('tempEntityReconciled', {
             tempId: tempPayload,
@@ -3685,8 +3695,9 @@ export function createListQueryStore<
     itemPayload: Parameters<typeof addItemToStateBase>[0],
     data: Parameters<typeof addItemToStateBase>[1],
     options?: Parameters<typeof addItemToStateBase>[2],
+    loadedFields?: Parameters<typeof addItemToStateBase>[3],
   ): void {
-    addItemToStateBase(itemPayload, data, options);
+    addItemToStateBase(itemPayload, data, options, loadedFields);
     touchUpdatedItemEntries([
       { itemKey: getItemKey(itemPayload), payload: itemPayload },
     ]);

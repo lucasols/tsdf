@@ -11,6 +11,10 @@ import {
   rc_unknown,
 } from 'runcheck';
 import type { Result as ResultType } from 't-result';
+import type {
+  ItemLoadedFields,
+  ListQueryAddItemToQueries,
+} from '../../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type {
   OfflineAttachedUploadIds,
@@ -991,19 +995,48 @@ export type OfflineTempEntitiesReconciliation<
 };
 
 /**
+ * Resolves to `T` for list-query stores and to `never` for stores without
+ * queries, where `TQueryPayload` is left as `never`.
+ */
+type ListQueryOnly<TQueryPayload extends ValidPayload, T> = [
+  TQueryPayload,
+] extends [never]
+  ? never
+  : T;
+
+/**
  * Pending temp-entity returned by `tempEntities.buildPendingEntities(...)`.
  *
  * @typeParam TTempId - Temporary payload used to track the optimistic entity.
  * @typeParam TPendingEntity - Pending entity snapshot to insert locally.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store. Left as `never` for stores without queries.
  */
 export type OfflineTempEntityPendingEntry<
   TTempId extends ValidPayload = ValidPayload,
   TPendingEntity = unknown,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /** Temporary payload that identifies the optimistic entity. */
   tempId: TTempId;
   /** Pending entity snapshot inserted while the mutation is queued. */
   pendingEntity: TPendingEntity;
+  /**
+   * List-query stores only: queries that show this pending entity while the
+   * mutation is queued, and where it is inserted in them.
+   *
+   * Same behavior as `tempEntity.addToQueries`.
+   */
+  addToQueries?: ListQueryOnly<
+    TQueryPayload,
+    ListQueryAddItemToQueries<TQueryPayload, TTempId>
+  >;
+  /**
+   * List-query stores with partial resources only: fields this pending entity
+   * already holds, or `'*'` when it is complete.
+   *
+   * Same behavior as `tempEntity.loadedFields`.
+   */
+  loadedFields?: ListQueryOnly<TQueryPayload, ItemLoadedFields>;
 };
 
 /**
@@ -1012,6 +1045,7 @@ export type OfflineTempEntityPendingEntry<
  * @typeParam TInput - Input type used to derive the temporary entity and identifier.
  * @typeParam TTempResult - Result returned by `execute`, used only by `tempEntity.reconcileServerEntity(...)`.
  * @typeParam TTempId - Temporary payload used to track optimistic entities before reconciliation.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store. Left as `never` for stores without queries.
  */
 export type OfflineTempEntityConfig<
   TInput,
@@ -1020,6 +1054,7 @@ export type OfflineTempEntityConfig<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /**
    * Builds the optimistic entity inserted into local state while the mutation
@@ -1029,6 +1064,42 @@ export type OfflineTempEntityConfig<
    * until replay succeeds and the final server entity can replace it.
    */
   buildPendingEntity: (input: TInput, tempId: TTempId) => TPendingEntity;
+  /**
+   * List-query stores only: queries that show the pending entity while the
+   * mutation is queued, and where it is inserted in them. Same shape as the
+   * `addItemToQueries` option of `addItemToState(...)`, or a function of the
+   * mutation input that returns it (return `undefined` to add to no query).
+   *
+   * The entity is added when the mutation is queued, so the mutation does not
+   * need to insert the temp row by hand in `optimisticUpdate`. It keeps its
+   * position when it is reconciled to the final server entity, and leaves the
+   * queries when the queued mutation is discarded. A mutation that runs
+   * online right away is never queued, so it creates no pending entity.
+   *
+   * Without this option the pending entity is only added to the queries
+   * matched by `optimisticListUpdates`.
+   */
+  addToQueries?: ListQueryOnly<
+    TQueryPayload,
+    | ListQueryAddItemToQueries<TQueryPayload, TTempId>
+    | ((
+        input: TInput,
+        tempId: TTempId,
+      ) => ListQueryAddItemToQueries<TQueryPayload, TTempId> | undefined)
+  >;
+  /**
+   * List-query stores with partial resources only: fields the pending entity
+   * already holds, or `'*'` when it is complete.
+   *
+   * The pending entity does not exist on the server yet, so its missing
+   * fields cannot be fetched: declare `'*'` when hooks that read every field
+   * (`fields: '*'`) should show it. The same loaded fields are kept when the
+   * entity is reconciled to its final server payload.
+   *
+   * Without this option only `partialResources.inferFields` can vouch for the
+   * fields of the pending entity.
+   */
+  loadedFields?: ListQueryOnly<TQueryPayload, ItemLoadedFields>;
   /**
    * Reconciles the optimistic temp entity with the successful replay result.
    */
@@ -1044,6 +1115,7 @@ export type OfflineTempEntityConfig<
  * @typeParam TInput - Input type used to derive the temporary entities and identifiers.
  * @typeParam TTempResult - Result returned by `execute`, used only by `tempEntities.reconcileServerEntities(...)`.
  * @typeParam TTempId - Temporary payload used to track optimistic entities before reconciliation.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store. Left as `never` for stores without queries.
  */
 export type OfflineTempEntitiesConfig<
   TInput,
@@ -1052,6 +1124,7 @@ export type OfflineTempEntitiesConfig<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /**
    * Builds the optimistic entities inserted into local state while the mutation
@@ -1059,11 +1132,18 @@ export type OfflineTempEntitiesConfig<
    *
    * `tempIds` are the temporary payloads derived from the operation entity refs
    * and used until replay succeeds and the final server entities can replace them.
+   *
+   * In list-query stores each returned entry can also declare `addToQueries`
+   * and `loadedFields`, with the same behavior as the `tempEntity` options.
    */
   buildPendingEntities: (
     input: TInput,
     tempIds: readonly TTempId[],
-  ) => readonly OfflineTempEntityPendingEntry<TTempId, TPendingEntity>[];
+  ) => readonly OfflineTempEntityPendingEntry<
+    TTempId,
+    TPendingEntity,
+    TQueryPayload
+  >[];
   /**
    * Reconciles the optimistic temp entities with the successful replay result.
    */
@@ -1086,6 +1166,7 @@ type ConfiguredTempEntityFields<
   TPendingEntity = unknown,
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
+  TQueryPayload extends ValidPayload = never,
 > =
   | {
       tempEntity: OfflineTempEntityConfig<
@@ -1094,7 +1175,8 @@ type ConfiguredTempEntityFields<
         TTempId,
         TPendingEntity,
         TFinalPayload,
-        TFinalData
+        TFinalData,
+        TQueryPayload
       >;
       tempEntities?: never;
     }
@@ -1106,7 +1188,8 @@ type ConfiguredTempEntityFields<
         TTempId,
         TPendingEntity,
         TFinalPayload,
-        TFinalData
+        TFinalData,
+        TQueryPayload
       >;
     };
 
@@ -1116,6 +1199,7 @@ type ConfiguredTempEntityFields<
  * @typeParam TInput - The persisted input payload for the queued offline operation.
  * @typeParam TConflict - The conflict payload produced by pre-execution conflict detection.
  * @typeParam TTempResult - Result returned by `execute`, used only when `tempEntity` or `tempEntities` needs to reconcile the final server entity. Defaults to `void`.
+ * @typeParam TQueryPayload - Query payload of the owning list-query store, which enables the temp-entity query options. Left as `never` for stores without queries.
  */
 export type OfflineOperationDefinition<
   TInput,
@@ -1127,6 +1211,7 @@ export type OfflineOperationDefinition<
   TFinalPayload extends ValidPayload = ValidPayload,
   TFinalData = unknown,
   TUploadRef extends ValidPayload = ValidPayload,
+  TQueryPayload extends ValidPayload = never,
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
@@ -1188,7 +1273,8 @@ export type OfflineOperationDefinition<
         TTempId,
         TPendingEntity,
         TFinalPayload,
-        TFinalData
+        TFinalData,
+        TQueryPayload
       >)
   );
 
@@ -1207,6 +1293,17 @@ type OperationEntityRefsContext<TInput> = {
   input: TInput;
 };
 
+/**
+ * Temp-entity list-query options as seen by the non-store-specific alias.
+ *
+ * Spelled out structurally: the store-specific configs disable these options
+ * with a `never` query payload, which is not comparable with a widened one.
+ */
+type AnyTempEntityListQueryOptions = {
+  addToQueries?: ListQueryAddItemToQueries<__LEGIT_ANY__, __LEGIT_ANY__>;
+  loadedFields?: ItemLoadedFields;
+};
+
 /** Non-store-specific offline operation definition alias. */
 export type AnyOfflineOperationDefinition<
   TUploadRef extends ValidPayload = ValidPayload,
@@ -1219,16 +1316,31 @@ export type AnyOfflineOperationDefinition<
   };
   accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
   supersedes?: OfflineSupersedeConfig;
-  tempEntity?: OfflineTempEntityConfig<
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >;
-  tempEntities?: OfflineTempEntitiesConfig<
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >;
+  tempEntity?: Omit<
+    OfflineTempEntityConfig<__LEGIT_ANY__, __LEGIT_ANY__, __LEGIT_ANY__>,
+    keyof AnyTempEntityListQueryOptions
+  > &
+    Omit<AnyTempEntityListQueryOptions, 'addToQueries'> & {
+      addToQueries?:
+        | AnyTempEntityListQueryOptions['addToQueries']
+        | ((
+            input: __LEGIT_ANY__,
+            tempId: __LEGIT_ANY__,
+          ) => AnyTempEntityListQueryOptions['addToQueries']);
+    };
+  tempEntities?: Omit<
+    OfflineTempEntitiesConfig<__LEGIT_ANY__, __LEGIT_ANY__, __LEGIT_ANY__>,
+    'buildPendingEntities'
+  > & {
+    buildPendingEntities: (
+      input: __LEGIT_ANY__,
+      tempIds: readonly __LEGIT_ANY__[],
+    ) => readonly (Omit<
+      OfflineTempEntityPendingEntry<__LEGIT_ANY__>,
+      keyof AnyTempEntityListQueryOptions
+    > &
+      AnyTempEntityListQueryOptions)[];
+  };
   getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
   execute: (ctx: OperationExecuteContext<__LEGIT_ANY__, TUploadRef>) => unknown;
   onSuccessExecute?: OfflineOperationExecuteSuccessHandler<
@@ -1545,7 +1657,9 @@ export type ListQueryOfflineEntityRef<ItemPayload extends ValidPayload> =
  * @typeParam TTempResult - Result returned by `execute`.
  * When `tempEntity` or `tempEntities` is provided, the pending builders must
  * return `ItemState`, and the reconciliation hooks must return an
- * `ItemPayload` plus optional `ItemState` replacement data.
+ * `ItemPayload` plus optional `ItemState` replacement data. The pending
+ * entities can declare `addToQueries` to show up in list queries while the
+ * mutation is queued, and `loadedFields` when partial resources are enabled.
  */
 export type ListQueryOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -1565,7 +1679,8 @@ export type ListQueryOfflineOperationDefinition<
   ItemState,
   ItemPayloadUnused,
   ItemState,
-  TUploadRef
+  TUploadRef,
+  QueryPayload
 > & {
   /**
    * Declares which list-query entities are affected by this queued mutation.

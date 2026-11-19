@@ -27,6 +27,37 @@ export type TSFDListQuery<QueryPayload extends ValidPayload> = {
   items: string[];
 };
 
+/**
+ * Query placement of an item added to a list-query store.
+ *
+ * Used by the `addItemToQueries` option of `addItemToState(...)` and by the
+ * `addToQueries` option of offline temp entities.
+ */
+export type ListQueryAddItemToQueries<
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = {
+  /**
+   * Queries that receive the item: one query payload, a list of payloads, or
+   * a filter over the queries currently in the store. Queries that are not in
+   * the store are skipped.
+   */
+  queries:
+    | QueryPayload[]
+    | ((
+        params: QueryPayload,
+        data: TSFDListQuery<QueryPayload>,
+        queryKey: string,
+      ) => boolean)
+    | QueryPayload;
+  /**
+   * Where the item is inserted in each query: `'start'`, `'end'`, or a
+   * function that receives the payloads of the items currently in the query
+   * and returns the insertion index.
+   */
+  appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
+};
+
 /** Raw cached state for one item query in a list-query store. */
 export type TSDFItemQuery<ItemPayload extends ValidPayload> = {
   /** Last item fetch error, if any. */
