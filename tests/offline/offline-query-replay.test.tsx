@@ -9,7 +9,12 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  pick,
+  range,
+} from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
@@ -2234,4 +2239,202 @@ describe('list-query replay', () => {
 
     hook.unmount();
   });
+});
+
+test('discarding failed offline changes puts the rows back to what the server has', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-restores-rows-session';
+  type RejectedEditOperations = PatchUserOperations & {
+    deleteUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { itemId: string },
+      unknown
+    >;
+  };
+
+  // The server rejects both changes on every replay attempt, so they end up
+  // waiting for the user to decide what to do with them.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    RejectedEditOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-discard-restores-rows-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('rename rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+            deleteUser: {
+              inputSchema: deleteItemInputSchema,
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('delete rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    );
+
+    env.trackItemUI('rows', query.items.join(', '));
+    return query;
+  });
+  await flushAllTimers();
+
+  // Offline: rename Ada and delete Grace, both applied optimistically.
+  env.addTimelineComments('beforeNextAction', [
+    'offline: rename Ada and delete Grace',
+  ]);
+  await act(async () => {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          name: 'Ada renamed',
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada renamed' },
+      },
+    });
+    await env.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||2');
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+    });
+  });
+
+  // Online: every replay attempt is rejected until both changes need a
+  // manual resolution.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects both changes until they need a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  // 3 attempts per change, 5s apart.
+  for (const _attempt of range(1, 6)) {
+    await advanceTime(5000);
+  }
+  await flushAllTimers();
+
+  const renameResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'patchUserName');
+  const deleteResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'deleteUser');
+  if (!renameResolution || !deleteResolution) {
+    throw new Error('Expected both changes to be waiting for a resolution');
+  }
+
+  // Discard the rename. Nothing can roll the optimistic rename back, so the
+  // store refetches what the discarded change touched: the item and the lists
+  // (a discarded change may also have moved or removed the row). Ada shows the
+  // server name again even though the store still has an unresolved change.
+  // Grace is listed again too: her delete never reached the server, and a
+  // change waiting for a decision is not kept applied over fresh server data.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the rename: the list is refetched and shows the server rows',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      renameResolution.id,
+      'patchUserName',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  // Discard the delete: Grace stays listed, and with nothing left to
+  // resolve the store revalidates once more.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the delete: Grace stays listed',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      deleteResolution.id,
+      'deleteUser',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada', 'Grace']`);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | rows               |
+    0      | Ada, Grace         | ui-initialized
+    3.01s  | Ada, Grace         | -- offline: rename Ada and delete Grace
+    .      | Ada renamed, Grace | ui-changed
+    .      | Ada renamed, Grace | offline:patchUserName queued
+    .      | Ada renamed        | ui-changed
+    .      | Ada renamed        | offline:deleteUser queued
+    .      | Ada renamed        | -- back online: the server rejects both changes until they need a resolution
+    .      | Ada renamed        | offline:patchUserName replay-started
+    8.01s  | Ada renamed        | offline:patchUserName replay-started
+    13.01s | Ada renamed        | offline:patchUserName replay-started
+    .      | Ada renamed        | offline:patchUserName resolution-required
+    .      | Ada renamed        | offline:deleteUser replay-started
+    18.01s | Ada renamed        | offline:deleteUser replay-started
+    23.01s | Ada renamed        | offline:deleteUser replay-started
+    .      | Ada renamed        | offline:deleteUser resolution-required
+    33.02s | Ada renamed        | -- discard the rename: the list is refetched and shows the server rows
+    .      | Ada renamed        | 🔴 >list-fetch-started
+    33.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
+    .      | Ada, Grace         | ui-changed
+    34.83s | Ada, Grace         | -- discard the delete: Grace stays listed
+    .      | Ada, Grace         | 🟠 >list-fetch-started
+    35.63s | Ada, Grace         | 🟠 <list-fetch-finished (value: {"count":2})
+    "
+  `);
+
+  hook.unmount();
 });
