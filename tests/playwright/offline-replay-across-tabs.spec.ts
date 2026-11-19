@@ -450,3 +450,138 @@ test('an edit is sent only once when a new tab opens while it is being replayed'
   expect(await getSentMutations(request, fixtureScopeId)).toBe('page-a');
   expect(await getServerValue(request, fixtureScopeId)).toBe(5);
 });
+
+/**
+ * Cuts or restores the connection of a single tab. Other tabs keep theirs,
+ * which is what lets a new tab load the app while this one is still offline.
+ */
+async function setTabOffline(
+  context: BrowserContext,
+  page: Page,
+  offline: boolean,
+): Promise<void> {
+  const session = await context.newCDPSession(page);
+  await session.send('Network.emulateNetworkConditions', {
+    offline,
+    latency: 0,
+    downloadThroughput: -1,
+    uploadThroughput: -1,
+  });
+  await session.detach();
+}
+
+async function openListTab(
+  context: BrowserContext,
+  pageId: string,
+  fixtureScopeId: string,
+  storeId: string,
+): Promise<Page> {
+  const page = await context.newPage();
+  const searchParams = new URLSearchParams({
+    scenario: 'offline-list',
+    pageId,
+    scopeId: fixtureScopeId,
+    storeId,
+    sessionKey: `offline-replay-${storeId}`,
+  });
+
+  await page.goto(`/?${searchParams.toString()}`);
+  await expect(page.getByTestId('offline-list-status')).toHaveText('success');
+  return page;
+}
+
+/** Names of the users the fixture server has, in creation order. */
+async function getServerUserNames(
+  request: APIRequestContext,
+  fixtureScopeId: string,
+): Promise<string> {
+  const response = await request.get('/api/list?tableId=users', {
+    headers: scopeHeaders(fixtureScopeId),
+  });
+  const body = __LEGIT_CAST__<{ items: { data: { name: string } }[] }, unknown>(
+    await response.json(),
+  );
+
+  return body.items.map((item) => item.data.name).join(', ');
+}
+
+/** Tabs that sent a create request to the fixture server, in arrival order. */
+async function getSentCreations(
+  request: APIRequestContext,
+  fixtureScopeId: string,
+): Promise<string> {
+  const response = await request.get('/api/test/history', {
+    headers: scopeHeaders(fixtureScopeId),
+  });
+  const body = __LEGIT_CAST__<{ history: RequestHistoryEntry[] }, unknown>(
+    await response.json(),
+  );
+
+  return body.history
+    .filter((entry) => entry.path === '/api/item/users/create')
+    .map((entry) => entry.pageId ?? 'unknown')
+    .join(', ');
+}
+
+test('a record created offline is not created twice when another tab already sent it', async ({
+  context,
+  request,
+  fixtureScopeId,
+}) => {
+  const storeId = 'duplicate-creation-list';
+  const creatingTab = await openListTab(
+    context,
+    'page-a',
+    fixtureScopeId,
+    storeId,
+  );
+
+  // Tab 1 loses its connection and creates a record, which is queued.
+  await setTabOffline(context, creatingTab, true);
+  await expect(creatingTab.getByTestId('offline-list-offline-mode')).toHaveText(
+    'offline',
+  );
+  await creatingTab.getByTestId('offline-list-new-user-name').fill('Linus');
+  await creatingTab.getByTestId('offline-list-create-user').click();
+  await expect(
+    creatingTab.getByTestId('offline-list-pending-mutations'),
+  ).toHaveText('1');
+
+  // Tab 2 opens afterwards with a working connection. It loads the queued
+  // creation from storage, leads the session and sends it.
+  const secondTab = await openListTab(
+    context,
+    'page-b',
+    fixtureScopeId,
+    storeId,
+  );
+  await expect(secondTab.getByTestId('offline-list-leadership')).toHaveText(
+    'leader',
+  );
+  await expect
+    .poll(() => getSentCreations(request, fixtureScopeId))
+    .toBe('page-b');
+  await expect(
+    secondTab.getByTestId('offline-list-pending-mutations'),
+  ).toHaveText('0');
+
+  // The user goes back to tab 1, which reconnects and leads the session
+  // again. Its creation was already sent, so it must not send it again.
+  await setTabHidden(secondTab, true);
+  await setTabOffline(context, creatingTab, false);
+  await expect(creatingTab.getByTestId('offline-list-leadership')).toHaveText(
+    'leader',
+  );
+  await expect(creatingTab.getByTestId('offline-list-offline-mode')).toHaveText(
+    'online',
+  );
+  await expect(
+    creatingTab.getByTestId('offline-list-pending-mutations'),
+  ).toHaveText('0');
+
+  await waitForStrayRequests(creatingTab);
+  expect(await getSentCreations(request, fixtureScopeId)).toBe('page-b');
+  expect(await getServerUserNames(request, fixtureScopeId)).toBe(
+    'Alice, Bob, Linus',
+  );
+});
