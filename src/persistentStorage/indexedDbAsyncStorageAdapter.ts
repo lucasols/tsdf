@@ -1,5 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
+import { asPossiblyUndefined } from '@ls-stack/utils/typingFnUtils';
 import {
   emitTSDFDebugLog,
   getTSDFDebugTimingMs,
@@ -43,6 +44,111 @@ const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
 const INDEXED_DB_META_STORE = 'meta';
 const INDEXED_DB_MAINTENANCE_META_KEY = 'maintenance';
+/**
+ * How often a pending open request or transaction is checked for progress.
+ * It is given up after two consecutive checks without a single IndexedDB
+ * event, i.e. after 30s to 45s without progress. Progress is what is
+ * measured, not total duration, so a large batch on a slow device is never
+ * cut short.
+ */
+const INDEXED_DB_STALL_CHECK_INTERVAL_MS = 15_000;
+/**
+ * Errors that say the connection (not the data or the quota) failed: the
+ * connection was closed or is closing (`InvalidStateError`), the browser's
+ * storage process went away (`UnknownError`, e.g. WebKit's "Connection to
+ * Indexed Database server lost"), a transaction was aborted under the
+ * operation (`AbortError`), or the operation stalled (`TimeoutError`).
+ */
+const INDEXED_DB_CONNECTION_ERROR_NAMES = new Set([
+  'AbortError',
+  'InvalidStateError',
+  'TimeoutError',
+  'UnknownError',
+]);
+
+function isIndexedDbConnectionError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    typeof error.name === 'string' &&
+    INDEXED_DB_CONNECTION_ERROR_NAMES.has(error.name)
+  );
+}
+
+/**
+ * IndexedDB events delivered to this page's adapters so far. While it keeps
+ * growing the browser's storage backend is answering, so an operation that
+ * is merely queued behind a long-running one is not mistaken for a stalled
+ * one.
+ */
+let indexedDbEventCount = 0;
+
+/**
+ * Gives up on an open request or transaction when IndexedDB stopped
+ * answering: some browsers leave operations pending forever, without any
+ * event, after a tab was backgrounded.
+ */
+class IndexedDbStallWatch {
+  /** Reject the promises still waiting on the watched operation. */
+  readonly rejecters: Array<(error: Error) => void> = [];
+
+  readonly #transaction: IDBTransaction | null;
+  #checkedEventCount = indexedDbEventCount;
+  #stalledChecks = 0;
+  #timer: ReturnType<typeof setTimeout>;
+
+  constructor(transaction: IDBTransaction | null) {
+    this.#transaction = transaction;
+    this.#timer = setTimeout(this.#check, INDEXED_DB_STALL_CHECK_INTERVAL_MS);
+    // Independent of how the operation's own code exits: the watch ends
+    // exactly when the browser says the transaction did.
+    transaction?.addEventListener('complete', this.stop);
+    transaction?.addEventListener('abort', this.stop);
+  }
+
+  readonly stop = (): void => {
+    clearTimeout(this.#timer);
+  };
+
+  readonly #check = (): void => {
+    // A hidden tab may have its storage paused and its timers throttled or
+    // frozen, so only checks made while visible count. A check that fires
+    // late, the moment a frozen tab resumes, is at most the first of the two
+    // required: the operation still gets a full interval of running time.
+    if (
+      indexedDbEventCount !== this.#checkedEventCount ||
+      asPossiblyUndefined(globalThis.document)?.visibilityState === 'hidden'
+    ) {
+      this.#stalledChecks = 0;
+    } else {
+      this.#stalledChecks += 1;
+    }
+    this.#checkedEventCount = indexedDbEventCount;
+
+    if (this.#stalledChecks < 2) {
+      this.#timer = setTimeout(this.#check, INDEXED_DB_STALL_CHECK_INTERVAL_MS);
+      return;
+    }
+
+    try {
+      // An aborted transaction can no longer commit behind the retry's back.
+      this.#transaction?.abort();
+    } catch {
+      // Already committing or finished: it cannot take new requests either.
+    }
+
+    const error = new Error(
+      'IndexedDB operation made no progress; treating the connection as lost.',
+    );
+    error.name = 'TimeoutError';
+    // The events of a stalled operation may never arrive, so its promises are
+    // settled here instead of waiting for them.
+    for (const reject of this.rejecters) {
+      reject(error);
+    }
+  };
+}
 
 type IndexedDbManagedMetadataRecord = {
   customMetadata?: Record<string, unknown>;
@@ -517,20 +623,33 @@ function expandEntryValue(
   return record.d;
 }
 
-function openRequestAsPromise<T>(request: IDBRequest): Promise<T> {
+function openRequestAsPromise<T>(
+  watch: IndexedDbStallWatch,
+  request: IDBRequest,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () =>
+    watch.rejecters.push(reject);
+    request.onsuccess = () => {
+      indexedDbEventCount += 1;
       // WORKAROUND: DOM IndexedDB requests expose `result` as `unknown`/`any`;
       // callers choose the expected shape at each read boundary.
       resolve(__LEGIT_CAST__<T, unknown>(request.result));
+    };
     request.onerror = () =>
       reject(request.error ?? new Error('IndexedDB request failed.'));
   });
 }
 
-function transactionDone(transaction: IDBTransaction): Promise<void> {
+function transactionDone(
+  transaction: IDBTransaction,
+  watch: IndexedDbStallWatch,
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
+    watch.rejecters.push(reject);
+    transaction.oncomplete = () => {
+      indexedDbEventCount += 1;
+      resolve();
+    };
     transaction.onerror = () =>
       reject(transaction.error ?? new Error('IndexedDB transaction failed.'));
     transaction.onabort = () =>
@@ -539,13 +658,16 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 async function iterateCursor<T>(
+  watch: IndexedDbStallWatch,
   request: IDBRequest<IDBCursorWithValue | null>,
   callback: (cursor: IDBCursorWithValue) => T | Promise<T>,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    watch.rejecters.push(reject);
     request.onerror = () =>
       reject(request.error ?? new Error('IndexedDB cursor request failed.'));
     request.onsuccess = async () => {
+      indexedDbEventCount += 1;
       const cursor = request.result;
       if (cursor === null) {
         resolve();
@@ -598,11 +720,13 @@ async function getMaintenanceState(
   database: IDBDatabase,
 ): Promise<{ lastSuccessfulCleanupAt: number | null }> {
   const transaction = database.transaction(INDEXED_DB_META_STORE, 'readonly');
+  const watch = new IndexedDbStallWatch(transaction);
   const store = transaction.objectStore(INDEXED_DB_META_STORE);
   const value = await openRequestAsPromise<IndexedDbMetaRecord | undefined>(
+    watch,
     store.get(INDEXED_DB_MAINTENANCE_META_KEY),
   );
-  await transactionDone(transaction);
+  await transactionDone(transaction, watch);
 
   const recordValue = value?.v;
   if (!isObject(recordValue)) {
@@ -628,13 +752,14 @@ async function setMaintenanceState(
   value: { lastSuccessfulCleanupAt: number | null },
 ): Promise<void> {
   const transaction = database.transaction(INDEXED_DB_META_STORE, 'readwrite');
+  const watch = new IndexedDbStallWatch(transaction);
   transaction
     .objectStore(INDEXED_DB_META_STORE)
     .put({
       k: INDEXED_DB_MAINTENANCE_META_KEY,
       v: { lca: value.lastSuccessfulCleanupAt },
     } satisfies IndexedDbMetaRecord);
-  await transactionDone(transaction);
+  await transactionDone(transaction, watch);
 }
 
 class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
@@ -665,6 +790,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
     syncSessionProtectedKeys: this.syncSessionProtectedKeys.bind(this),
   };
 
+  #database: IDBDatabase | null = null;
   #databasePromise: Promise<IDBDatabase> | null = null;
   readonly #instrumentation: IndexedDbDriverInstrumentation | undefined;
 
@@ -765,61 +891,69 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   async removeMany(
     scope: AsyncStorageNamespaceScope,
     keys: string[],
+    isRetry = false,
   ): Promise<void> {
-    const startTime =
-      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readwrite',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
+    let database: IDBDatabase | undefined;
+    try {
+      const startTime =
+        import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readwrite',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
 
-    let removedAnyEntry = false;
-    let removedScope = false;
-    for (const key of keys) {
-      const parsedKey = parseAsyncStorageRecordKey(key);
-      if (parsedKey.recordKind === 'payload') {
-        entryStore.delete(createEntryPrimaryKey(scope, parsedKey.userKey));
-        removedAnyEntry = true;
-        continue;
-      }
-
-      if (parsedKey.rawKey === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
-        policyStore.delete(createScopePolicyKey(scope));
-        removedScope = true;
-      }
-    }
-
-    if (removedAnyEntry && !removedScope) {
-      const countRequest = entryStore.count(createScopeKeyRange(scope));
-      countRequest.onsuccess = () => {
-        if (countRequest.result === 0) {
-          policyStore.delete(createScopePolicyKey(scope));
+      let removedAnyEntry = false;
+      let removedScope = false;
+      for (const key of keys) {
+        const parsedKey = parseAsyncStorageRecordKey(key);
+        if (parsedKey.recordKind === 'payload') {
+          entryStore.delete(createEntryPrimaryKey(scope, parsedKey.userKey));
+          removedAnyEntry = true;
+          continue;
         }
-      };
-    }
 
-    await transactionDone(transaction);
-    if (import.meta.env.DEV && this.debugLogger) {
-      this.#logAdapterOperation(scope, 'delete-records', startTime, {
-        keyCount: keys.length,
-        objectStores: [
-          INDEXED_DB_ENTRY_STORE,
-          INDEXED_DB_NAMESPACE_POLICY_STORE,
-        ],
+        if (parsedKey.rawKey === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+          policyStore.delete(createScopePolicyKey(scope));
+          removedScope = true;
+        }
+      }
+
+      if (removedAnyEntry && !removedScope) {
+        const countRequest = entryStore.count(createScopeKeyRange(scope));
+        countRequest.onsuccess = () => {
+          if (countRequest.result === 0) {
+            policyStore.delete(createScopePolicyKey(scope));
+          }
+        };
+      }
+
+      await transactionDone(transaction, watch);
+      if (import.meta.env.DEV && this.debugLogger) {
+        this.#logAdapterOperation(scope, 'delete-records', startTime, {
+          keyCount: keys.length,
+          objectStores: [
+            INDEXED_DB_ENTRY_STORE,
+            INDEXED_DB_NAMESPACE_POLICY_STORE,
+          ],
+        });
+      }
+      this.#instrumentation?.onRemoveMany?.(scope, keys);
+      this.#instrumentation?.record({
+        keys: [...keys].sort((left, right) => left.localeCompare(right)),
+        scope,
+        time: Date.now(),
+        type: 'removeManagedRecords',
       });
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.removeMany(scope, keys, true);
     }
-    this.#instrumentation?.onRemoveMany?.(scope, keys);
-    this.#instrumentation?.record({
-      keys: [...keys].sort((left, right) => left.localeCompare(right)),
-      scope,
-      time: Date.now(),
-      type: 'removeManagedRecords',
-    });
   }
 
   async listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
@@ -845,137 +979,155 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   async listScopesWithKnownRecordKeys(
     sessionKey?: string,
+    isRetry = false,
   ): Promise<AsyncStorageDiscoveredScope[]> {
-    const startTime =
-      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readonly',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-    const discoveredScopes: AsyncStorageDiscoveredScope[] = [];
-    const policyRequest =
-      sessionKey === undefined
-        ? policyStore.openCursor()
-        : policyStore
-            .index('bySession')
-            .openCursor(IDBKeyRange.only(sessionKey));
-    await iterateCursor(policyRequest, async (cursor) => {
-      const scope = getScopeFromPrimaryKey(cursor.primaryKey);
-      if (scope === null) return;
-      const keys = new Set<string>([ASYNC_NAMESPACE_INDEX_RECORD_KEY]);
+    let database: IDBDatabase | undefined;
+    try {
+      const startTime =
+        import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readonly',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      const discoveredScopes: AsyncStorageDiscoveredScope[] = [];
+      const policyRequest =
+        sessionKey === undefined
+          ? policyStore.openCursor()
+          : policyStore
+              .index('bySession')
+              .openCursor(IDBKeyRange.only(sessionKey));
+      await iterateCursor(watch, policyRequest, async (cursor) => {
+        const scope = getScopeFromPrimaryKey(cursor.primaryKey);
+        if (scope === null) return;
+        const keys = new Set<string>([ASYNC_NAMESPACE_INDEX_RECORD_KEY]);
 
-      await iterateCursor(
-        entryStore.openCursor(createScopeKeyRange(scope)),
-        (entryCursor) => {
-          const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
-          if (entryKey === null) return;
-          keys.add(getPayloadRecordKey(entryKey));
-        },
+        await iterateCursor(
+          watch,
+          entryStore.openCursor(createScopeKeyRange(scope)),
+          (entryCursor) => {
+            const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
+            if (entryKey === null) return;
+            keys.add(getPayloadRecordKey(entryKey));
+          },
+        );
+
+        discoveredScopes.push({
+          knownRecordKeys: [...keys].sort((left, right) =>
+            left.localeCompare(right),
+          ),
+          scope,
+        });
+      });
+
+      await transactionDone(transaction, watch);
+      if (import.meta.env.DEV && this.debugLogger) {
+        this.#logAdapterOperation(undefined, 'list-scopes', startTime, {
+          count: discoveredScopes.length,
+          objectStores: [
+            INDEXED_DB_ENTRY_STORE,
+            INDEXED_DB_NAMESPACE_POLICY_STORE,
+          ],
+          ...(sessionKey !== undefined ? { sessionKey } : {}),
+        });
+      }
+
+      discoveredScopes.sort((left, right) =>
+        getNamespaceId(left.scope).localeCompare(getNamespaceId(right.scope)),
       );
 
-      discoveredScopes.push({
-        knownRecordKeys: [...keys].sort((left, right) =>
-          left.localeCompare(right),
-        ),
-        scope,
-      });
-    });
-
-    await transactionDone(transaction);
-    if (import.meta.env.DEV && this.debugLogger) {
-      this.#logAdapterOperation(undefined, 'list-scopes', startTime, {
-        count: discoveredScopes.length,
-        objectStores: [
-          INDEXED_DB_ENTRY_STORE,
-          INDEXED_DB_NAMESPACE_POLICY_STORE,
-        ],
+      this.#instrumentation?.record({
+        scopeIds: discoveredScopes.map(({ scope }) => getNamespaceId(scope)),
         ...(sessionKey !== undefined ? { sessionKey } : {}),
+        time: Date.now(),
+        type: 'listScopesWithKnownRecordKeys',
       });
+
+      return discoveredScopes;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.listScopesWithKnownRecordKeys(sessionKey, true);
     }
-
-    discoveredScopes.sort((left, right) =>
-      getNamespaceId(left.scope).localeCompare(getNamespaceId(right.scope)),
-    );
-
-    this.#instrumentation?.record({
-      scopeIds: discoveredScopes.map(({ scope }) => getNamespaceId(scope)),
-      ...(sessionKey !== undefined ? { sessionKey } : {}),
-      time: Date.now(),
-      type: 'listScopesWithKnownRecordKeys',
-    });
-
-    return discoveredScopes;
   }
 
   async readManagedEntries<TValue>(
     scope: AsyncStorageNamespaceScope,
     keys: string[],
+    isRetry = false,
   ): Promise<
     Map<
       string,
       AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
     >
   > {
-    const startTime =
-      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      INDEXED_DB_ENTRY_STORE,
-      'readonly',
-    );
-    const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const uniqueKeys = [...new Set(keys)];
-    const result = new Map<
-      string,
-      AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
-    >();
+    let database: IDBDatabase | undefined;
+    try {
+      const startTime =
+        import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        INDEXED_DB_ENTRY_STORE,
+        'readonly',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const uniqueKeys = [...new Set(keys)];
+      const result = new Map<
+        string,
+        AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
+      >();
 
-    await Promise.all(
-      uniqueKeys.map(async (key) => {
-        const record = await openRequestAsPromise<
-          IndexedDbEntryRecord | undefined
-        >(store.get(createEntryPrimaryKey(scope, key)));
-        if (!isValidEntryRecord(record)) {
-          result.set(key, null);
-          return;
-        }
-        const entryRecord = toEntryRecordValue(record);
+      await Promise.all(
+        uniqueKeys.map(async (key) => {
+          const record = await openRequestAsPromise<
+            IndexedDbEntryRecord | undefined
+          >(watch, store.get(createEntryPrimaryKey(scope, key)));
+          if (!isValidEntryRecord(record)) {
+            result.set(key, null);
+            return;
+          }
+          const entryRecord = toEntryRecordValue(record);
 
-        result.set(key, {
-          metadata: toPublicMetadata(key, entryRecord),
-          // WORKAROUND: IndexedDB payload values cross the untyped storage
-          // boundary as unknown and are only rebound to the caller's TValue here.
-          value: __LEGIT_CAST__<TValue, unknown>(
-            expandEntryValue(scope, entryRecord),
-          ),
+          result.set(key, {
+            metadata: toPublicMetadata(key, entryRecord),
+            // WORKAROUND: IndexedDB payload values cross the untyped storage
+            // boundary as unknown and are only rebound to the caller's TValue here.
+            value: __LEGIT_CAST__<TValue, unknown>(
+              expandEntryValue(scope, entryRecord),
+            ),
+          });
+        }),
+      );
+      await transactionDone(transaction, watch);
+      if (import.meta.env.DEV && this.debugLogger) {
+        this.#logAdapterOperation(scope, 'read-records', startTime, {
+          hitCount: [...result.values()].filter((value) => value !== null)
+            .length,
+          keyCount: uniqueKeys.length,
+          objectStores: [INDEXED_DB_ENTRY_STORE],
         });
-      }),
-    );
-    await transactionDone(transaction);
-    if (import.meta.env.DEV && this.debugLogger) {
-      this.#logAdapterOperation(scope, 'read-records', startTime, {
-        hitCount: [...result.values()].filter((value) => value !== null).length,
-        keyCount: uniqueKeys.length,
-        objectStores: [INDEXED_DB_ENTRY_STORE],
+      }
+
+      this.#instrumentation?.record({
+        keys: uniqueKeys,
+        resultKeys: [...result.entries()]
+          .flatMap(([key, value]) => (value === null ? [] : [key]))
+          .sort((left, right) => left.localeCompare(right)),
+        scope,
+        time: Date.now(),
+        type: 'readManagedEntries',
       });
+
+      return result;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.readManagedEntries<TValue>(scope, keys, true);
     }
-
-    this.#instrumentation?.record({
-      keys: uniqueKeys,
-      resultKeys: [...result.entries()]
-        .flatMap(([key, value]) => (value === null ? [] : [key]))
-        .sort((left, right) => left.localeCompare(right)),
-      scope,
-      time: Date.now(),
-      type: 'readManagedEntries',
-    });
-
-    return result;
   }
 
   async listManagedMetadata(
@@ -984,98 +1136,115 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       filter?: IndexedDbManagedMetadataFilter;
       order?: AsyncStorageMetadataOrder;
     } = {},
+    isRetry = false,
   ): Promise<AsyncStorageEntryMetadata<Record<string, unknown>>[]> {
-    const startTime =
-      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-    const order = args.order ?? 'key';
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      INDEXED_DB_ENTRY_STORE,
-      'readonly',
-    );
-    const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const entries: AsyncStorageEntryMetadata<Record<string, unknown>>[] = [];
-    let usedIndex: 'group' | 'key' | 'lru' = 'key';
-
-    if (
-      args.filter?.key === 'g' &&
-      typeof args.filter.equals === 'string' &&
-      order === 'key'
-    ) {
-      usedIndex = 'group';
-      await iterateCursor(
-        store
-          .index('byScopeGroup')
-          .openCursor(createScopeGroupRange(scope, args.filter.equals)),
-        (cursor) => {
-          const record = cursor.value;
-          const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
-          if (!isValidEntryRecord(record) || entryKey === null) return;
-          entries.push(toPublicMetadata(entryKey, toEntryRecordValue(record)));
-        },
+    let database: IDBDatabase | undefined;
+    try {
+      const startTime =
+        import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
+      const order = args.order ?? 'key';
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        INDEXED_DB_ENTRY_STORE,
+        'readonly',
       );
-    } else if (order === 'lru-asc' || order === 'lru-desc') {
-      usedIndex = 'lru';
-      await iterateCursor(
-        store
-          .index('byScopeLastAccessAt')
-          .openCursor(
-            createScopeLastAccessRange(scope),
-            order === 'lru-desc' ? 'prev' : 'next',
-          ),
-        (cursor) => {
-          const record = cursor.value;
-          const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
-          if (!isValidEntryRecord(record) || entryKey === null) return;
-          entries.push(toPublicMetadata(entryKey, toEntryRecordValue(record)));
-        },
-      );
-    } else {
-      await iterateCursor(
-        store.openCursor(createScopeKeyRange(scope)),
-        (cursor) => {
-          const record = cursor.value;
-          const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
-          if (!isValidEntryRecord(record) || entryKey === null) return;
-          entries.push(toPublicMetadata(entryKey, toEntryRecordValue(record)));
-        },
-      );
-    }
+      const watch = new IndexedDbStallWatch(transaction);
+      const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const entries: AsyncStorageEntryMetadata<Record<string, unknown>>[] = [];
+      let usedIndex: 'group' | 'key' | 'lru' = 'key';
 
-    await transactionDone(transaction);
+      if (
+        args.filter?.key === 'g' &&
+        typeof args.filter.equals === 'string' &&
+        order === 'key'
+      ) {
+        usedIndex = 'group';
+        await iterateCursor(
+          watch,
+          store
+            .index('byScopeGroup')
+            .openCursor(createScopeGroupRange(scope, args.filter.equals)),
+          (cursor) => {
+            const record = cursor.value;
+            const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+            if (!isValidEntryRecord(record) || entryKey === null) return;
+            entries.push(
+              toPublicMetadata(entryKey, toEntryRecordValue(record)),
+            );
+          },
+        );
+      } else if (order === 'lru-asc' || order === 'lru-desc') {
+        usedIndex = 'lru';
+        await iterateCursor(
+          watch,
+          store
+            .index('byScopeLastAccessAt')
+            .openCursor(
+              createScopeLastAccessRange(scope),
+              order === 'lru-desc' ? 'prev' : 'next',
+            ),
+          (cursor) => {
+            const record = cursor.value;
+            const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+            if (!isValidEntryRecord(record) || entryKey === null) return;
+            entries.push(
+              toPublicMetadata(entryKey, toEntryRecordValue(record)),
+            );
+          },
+        );
+      } else {
+        await iterateCursor(
+          watch,
+          store.openCursor(createScopeKeyRange(scope)),
+          (cursor) => {
+            const record = cursor.value;
+            const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+            if (!isValidEntryRecord(record) || entryKey === null) return;
+            entries.push(
+              toPublicMetadata(entryKey, toEntryRecordValue(record)),
+            );
+          },
+        );
+      }
 
-    const filter = args.filter;
-    const filteredEntries =
-      filter === undefined
-        ? entries
-        : entries.filter(
-            (entry) => entry.customMetadata[filter.key] === filter.equals,
-          );
+      await transactionDone(transaction, watch);
 
-    if (usedIndex !== 'lru') {
-      filteredEntries.sort((left, right) =>
-        compareMetadata(left, right, order),
-      );
-    }
-    if (import.meta.env.DEV && this.debugLogger) {
-      this.#logAdapterOperation(scope, 'list-record-metadata', startTime, {
-        count: filteredEntries.length,
-        objectStores: [INDEXED_DB_ENTRY_STORE],
+      const filter = args.filter;
+      const filteredEntries =
+        filter === undefined
+          ? entries
+          : entries.filter(
+              (entry) => entry.customMetadata[filter.key] === filter.equals,
+            );
+
+      if (usedIndex !== 'lru') {
+        filteredEntries.sort((left, right) =>
+          compareMetadata(left, right, order),
+        );
+      }
+      if (import.meta.env.DEV && this.debugLogger) {
+        this.#logAdapterOperation(scope, 'list-record-metadata', startTime, {
+          count: filteredEntries.length,
+          objectStores: [INDEXED_DB_ENTRY_STORE],
+          order,
+          usedIndex,
+        });
+      }
+
+      this.#instrumentation?.record({
         order,
+        resultKeys: filteredEntries.map((entry) => entry.key),
+        scope,
+        time: Date.now(),
+        type: 'listManagedMetadata',
         usedIndex,
       });
+
+      return filteredEntries;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.listManagedMetadata(scope, args, true);
     }
-
-    this.#instrumentation?.record({
-      order,
-      resultKeys: filteredEntries.map((entry) => entry.key),
-      scope,
-      time: Date.now(),
-      type: 'listManagedMetadata',
-      usedIndex,
-    });
-
-    return filteredEntries;
   }
 
   async listManagedKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
@@ -1085,41 +1254,46 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   async clearManagedNamespace(
     scope: AsyncStorageNamespaceScope,
+    isRetry = false,
   ): Promise<void> {
-    const startTime =
-      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readwrite',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-    await iterateCursor(
-      entryStore.openCursor(createScopeKeyRange(scope)),
-      (cursor) => {
-        cursor.delete();
-      },
-    );
-    policyStore.delete(createScopePolicyKey(scope));
-    await transactionDone(transaction);
-    if (import.meta.env.DEV && this.debugLogger) {
-      this.#logAdapterOperation(scope, 'clear-records', startTime, {
-        objectStores: [
-          INDEXED_DB_ENTRY_STORE,
-          INDEXED_DB_NAMESPACE_POLICY_STORE,
-        ],
-      });
-    }
+    let database: IDBDatabase | undefined;
+    try {
+      const startTime =
+        import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readwrite',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      // One range delete instead of a cursor walk: fewer requests, and both
+      // are issued in the frame that created the transaction.
+      entryStore.delete(createScopeKeyRange(scope));
+      policyStore.delete(createScopePolicyKey(scope));
+      await transactionDone(transaction, watch);
+      if (import.meta.env.DEV && this.debugLogger) {
+        this.#logAdapterOperation(scope, 'clear-records', startTime, {
+          objectStores: [
+            INDEXED_DB_ENTRY_STORE,
+            INDEXED_DB_NAMESPACE_POLICY_STORE,
+          ],
+        });
+      }
 
-    this.#instrumentation?.onClearManagedNamespace?.(scope);
-    this.#instrumentation?.record({
-      scope,
-      time: Date.now(),
-      type: 'clearManagedNamespace',
-    });
+      this.#instrumentation?.onClearManagedNamespace?.(scope);
+      this.#instrumentation?.record({
+        scope,
+        time: Date.now(),
+        type: 'clearManagedNamespace',
+      });
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.clearManagedNamespace(scope, true);
+    }
   }
 
   async applyManagedCommit(
@@ -1135,314 +1309,339 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         currentCustomMetadata: Record<string, unknown> | undefined,
       ) => Record<string, unknown> | undefined;
     },
+    isRetry = false,
   ): Promise<ReadonlySet<string>> {
-    const startTime =
-      import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readwrite',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-    const upserts = args.upserts ?? [];
-    const removes = [...new Set(args.removes ?? [])];
-    const conditionalRemoves = args.conditionalRemoves ?? [];
-    const touches = args.touches ?? [];
-    const scopeId = createScopeId(
-      scope.sessionKey,
-      scope.storeName,
-      scope.kind,
-    );
-    const uniqueKeys = [
-      ...new Set([
-        ...removes,
-        ...conditionalRemoves.map((remove) => remove.key),
-        ...touches.map((touch) => touch.key),
-        ...upserts.map((upsert) => upsert.key),
-      ]),
-    ];
-    const existingEntries = new Map<string, IndexedDbEntryRecord>();
-    const now = Date.now();
-    const touchTimestamps = new Map(
-      touches.map((touch) => [touch.key, touch.lastAccessAt ?? now]),
-    );
-    const rawScopeRecord = await openRequestAsPromise<unknown>(
-      policyStore.get(createScopePolicyKey(scope)),
-    );
-    const existingStaticPolicy = isValidNamespacePolicyRecord(rawScopeRecord)
-      ? getStaticPolicyFromScopeRecord(
-          toNamespacePolicyRecordValue(rawScopeRecord),
-        )
-      : null;
+    let database: IDBDatabase | undefined;
+    try {
+      const startTime =
+        import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readwrite',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      const upserts = args.upserts ?? [];
+      const removes = [...new Set(args.removes ?? [])];
+      const conditionalRemoves = args.conditionalRemoves ?? [];
+      const touches = args.touches ?? [];
+      const scopeId = createScopeId(
+        scope.sessionKey,
+        scope.storeName,
+        scope.kind,
+      );
+      const uniqueKeys = [
+        ...new Set([
+          ...removes,
+          ...conditionalRemoves.map((remove) => remove.key),
+          ...touches.map((touch) => touch.key),
+          ...upserts.map((upsert) => upsert.key),
+        ]),
+      ];
+      const existingEntries = new Map<string, IndexedDbEntryRecord>();
+      const now = Date.now();
+      const touchTimestamps = new Map(
+        touches.map((touch) => [touch.key, touch.lastAccessAt ?? now]),
+      );
+      const rawScopeRecord = await openRequestAsPromise<unknown>(
+        watch,
+        policyStore.get(createScopePolicyKey(scope)),
+      );
+      const existingStaticPolicy = isValidNamespacePolicyRecord(rawScopeRecord)
+        ? getStaticPolicyFromScopeRecord(
+            toNamespacePolicyRecordValue(rawScopeRecord),
+          )
+        : null;
 
-    await Promise.all(
-      uniqueKeys.map(async (key) => {
-        const record = await openRequestAsPromise<
-          IndexedDbEntryRecord | undefined
-        >(entryStore.get(createEntryPrimaryKey(scope, key)));
-        if (isValidEntryRecord(record)) {
-          existingEntries.set(key, toEntryRecordValue(record));
+      await Promise.all(
+        uniqueKeys.map(async (key) => {
+          const record = await openRequestAsPromise<
+            IndexedDbEntryRecord | undefined
+          >(watch, entryStore.get(createEntryPrimaryKey(scope, key)));
+          if (isValidEntryRecord(record)) {
+            existingEntries.set(key, toEntryRecordValue(record));
+          }
+        }),
+      );
+
+      // Checked inside the same readwrite transaction as the removal.
+      const staleConditionalRemoveKeys = new Set<string>();
+      for (const remove of conditionalRemoves) {
+        const existing = existingEntries.get(remove.key);
+        // Already removed.
+        if (existing === undefined) continue;
+        if (
+          matchesConditionalRemove(
+            remove,
+            existing.a,
+            existing.z,
+            existing.v ?? 1,
+            existing.o === 1,
+          )
+        ) {
+          removes.push(remove.key);
+        } else {
+          staleConditionalRemoveKeys.add(remove.key);
         }
-      }),
-    );
-
-    // Checked inside the same readwrite transaction as the removal.
-    const staleConditionalRemoveKeys = new Set<string>();
-    for (const remove of conditionalRemoves) {
-      const existing = existingEntries.get(remove.key);
-      // Already removed.
-      if (existing === undefined) continue;
-      if (
-        matchesConditionalRemove(
-          remove,
-          existing.a,
-          existing.z,
-          existing.v ?? 1,
-          existing.o === 1,
-        )
-      ) {
-        removes.push(remove.key);
-      } else {
-        staleConditionalRemoveKeys.add(remove.key);
       }
-    }
 
-    for (const key of removes) {
-      entryStore.delete(createEntryPrimaryKey(scope, key));
-    }
+      for (const key of removes) {
+        entryStore.delete(createEntryPrimaryKey(scope, key));
+      }
 
-    const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
-    for (const upsert of upserts) {
-      const existing = existingEntries.get(upsert.key);
-      const customMetadata = helpers.mergeOfflineProtectionMetadata(
-        upsert.key,
-        upsert.metadata,
-        existing === undefined
-          ? undefined
-          : getCustomMetadataFromEntryRecord(existing),
-      );
-      const { extraMetadata, group, offlineProtected, payload } =
-        splitCustomMetadata(customMetadata);
-      const nextLastAccessAt =
-        touchTimestamps.get(upsert.key) ?? existing?.a ?? now;
-      const sizeBytes =
-        scope.kind !== 'document'
-          ? estimateIndexedDbManagedEntrySizeBytes({
-              customMetadata,
-              lastAccessAt: nextLastAccessAt,
-              serializedValue: upsert.serializedValue,
-              value: upsert.value,
-              version: upsert.version,
-            })
+      const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
+      for (const upsert of upserts) {
+        const existing = existingEntries.get(upsert.key);
+        const customMetadata = helpers.mergeOfflineProtectionMetadata(
+          upsert.key,
+          upsert.metadata,
+          existing === undefined
+            ? undefined
+            : getCustomMetadataFromEntryRecord(existing),
+        );
+        const { extraMetadata, group, offlineProtected, payload } =
+          splitCustomMetadata(customMetadata);
+        const nextLastAccessAt =
+          touchTimestamps.get(upsert.key) ?? existing?.a ?? now;
+        const sizeBytes =
+          scope.kind !== 'document'
+            ? estimateIndexedDbManagedEntrySizeBytes({
+                customMetadata,
+                lastAccessAt: nextLastAccessAt,
+                serializedValue: upsert.serializedValue,
+                value: upsert.value,
+                version: upsert.version,
+              })
+            : undefined;
+        const compactValue = compactEntryValue(scope, upsert.value);
+        await openRequestAsPromise(
+          watch,
+          entryStore.put(
+            {
+              a: nextLastAccessAt,
+              ...compactValue,
+              ...(group !== undefined ? { g: group } : {}),
+              i: scopeId,
+              ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+              ...(offlineProtected === true ? { o: 1 as const } : {}),
+              ...(payload !== undefined ? { p: payload } : {}),
+              ...(upsert.version !== 1 ? { v: upsert.version } : {}),
+              ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
+            } satisfies IndexedDbEntryRecord,
+            createEntryPrimaryKey(scope, upsert.key),
+          ),
+        );
+      }
+
+      for (const touch of touches) {
+        if (upsertKeySet.has(touch.key)) continue;
+        const existing = existingEntries.get(touch.key);
+        if (existing === undefined) continue;
+        const nextLastAccessAt = touch.lastAccessAt ?? now;
+        if (existing.a === nextLastAccessAt) continue;
+        await openRequestAsPromise(
+          watch,
+          entryStore.put(
+            { ...existing, a: nextLastAccessAt } satisfies IndexedDbEntryRecord,
+            createEntryPrimaryKey(scope, touch.key),
+          ),
+        );
+      }
+
+      const normalizedStaticPolicy =
+        'staticPolicy' in args
+          ? normalizeStaticPolicy(args.staticPolicy)
           : undefined;
-      const compactValue = compactEntryValue(scope, upsert.value);
-      await openRequestAsPromise(
-        entryStore.put(
-          {
-            a: nextLastAccessAt,
-            ...compactValue,
-            ...(group !== undefined ? { g: group } : {}),
-            i: scopeId,
-            ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
-            ...(offlineProtected === true ? { o: 1 as const } : {}),
-            ...(payload !== undefined ? { p: payload } : {}),
-            ...(upsert.version !== 1 ? { v: upsert.version } : {}),
-            ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
-          } satisfies IndexedDbEntryRecord,
-          createEntryPrimaryKey(scope, upsert.key),
-        ),
+      const remainingCount = await openRequestAsPromise<number>(
+        watch,
+        entryStore.count(createScopeKeyRange(scope)),
       );
-    }
 
-    for (const touch of touches) {
-      if (upsertKeySet.has(touch.key)) continue;
-      const existing = existingEntries.get(touch.key);
-      if (existing === undefined) continue;
-      const nextLastAccessAt = touch.lastAccessAt ?? now;
-      if (existing.a === nextLastAccessAt) continue;
-      await openRequestAsPromise(
-        entryStore.put(
-          { ...existing, a: nextLastAccessAt } satisfies IndexedDbEntryRecord,
-          createEntryPrimaryKey(scope, touch.key),
-        ),
-      );
-    }
+      if (remainingCount === 0) {
+        policyStore.delete(createScopePolicyKey(scope));
+      } else {
+        await openRequestAsPromise(
+          watch,
+          policyStore.put(
+            {
+              p: serializeIndexedDbPersistedStaticPolicy(
+                normalizedStaticPolicy ?? existingStaticPolicy,
+              ),
+              s: scope.sessionKey,
+            } satisfies IndexedDbNamespacePolicyRecord,
+            createScopePolicyKey(scope),
+          ),
+        );
+      }
 
-    const normalizedStaticPolicy =
-      'staticPolicy' in args
-        ? normalizeStaticPolicy(args.staticPolicy)
-        : undefined;
-    const remainingCount = await openRequestAsPromise<number>(
-      entryStore.count(createScopeKeyRange(scope)),
-    );
+      await transactionDone(transaction, watch);
+      if (import.meta.env.DEV && this.debugLogger) {
+        this.#logAdapterOperation(scope, 'write-records', startTime, {
+          objectStores: [
+            INDEXED_DB_ENTRY_STORE,
+            INDEXED_DB_NAMESPACE_POLICY_STORE,
+          ],
+          removes: removes.length,
+          touches: touches.length,
+          upserts: upserts.length,
+        });
+      }
 
-    if (remainingCount === 0) {
-      policyStore.delete(createScopePolicyKey(scope));
-    } else {
-      await openRequestAsPromise(
-        policyStore.put(
-          {
-            p: serializeIndexedDbPersistedStaticPolicy(
-              normalizedStaticPolicy ?? existingStaticPolicy,
-            ),
-            s: scope.sessionKey,
-          } satisfies IndexedDbNamespacePolicyRecord,
-          createScopePolicyKey(scope),
-        ),
-      );
-    }
-
-    await transactionDone(transaction);
-    if (import.meta.env.DEV && this.debugLogger) {
-      this.#logAdapterOperation(scope, 'write-records', startTime, {
-        objectStores: [
-          INDEXED_DB_ENTRY_STORE,
-          INDEXED_DB_NAMESPACE_POLICY_STORE,
-        ],
-        removes: removes.length,
-        touches: touches.length,
-        upserts: upserts.length,
+      this.#instrumentation?.onApplyManagedCommit?.(scope, args);
+      this.#instrumentation?.record({
+        removes,
+        scope,
+        staticPolicyChanged: 'staticPolicy' in args,
+        time: Date.now(),
+        touches: touches
+          .map((touch) => touch.key)
+          .sort((left, right) => left.localeCompare(right)),
+        type: 'applyManagedCommit',
+        upserts: upserts
+          .map((upsert) => upsert.key)
+          .sort((left, right) => left.localeCompare(right)),
       });
+      return staleConditionalRemoveKeys;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.applyManagedCommit(scope, args, helpers, true);
     }
-
-    this.#instrumentation?.onApplyManagedCommit?.(scope, args);
-    this.#instrumentation?.record({
-      removes,
-      scope,
-      staticPolicyChanged: 'staticPolicy' in args,
-      time: Date.now(),
-      touches: touches
-        .map((touch) => touch.key)
-        .sort((left, right) => left.localeCompare(right)),
-      type: 'applyManagedCommit',
-      upserts: upserts
-        .map((upsert) => upsert.key)
-        .sort((left, right) => left.localeCompare(right)),
-    });
-    return staleConditionalRemoveKeys;
   }
 
   async readNamespaceIndexState(
     scope: AsyncStorageNamespaceScope,
     knownRecordKeys_?: string[] | null,
+    isRetry = false,
   ): Promise<IndexedDbManagedIndexState> {
-    void knownRecordKeys_;
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readonly',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-    const entries = new Map<string, IndexedDbManagedMetadataRecord>();
-    let invalidEntryCount = 0;
+    let database: IDBDatabase | undefined;
+    try {
+      void knownRecordKeys_;
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readonly',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      const entries = new Map<string, IndexedDbManagedMetadataRecord>();
+      let invalidEntryCount = 0;
 
-    await iterateCursor(
-      entryStore.openCursor(createScopeKeyRange(scope)),
-      (cursor) => {
-        const record = cursor.value;
-        const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
-        if (!isValidEntryRecord(record)) {
-          invalidEntryCount += 1;
-          return;
-        }
+      // Both reads are issued in the frame that created the transaction.
+      const [rawPolicy] = await Promise.all([
+        openRequestAsPromise<unknown>(
+          watch,
+          policyStore.get(createScopePolicyKey(scope)),
+        ),
+        iterateCursor(
+          watch,
+          entryStore.openCursor(createScopeKeyRange(scope)),
+          (cursor) => {
+            const record = cursor.value;
+            const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+            if (!isValidEntryRecord(record)) {
+              invalidEntryCount += 1;
+              return;
+            }
 
-        if (entryKey === null) {
-          invalidEntryCount += 1;
-          return;
-        }
+            if (entryKey === null) {
+              invalidEntryCount += 1;
+              return;
+            }
 
-        entries.set(entryKey, toMetadataRecord(toEntryRecordValue(record)));
-      },
-    );
+            entries.set(entryKey, toMetadataRecord(toEntryRecordValue(record)));
+          },
+        ),
+      ]);
+      await transactionDone(transaction, watch);
 
-    const rawPolicy = await openRequestAsPromise<unknown>(
-      policyStore.get(createScopePolicyKey(scope)),
-    );
-    await transactionDone(transaction);
+      if (invalidEntryCount > 0) {
+        const result = {
+          entries: null,
+          exists: entries.size > 0 || rawPolicy !== undefined,
+          staticPolicy: null,
+          valid: false,
+        };
+        this.#instrumentation?.record({
+          exists: result.exists,
+          keyCount: entries.size,
+          scope,
+          time: Date.now(),
+          type: 'readManagedIndexState',
+          valid: result.valid,
+        });
+        return result;
+      }
 
-    if (invalidEntryCount > 0) {
+      if (rawPolicy !== undefined && !isValidNamespacePolicyRecord(rawPolicy)) {
+        const result = {
+          entries: null,
+          exists: true,
+          staticPolicy: null,
+          valid: false,
+        };
+        this.#instrumentation?.record({
+          exists: result.exists,
+          keyCount: entries.size,
+          scope,
+          time: Date.now(),
+          type: 'readManagedIndexState',
+          valid: result.valid,
+        });
+        return result;
+      }
+
+      const exists = rawPolicy !== undefined || entries.size > 0;
+      if (
+        (rawPolicy === undefined && entries.size > 0) ||
+        (rawPolicy !== undefined && entries.size === 0)
+      ) {
+        const result = {
+          entries: null,
+          exists,
+          staticPolicy: null,
+          valid: false,
+        };
+        this.#instrumentation?.record({
+          exists: result.exists,
+          keyCount: entries.size,
+          scope,
+          time: Date.now(),
+          type: 'readManagedIndexState',
+          valid: result.valid,
+        });
+        return result;
+      }
+
       const result = {
-        entries: null,
-        exists: entries.size > 0 || rawPolicy !== undefined,
-        staticPolicy: null,
-        valid: false,
+        entries,
+        exists: rawPolicy !== undefined,
+        staticPolicy: getStaticPolicyFromScopeRecord(
+          rawPolicy === undefined
+            ? undefined
+            : toNamespacePolicyRecordValue(rawPolicy),
+        ),
+        valid: true,
       };
       this.#instrumentation?.record({
         exists: result.exists,
-        keyCount: entries.size,
+        keyCount: result.entries.size,
         scope,
         time: Date.now(),
         type: 'readManagedIndexState',
         valid: result.valid,
       });
       return result;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.readNamespaceIndexState(scope, knownRecordKeys_, true);
     }
-
-    if (rawPolicy !== undefined && !isValidNamespacePolicyRecord(rawPolicy)) {
-      const result = {
-        entries: null,
-        exists: true,
-        staticPolicy: null,
-        valid: false,
-      };
-      this.#instrumentation?.record({
-        exists: result.exists,
-        keyCount: entries.size,
-        scope,
-        time: Date.now(),
-        type: 'readManagedIndexState',
-        valid: result.valid,
-      });
-      return result;
-    }
-
-    const exists = rawPolicy !== undefined || entries.size > 0;
-    if (
-      (rawPolicy === undefined && entries.size > 0) ||
-      (rawPolicy !== undefined && entries.size === 0)
-    ) {
-      const result = {
-        entries: null,
-        exists,
-        staticPolicy: null,
-        valid: false,
-      };
-      this.#instrumentation?.record({
-        exists: result.exists,
-        keyCount: entries.size,
-        scope,
-        time: Date.now(),
-        type: 'readManagedIndexState',
-        valid: result.valid,
-      });
-      return result;
-    }
-
-    const result = {
-      entries,
-      exists: rawPolicy !== undefined,
-      staticPolicy: getStaticPolicyFromScopeRecord(
-        rawPolicy === undefined
-          ? undefined
-          : toNamespacePolicyRecordValue(rawPolicy),
-      ),
-      valid: true,
-    };
-    this.#instrumentation?.record({
-      exists: result.exists,
-      keyCount: result.entries.size,
-      scope,
-      time: Date.now(),
-      type: 'readManagedIndexState',
-      valid: result.valid,
-    });
-    return result;
   }
 
   async persistNamespaceIndexState(
@@ -1451,183 +1650,213 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       entries: Map<string, IndexedDbManagedMetadataRecord>;
       staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
     },
+    isRetry = false,
   ): Promise<void> {
-    const database = await this.#getDatabase();
-    const existingEntries = new Map<string, IndexedDbEntryRecord>();
-    const readTransaction = database.transaction(
-      INDEXED_DB_ENTRY_STORE,
-      'readonly',
-    );
-    const readStore = readTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const desiredKeys = [...state.entries.keys()];
-
-    await Promise.all(
-      desiredKeys.map(async (key) => {
-        const existing = await openRequestAsPromise<
-          IndexedDbEntryRecord | undefined
-        >(readStore.get(createEntryPrimaryKey(scope, key)));
-        if (isValidEntryRecord(existing)) {
-          existingEntries.set(key, toEntryRecordValue(existing));
-        }
-      }),
-    );
-    await transactionDone(readTransaction);
-
-    const writeTransaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readwrite',
-    );
-    const entryStore = writeTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = writeTransaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-
-    for (const [key, metadata] of state.entries.entries()) {
-      const existing = existingEntries.get(key);
-      if (existing === undefined) continue;
-      const { extraMetadata, group, offlineProtected, payload } =
-        splitCustomMetadata(metadata.customMetadata);
-
-      entryStore.put(
-        {
-          ...existing,
-          a: metadata.lastAccessAt,
-          ...(group !== undefined ? { g: group } : {}),
-          ...(group === undefined ? { g: undefined } : {}),
-          ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
-          ...(extraMetadata === undefined ? { m: undefined } : {}),
-          ...(offlineProtected === true ? { o: 1 as const } : {}),
-          ...(offlineProtected !== true ? { o: undefined } : {}),
-          ...(payload !== undefined ? { p: payload } : {}),
-          ...(payload === undefined ? { p: undefined } : {}),
-          ...(metadata.version !== 1 ? { v: metadata.version } : {}),
-          ...(metadata.version === 1 ? { v: undefined } : {}),
-          ...(metadata.sizeBytes !== undefined
-            ? { z: metadata.sizeBytes }
-            : {}),
-          ...(metadata.sizeBytes === undefined ? { z: undefined } : {}),
-        } satisfies IndexedDbEntryRecord,
-        createEntryPrimaryKey(scope, key),
+    let database: IDBDatabase | undefined;
+    try {
+      database = await this.#getDatabase();
+      const existingEntries = new Map<string, IndexedDbEntryRecord>();
+      const readTransaction = database.transaction(
+        INDEXED_DB_ENTRY_STORE,
+        'readonly',
       );
-    }
+      const readWatch = new IndexedDbStallWatch(readTransaction);
+      const readStore = readTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const desiredKeys = [...state.entries.keys()];
 
-    if (state.entries.size === 0) {
-      policyStore.delete(createScopePolicyKey(scope));
-    } else {
-      policyStore.put(
-        {
-          p: serializeIndexedDbPersistedStaticPolicy(state.staticPolicy),
-          s: scope.sessionKey,
-        } satisfies IndexedDbNamespacePolicyRecord,
-        createScopePolicyKey(scope),
+      await Promise.all(
+        desiredKeys.map(async (key) => {
+          const existing = await openRequestAsPromise<
+            IndexedDbEntryRecord | undefined
+          >(readWatch, readStore.get(createEntryPrimaryKey(scope, key)));
+          if (isValidEntryRecord(existing)) {
+            existingEntries.set(key, toEntryRecordValue(existing));
+          }
+        }),
       );
-    }
+      await transactionDone(readTransaction, readWatch);
 
-    await transactionDone(writeTransaction);
-    this.#instrumentation?.onPersistNamespaceIndexState?.(scope, state);
-    this.#instrumentation?.record({
-      keyCount: state.entries.size,
-      scope,
-      staticPolicy: state.staticPolicy,
-      time: Date.now(),
-      type: 'persistManagedIndexState',
-    });
+      const writeTransaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readwrite',
+      );
+      const writeWatch = new IndexedDbStallWatch(writeTransaction);
+      const entryStore = writeTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = writeTransaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+
+      for (const [key, metadata] of state.entries.entries()) {
+        const existing = existingEntries.get(key);
+        if (existing === undefined) continue;
+        const { extraMetadata, group, offlineProtected, payload } =
+          splitCustomMetadata(metadata.customMetadata);
+
+        entryStore.put(
+          {
+            ...existing,
+            a: metadata.lastAccessAt,
+            ...(group !== undefined ? { g: group } : {}),
+            ...(group === undefined ? { g: undefined } : {}),
+            ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+            ...(extraMetadata === undefined ? { m: undefined } : {}),
+            ...(offlineProtected === true ? { o: 1 as const } : {}),
+            ...(offlineProtected !== true ? { o: undefined } : {}),
+            ...(payload !== undefined ? { p: payload } : {}),
+            ...(payload === undefined ? { p: undefined } : {}),
+            ...(metadata.version !== 1 ? { v: metadata.version } : {}),
+            ...(metadata.version === 1 ? { v: undefined } : {}),
+            ...(metadata.sizeBytes !== undefined
+              ? { z: metadata.sizeBytes }
+              : {}),
+            ...(metadata.sizeBytes === undefined ? { z: undefined } : {}),
+          } satisfies IndexedDbEntryRecord,
+          createEntryPrimaryKey(scope, key),
+        );
+      }
+
+      if (state.entries.size === 0) {
+        policyStore.delete(createScopePolicyKey(scope));
+      } else {
+        policyStore.put(
+          {
+            p: serializeIndexedDbPersistedStaticPolicy(state.staticPolicy),
+            s: scope.sessionKey,
+          } satisfies IndexedDbNamespacePolicyRecord,
+          createScopePolicyKey(scope),
+        );
+      }
+
+      await transactionDone(writeTransaction, writeWatch);
+      this.#instrumentation?.onPersistNamespaceIndexState?.(scope, state);
+      this.#instrumentation?.record({
+        keyCount: state.entries.size,
+        scope,
+        staticPolicy: state.staticPolicy,
+        time: Date.now(),
+        type: 'persistManagedIndexState',
+      });
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.persistNamespaceIndexState(scope, state, true);
+    }
   }
 
-  async readProtectedStorageKeys(sessionKey: string): Promise<string[]> {
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readonly',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-    const values: string[] = [];
-    const scopeRequest = policyStore
-      .index('bySession')
-      .openCursor(IDBKeyRange.only(sessionKey));
-    await iterateCursor(scopeRequest, async (scopeCursor) => {
-      const scope = getScopeFromPrimaryKey(scopeCursor.primaryKey);
-      if (scope === null) return;
-
-      await iterateCursor(
-        entryStore
-          .index('byScopeOfflineProtected')
-          .openCursor(createScopeOfflineProtectedRange(scope)),
-        (entryCursor) => {
-          const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
-          const record = entryCursor.value;
-          if (!isValidEntryRecord(record) || entryKey === null) return;
-          values.push(serializeProtectedRef({ ...scope, key: entryKey }));
-        },
+  async readProtectedStorageKeys(
+    sessionKey: string,
+    isRetry = false,
+  ): Promise<string[]> {
+    let database: IDBDatabase | undefined;
+    try {
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readonly',
       );
-    });
-    await transactionDone(transaction);
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      const values: string[] = [];
+      const scopeRequest = policyStore
+        .index('bySession')
+        .openCursor(IDBKeyRange.only(sessionKey));
+      await iterateCursor(watch, scopeRequest, async (scopeCursor) => {
+        const scope = getScopeFromPrimaryKey(scopeCursor.primaryKey);
+        if (scope === null) return;
 
-    this.#instrumentation?.record({
-      sessionKey,
-      time: Date.now(),
-      type: 'readProtectedStorageKeys',
-      values: [...values].sort((left, right) => left.localeCompare(right)),
-    });
+        await iterateCursor(
+          watch,
+          entryStore
+            .index('byScopeOfflineProtected')
+            .openCursor(createScopeOfflineProtectedRange(scope)),
+          (entryCursor) => {
+            const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
+            const record = entryCursor.value;
+            if (!isValidEntryRecord(record) || entryKey === null) return;
+            values.push(serializeProtectedRef({ ...scope, key: entryKey }));
+          },
+        );
+      });
+      await transactionDone(transaction, watch);
 
-    return values;
+      this.#instrumentation?.record({
+        sessionKey,
+        time: Date.now(),
+        type: 'readProtectedStorageKeys',
+        values: [...values].sort((left, right) => left.localeCompare(right)),
+      });
+
+      return values;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.readProtectedStorageKeys(sessionKey, true);
+    }
   }
 
   async syncSessionProtectedKeys(
     sessionKey: string,
     protectedKeys: Iterable<string>,
+    isRetry = false,
   ): Promise<void> {
-    const nextProtectedKeys = new Set(protectedKeys);
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readwrite',
-    );
-    const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
+    let database: IDBDatabase | undefined;
+    try {
+      const nextProtectedKeys = new Set(protectedKeys);
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readwrite',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
 
-    await iterateCursor(
-      policyStore.index('bySession').openCursor(IDBKeyRange.only(sessionKey)),
-      async (scopeCursor) => {
-        const scope = getScopeFromPrimaryKey(scopeCursor.primaryKey);
-        if (scope === null) return;
+      await iterateCursor(
+        watch,
+        policyStore.index('bySession').openCursor(IDBKeyRange.only(sessionKey)),
+        async (scopeCursor) => {
+          const scope = getScopeFromPrimaryKey(scopeCursor.primaryKey);
+          if (scope === null) return;
 
-        await iterateCursor(
-          store.openCursor(createScopeKeyRange(scope)),
-          (cursor) => {
-            const record = cursor.value;
-            const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
-            if (!isValidEntryRecord(record) || entryKey === null) return;
-            const entryRecord = toEntryRecordValue(record);
+          await iterateCursor(
+            watch,
+            store.openCursor(createScopeKeyRange(scope)),
+            (cursor) => {
+              const record = cursor.value;
+              const entryKey = getEntryKeyFromPrimaryKey(cursor.primaryKey);
+              if (!isValidEntryRecord(record) || entryKey === null) return;
+              const entryRecord = toEntryRecordValue(record);
 
-            const ref = serializeProtectedRef({ ...scope, key: entryKey });
-            const shouldProtect = nextProtectedKeys.has(ref);
-            if ((entryRecord.o === 1) === shouldProtect) return;
+              const ref = serializeProtectedRef({ ...scope, key: entryKey });
+              const shouldProtect = nextProtectedKeys.has(ref);
+              if ((entryRecord.o === 1) === shouldProtect) return;
 
-            const nextRecord = {
-              ...entryRecord,
-              ...(shouldProtect ? { o: 1 as const } : { o: undefined }),
-            } satisfies IndexedDbEntryRecord;
-            cursor.update(nextRecord);
-          },
-        );
-      },
-    );
-    await transactionDone(transaction);
+              const nextRecord = {
+                ...entryRecord,
+                ...(shouldProtect ? { o: 1 as const } : { o: undefined }),
+              } satisfies IndexedDbEntryRecord;
+              cursor.update(nextRecord);
+            },
+          );
+        },
+      );
+      await transactionDone(transaction, watch);
 
-    this.#instrumentation?.record({
-      sessionKey,
-      time: Date.now(),
-      type: 'syncSessionProtectedKeys',
-      values: [...nextProtectedKeys].sort((left, right) =>
-        left.localeCompare(right),
-      ),
-    });
+      this.#instrumentation?.record({
+        sessionKey,
+        time: Date.now(),
+        type: 'syncSessionProtectedKeys',
+        values: [...nextProtectedKeys].sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      });
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.syncSessionProtectedKeys(sessionKey, protectedKeys, true);
+    }
   }
 
   async readMaintenanceState(): Promise<{
@@ -1643,11 +1872,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   }
 
   async __resetForTests(): Promise<void> {
-    if (this.#databasePromise !== null) {
-      const database = await this.#databasePromise;
-      database.close();
-      this.#databasePromise = null;
-    }
+    if (this.#database !== null) this.#dropDatabase(this.#database);
     await deleteDatabase(this.databaseName);
     this.#instrumentation?.reset();
   }
@@ -1660,6 +1885,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       left.localeCompare(right),
     )) {
       const transaction = database.transaction(storeName, 'readonly');
+      const watch = new IndexedDbStallWatch(transaction);
       const store = transaction.objectStore(storeName);
       const indexes = [...store.indexNames]
         .sort((left, right) => left.localeCompare(right))
@@ -1674,10 +1900,10 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           };
         });
       const [keys, values] = await Promise.all([
-        openRequestAsPromise<unknown[]>(store.getAllKeys()),
-        openRequestAsPromise<unknown[]>(store.getAll()),
+        openRequestAsPromise<unknown[]>(watch, store.getAllKeys()),
+        openRequestAsPromise<unknown[]>(watch, store.getAll()),
       ]);
-      await transactionDone(transaction);
+      await transactionDone(transaction, watch);
 
       stores.push({
         autoIncrement: store.autoIncrement,
@@ -1694,19 +1920,30 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   async #getEntry(
     scope: AsyncStorageNamespaceScope,
     key: string,
+    isRetry = false,
   ): Promise<IndexedDbEntryRecord | null> {
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      INDEXED_DB_ENTRY_STORE,
-      'readonly',
-    );
-    const record = await openRequestAsPromise<IndexedDbEntryRecord | undefined>(
-      transaction
-        .objectStore(INDEXED_DB_ENTRY_STORE)
-        .get(createEntryPrimaryKey(scope, key)),
-    );
-    await transactionDone(transaction);
-    return isValidEntryRecord(record) ? toEntryRecordValue(record) : null;
+    let database: IDBDatabase | undefined;
+    try {
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        INDEXED_DB_ENTRY_STORE,
+        'readonly',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const record = await openRequestAsPromise<
+        IndexedDbEntryRecord | undefined
+      >(
+        watch,
+        transaction
+          .objectStore(INDEXED_DB_ENTRY_STORE)
+          .get(createEntryPrimaryKey(scope, key)),
+      );
+      await transactionDone(transaction, watch);
+      return isValidEntryRecord(record) ? toEntryRecordValue(record) : null;
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.#getEntry(scope, key, true);
+    }
   }
 
   async #putEntryRecord(
@@ -1718,59 +1955,73 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       value: unknown;
       version: number;
     },
+    isRetry = false,
   ): Promise<void> {
-    const database = await this.#getDatabase();
-    const transaction = database.transaction(
-      [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
-      'readwrite',
-    );
-    const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
-    const policyStore = transaction.objectStore(
-      INDEXED_DB_NAMESPACE_POLICY_STORE,
-    );
-    const existingScopeRecord = await openRequestAsPromise<unknown>(
-      policyStore.get(createScopePolicyKey(scope)),
-    );
-    const { extraMetadata, group, offlineProtected, payload } =
-      splitCustomMetadata(args.customMetadata);
-    const sizeBytes =
-      scope.kind !== 'document'
-        ? estimateIndexedDbManagedEntrySizeBytes({
-            customMetadata: args.customMetadata,
-            lastAccessAt: args.lastAccessAt,
-            value: args.value,
-            version: args.version,
-          })
-        : undefined;
-    const compactValue = compactEntryValue(scope, args.value);
-    entryStore.put(
-      {
-        a: args.lastAccessAt,
-        ...compactValue,
-        ...(group !== undefined ? { g: group } : {}),
-        i: createScopeId(scope.sessionKey, scope.storeName, scope.kind),
-        ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
-        ...(offlineProtected === true ? { o: 1 as const } : {}),
-        ...(payload !== undefined ? { p: payload } : {}),
-        ...(args.version !== 1 ? { v: args.version } : {}),
-        ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
-      } satisfies IndexedDbEntryRecord,
-      createEntryPrimaryKey(scope, args.key),
-    );
-    policyStore.put(
-      {
-        p: serializeIndexedDbPersistedStaticPolicy(
-          getStaticPolicyFromScopeRecord(
-            isValidNamespacePolicyRecord(existingScopeRecord)
-              ? toNamespacePolicyRecordValue(existingScopeRecord)
-              : undefined,
-          ),
-        ),
-        s: scope.sessionKey,
-      } satisfies IndexedDbNamespacePolicyRecord,
-      createScopePolicyKey(scope),
-    );
-    await transactionDone(transaction);
+    let database: IDBDatabase | undefined;
+    try {
+      database = await this.#getDatabase();
+      const transaction = database.transaction(
+        [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
+        'readwrite',
+      );
+      const watch = new IndexedDbStallWatch(transaction);
+      const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
+      const policyStore = transaction.objectStore(
+        INDEXED_DB_NAMESPACE_POLICY_STORE,
+      );
+      const { extraMetadata, group, offlineProtected, payload } =
+        splitCustomMetadata(args.customMetadata);
+      const sizeBytes =
+        scope.kind !== 'document'
+          ? estimateIndexedDbManagedEntrySizeBytes({
+              customMetadata: args.customMetadata,
+              lastAccessAt: args.lastAccessAt,
+              value: args.value,
+              version: args.version,
+            })
+          : undefined;
+      const compactValue = compactEntryValue(scope, args.value);
+      entryStore.put(
+        {
+          a: args.lastAccessAt,
+          ...compactValue,
+          ...(group !== undefined ? { g: group } : {}),
+          i: createScopeId(scope.sessionKey, scope.storeName, scope.kind),
+          ...(extraMetadata !== undefined ? { m: extraMetadata } : {}),
+          ...(offlineProtected === true ? { o: 1 as const } : {}),
+          ...(payload !== undefined ? { p: payload } : {}),
+          ...(args.version !== 1 ? { v: args.version } : {}),
+          ...(sizeBytes !== undefined ? { z: sizeBytes } : {}),
+        } satisfies IndexedDbEntryRecord,
+        createEntryPrimaryKey(scope, args.key),
+      );
+      // The policy rewrite depends on a read, so it is issued from that
+      // read's own callback rather than after an await.
+      const policyRequest: IDBRequest<unknown> = policyStore.get(
+        createScopePolicyKey(scope),
+      );
+      policyRequest.onsuccess = () => {
+        indexedDbEventCount += 1;
+        const existingScopeRecord = policyRequest.result;
+        policyStore.put(
+          {
+            p: serializeIndexedDbPersistedStaticPolicy(
+              getStaticPolicyFromScopeRecord(
+                isValidNamespacePolicyRecord(existingScopeRecord)
+                  ? toNamespacePolicyRecordValue(existingScopeRecord)
+                  : undefined,
+              ),
+            ),
+            s: scope.sessionKey,
+          } satisfies IndexedDbNamespacePolicyRecord,
+          createScopePolicyKey(scope),
+        );
+      };
+      await transactionDone(transaction, watch);
+    } catch (error) {
+      if (!this.#shouldRetry(error, database, isRetry)) throw error;
+      return this.#putEntryRecord(scope, args, true);
+    }
   }
 
   #parsePersistedIndexState(
@@ -1819,9 +2070,15 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       return this.#databasePromise;
     }
 
-    this.#databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
+    const opening = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.databaseName, INDEXED_DB_VERSION);
+      // Also bounds a request left pending by `blocked`, which needs no
+      // handler of its own: it only means another connection has not closed
+      // yet, and the request still succeeds once it does.
+      const watch = new IndexedDbStallWatch(null);
+      watch.rejecters.push(reject);
       request.onupgradeneeded = () => {
+        indexedDbEventCount += 1;
         const database = request.result;
         if (database.objectStoreNames.contains(INDEXED_DB_ENTRY_STORE)) {
           database.deleteObjectStore(INDEXED_DB_ENTRY_STORE);
@@ -1850,12 +2107,64 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           database.createObjectStore(INDEXED_DB_META_STORE, { keyPath: 'k' });
         }
       };
-      request.onerror = () =>
+      request.onerror = () => {
+        watch.stop();
         reject(request.error ?? new Error('IndexedDB open failed.'));
-      request.onsuccess = () => resolve(request.result);
+      };
+      request.onsuccess = () => {
+        watch.stop();
+        const database = request.result;
+        if (this.#databasePromise !== opening) {
+          // Given up on as stalled: nobody is waiting for this connection.
+          database.close();
+          return;
+        }
+
+        // The browser closed the connection, or another tab wants to upgrade
+        // or delete the database and is blocked until this one lets go.
+        // Either way the next operation opens a new connection.
+        database.onclose = () => this.#dropDatabase(database);
+        database.onversionchange = () => this.#dropDatabase(database);
+        this.#database = database;
+        resolve(database);
+      };
     });
 
-    return this.#databasePromise;
+    this.#databasePromise = opening;
+    // A failed open is not kept: the next operation opens again.
+    opening.catch(() => {
+      if (this.#databasePromise === opening) this.#databasePromise = null;
+    });
+
+    return opening;
+  }
+
+  #dropDatabase(database: IDBDatabase): void {
+    if (this.#database === database) {
+      this.#database = null;
+      this.#databasePromise = null;
+    }
+    database.close();
+  }
+
+  /**
+   * Whether a failed operation should run once more on a new connection.
+   *
+   * Every operation of this driver is safe to repeat: each one is a single
+   * atomic transaction (or a sequence of them) that reads what it needs inside
+   * the transaction and writes whole values, deletes, or flags derived from
+   * its arguments, so applying it after an attempt that did or did not commit
+   * leaves the same data. Quota, data and version errors are not connection
+   * errors and are never retried.
+   */
+  #shouldRetry(
+    error: unknown,
+    database: IDBDatabase | undefined,
+    isRetry: boolean,
+  ): boolean {
+    if (!isIndexedDbConnectionError(error)) return false;
+    if (database !== undefined) this.#dropDatabase(database);
+    return !isRetry;
   }
 
   #logAdapterOperation(

@@ -105,6 +105,8 @@ await userStore.performMutation(
 
 When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`.
 
+The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the result is still `{ kind: 'queued' }`: the mutation stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded first. Treat an `onPersistentStorageError` call while offline as "pending changes may not survive a reload".
+
 ## Operation Definitions
 
 All offline operations define:
