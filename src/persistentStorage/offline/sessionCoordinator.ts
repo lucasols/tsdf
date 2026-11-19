@@ -131,6 +131,7 @@ const DEFAULT_NETWORK_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
   jitterRatio: 0.2,
 };
 const defaultGetIsOffline = () => !navigator.onLine;
+const INACTIVE_MODE = { enabled: false, active: false } as const;
 
 const defaultStatusBySession = new Map<string, GlobalOfflineStatus>();
 const registry = new Map<string, SessionOfflineCoordinator>();
@@ -406,6 +407,7 @@ type SessionRecoveryTarget = {
 };
 
 type SessionCanonicalConfig = {
+  isSessionEnabled?: OfflineSessionConfig['enabled'];
   hasNetworkConfig: boolean;
   networkEnabledByDefault: boolean;
   networkListenToBrowserEvents: boolean;
@@ -428,6 +430,7 @@ function toCanonicalConfig(
   config: OfflineSessionConfig | undefined,
 ): SessionCanonicalConfig {
   return {
+    isSessionEnabled: config?.enabled,
     hasNetworkConfig: config?.network !== undefined,
     networkEnabledByDefault: config?.network?.enabled ?? false,
     networkListenToBrowserEvents:
@@ -485,6 +488,7 @@ function sameCanonicalConfig(
   right: SessionCanonicalConfig,
 ): boolean {
   return (
+    left.isSessionEnabled === right.isSessionEnabled &&
     left.hasNetworkConfig === right.hasNetworkConfig &&
     left.networkEnabledByDefault === right.networkEnabledByDefault &&
     left.networkListenToBrowserEvents === right.networkListenToBrowserEvents &&
@@ -667,6 +671,8 @@ class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
+  /** Last value of the session gate applied to the status. */
+  #appliedSessionEnabled = true;
   #networkEnabledOverride: boolean | undefined;
   #outageEnabledOverride: boolean | undefined;
   #mutationQueueingOverrides:
@@ -1157,6 +1163,8 @@ class SessionOfflineCoordinator {
   }
 
   isReplayBlocked(): boolean {
+    // Queued mutations wait for the session gate to reopen
+    if (!this.#isSessionEnabled()) return true;
     if (this.store.state.status.isOfflineMode) return true;
 
     const { network, outage } = this.store.state.status;
@@ -1211,11 +1219,20 @@ class SessionOfflineCoordinator {
     return !isWindowAvailable() || navigator.onLine !== false;
   }
 
+  /**
+   * Reads the session gate (`offlineSession.enabled`): while it is closed the
+   * session behaves as if no offline session existed.
+   */
+  #isSessionEnabled(): boolean {
+    return this.#canonicalConfig.isSessionEnabled?.() ?? true;
+  }
+
   #isNetworkEnabled(): boolean {
     return (
       this.#canonicalConfig.hasNetworkConfig &&
       (this.#networkEnabledOverride ??
-        this.#canonicalConfig.networkEnabledByDefault)
+        this.#canonicalConfig.networkEnabledByDefault) &&
+      this.#isSessionEnabled()
     );
   }
 
@@ -1223,8 +1240,37 @@ class SessionOfflineCoordinator {
     return (
       this.#canonicalConfig.hasOutageConfig &&
       (this.#outageEnabledOverride ??
-        this.#canonicalConfig.outageEnabledByDefault)
+        this.#canonicalConfig.outageEnabledByDefault) &&
+      this.#isSessionEnabled()
     );
+  }
+
+  /**
+   * Applies a flip of the session gate to the status: closing it leaves
+   * offline mode, whatever the cause. Returns whether the gate is open.
+   */
+  #syncSessionGate(): boolean {
+    const enabled = this.#isSessionEnabled();
+    if (enabled === this.#appliedSessionEnabled) return enabled;
+
+    this.#appliedSessionEnabled = enabled;
+
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
+    this.#updateStatus((current) => ({
+      ...current,
+      network: {
+        enabled: this.#isNetworkEnabled(),
+        active: current.network.active,
+      },
+      outage: {
+        enabled: this.#isOutageEnabled(),
+        active: current.outage.active,
+      },
+    }));
+    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    this.#handleConnectivityChange(wasEffectivelyOffline, false);
+
+    return enabled;
   }
 
   #assertModeIsConfigured(mode: 'network' | 'outage'): void {
@@ -1383,17 +1429,28 @@ class SessionOfflineCoordinator {
   }
 
   async refreshNetworkState(): Promise<boolean> {
+    const wasSessionEnabled = this.#appliedSessionEnabled;
+    const sessionEnabled = this.#syncSessionGate();
     const token = ++this.#networkStateToken;
-    const detectedOffline = this.#getCurrentOfflineState();
 
-    if (typeof detectedOffline === 'boolean') {
-      return Promise.resolve(
-        this.#applyRefreshedNetworkState(token, detectedOffline),
-      );
+    // A closed session gate ignores network detection
+    if (!sessionEnabled) return false;
+
+    const detectedOffline = this.#getCurrentOfflineState();
+    const isOffline = this.#applyRefreshedNetworkState(
+      token,
+      typeof detectedOffline === 'boolean'
+        ? detectedOffline
+        : await detectedOffline,
+    );
+
+    // The gate has just reopened: mutations queued before it closed can be
+    // replayed
+    if (!wasSessionEnabled && !isOffline && !this.isReplayBlocked()) {
+      this.#notifyGreenCycle();
     }
 
-    const resolvedDetectedOffline = await Promise.resolve(detectedOffline);
-    return this.#applyRefreshedNetworkState(token, resolvedDetectedOffline);
+    return isOffline;
   }
 
   setNetworkActive(
@@ -1448,7 +1505,12 @@ class SessionOfflineCoordinator {
     error: unknown,
     ctx: OfflineFailureContext,
   ): Promise<OfflineFailureClassification> {
-    if (!this.#canonicalConfig.classifyFailure) return 'ignore';
+    if (
+      !this.#canonicalConfig.classifyFailure ||
+      !this.#canClassifyFailures()
+    ) {
+      return 'ignore';
+    }
 
     const token = this.getClassificationToken();
     const result = await this.#canonicalConfig.classifyFailure(error, ctx);
@@ -1477,6 +1539,23 @@ class SessionOfflineCoordinator {
     }
 
     return 'ignore';
+  }
+
+  /**
+   * Whether classifying a failure can change anything: the session gate has
+   * to be open, with a mode enabled or still active (waiting to recover).
+   */
+  #canClassifyFailures(): boolean {
+    if (!this.#isSessionEnabled()) return false;
+
+    const { network, outage } = this.store.state.status;
+
+    return (
+      network.active ||
+      outage.active ||
+      this.#isNetworkEnabled() ||
+      this.#isOutageEnabled()
+    );
   }
 
   async classifyRetriableFailure(
@@ -2088,9 +2167,14 @@ class SessionOfflineCoordinator {
   }
 
   #deriveLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
-    const isOfflineMode = getIsOfflineModeFromStatus(status);
+    // A closed session gate drops every offline cause, wherever it comes from
+    // (detection, classification, another tab or the persisted snapshot)
+    const gatedStatus = this.#isSessionEnabled()
+      ? status
+      : { ...status, network: INACTIVE_MODE, outage: INACTIVE_MODE };
+    const isOfflineMode = getIsOfflineModeFromStatus(gatedStatus);
 
-    return this.#stampLocalStatus({ ...status, isOfflineMode });
+    return this.#stampLocalStatus({ ...gatedStatus, isOfflineMode });
   }
 
   #updateStatus(

@@ -113,6 +113,8 @@ const storeManager = createStoreManager({
 
 Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers return `Result.err(...)` where applicable.
 
+To turn the whole offline layer on and off at runtime (feature flag, per-workspace setting) without recreating the manager, pass `offlineSession.enabled: () => boolean`. While it returns `false` the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations; work already queued is kept and replayed after the gate reopens. See [Session gate](./offline.md#session-gate).
+
 ## Offline Status APIs
 
 Read session-wide offline state:
@@ -134,7 +136,7 @@ Synchronous equivalents:
 
 Runtime controls:
 
-- `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`
+- `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`. Every update, even an empty `{}`, also re-reads the `offlineSession.enabled` gate right away
 - `resetOfflineRuntimeConfig()` restores the static `offlineSession` controls
 
 ## Upload APIs

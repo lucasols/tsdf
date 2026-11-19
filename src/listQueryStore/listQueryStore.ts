@@ -1633,9 +1633,7 @@ export function createListQueryStore<
       (offlineController?.shouldTreatFetchAsOffline() ?? false) ||
       resolvedOfflineConfig?.session.getOfflineStatus().isOfflineMode ===
         true ||
-      isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
-      )
+      isOfflineNetworkModeActiveSync(resolvedOfflineConfig?.session.getConfig())
     );
   }
 
@@ -3090,7 +3088,7 @@ export function createListQueryStore<
     const isStoreOfflineMode =
       offlineStatus.isOfflineMode ||
       isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
+        resolvedOfflineConfig?.session.getConfig(),
       );
     const offlineOverlaysSelector = useCallback(
       (

@@ -107,6 +107,8 @@ When the online mutation succeeds, the result value is `{ kind: 'online', data }
 
 A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them and then be overwritten, so it joins the queue and is replayed in the order the user made the changes.
 
+Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
+
 ## Revalidation After Recovering
 
 While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations are ignored, and cached data stays visible.
@@ -205,6 +207,33 @@ storeManager.resetOfflineRuntimeConfig();
 ```
 
 `getOfflineRuntimeConfig()` returns the current effective controls. Runtime updates are useful for explicit "work offline" toggles, diagnostics, or temporarily disabling queueing modes.
+
+Disabling a mode only stops new work from entering it: an offline state that is already active is preserved so the work depending on it can still recover and replay. To turn the whole offline layer off, use the session gate instead.
+
+### Session gate
+
+`offlineSession.enabled` turns the whole offline layer on and off at runtime — for a feature flag or a per-workspace setting — without recreating the store manager or its stores:
+
+```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    enabled: () => featureFlags.offlineMode,
+    network: { enabled: true },
+  },
+});
+```
+
+While it returns `false` the session behaves as if no offline session existed:
+
+- it never enters offline mode: network detection is ignored and `classifyFailure` is not called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled
+- fetches always go to the network and fail with their normal errors
+- mutations with an `offline` descriptor run as plain online mutations (see [Queuing Mutations](#queuing-mutations))
+
+Mutations already queued when the gate closes are neither deleted nor replayed. They stay in persistent storage untouched, still listed by the offline entities / resolutions APIs, and are replayed once the gate reopens and the session is online. A queued mutation whose replay request fails because the gate closed mid-flight goes back to the queue as pending. Mutations made while the gate is closed go straight to the server, so they are not ordered after older mutations still waiting in the queue for the same entities: when that matters, close the gate only once the offline entities list is empty.
+
+The callback is read before every fetch and mutation, on browser `online` / `offline` events and before each queued mutation is replayed, so it must be synchronous and cheap (read a variable or a store, no I/O). The app does not have to call anything for a flip to apply to the next fetch or mutation. To apply it right away — clear the offline status in the UI as soon as the gate closes, or start replaying the queue as soon as it reopens on an idle screen — call `storeManager.setOfflineRuntimeConfig({})` after changing the value: every runtime config update re-reads the gate. Runtime overrides and the upload helpers are not affected by the gate.
 
 ## Uploads
 

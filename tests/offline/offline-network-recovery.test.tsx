@@ -189,7 +189,12 @@ test('network classifications are ignored when network mode is disabled', async 
     storeManager: createStoreManager({
       errorNormalizer: normalizeError,
       getSessionKey: () => sessionKey,
-      offlineSession: { classifyFailure },
+      offlineSession: {
+        classifyFailure,
+        // Failures are only classified while some mode is enabled, so outage
+        // mode keeps the classifier consulted while network mode stays off.
+        outage: { enabled: true, recoveryCheck: () => true },
+      },
     }),
     persistentStorage: {
       adapter: 'local-sync',
@@ -202,6 +207,8 @@ test('network classifications are ignored when network mode is disabled', async 
   env.apiStore.scheduleFetch('highPriority');
   await advanceTime(25);
 
+  // The failure was classified as `network`, which is not enabled: the
+  // session stays online.
   expect(classifyFailure).toHaveBeenCalledTimes(1);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
     isLeader: '✅'

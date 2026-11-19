@@ -233,11 +233,33 @@ export type OfflineSessionConfig<
   TUploadRef extends ValidPayload = ValidPayload,
 > = {
   /**
+   * Gate for the whole offline session, e.g. a feature flag or a
+   * per-workspace setting. While it returns `false` the session behaves as if
+   * no offline session existed: it never enters offline mode (network
+   * detection and `classifyFailure` are skipped), fetches always go to the
+   * network and mutations with an `offline` descriptor run as plain online
+   * mutations instead of being queued.
+   *
+   * Mutations already queued when the gate closes are kept in persistent
+   * storage untouched (and stay visible through the offline entities /
+   * resolutions) and are replayed after the gate reopens while online.
+   *
+   * It is read before every fetch and mutation, on browser online/offline
+   * events and before replaying queued mutations, so it must be synchronous
+   * and cheap. A flip is picked up by the next of those; call
+   * `storeManager.setOfflineRuntimeConfig({})` to apply it right away.
+   * @default () => true
+   */
+  enabled?: () => boolean;
+  /**
    * Classify a remote failure as `outage`, `network`, or `ignore`.
    * `outage` activates outage recovery behavior.
    * `network` activates network offline handling for future operations only
    * when `network.enabled` is true. Existing offline recovery may keep using
    * classifications until already-active work finishes recovering.
+   *
+   * Not called while no classification could change anything: the session
+   * gate is closed, or both modes are disabled and neither is still active.
    */
   classifyFailure?: (
     error: unknown,

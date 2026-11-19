@@ -230,6 +230,8 @@ Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResoluti
 
 Recovery: while offline, `onTransportReconnect()` and focus revalidations are ignored; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities are still pending.
 
+Session gate: `offlineSession.enabled: () => boolean` turns the whole offline layer on/off at runtime (feature flag, per-workspace setting). While it returns `false` — or `getSessionKey()` returns `false` — the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations (`{ kind: 'online', data }`, normal errors). Already-queued work is kept and replayed after the gate reopens. Read lazily on the next fetch/mutation; call `storeManager.setOfflineRuntimeConfig({})` to apply a flip immediately.
+
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
 Docs: `docs/offline.md`.

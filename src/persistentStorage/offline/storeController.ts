@@ -543,6 +543,11 @@ export function createOfflineStoreController<
     touchedNextEntry: boolean;
   };
 
+  /** Reads the session gate (`offlineSession.enabled`). */
+  function isSessionEnabled(): boolean {
+    return sessionConfig.enabled?.() !== false;
+  }
+
   function getActiveMutationQueueingCause(
     current: ActiveSessionState,
   ): OfflineMutationQueueingCause | null {
@@ -3258,7 +3263,12 @@ export function createOfflineStoreController<
           operationName: entryToUse.operation,
           sessionKey: current.sessionKey,
         });
+        // A session gate closed while the entry was in flight leaves the
+        // failure unclassified: the entry stays queued as it was, to be
+        // replayed once the gate reopens
+        const sessionEnabled = isSessionEnabled();
         const allowReplayRetry =
+          sessionEnabled &&
           classification === 'ignore' &&
           !current.session.getStatus().isOfflineMode
             ? await current.session.classifyRetriableFailure(error, {
@@ -3270,6 +3280,7 @@ export function createOfflineStoreController<
             : false;
 
         if (
+          !sessionEnabled ||
           classification !== 'ignore' ||
           current.session.getStatus().isOfflineMode
         ) {
@@ -3599,7 +3610,7 @@ export function createOfflineStoreController<
   }
 
   function canQueueMutation(): boolean {
-    return !isDisposed && getSessionKey() !== false;
+    return !isDisposed && getSessionKey() !== false && isSessionEnabled();
   }
 
   async function prepareForFetch(): Promise<void> {
