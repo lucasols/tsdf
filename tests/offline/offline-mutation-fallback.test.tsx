@@ -1545,10 +1545,8 @@ describe('collection', () => {
           { id: 'users||temp a', name: 'Temp A' },
           { id: 'users||temp b', name: 'Temp B' },
         ];
-        for (const result of results) {
-          await env.serverTable.delayedSetItem(result.id, {
-            name: result.name,
-          });
+        for (const item of results) {
+          await env.serverTable.delayedSetItem(item.id, { name: item.name });
         }
         return results;
       },

@@ -17,3 +17,7 @@ minimumReleaseAgeExclude:
 onlyBuiltDependencies:
   - esbuild
   - simple-git-hooks
+
+overrides:
+  # tsrs is the type-aware backend, skip oxlint's auto-installed optional peer
+  'oxlint>oxlint-tsgolint': '-'

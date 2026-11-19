@@ -29,7 +29,7 @@ export function unwrapTSDFResult<T>(value: T): UnwrapTSDFResult<T> {
       return __LEGIT_CAST__<UnwrapTSDFResult<T>, unknown>(value.value);
     }
 
-    // eslint-disable-next-line @typescript-eslint/only-throw-error -- Result.err carries the caller's domain error so existing normalization/offline classification can see it unchanged.
+    // oxlint-disable-next-line typescript/only-throw-error -- Result.err carries the caller's domain error so existing normalization/offline classification can see it unchanged.
     throw value.error;
   }
 
