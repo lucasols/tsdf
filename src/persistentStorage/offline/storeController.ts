@@ -62,8 +62,8 @@ import {
 const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 3;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
 /**
- * Time given to the other tabs to learn about the queue changes of the tab
- * that just replayed, before one of them may replay.
+ * Time given to a tab to learn about the queue changes of the tab that just
+ * replayed, before it may replay itself.
  */
 const REPLAY_HANDOFF_SETTLE_MS = 500;
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
@@ -3155,36 +3155,6 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Second safeguard against sending an entry another tab already replayed, in
-   * case that tab's announcement has not arrived yet: a replayed entry is also
-   * removed from storage. Returns `false` after dropping such an entry.
-   */
-  async function isEntryStillStored(
-    entryId: string,
-    current: ActiveSessionState,
-  ): Promise<boolean> {
-    for (const isLastCheck of [false, true]) {
-      const storedEntry = await current.queueNamespace.load(entryId, {
-        touch: 'never',
-      });
-      if (!isActiveSessionState(current)) return false;
-      if (storedEntry || !queueEntries.has(entryId)) return true;
-
-      if (isLastCheck) break;
-      // An entry another tab just queued can reach this tab before the
-      // storage write it comes from does, so check again before dropping it.
-      await new Promise((resolve) => {
-        setTimeout(resolve, REPLAY_HANDOFF_SETTLE_MS);
-      });
-    }
-
-    queueEntries.delete(entryId);
-    countedReplayFailures.delete(entryId);
-    refreshDerivedState(current, true);
-    return false;
-  }
-
-  /**
    * Leadership is decided from tab presence messages, so for a moment two tabs
    * can both consider themselves the leader (e.g. while it moves to the tab
    * that just got focus). This cross-tab lock makes sure only one of them
@@ -3203,19 +3173,45 @@ export function createOfflineStoreController<
     if (heldReplayLockName === lockName) return;
     releaseHeldReplayLock();
 
-    await new Promise<void>((onAcquired) => {
+    if (await requestReplayLock(lockManager, lockName, true)) return;
+
+    // Another tab is replaying this queue or just did. Once it lets go, wait
+    // for the queue changes it announced to arrive, so this tab does not send
+    // what that tab already sent.
+    await requestReplayLock(lockManager, lockName, false);
+    await new Promise((resolve) => {
+      setTimeout(resolve, REPLAY_HANDOFF_SETTLE_MS);
+    });
+  }
+
+  /**
+   * Resolves `true` once this tab holds the lock (until
+   * `releaseHeldReplayLock`), or `false` when `ifAvailable` is set and another
+   * tab holds it.
+   */
+  function requestReplayLock(
+    lockManager: LockManager,
+    lockName: string,
+    ifAvailable: boolean,
+  ): Promise<boolean> {
+    return new Promise((onSettled) => {
       lockManager
-        .request(
-          lockName,
-          () =>
-            new Promise<void>((release) => {
-              heldReplayLockName = lockName;
-              releaseReplayLock = release;
-              onAcquired();
-            }),
-        )
+        .request(lockName, { ifAvailable }, (lock) => {
+          if (lock === null) {
+            onSettled(false);
+            return undefined;
+          }
+
+          return new Promise<void>((release) => {
+            heldReplayLockName = lockName;
+            releaseReplayLock = release;
+            onSettled(true);
+          });
+        })
         // Replaying without the lock is better than never replaying
-        .catch(onAcquired);
+        .catch(() => {
+          onSettled(true);
+        });
     });
   }
 
@@ -3243,28 +3239,18 @@ export function createOfflineStoreController<
         return;
       }
 
-      const queuedEntry = getSortedEntries()[0];
-      if (!queuedEntry) return;
+      const nextEntry = getSortedEntries()[0];
+      if (!nextEntry) return;
       if (
         !current.session.canReplayEntry({
           storeName,
-          entryId: queuedEntry.id,
-          queueOrder: getQueueOrder(queuedEntry),
-          createdAt: queuedEntry.createdAt,
+          entryId: nextEntry.id,
+          queueOrder: getQueueOrder(nextEntry),
+          createdAt: nextEntry.createdAt,
         })
       ) {
         return;
       }
-
-      if (
-        current.session.hasOtherTabs() &&
-        !(await isEntryStillStored(queuedEntry.id, current))
-      ) {
-        continue;
-      }
-      // The checks above are async: use the entry as the queue has it now
-      const nextEntry = queueEntries.get(queuedEntry.id);
-      if (!nextEntry) continue;
 
       const operation = operations[nextEntry.operation];
       if (!operation) {

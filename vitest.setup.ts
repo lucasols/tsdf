@@ -50,10 +50,23 @@ console.error = (...args) => {
   if (!skipOriginal) originalConsoleError(...args);
 };
 
+type LockCallback<T> = (lock: { name: string }) => T | Promise<T>;
+
+// Single tab: every lock is available right away. Supports both
+// `request(name, callback)` and `request(name, options, callback)`.
 const defaultNavigatorLocks = {
   request: vi.fn(
-    async <T>(_name: string, callback: () => T | Promise<T>) =>
-      await callback(),
+    async <T>(
+      name: string,
+      optionsOrCallback: LockCallback<T> | { ifAvailable?: boolean },
+      callback?: LockCallback<T>,
+    ) => {
+      const run =
+        typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+      if (!run) throw new Error('navigator.locks.request needs a callback');
+
+      return await run({ name });
+    },
   ),
 };
 

@@ -187,7 +187,7 @@ Tabs of the same session share one offline queue. Every tab can queue mutations 
 - The **leading tab** replays the queue: the visible tab, or the one that was visible most recently. `useOfflineStatus().isLeader` tells whether the current tab leads.
 - A mutation queued in any other tab is sent by the leading tab after the connection recovers, in the order the mutations were queued across tabs. No reload or tab switch is needed.
 - Every queued mutation is sent once. A cross-tab lock (Web Locks API) keeps two tabs from replaying a store's queue at the same time, and a tab drops an entry as soon as another tab reports it as sent, so it does not send it again when it leads later.
-- When the leading tab is closed or hidden, a visible tab takes over. It starts replaying up to 500ms after the previous tab finished, which gives it time to learn what that tab already sent.
+- When the leading tab is closed or hidden, a visible tab takes over. When the previous tab was replaying or just did, the new one waits up to a second before it starts, so it first learns what that tab already sent.
 
 Things to keep in mind:
 
