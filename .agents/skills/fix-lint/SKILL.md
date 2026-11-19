@@ -1,7 +1,7 @@
 ---
 name: fix-lint
 description: >
-  Identify and fix lint issues in the project: TypeScript type errors, ESLint errors, and formatting issues.
+  Identify and fix lint issues in the project: TypeScript type errors, oxlint/fast-lint errors, and formatting issues.
   Triggers: "fix lint errors", "fix eslint errors", "fix type errors", "run lint", "check types",
   "fix lint", "lint is failing", "CI lint failure", or after making code changes that may introduce errors.
 ---
@@ -10,12 +10,13 @@ description: >
 
 ## Commands
 
-| Command       | What it runs                 | When to use                          |
-| ------------- | ---------------------------- | ------------------------------------ |
-| `pnpm lint`   | `pnpm tsc && pnpm eslint`    | Full check (type errors + ESLint)    |
-| `pnpm tsc`    | `tsgo -p tsconfig.prod.json` | Type checking only                   |
-| `pnpm eslint` | `eslint src/ tests/ --fix`   | ESLint only (auto-fixes what it can) |
-| `pnpm format` | `oxfmt src/ tests/`          | Formatting only                      |
+| Command          | What it runs                                    | When to use                                         |
+| ---------------- | ----------------------------------------------- | --------------------------------------------------- |
+| `pnpm lint`      | `pnpm oxlint`, `pnpm fast-lint`, extra projects | Full check (type errors + lint rules)               |
+| `pnpm oxlint`    | `oxlint --type-check src/ tests/ --fix`         | Native rules + type errors (auto-fixes what it can) |
+| `pnpm fast-lint` | `fast-lint src/ tests/ --fix`                   | `@ls-stack` rules (auto-fixes what it can)          |
+| `pnpm typecheck` | `tsrs --fast` on every lib tsconfig             | Type checking only                                  |
+| `pnpm format`    | `oxfmt src/ tests/`                             | Formatting only                                     |
 
 **Always use pnpm scripts** — never rely on IDE diagnostics, they may be outdated.
 
@@ -25,8 +26,6 @@ description: >
 2. Read and group errors by type/file
 3. Fix all errors
 4. Run `pnpm lint` again to verify — repeat until clean
-
-Run ESLint/tsc only after **all** fixes are applied (they are slow).
 
 ## Critical: Fix Root Causes, Never Silence Errors
 
@@ -54,10 +53,9 @@ These are **strict project rules** — never work around them:
 - **Avoid `__LEGIT_CAST__`** — use it only at genuine type-system boundaries after exhausting type-safe and schema-based alternatives
 - **No non-null assertions (`!`)** — handle null/undefined properly (exception: allowed in test files)
 - **No `@ts-expect-error` / `@ts-ignore`** — fix the actual type issue
-- **No `eslint-disable` comments** — always fix the root cause
+- **No `oxlint-disable` / `fast-lint-disable` / `eslint-disable` comments** — always fix the root cause
 - **No `_` prefix for unused vars** — remove the unused code entirely
 
 ## Diagnostics to Ignore
 
 - **cSpell** diagnostic errors
-- **`// FIX` comment warnings** (`unicorn/expiring-todo-comments`) — intentional TODOs, only address if user asks
