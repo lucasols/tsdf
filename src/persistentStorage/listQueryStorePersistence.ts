@@ -136,6 +136,7 @@ type ManagedQueryEntry = {
   hasMore: boolean;
   items: string[];
   lastAccessAt: number;
+  missingItems: boolean;
   offlineProtected: boolean;
   payload: unknown;
   queryKey: string;
@@ -591,6 +592,10 @@ export function setupListQueryPersistence<
   const querySizeBytesByKey = new Map<string, number>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  // Persisted queries restored without some of the rows they list (see
+  // `createRestoredQueryState`). Their stored entry is the only record that
+  // rows are missing, so flushes keep it as is until the query is loaded again.
+  const incompleteRestoredQueryKeys = new Set<string>();
   // Remembers in-state entries that lost their persistence slot to the byte
   // budget, keyed by entry key. Without this memory a budget-evicted entry
   // would re-enter the next flush as if it were freshly accessed (it has no
@@ -725,6 +730,7 @@ export function setupListQueryPersistence<
       items: entry.items,
       hasMore: entry.hasMore,
       lastAccessAt: entry.lastAccessAt,
+      missingItems: entry.missingItems === true,
       offlineProtected: entry.offlineProtected,
       rawValue: rawEntry,
       sizeBytes,
@@ -872,6 +878,7 @@ export function setupListQueryPersistence<
         payload: data.payload,
         items: data.items,
         hasMore: data.hasMore,
+        missingItems: data.missingItems,
         version,
       }),
     );
@@ -1025,6 +1032,7 @@ export function setupListQueryPersistence<
           payload: entry.payload,
           items: entry.items,
           hasMore: entry.hasMore,
+          missingItems: entry.missingItems,
           version,
         }),
       );
@@ -1358,6 +1366,7 @@ export function setupListQueryPersistence<
 
   function forgetPersistedQuery(queryKey: string): void {
     hydratedPersistedQueryKeys.delete(queryKey);
+    incompleteRestoredQueryKeys.delete(queryKey);
     querySnapshotByKey.delete(queryKey);
     querySizeBytesByKey.delete(queryKey);
     knownPersistedQueryKeys?.delete(queryKey);
@@ -1694,7 +1703,12 @@ export function setupListQueryPersistence<
     }
 
     const persistedQuery = parsePersistedListQueryData(
-      { payload: entry.payload, items: entry.items, hasMore: entry.hasMore },
+      {
+        payload: entry.payload,
+        items: entry.items,
+        hasMore: entry.hasMore,
+        missingItems: entry.missingItems,
+      },
       config.queryPayloadSchema,
     );
     if (!persistedQuery) {
@@ -1716,23 +1730,41 @@ export function setupListQueryPersistence<
         payload: persistedQuery.payload,
         items: persistedQuery.items,
         hasMore: persistedQuery.hasMore,
+        ...(persistedQuery.missingItems ? { missingItems: true } : {}),
       },
       getSerializedStringSize(rawEntry),
     );
     return persistedQuery;
   }
 
-  function buildHydratedQueryState(
+  /**
+   * Builds the state of a query restored from storage. A persisted query
+   * lists the rows it had when it was saved. When some of them can no longer
+   * be restored (evicted by the byte budget, discarded on read, ...), the rows
+   * that are left are still restored, but the query is not restored as loaded:
+   * it would be reported as a complete `success` with a shorter — or empty —
+   * list. A query that was not loaded is reported as `loading` and always
+   * fetched, and fails with the offline error while offline.
+   */
+  function createRestoredQueryState(
+    queryKey: string,
     persistedQuery: ParsedPersistedListQueryData<QueryPayload>,
+    restoredItemKeys: string[],
   ): TSFDListQuery<QueryPayload> {
-    const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
-      return readHydratedItem(itemKey) !== undefined;
-    });
+    const hasAllRows =
+      !persistedQuery.missingItems &&
+      restoredItemKeys.length === persistedQuery.items.length;
     const limitedQuery = limitPersistedQueryItems(
-      filteredItemKeys,
+      restoredItemKeys,
       persistedQuery.hasMore,
       maxQuerySize,
     );
+
+    if (!hasAllRows) {
+      incompleteRestoredQueryKeys.add(queryKey);
+    } else if (incompleteRestoredQueryKeys.size > 0) {
+      incompleteRestoredQueryKeys.delete(queryKey);
+    }
 
     return {
       error: null,
@@ -1740,9 +1772,22 @@ export function setupListQueryPersistence<
       items: limitedQuery.itemKeys,
       payload: persistedQuery.payload,
       refetchOnMount: 'lowPriority',
-      status: 'success',
-      wasLoaded: true,
+      status: hasAllRows ? 'success' : 'loading',
+      wasLoaded: hasAllRows,
     };
+  }
+
+  function buildHydratedQueryState(
+    queryKey: string,
+    persistedQuery: ParsedPersistedListQueryData<QueryPayload>,
+  ): TSFDListQuery<QueryPayload> {
+    return createRestoredQueryState(
+      queryKey,
+      persistedQuery,
+      persistedQuery.items.filter((itemKey) => {
+        return readHydratedItem(itemKey) !== undefined;
+      }),
+    );
   }
 
   function createInitialState(baseState: State): State {
@@ -1776,7 +1821,9 @@ export function setupListQueryPersistence<
     queryKey: string,
   ): TSFDListQuery<QueryPayload> | undefined {
     const persistedQuery = readPersistedQueryData(queryKey);
-    return persistedQuery ? buildHydratedQueryState(persistedQuery) : undefined;
+    return persistedQuery
+      ? buildHydratedQueryState(queryKey, persistedQuery)
+      : undefined;
   }
 
   function resolveAsyncPreloadedItem(
@@ -1953,21 +2000,10 @@ export function setupListQueryPersistence<
           activeStore.state.itemQueries[itemKey] !== undefined
         );
       });
-      const limitedQuery = limitPersistedQueryItems(
-        filteredItemKeys,
-        persistedQuery.hasMore,
-        maxQuerySize,
+      materializeHydratedQueryState(
+        queryKey,
+        createRestoredQueryState(queryKey, persistedQuery, filteredItemKeys),
       );
-
-      materializeHydratedQueryState(queryKey, {
-        error: null,
-        hasMore: limitedQuery.hasMore,
-        items: limitedQuery.itemKeys,
-        payload: persistedQuery.payload,
-        refetchOnMount: 'lowPriority',
-        status: 'success',
-        wasLoaded: true,
-      });
 
       return true;
     }
@@ -2008,26 +2044,16 @@ export function setupListQueryPersistence<
             activeStore.state.itemQueries[itemKey] !== undefined
           );
         });
-        const limitedQuery = limitPersistedQueryItems(
-          filteredItemKeys,
-          persistedQuery.hasMore,
-          maxQuerySize,
-        );
-
         suppressedPersistedStateFlushes++;
         activeStore.setState({
           ...activeStore.state,
           queries: {
             ...activeStore.state.queries,
-            [queryKey]: {
-              error: null,
-              hasMore: limitedQuery.hasMore,
-              items: limitedQuery.itemKeys,
-              payload: persistedQuery.payload,
-              refetchOnMount: 'lowPriority',
-              status: 'success',
-              wasLoaded: true,
-            },
+            [queryKey]: createRestoredQueryState(
+              queryKey,
+              persistedQuery,
+              filteredItemKeys,
+            ),
           },
         });
 
@@ -2803,6 +2829,12 @@ export function setupListQueryPersistence<
           payload: queryData.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
+          // The rows that are left are not the whole list anymore: the entry
+          // records it, so the query is not restored as a loaded one.
+          ...(queryData.missingItems ||
+          filteredItems.length < queryData.items.length
+            ? { missingItems: true }
+            : {}),
         };
         let saved = true;
         if (idleContext === undefined) {
@@ -3058,7 +3090,17 @@ export function setupListQueryPersistence<
       }
 
       for (const [queryKey, query] of queryEntries) {
-        if (query.status !== 'success' && !query.wasLoaded) continue;
+        if (query.status !== 'success' && !query.wasLoaded) {
+          if (incompleteRestoredQueryKeys.has(queryKey)) {
+            // Keep the stored entry (and the rows it still has) untouched
+            // until the query is loaded again.
+            nextQueryKeys.add(queryKey);
+            for (const itemKey of query.items) {
+              persistedQueryItemKeys.add(itemKey);
+            }
+          }
+          continue;
+        }
 
         const filteredItems = query.items.filter((itemKey) => {
           const hasItemInState = Object.hasOwn(state.items, itemKey);
@@ -3440,6 +3482,9 @@ export function setupListQueryPersistence<
     for (const queryKey of previousKnownLocalQueryKeys) {
       if (finalQueryDataByKey.has(queryKey)) continue;
       if (!hydratedPersistedQueryKeys.has(queryKey)) continue;
+      // Keep the stored entry of a query restored without some of its rows
+      // untouched until the query is loaded again.
+      if (incompleteRestoredQueryKeys.has(queryKey)) continue;
       finalPersistedQueryKeys.delete(queryKey);
     }
 
@@ -3968,6 +4013,7 @@ export function setupListQueryPersistence<
     pendingQueryPreloads.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    incompleteRestoredQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();
     syncHydrationQueryMissCache.clearAll();
     knownPersistedItemKeys = null;
@@ -4010,6 +4056,7 @@ export function setupListQueryPersistence<
     budgetEvictedQueryRecency.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    incompleteRestoredQueryKeys.clear();
     syncHydrationItemMissCache.clearAll();
     syncHydrationQueryMissCache.clearAll();
     await Promise.all([itemNamespace.clear(), clearLocalStorageQueries()]);

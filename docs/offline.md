@@ -180,6 +180,8 @@ Each store also exposes scoped APIs:
 
 List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query.
 
+Cached list queries stay readable while offline. A cached query that can no longer restore every row it was saved with is the exception: it is not reported as a complete `success`. Hooks return the rows that are left with `status: 'error'` and `error.id === 'offline'`, so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
+
 ## Runtime Controls
 
 The store manager owns runtime controls for the shared session:

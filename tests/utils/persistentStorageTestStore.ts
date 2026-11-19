@@ -572,6 +572,7 @@ function createPersistentTestStore(
               payload: entry.payload,
               items: entry.items,
               hasMore: entry.hasMore,
+              ...(entry.missingItems ? { missingItems: true } : {}),
             },
             timestamp: entry.lastAccessAt,
             ...(entry.version !== undefined ? { version: entry.version } : {}),

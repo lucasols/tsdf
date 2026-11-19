@@ -17,6 +17,7 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedListQueryData,
@@ -24,6 +25,7 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -31,12 +33,13 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   createOpfsPersistentStorageTestStore,
   type OpfsPersistentStorageTestStoreOptions,
@@ -82,6 +85,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
       .map(([field]) => field),
 };
 const fullLoadedFields = ['age', 'email', 'id', 'name'];
+let network = createOfflineNetworkMock();
 
 function getLogicalListItemEntrySizeBytes(payload: string, data: Row): number {
   return utf8Encoder.encode(JSON.stringify({ data, payload })).byteLength;
@@ -100,10 +104,21 @@ function createEnv(options: {
   partialResources?: PartialResourcesConfig<Row>;
   offsetPagination?: OffsetPaginationConfig;
   defaultQuerySize?: number;
+  /** Makes the store offline-capable, tracking this network state. */
+  offlineNetwork?: OfflineNetworkModeConfig;
 }) {
+  const getSessionKey = () => options.sessionKey ?? 'session1';
+
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
-    getSessionKey: () => options.sessionKey ?? 'session1',
+    getSessionKey,
+    storeManager: options.offlineNetwork
+      ? createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey,
+          offlineSession: { network: options.offlineNetwork },
+        })
+      : undefined,
     partialResources: options.partialResources,
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
@@ -118,6 +133,7 @@ function createEnv(options: {
       ignoreItems: options.ignoreItems,
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,
+      offline: options.offlineNetwork ? { operations: {} } : undefined,
     },
   });
 }
@@ -173,12 +189,115 @@ function createListQueryOpfsTestStore(options: {
   return { mockAdapter, listQueryScope };
 }
 
+const usersListQuery = { tableId: 'users' };
+
+/**
+ * Runs the app sessions that leave the users list (two rows) cached while
+ * some of its rows were evicted by `maxItemBytes`, and returns a function that
+ * starts the next app session (a cold start).
+ */
+async function cacheUsersListAndEvictRows(options: {
+  storeName: string;
+  evictedRows: 'User 1' | 'all';
+  offlineNetwork?: OfflineNetworkModeConfig;
+}) {
+  const projectsQuery = { tableId: 'projects' };
+  const serverData = {
+    users: [
+      { id: 1, name: 'User 1' },
+      { id: 2, name: 'User 2' },
+    ],
+    projects: [
+      { id: 1, name: 'Project 1' },
+      { id: 2, name: 'Project 2' },
+    ],
+  };
+  const { listQueryScope } = createListQueryOpfsTestStore({
+    storeName: options.storeName,
+    sessionKey: 'sess1',
+  });
+  const projectRowsBytes = sumPersistedEntryBytes(
+    getAsyncListItemEntrySizeBytes('projects||1', { id: 1, name: 'Project 1' }),
+    getAsyncListItemEntrySizeBytes('projects||2', { id: 2, name: 'Project 2' }),
+  );
+  // The item budget fits the two project rows, plus a single user row when
+  // only "User 1" is meant to be evicted.
+  const maxItemBytes =
+    options.evictedRows === 'all'
+      ? projectRowsBytes
+      : projectRowsBytes +
+        getAsyncListItemEntrySizeBytes('users||2', { id: 2, name: 'User 2' });
+
+  function startNextSession() {
+    return createEnv({
+      storeName: options.storeName,
+      sessionKey: 'sess1',
+      maxItemBytes,
+      offlineNetwork: options.offlineNetwork,
+      serverData: structuredClone(serverData),
+    });
+  }
+
+  // The users list is loaded and cached with both rows.
+  let session = startNextSession();
+  const usersList = renderHook(() =>
+    session.apiStore.useListQuery(usersListQuery),
+  );
+  await flushAllTimers();
+  usersList.unmount();
+
+  if (options.evictedRows === 'User 1') {
+    // Read recency is tracked in 6h buckets, so the next read has to happen
+    // in a later one to count as more recent.
+    await advanceTime(7 * 60 * 60 * 1000);
+
+    // In a new session only "User 2" is opened, which refreshes its recency.
+    session = startNextSession();
+    const userDetails = renderHook(() => session.apiStore.useItem('users||2'));
+    await flushAllTimers();
+    userDetails.unmount();
+  }
+  await advanceTime(60_000);
+
+  // Loading the projects list pushes the items over maxItemBytes: the least
+  // recently read rows are evicted.
+  const projectsList = renderHook(() =>
+    session.apiStore.useListQuery(projectsQuery),
+  );
+  await flushAllTimers();
+  await advanceTime(1100);
+  await flushAllTimers();
+  projectsList.unmount();
+
+  return { listQueryScope, startNextSession };
+}
+
+function mountUsersList(env: ReturnType<typeof createEnv>) {
+  const renders = createLoggerStore({ arrays: 'all' });
+
+  const { unmount } = renderHook(() => {
+    const { items, status, error } = env.apiStore.useListQuery(usersListQuery, {
+      returnRefetchingStatus: true,
+    });
+
+    renders.add({
+      status,
+      error: error?.id ?? null,
+      names: items.map((item) => item.name),
+    });
+  });
+
+  return { renders, unmount };
+}
+
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  network = createOfflineNetworkMock();
+  network.install();
   resetMockBrowserOpfsForTests();
   opfsPersistentStorage.resetForTests?.();
 });
@@ -1569,8 +1688,9 @@ describe('opfs: list query store persistence', () => {
     });
     const renders = createLoggerStore({ arrays: 'all' });
 
-    // The reader first hydrates the remaining cached item, then revalidates the
-    // list and restores the missing server items.
+    // The reader hydrates the remaining cached item, but the list is missing a
+    // row it was cached with: it is reported as loading (not as a complete
+    // `success`) until the fetch restores the missing server items.
     renderHook(() => {
       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
         returnRefetchingStatus: true,
@@ -1584,12 +1704,11 @@ describe('opfs: list query store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ names: []
-      -> status: success ⋅ names: [Newer cached]
-      -> status: refetching ⋅ names: [Newer cached]
+      -> status: loading ⋅ names: [Newer cached]
       -> status: success ⋅ names: [Older cached, Newer cached, Fresh standalone]
       "
     `);
-    // The mount revalidation should repair the incomplete hydrated query.
+    // The incomplete hydrated query is always fetched on mount.
     expect(
       readerEnv.serverTable.getRequestHistory('all', { includeTime: false }),
     ).toMatchInlineSnapshot(`
@@ -1599,6 +1718,165 @@ describe('opfs: list query store persistence', () => {
           pos: { limit: 50, offset: 0 }
         returned_items: 3
     `);
+  });
+
+  test('a cached list that lost some rows to maxItemBytes shows the remaining rows as still loading, then the full list', async () => {
+    const storeName = 'lq-opfs-evicted-rows-partial';
+    const { listQueryScope, startNextSession } =
+      await cacheUsersListAndEvictRows({ storeName, evictedRows: 'User 1' });
+
+    // The least recently read row ("User 1") was evicted, but the users query
+    // is still cached and still lists it.
+    expect(listQueryScope.listStoredItemKeys().sort()).toMatchInlineSnapshot(
+      `['"projects||1', '"projects||2', '"users||2']`,
+    );
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/sess1/${storeName}/lq.%7BtableId%3A%22users%22%7D.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+
+    // A cold start mounts the users list again.
+    const session = startNextSession();
+    const { renders } = mountUsersList(session);
+    await flushAllTimers();
+
+    // The cached list is missing a row, so it must not be reported as a
+    // complete `success`: the remaining row is available while the list is
+    // reported as loading, until the fetch delivers every row.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: loading ⋅ error: null ⋅ names: [User 2]
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      "
+    `);
+    expect(
+      session.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 2
+    `);
+  });
+
+  test('a cached list that lost all its rows to maxItemBytes shows a loading state instead of an empty list', async () => {
+    const storeName = 'lq-opfs-evicted-rows-all';
+    const { listQueryScope, startNextSession } =
+      await cacheUsersListAndEvictRows({ storeName, evictedRows: 'all' });
+
+    // Both user rows were evicted, but the users query is still cached.
+    expect(listQueryScope.listStoredItemKeys().sort()).toMatchInlineSnapshot(
+      `['"projects||1', '"projects||2']`,
+    );
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/sess1/${storeName}/lq.%7BtableId%3A%22users%22%7D.p.json`,
+      ),
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+
+    // A cold start mounts the users list again.
+    const { renders } = mountUsersList(startNextSession());
+    await flushAllTimers();
+
+    // None of the cached rows can be restored: an empty `success` list would
+    // read as "no records", so the list loads as if it was never cached.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      "
+    `);
+  });
+
+  test('starting offline with a cached list that lost some rows to maxItemBytes shows the remaining rows next to the offline error', async () => {
+    const { startNextSession } = await cacheUsersListAndEvictRows({
+      storeName: 'lq-opfs-evicted-rows-partial-offline',
+      evictedRows: 'User 1',
+      offlineNetwork: network.config,
+    });
+
+    // The app starts offline and mounts the users list.
+    network.setOffline();
+    const session = startNextSession();
+    const usersList = mountUsersList(session);
+    await flushAllTimers();
+
+    // The cached list is missing "User 1" and cannot be refetched: it must
+    // not be presented as the complete list. The remaining row stays
+    // available next to the offline error.
+    expect(usersList.renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: loading ⋅ error: null ⋅ names: [User 2]
+      -> status: error ⋅ error: offline ⋅ names: [User 2]
+      "
+    `);
+
+    // Imperative reads do not return the incomplete list as a result.
+    expect(
+      await resolveAfterAllTimers(
+        session.apiStore.awaitListQueryFetch(usersListQuery),
+      ),
+    ).toMatchInlineSnapshot(`
+      error{Error}:
+        message: 'Offline'
+        name: 'StoreFetchError'
+        code: 0
+        id: 'offline'
+        type: 'fetch'
+
+      hasMore: '❌'
+      items: []
+    `);
+    expect(
+      session.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+
+    // The offline session neither drops what is left of the cached list nor
+    // turns it into a complete one: the next offline start gets the same
+    // rows and error.
+    await advanceTime(1100);
+    await flushAllTimers();
+    usersList.unmount();
+    const { renders: nextStartRenders } = mountUsersList(startNextSession());
+    await flushAllTimers();
+
+    expect(nextStartRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: loading ⋅ error: null ⋅ names: [User 2]
+      -> status: error ⋅ error: offline ⋅ names: [User 2]
+      "
+    `);
+  });
+
+  test('starting offline with a cached list that lost all its rows to maxItemBytes reports the offline error instead of an empty list', async () => {
+    const { startNextSession } = await cacheUsersListAndEvictRows({
+      storeName: 'lq-opfs-evicted-rows-all-offline',
+      evictedRows: 'all',
+      offlineNetwork: network.config,
+    });
+
+    // The app starts offline and mounts the users list.
+    network.setOffline();
+    const session = startNextSession();
+    const { renders } = mountUsersList(session);
+    await flushAllTimers();
+
+    // An empty `success` list would read as "no records": with no row left
+    // the list behaves as if it was never cached.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: error ⋅ error: offline ⋅ names: []
+      "
+    `);
+    expect(
+      session.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {

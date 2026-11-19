@@ -1219,7 +1219,9 @@ export function createFetchApi<
     if (query?.error?.id === 'offline') {
       const hydratedQuery = persistence?.readHydratedQuery(queryKey);
 
-      if (hydratedQuery) {
+      // A persisted query missing some of its rows is not a loaded query, so
+      // the offline error is returned instead of an incomplete list.
+      if (hydratedQuery?.wasLoaded) {
         query = hydratedQuery;
         store.produceState(
           (draft) => {

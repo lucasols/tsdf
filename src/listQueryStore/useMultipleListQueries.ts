@@ -963,7 +963,9 @@ export function useMultipleListQueries<
         ) {
           const fallbackQuery = readFallbackQueryState(queryConfig.key);
 
-          if (fallbackQuery && readFallbackItemState) {
+          // A persisted query missing some of its rows is not restored as
+          // loaded, so it cannot stand in as a `success` either.
+          if (fallbackQuery?.wasLoaded && readFallbackItemState) {
             const visibleItemKeys = getVisibleQueryItemKeys(
               result.queryKey,
               fallbackQuery.items,

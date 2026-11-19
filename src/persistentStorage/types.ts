@@ -670,4 +670,10 @@ export type PersistedListQueryData = {
   items: string[];
   /** Whether the query has additional pages available. */
   hasMore: boolean;
+  /**
+   * Set when rows were dropped from `items` because their item entries were
+   * evicted from storage. Such a query is restored with the rows it still has,
+   * but not as a loaded query.
+   */
+  missingItems?: boolean;
 };
