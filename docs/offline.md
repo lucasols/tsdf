@@ -192,6 +192,72 @@ storeManager.resetOfflineRuntimeConfig();
 
 `getOfflineRuntimeConfig()` returns the current effective controls. Runtime updates are useful for explicit "work offline" toggles, diagnostics, or temporarily disabling queueing modes.
 
+### Forced offline mode
+
+`setForcedOfflineMode(forced)` makes the session behave as if the network were down, without cutting the real connection:
+
+```ts
+const result = await storeManager.setForcedOfflineMode(true);
+
+storeManager.getOfflineStatus().isForcedOffline; // true
+
+await storeManager.setForcedOfflineMode(false);
+```
+
+- While forced, the session's network detection reports offline regardless of `navigator.onLine` / `network.getIsOffline`: fetches are served from cache, offline-enabled mutations are queued, and neither replay nor recovery checks run. Successful requests and browser `online` events cannot end it.
+- The flag is persisted per session key in `localStorage` and read synchronously when the session boots, so it survives reloads and the first fetches after a reload are already offline. It stays on until it is turned off.
+- It is shared with the other tabs of the same session: open tabs follow the toggle, tabs opened later boot with it.
+- Turning it off hands control back to the real network detection. If the network is up, the session recovers and replays queued work exactly like a normal reconnect; if it is really down, the session stays offline.
+- It is a simulated network loss, so it requires `offlineSession.network` and only takes effect while network mode is enabled. The call resolves to `Result.err(...)` when `offlineSession.network` is not configured or there is no active session key.
+- The returned promise resolves once the flag is persisted, so it is safe to reload right after awaiting it.
+
+Unlike `setOfflineRuntimeConfig(...)`, which is in-memory and changes which modes are allowed, forced offline mode is persisted and changes what the session detects. It is a runtime control available in production builds, meant for manual testing, end-to-end tests and support diagnostics. Expose it deliberately (e.g. a dev tools panel), and show `isForcedOffline` in the UI when you do, since the app will keep booting offline until it is released.
+
+## Testing
+
+### End-to-end tests
+
+Browser automation tools can cut the connection (e.g. Playwright's `context.setOffline(true)`), but that also blocks loading the app itself on the next navigation unless a service worker serves it. Forced offline mode keeps the real network up and only takes the offline session offline, and it survives the reload:
+
+```ts
+// `storeManager` exposed by the app for tests, e.g. on `window`
+await page.evaluate(() => window.storeManager.setForcedOfflineMode(true));
+await page.reload();
+
+// ...the app boots offline from cache; edits are queued
+
+await page.evaluate(() => window.storeManager.setForcedOfflineMode(false));
+// ...queued edits are replayed
+```
+
+When several pages of the same session are open, replay is done by the leading tab (the visible, most recently focused one), which replays the edits it queued itself or loaded from storage when it booted, same as for a real reconnect. In a multi-page test, queue the edits from the page that was opened or focused last.
+
+### Unit and component tests
+
+`tsdf/testing` exports a network status mock with no dependency on a test runner:
+
+```ts
+import { createOfflineNetworkMock } from 'tsdf/testing';
+
+const network = createOfflineNetworkMock();
+
+beforeEach(() => network.install());
+afterEach(() => network.uninstall());
+
+test('queues the edit while offline', async () => {
+  network.goOffline();
+  // ...perform the mutation, assert it was queued
+
+  network.goOnline();
+  // ...assert it was replayed
+});
+```
+
+- `install()` / `uninstall()` replace and restore `navigator.onLine` (requires a DOM environment such as `happy-dom` or `jsdom`). That is enough for sessions using the default detection.
+- `network.config` is a ready-to-use `offlineSession.network` value (`{ enabled: true, getIsOffline }`) for sessions that should read the mock directly.
+- `goOffline()` / `goOnline()` change the status and dispatch the window `offline` / `online` events, like the browser does. `setOffline()` / `setOnline()` change it silently, e.g. to prepare the status before the app boots.
+- `isOnline()` / `isOffline()` read the mocked status.
+
 ## Uploads
 
 Configure uploads on `offlineSession.uploads` when queued mutations depend on local files. The manager exposes upload helpers:

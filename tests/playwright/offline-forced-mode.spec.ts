@@ -47,11 +47,15 @@ type RequestHistoryEntry = {
   timestamp: number;
 };
 
-/** Requests the fixture server received, as `METHOD path (pageId)`. */
+/**
+ * Requests the fixture server received, one `METHOD path (pageId)` per line.
+ * An empty string means the server was not contacted.
+ */
 async function getServerRequests(
   request: APIRequestContext,
   fixtureScopeId: string,
-): Promise<string[]> {
+  method?: 'POST',
+): Promise<string> {
   const response = await request.get('/api/test/history', {
     headers: scopeHeaders(fixtureScopeId),
   });
@@ -59,9 +63,12 @@ async function getServerRequests(
     await response.json(),
   );
 
-  return body.history.map(
-    (entry) => `${entry.method} ${entry.path} (${entry.pageId ?? 'unknown'})`,
-  );
+  return body.history
+    .filter((entry) => method === undefined || entry.method === method)
+    .map(
+      (entry) => `${entry.method} ${entry.path} (${entry.pageId ?? 'unknown'})`,
+    )
+    .join('\n');
 }
 
 async function resetServerRequests(
@@ -191,7 +198,7 @@ test('forced offline mode survives a reload, queues edits and replays them once 
   // Neither the boot fetch nor the edit reached the server, even though the
   // real network was up the whole time.
   await waitForBackgroundWork(page);
-  expect(await getServerRequests(request, fixtureScopeId)).toEqual([]);
+  expect(await getServerRequests(request, fixtureScopeId)).toBe('');
 
   // Releasing forced mode recovers like a reconnect: the edit is replayed.
   await page.getByTestId('offline-doc-release-offline').click();
@@ -201,11 +208,9 @@ test('forced offline mode survives a reload, queues edits and replays them once 
     value: '1',
     pending: '0',
   });
-  expect(
-    (await getServerRequests(request, fixtureScopeId)).filter((entry) =>
-      entry.startsWith('POST '),
-    ),
-  ).toEqual(['POST /api/document/mutate (page-a)']);
+  expect(await getServerRequests(request, fixtureScopeId, 'POST')).toBe(
+    'POST /api/document/mutate (page-a)',
+  );
 
   // The released state is persisted too: the next reload boots online.
   await expect(page.getByTestId('offline-doc-persisted-toggles')).toHaveText(
@@ -296,7 +301,7 @@ test('forced offline mode is shared by every tab of the session', async ({
 
   // No tab talks to the server while the session is forced offline.
   await waitForBackgroundWork(pageC);
-  expect(await getServerRequests(request, fixtureScopeId)).toEqual([]);
+  expect(await getServerRequests(request, fixtureScopeId)).toBe('');
 
   // Releasing from a tab that neither forced it nor queued the edit brings
   // every tab back online, and the leader replays the edit.
@@ -312,9 +317,7 @@ test('forced offline mode is shared by every tab of the session', async ({
 
   // The queued edit was sent exactly once.
   await waitForBackgroundWork(pageC);
-  expect(
-    (await getServerRequests(request, fixtureScopeId)).filter((entry) =>
-      entry.startsWith('POST '),
-    ),
-  ).toEqual(['POST /api/document/mutate (page-c)']);
+  expect(await getServerRequests(request, fixtureScopeId, 'POST')).toBe(
+    'POST /api/document/mutate (page-c)',
+  );
 });

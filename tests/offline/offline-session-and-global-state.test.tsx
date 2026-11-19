@@ -929,6 +929,7 @@ test('global offline status is shared across stores in the same session', async 
   await Promise.resolve();
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null

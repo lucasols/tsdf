@@ -329,6 +329,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
@@ -397,6 +398,7 @@ describe('document', () => {
     await advanceTime(25);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -425,6 +427,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -493,6 +496,7 @@ describe('document', () => {
     await advanceTime(25);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -521,6 +525,7 @@ describe('document', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600010
@@ -604,6 +609,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
@@ -757,6 +763,7 @@ describe('document', () => {
       `[]`,
     );
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: 1735689600010
@@ -1034,6 +1041,7 @@ describe('document', () => {
       ),
     ).toMatchInlineSnapshot(`[]`);
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '❌'
       lastFailureAt: null
@@ -1740,6 +1748,7 @@ describe('collection', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000
@@ -2174,6 +2183,7 @@ describe('list-query', () => {
       `);
 
     expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+      isForcedOffline: '❌'
       isLeader: '✅'
       isOfflineMode: '✅'
       lastFailureAt: 1735689600000

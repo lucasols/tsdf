@@ -200,7 +200,7 @@ test('forced offline mode keeps a reloaded app offline from boot and turning it 
   // Browser "online" events and the passage of time must not end forced mode
   // or start replaying: the server never hears about the queued edit.
   env.addTimelineComments('beforeNextAction', [
-    'the browser fires an "online" event and a minute passes',
+    'a browser "online" event and a full minute went by without any replay',
   ]);
   act(() => {
     network.goOnline();
@@ -231,9 +231,10 @@ test('forced offline mode keeps a reloaded app offline from boot and turning it 
     network: { active: '❌', enabled: '✅' }
   `);
 
-  // - while forced: cached value is shown as success and no fetch is started
-  // - after turning it off: the pending sync clears and the document
-  //   revalidates against the server
+  // - while forced: the cached value is shown as success, the mount refetch
+  //   never reaches the server and the edit stays pending
+  // - after turning it off: the status flips first, then the queued edit is
+  //   replayed and the pending sync clears
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui                                                     |
@@ -244,7 +245,7 @@ test('forced offline mode keeps a reloaded app offline from boot and turning it 
     .     | "value:2 success | offline:on forced:on"               | ui-changed
     .     | "value:2 success pendingSync | offline:on forced:on"   | ui-changed
     .     | "value:2 success pendingSync | offline:on forced:on"   | offline:updateValue queued
-    72s   | "value:2 success pendingSync | offline:on forced:on"   | -- the browser fires an "online" event and a minute passes
+    72s   | "value:2 success pendingSync | offline:on forced:on"   | -- a browser "online" event and a full minute went by without any replay
     .     | "value:2 success pendingSync | offline:on forced:on"   | -- forced offline is turned off
     .     | "value:2 success pendingSync | offline:off forced:off" | ui-changed
     .     | "value:2 success pendingSync | offline:off forced:off" | offline:updateValue replay-started
@@ -485,6 +486,14 @@ test('network recovery checks do not run and cannot end forced offline mode', as
     storeName,
     networkConfig,
   });
+
+  // Nothing is mounted yet, so no fetch re-checks the network: the session
+  // has to stay quiet on its own while the probe interval elapses many times.
+  await advanceTime(30_000);
+
+  expect(recoveryCheck).toHaveBeenCalledTimes(0);
+
+  // Same once a screen mounts and tries to fetch.
   const screen = reloadedPage.renderScreen();
   await advanceTime(30_000);
 
@@ -546,31 +555,46 @@ test('turning forced offline mode off while the network is really down keeps the
 
 test('forced offline mode only takes effect while network mode is enabled', async () => {
   const sessionKey = 'forced-offline-disabled-network-session';
-  const page = createOfflineDocumentPage({
-    sessionKey,
-    storeName: 'forced-offline-disabled-network-doc',
-    testScenario: 'loaded',
-    // Network mode is configured but starts disabled.
-    networkConfig: { ...network.config, enabled: false },
-  });
-  await flushAllTimers();
+
+  // Network mode is configured but starts disabled (e.g. an app that only
+  // turns on offline support for some users, at runtime). No store is
+  // attached: the forced flag is the only thing this session has to persist.
+  function createPageManager() {
+    return createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: { ...network.config, enabled: false } },
+    });
+  }
+
+  const firstPageManager = createPageManager();
 
   // Forced mode simulates a network loss, so it follows the same admission
   // rule as a real one: it is recorded, but ignored while the mode is off.
-  (await page.storeManager.setForcedOfflineMode(true)).unwrap();
+  (await firstPageManager.setForcedOfflineMode(true)).unwrap();
 
-  expect(getStatusSummary(page.storeManager)).toMatchInlineSnapshot(`
+  expect(getStatusSummary(firstPageManager)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+  `);
+
+  // The recorded flag survives a reload even though the session is online.
+  resetSessionForTests();
+  const reloadedPageManager = createPageManager();
+
+  expect(getStatusSummary(reloadedPageManager)).toMatchInlineSnapshot(`
     isForcedOffline: '✅'
     isOfflineMode: '❌'
     network: { active: '❌', enabled: '❌' }
   `);
 
   // Enabling network mode at runtime makes the forced flag effective.
-  page.storeManager
+  reloadedPageManager
     .setOfflineRuntimeConfig({ network: { enabled: true } })
     .unwrap();
 
-  expect(getStatusSummary(page.storeManager)).toMatchInlineSnapshot(`
+  expect(getStatusSummary(reloadedPageManager)).toMatchInlineSnapshot(`
     isForcedOffline: '✅'
     isOfflineMode: '✅'
     network: { active: '✅', enabled: '✅' }

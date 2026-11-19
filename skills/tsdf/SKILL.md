@@ -230,6 +230,8 @@ Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResoluti
 
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
+Testing: `await storeManager.setForcedOfflineMode(true | false)` forces the session offline without cutting the connection (persisted per session key, survives reloads, shared across tabs, reported as `getOfflineStatus().isForcedOffline`; requires `offlineSession.network`). `createOfflineNetworkMock()` from `tsdf/testing` mocks the network status in unit tests.
+
 Docs: `docs/offline.md`.
 
 ## Real-time updates

@@ -332,6 +332,7 @@ test('direct collection store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
@@ -588,6 +589,7 @@ test('direct collection store offline public api', async () => {
   );
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '✅'
     lastFailureAt: null
@@ -731,6 +733,7 @@ test('direct collection store offline public api', async () => {
     `);
 
   expect(getGlobalOfflineStatus(sessionKey)).toMatchInlineSnapshot(`
+    isForcedOffline: '❌'
     isLeader: '✅'
     isOfflineMode: '❌'
     lastFailureAt: null
