@@ -9,12 +9,7 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import {
-  advanceTime,
-  flushAllTimers,
-  pick,
-  range,
-} from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
@@ -2358,10 +2353,8 @@ test('discarding failed offline changes puts the rows back to what the server ha
   act(() => {
     network.goOnline();
   });
-  // 3 attempts per change, 5s apart.
-  for (const _attempt of range(1, 6)) {
-    await advanceTime(5000);
-  }
+  // 3 attempts per change, 5s apart: 30s covers both.
+  await advanceTime(30_000);
   await flushAllTimers();
 
   const renameResolution = env.apiStore

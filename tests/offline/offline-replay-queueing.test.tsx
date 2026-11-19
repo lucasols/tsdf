@@ -12,12 +12,7 @@ import {
   TEST_INITIAL_TIME,
   normalizeError,
 } from '../mocks/testEnvUtils';
-import {
-  advanceTime,
-  flushAllTimers,
-  pick,
-  range,
-} from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { withSuppressedActError } from '../utils/withSuppressedActError';
 import {
@@ -3185,10 +3180,8 @@ test('discarding a failed offline edit of a collection item puts that item back 
   act(() => {
     network.goOnline();
   });
-  // 3 attempts per rename, 5s apart.
-  for (const _attempt of range(1, 6)) {
-    await advanceTime(5000);
-  }
+  // 3 attempts per rename, 5s apart: 30s covers both.
+  await advanceTime(30_000);
   await flushAllTimers();
 
   const adaResolution = env.apiStore
