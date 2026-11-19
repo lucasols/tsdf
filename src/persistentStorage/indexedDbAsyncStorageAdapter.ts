@@ -95,6 +95,7 @@ class IndexedDbStallWatch {
 
   readonly #transaction: IDBTransaction | null;
   #checkedEventCount = indexedDbEventCount;
+  #checkedAt = 0;
   #stalledChecks = 0;
   #timer: ReturnType<typeof setTimeout>;
 
@@ -112,12 +113,18 @@ class IndexedDbStallWatch {
   };
 
   readonly #check = (): void => {
-    // A hidden tab may have its storage paused and its timers throttled or
-    // frozen, so only checks made while visible count. A check that fires
-    // late, the moment a frozen tab resumes, is at most the first of the two
-    // required: the operation still gets a full interval of running time.
+    // Only time during which the page was running and visible counts. A
+    // hidden tab may have its storage paused, and a check that fires late
+    // means the page itself was not running (frozen tab, sleeping device,
+    // throttled timers), so IndexedDB had no chance to answer either. An
+    // operation is therefore never given up the moment a page resumes.
+    const now = Date.now();
+    const firedLate =
+      this.#checkedAt !== 0 &&
+      now - this.#checkedAt > INDEXED_DB_STALL_CHECK_INTERVAL_MS * 1.5;
     if (
       indexedDbEventCount !== this.#checkedEventCount ||
+      firedLate ||
       asPossiblyUndefined(globalThis.document)?.visibilityState === 'hidden'
     ) {
       this.#stalledChecks = 0;
@@ -125,6 +132,7 @@ class IndexedDbStallWatch {
       this.#stalledChecks += 1;
     }
     this.#checkedEventCount = indexedDbEventCount;
+    this.#checkedAt = now;
 
     if (this.#stalledChecks < 2) {
       this.#timer = setTimeout(this.#check, INDEXED_DB_STALL_CHECK_INTERVAL_MS);
@@ -650,8 +658,14 @@ function transactionDone(
       indexedDbEventCount += 1;
       resolve();
     };
-    transaction.onerror = () =>
-      reject(transaction.error ?? new Error('IndexedDB transaction failed.'));
+    transaction.onerror = (event) =>
+      reject(
+        transaction.error ??
+          // A request the operation did not await failed. Its error is the
+          // one that tells a lost connection from a data or quota problem.
+          (event.target instanceof IDBRequest ? event.target.error : null) ??
+          new Error('IndexedDB transaction failed.'),
+      );
     transaction.onabort = () =>
       reject(transaction.error ?? new Error('IndexedDB transaction aborted.'));
   });

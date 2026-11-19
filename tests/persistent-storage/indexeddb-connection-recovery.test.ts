@@ -2,8 +2,22 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { cleanup, renderHook } from '@testing-library/react';
 import { forceCloseDatabase } from 'fake-indexeddb';
 import { act } from 'react';
-import { rc_number, rc_object, rc_parse, rc_string } from 'runcheck';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  rc_number,
+  rc_object,
+  rc_parse,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import { createIndexedDbPersistentStorageForTests } from '../../src/persistentStorage/indexedDbAsyncStorageAdapter';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -31,14 +45,16 @@ const documentSchema = rc_object({ value: rc_number });
 /** Time without progress after which a stalled operation is given up. */
 const STALL_CHECK_INTERVAL_MS = 15_000;
 
-type TestApp = { adapter: { resetForTests?: () => void }; dispose: () => void };
-
 let network = createOfflineNetworkMock();
 let databaseName = '';
+type TestApp = { adapter: { resetForTests?: () => void }; dispose: () => void };
+
 let apps: TestApp[] = [];
 /** Connections the adapter under test opened, oldest first. */
 let adapterConnections: IDBDatabase[] = [];
 let isTestOwnedOpen = false;
+/** Every `indexedDB.open` call, the adapter's and the test's own. */
+let openDatabase: MockInstance<IDBFactory['open']>;
 let persistentStorageErrors: string[] = [];
 
 function onPersistentStorageError(error: unknown): void {
@@ -73,21 +89,25 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-function getPersistedName(row: unknown): unknown {
+/** Name of the item in a row handed to IndexedDB. */
+function getPersistedName(row: unknown): string {
   const parsed = rc_parse(
     row,
     rc_object({ d: rc_object({ value: rc_object({ name: rc_string }) }) }),
   ).unwrapOrNull();
-  return parsed === null ? 'not an item' : parsed.d.value.name;
+  return parsed === null ? '(store bookkeeping row)' : parsed.d.value.name;
 }
 
 /** `storeName/entryKey` of a persisted row. */
 function getEntryLabel(key: IDBValidKey): string {
-  if (!Array.isArray(key)) return String(key);
+  const [scopeId, entryKey] = Array.isArray(key) ? key : [];
+  if (typeof scopeId !== 'string' || typeof entryKey !== 'string') {
+    return JSON.stringify(key);
+  }
 
-  const scope: unknown = JSON.parse(String(key[0]));
-  const storeName = Array.isArray(scope) ? String(scope[1]) : String(key[0]);
-  return `${storeName}/${String(key[1])}`;
+  const scope: unknown = JSON.parse(scopeId);
+  const storeName: unknown = Array.isArray(scope) ? scope[1] : undefined;
+  return `${typeof storeName === 'string' ? storeName : scopeId}/${entryKey}`;
 }
 
 /**
@@ -105,14 +125,17 @@ async function readPersistedEntries(): Promise<Record<string, unknown>> {
       const store = database
         .transaction('entries', 'readonly')
         .objectStore('entries');
-      const [keys, values] = await Promise.all([
+      const [keys, rows]: [IDBValidKey[], unknown[]] = await Promise.all([
         requestResult(store.getAllKeys()),
-        requestResult<Array<{ d: unknown }>>(store.getAll()),
+        requestResult(store.getAll()),
       ]);
       database.close();
 
       return Object.fromEntries(
-        keys.map((key, index) => [getEntryLabel(key), values[index]?.d]),
+        keys.map((key, index) => [
+          getEntryLabel(key),
+          rc_parse(rows[index], rc_object({ d: rc_unknown })).unwrapOrNull()?.d,
+        ]),
       );
     })(),
   );
@@ -241,6 +264,40 @@ function editDocument(
   });
 }
 
+/**
+ * The browser's storage backend stops answering: requests, transactions and
+ * opens stay pending and no IndexedDB event is delivered. fake-indexeddb runs
+ * all of its work through `setImmediate`, so holding those tasks back is the
+ * same thing seen from the page.
+ */
+function freezeStorage() {
+  const heldTasks: Array<() => void> = [];
+  vi.stubGlobal('setImmediate', (task: () => void) => {
+    heldTasks.push(task);
+    return 0;
+  });
+
+  return {
+    /** Lets the backend do one more piece of work. */
+    runNextTask(): boolean {
+      const task = heldTasks.shift();
+      task?.();
+      return task !== undefined;
+    },
+    /** The backend answers again, starting with what it was holding back. */
+    resume(): void {
+      vi.unstubAllGlobals();
+      for (const task of heldTasks.splice(0)) {
+        task();
+      }
+    },
+    /** New work is answered again; what was asked while frozen is lost. */
+    recoverLosingPendingWork(): void {
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
@@ -254,7 +311,8 @@ beforeEach(() => {
 
   // Observe the connections the adapter opens, at the IndexedDB boundary.
   const open = indexedDB.open.bind(indexedDB);
-  vi.spyOn(indexedDB, 'open').mockImplementation((name, version) => {
+  openDatabase = vi.spyOn(indexedDB, 'open');
+  openDatabase.mockImplementation((name, version) => {
     const request = open(name, version);
     if (!isTestOwnedOpen) {
       request.addEventListener('success', () => {
@@ -283,7 +341,7 @@ describe('opening the database', () => {
   test('a failed open is not remembered: the app is told once and later saves work', async () => {
     // The first operation finds the IndexedDB backend broken, including the
     // immediate second attempt the adapter makes on its own.
-    vi.mocked(indexedDB.open)
+    openDatabase
       .mockImplementationOnce(() => {
         throw new DOMException('Backing store is unavailable', 'UnknownError');
       })
@@ -312,16 +370,14 @@ describe('opening the database', () => {
   test('an open that never settles is abandoned and retried', async () => {
     // Old Safari: the first open of a page stays pending forever, with no
     // success, error or blocked event.
-    vi.mocked(indexedDB.open).mockImplementationOnce(
-      () => new IDBOpenDBRequest(),
-    );
+    openDatabase.mockImplementationOnce(() => new IDBOpenDBRequest());
 
     const { env } = createDocumentApp('doc-open-hangs', 5);
     const hook = renderHook(() => env.apiStore.useDocument());
 
     // One check without progress is not enough to give up.
     await advanceTime(STALL_CHECK_INTERVAL_MS);
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(1);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
 
     // The second one is: the adapter opens again and carries on.
     await advanceTime(STALL_CHECK_INTERVAL_MS);
@@ -410,31 +466,41 @@ describe('losing the connection in the middle of an operation', () => {
     );
     apps.push({ adapter, dispose: () => env.apiStore.dispose() });
 
-    // The connection dies right after the first item of the batch was handed
-    // to IndexedDB: its transaction aborts and the connection is closing.
-    const realPut = IDBObjectStore.prototype.put;
-    const put = vi
-      .spyOn(IDBObjectStore.prototype, 'put')
-      .mockImplementationOnce(function (this: IDBObjectStore, value, key) {
-        const request = realPut.call(this, value, key);
-        this.transaction.abort();
-        this.transaction.db.close();
-        return request;
-      });
+    // Observe every row handed to IndexedDB.
+    const put = vi.spyOn(IDBObjectStore.prototype, 'put');
 
-    // Three items are fetched together and saved as one batch.
+    // Three items are fetched together and saved as one batch. Storage answers
+    // one step at a time until the batch has started writing its items...
+    const storage = freezeStorage();
     renderHook(() => [
       env.apiStore.useItem('a'),
       env.apiStore.useItem('b'),
       env.apiStore.useItem('c'),
     ]);
+    while (put.mock.calls.length === 0) {
+      storage.runNextTask();
+      await advanceTime(100);
+    }
+
+    // ...and right then the connection dies: the transaction of the batch is
+    // aborted before it could commit, and the connection is closing.
+    const store = put.mock.contexts[0];
+    if (!(store instanceof IDBObjectStore)) {
+      throw new Error('No item was handed to IndexedDB.');
+    }
+    store.transaction.abort();
+    store.transaction.db.close();
+    storage.resume();
     await flushAllTimers();
 
-    // One reconnect, and the batch was attempted exactly twice.
+    // The interrupted attempt got as far as its first item. After one
+    // reconnect the whole batch was handed over again.
     expect(
       put.mock.calls.map(([value]) => getPersistedName(value)),
-    ).toMatchInlineSnapshot(`['Ada', 'Ada', 'Grace', 'Linus', 'not an item']`);
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(2);
+    ).toMatchInlineSnapshot(
+      `['Ada', 'Ada', 'Grace', 'Linus', '(store bookkeeping row)']`,
+    );
+    expect(openDatabase).toHaveBeenCalledTimes(2);
     // Nothing of the aborted attempt is left half-written, every item is there
     // exactly once, and the app saw no error.
     expect(await readPersistedEntries()).toMatchInlineSnapshot(`
@@ -504,33 +570,6 @@ describe('another tab changing the database', () => {
 });
 
 describe('operations that stop making progress', () => {
-  /**
-   * The browser's storage backend stops answering: requests, transactions and
-   * opens stay pending and no IndexedDB event is delivered. fake-indexeddb runs
-   * all of its work through `setImmediate`, so holding those tasks back is the
-   * same thing seen from the page.
-   */
-  function freezeStorage() {
-    const heldTasks: Array<() => void> = [];
-    vi.stubGlobal('setImmediate', (task: () => void) => {
-      heldTasks.push(task);
-      return 0;
-    });
-
-    return {
-      /** Lets the backend do one more piece of work. */
-      runNextTask(): boolean {
-        const task = heldTasks.shift();
-        task?.();
-        return task !== undefined;
-      },
-      /** New work is answered again; what was asked while frozen is lost. */
-      recoverLosingPendingWork(): void {
-        vi.unstubAllGlobals();
-      },
-    };
-  }
-
   test('a save that hangs is given up after two checks without progress and written again', async () => {
     const { env } = createDocumentApp('doc-hung-save', 1);
     renderHook(() => env.apiStore.useDocument());
@@ -541,7 +580,7 @@ describe('operations that stop making progress', () => {
     // The debounced save starts and gets no answer. One check without
     // progress is not enough to give up on it.
     await advanceTime(2000 + STALL_CHECK_INTERVAL_MS);
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(1);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
 
     // Storage works again for new connections, the old one stays dead. The
     // second check drops it and the save runs again on a new connection.
@@ -549,7 +588,7 @@ describe('operations that stop making progress', () => {
     await advanceTime(STALL_CHECK_INTERVAL_MS);
     await flushAllTimers();
 
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(2);
+    expect(openDatabase).toHaveBeenCalledTimes(2);
     expect(await readPersistedEntries()).toMatchInlineSnapshot(
       `doc-hung-save/d: { value: 2 }`,
     );
@@ -570,21 +609,49 @@ describe('operations that stop making progress', () => {
     // Browsers may pause storage for background tabs, so however long the tab
     // stays hidden the pending save is left alone: no second attempt is made.
     await advanceTime(10 * 60_000);
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(1);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
 
     // Back in the foreground the save still gets two full checks before it is
     // considered stuck, so a save that completes on resume is never failed.
     visibility.mockReturnValue('visible');
     storage.recoverLosingPendingWork();
     await advanceTime(STALL_CHECK_INTERVAL_MS);
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(1);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
 
     await advanceTime(STALL_CHECK_INTERVAL_MS);
     await flushAllTimers();
 
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(2);
+    expect(openDatabase).toHaveBeenCalledTimes(2);
     expect(await readPersistedEntries()).toMatchInlineSnapshot(
       `doc-hung-hidden/d: { value: 2 }`,
+    );
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a save left pending while the device sleeps is not given up the moment it wakes', async () => {
+    const { env } = createDocumentApp('doc-hung-asleep', 1);
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
+
+    const storage = freezeStorage();
+    editDocument(env, 2);
+    // The save is already one check behind when the lid is closed.
+    await advanceTime(2000 + STALL_CHECK_INTERVAL_MS);
+
+    // An hour later the device wakes up. Nothing ran meanwhile, so the next
+    // check is long overdue, and it does not count against the save.
+    vi.setSystemTime(Date.now() + 60 * 60_000);
+    await advanceTime(STALL_CHECK_INTERVAL_MS);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+
+    // Storage answers shortly after waking up: the original save completes on
+    // the original connection, without a second attempt.
+    storage.resume();
+    await flushAllTimers();
+
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+    expect(await readPersistedEntries()).toMatchInlineSnapshot(
+      `doc-hung-asleep/d: { value: 2 }`,
     );
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });
@@ -643,16 +710,12 @@ describe('operations that stop making progress', () => {
     await flushAllTimers();
 
     // Measure how long each transaction stays open from here on.
-    const realTransaction = IDBDatabase.prototype.transaction;
+    const connection = getAdapterConnection();
+    const openTransaction = connection.transaction.bind(connection);
     const transactionDurations: number[] = [];
-    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(
-      function (this: IDBDatabase, storeNames, mode, options) {
-        const transaction = realTransaction.call(
-          this,
-          storeNames,
-          mode,
-          options,
-        );
+    vi.spyOn(connection, 'transaction').mockImplementation(
+      (storeNames, mode, options) => {
+        const transaction = openTransaction(storeNames, mode, options);
         const startedAt = Date.now();
         transaction.addEventListener('complete', () => {
           transactionDurations.push(Date.now() - startedAt);
@@ -683,7 +746,7 @@ describe('operations that stop making progress', () => {
     expect(Math.max(...transactionDurations)).toBeGreaterThan(
       3 * STALL_CHECK_INTERVAL_MS,
     );
-    expect(vi.mocked(indexedDB.open)).toHaveBeenCalledTimes(1);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
     expect(Object.keys(await readPersistedEntries())).toMatchInlineSnapshot(`
       - 'col-slow/"a'
       - 'col-slow/"b'
@@ -742,7 +805,7 @@ describe('queued offline mutations', () => {
 
     // Storage is gone for good: the connection is dead and cannot be reopened.
     getAdapterConnection().close();
-    vi.mocked(indexedDB.open).mockImplementation(() => {
+    openDatabase.mockImplementation(() => {
       throw new DOMException(
         'Connection to Indexed Database server lost. Refresh the page to try again',
         'UnknownError',
@@ -765,7 +828,7 @@ describe('queued offline mutations', () => {
     );
 
     // Nothing reached the disk, so a reload loses the queued mutation.
-    vi.mocked(indexedDB.open).mockRestore();
+    openDatabase.mockRestore();
     closeApps();
     const reloaded = createOfflineDocumentApp('doc-offline-unsaved', 'idle');
     renderHook(() => reloaded.env.apiStore.useDocument());
@@ -782,7 +845,7 @@ describe('queued offline mutations', () => {
 
     // Storage is gone for good, so the queued mutation only lives in memory.
     getAdapterConnection().close();
-    vi.mocked(indexedDB.open).mockImplementation(() => {
+    openDatabase.mockImplementation(() => {
       throw new DOMException(
         'Connection to Indexed Database server lost. Refresh the page to try again',
         'UnknownError',
