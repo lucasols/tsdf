@@ -48,6 +48,12 @@ Rules in `oxlint.config.ts` are disabled with `oxlint-disable*` comments, rules 
 pnpm vitest run src/yourFile.test.ts
 ```
 
+### Subagents can run tests
+
+Subagents (reviewers, fixers and any other delegated agent) can and should run tests and type checks themselves to confirm a finding or validate a change, without asking: `pnpm test`, `pnpm vitest run <file>` and `pnpm typecheck` only read the repo and need no network.
+
+An agent told not to modify files must skip the commands that rewrite them: `pnpm lint`, `pnpm oxlint` and `pnpm fast-lint` run with `--fix`, and `vitest -u` updates snapshots.
+
 ## Git and Publishing Workflow
 
 These are pre-approved, do them without asking the user for confirmation:
