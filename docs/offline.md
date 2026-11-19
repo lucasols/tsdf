@@ -192,9 +192,10 @@ deleteTask: {
 What happens depends on whether the creation was already sent:
 
 - **Never sent** (still waiting in the queue): nothing is sent. TSDF drops the creation, the queued edits of the entity, the delete itself and the queued work that depends on the entity (`dependsOn`), then removes the temporary entity from the store and its lists.
-- **Sent, or waiting for a manual resolution** (`syncing`, `needs-confirmation`, or queued again after a `retry`): the server may have the entity, so the creation is kept and the delete stays queued behind it. Once the server id is known the delete is sent with it. `execute` should treat a not-found answer as success, as above: the server answers not-found when the creation never reached it, or when an earlier delete attempt did.
+- **Sent** (`syncing`, `needs-confirmation`, or queued again after a `retry`): the server may have the entity, so the creation is kept and the delete stays queued behind it. Once the server id is known the delete is sent with it. `execute` should treat a not-found answer as success, as above: the server answers not-found when the creation never reached it, or when an earlier delete attempt did.
+- **Waiting for a manual resolution**: the creation is kept too, and the delete is held behind that resolution. See [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution).
 
-`getItemOfflineState(payload)` tells the two cases apart before deleting: `isUnsentCreation && !creationAttempted` means the delete only discards local work.
+`getItemOfflineState(payload)` tells the first case apart before deleting: `isUnsentCreation && !creationAttempted` means the delete only discards local work.
 
 Work queued in **other stores** for the cancelled entity is not known to its store. Declare the relation with `cancelledWith` in the other store's operation:
 
@@ -231,6 +232,12 @@ Supported resolution actions include:
 - `retry` - Retry a retry-exhausted record.
 
 Use `parseOfflineResolutionConflict(resolution)` to narrow a persisted resolution back to the operation-specific conflict/input type before rendering a manual resolution UI.
+
+### Entities whose creation waits for a resolution
+
+While the creation of an entity made offline waits for a resolution, the server does not know the entity, so nothing else can be sent for it. The mutations that target or depend on it become blocked resolutions behind the creation (`blockedResolutionCount > 0`, error `Blocked by unresolved dependency`), whether they were queued before the creation failed or made afterwards, online or offline. `performMutation(...)` returns `{ kind: 'queued' }` for them and the optimistic update stays visible.
+
+They follow the decision about the creation: `retry` (default scope) sends the creation again and then the blocked mutations with the server id, `discard` drops them with the creation. This includes a delete with `dropSelfIfTempLifecycleCancelled`: the creation may have reached the server, so it is not cancelled locally; the delete is sent after the creation is retried, or dropped when it is discarded.
 
 ## Reading Offline State
 

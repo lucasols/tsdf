@@ -617,12 +617,13 @@ export function createOfflineStoreController<
 
   /**
    * Whether mutations queued earlier for the entities of this mutation are
-   * still waiting to reach the server (queued, replaying or unconfirmed).
+   * still waiting to reach the server (queued, replaying or unconfirmed), or
+   * the creation of one of those entities waits for a manual resolution.
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
-    if (queueEntries.size === 0) return false;
+    if (queueEntries.size === 0 && resolutions.size === 0) return false;
 
     const entityRefs =
       prepared.entityRefs ??
@@ -646,7 +647,12 @@ export function createOfflineStoreController<
       }
     }
 
-    return false;
+    return isHeldBehindTempCreateResolution({
+      operation: prepared.operationName,
+      input: prepared.validatedInput,
+      entityRefs,
+      tempIds: prepared.tempIds,
+    });
   }
 
   function getInitialOfflineMutationAction(
@@ -2459,6 +2465,37 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Whether the work targets or depends on a temp entity whose creation is
+   * held in a manual resolution. Such work cannot be sent (the server does
+   * not know the entity) until that resolution is decided.
+   */
+  function isHeldBehindTempCreateResolution(
+    workItem: Pick<
+      OfflineQueueEntry,
+      'entityRefs' | 'input' | 'operation' | 'tempIds'
+    >,
+  ): boolean {
+    for (const resolution of resolutions.values()) {
+      for (const entityKey of getTempLifecycleEntityKeys(resolution)) {
+        if (
+          workItemDependsOnDependencySource({
+            workItem,
+            dependencySource: {
+              entityKey,
+              resolutionId: resolution.id,
+              sourceType: 'resolution',
+            },
+          })
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   async function promoteBlockedTempCreateDescendants(args: {
     current: ActiveSessionState;
     parentEntry: OfflineQueueEntry;
@@ -3108,6 +3145,19 @@ export function createOfflineStoreController<
       workingQueue,
     });
 
+    // Work for a temp entity whose creation already waits for a manual
+    // resolution joins the descendants that were blocked when the creation
+    // failed, instead of the queue: it is retried or discarded with it.
+    const blockedResolution =
+      plannedMutation.nextEntry &&
+      isHeldBehindTempCreateResolution(plannedMutation.nextEntry)
+        ? buildRetryExhaustedResolutionRecord(
+            current,
+            plannedMutation.nextEntry,
+            { message: BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE },
+          )
+        : undefined;
+
     const persistedMutations: AppliedQueuedMutation[] = [];
     const persistedUploadIds: string[] = [];
     const appliedPendingMutations: Array<{
@@ -3159,7 +3209,11 @@ export function createOfflineStoreController<
 
       if (plannedMutation.nextEntry) {
         appliedMutation.touchedNextEntry = true;
-        await persistEntry(plannedMutation.nextEntry, current, true);
+        if (blockedResolution) {
+          await persistResolution(blockedResolution, current, true);
+        } else {
+          await persistEntry(plannedMutation.nextEntry, current, true);
+        }
       }
 
       nextQueueOrder = nextQueueOrderValue;
@@ -3218,7 +3272,9 @@ export function createOfflineStoreController<
           );
 
         if (mutation.touchedNextEntry && mutation.nextEntry) {
-          if (!nextEntryReplacesRemovedEntry) {
+          if (blockedResolution) {
+            await removeResolution(blockedResolution.id, current, true);
+          } else if (!nextEntryReplacesRemovedEntry) {
             await removeEntry(mutation.nextEntry.id, current, true);
           }
         }

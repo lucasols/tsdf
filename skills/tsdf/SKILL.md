@@ -229,7 +229,7 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with its queued edits, its `dependsOn` dependents and the work of other stores declaring it in `cancelledWith`; an attempted creation is kept and the delete replays after it with the server id (treat not-found as success in `execute`). See `docs/offline.md`.
 
-Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`.
+Conflict / retry: `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. Mutations for an entity whose offline creation waits for a resolution are never sent with the temp id: they become blocked resolutions that are retried or discarded with the creation.
 
 Recovery: while offline, `onTransportReconnect()` and focus revalidations are ignored; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities are still pending.
 
