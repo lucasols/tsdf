@@ -50,8 +50,6 @@ import {
 import {
   offlineItemEntityRefSchema,
   OfflineResolutionConflictParseError,
-  type AnyOfflineOperationDefinition,
-  type CollectionOfflineEntityRef,
   type GlobalOfflineEntity,
   type OfflineMutationInput,
   type OfflineResolutionActionForOperation,
@@ -61,6 +59,7 @@ import {
 import type { OfflineMutationUploadsInput } from '../persistentStorage/offlineUploadTypes';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
+  CollectionOfflineOperationsConfig,
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
   ResolvedCollectionPersistentStorageConfig,
@@ -280,24 +279,6 @@ type CollectionItemSnapshotMessage<
   CollectionBrowserTabsMessage<ItemState, ItemPayload>,
   { kind: 'collection-item-snapshot' }
 >;
-
-type InternalCollectionOfflineOperations<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
-> = Record<
-  string,
-  AnyOfflineOperationDefinition & {
-    getEntityRefs: (ctx: {
-      input: __LEGIT_ANY__;
-    }) => CollectionOfflineEntityRef<ItemPayload>[];
-  }
-> &
-  ([ItemState | ItemPayload] extends [never] ? never : unknown);
-
-type CollectionOfflineOperationsConfig<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
-> = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
 
 const EMPTY_COLLECTION_OFFLINE_OPERATIONS = {};
 

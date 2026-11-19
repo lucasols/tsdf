@@ -163,4 +163,6 @@ Upload methods:
 
 `metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
 
+The ref type returned by `resolveOfflineUpload(s)` and exposed as `OfflineUpload.resolvedRef` is inferred from the `upload` transport of `offlineSession.uploads`, as long as the manager is not annotated with the plain `StoreManager` type. `StoreManagerUploadRef<typeof storeManager>` extracts it, for example to type the upload refs of offline operations. `offlineSession.uploads.resolvedRefSchema` optionally validates refs restored from storage or received from other tabs; a ref that fails it is dropped and its upload goes back to `pending`. See [Offline: Upload refs](./offline.md#upload-refs).
+
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.

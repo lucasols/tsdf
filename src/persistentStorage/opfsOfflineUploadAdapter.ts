@@ -128,9 +128,10 @@ function parseStoredUploadMetadataRecord<
     updatedAt: compactRecord.u,
     ...(compactRecord.r !== undefined
       ? {
-          // WORKAROUND: Persisted upload metadata is validated only at the
-          // shared ValidPayload boundary, and hydration rebinds that known-safe
-          // value back to the caller's compile-time upload-ref generic.
+          // WORKAROUND: The adapter contract is generic over the upload ref,
+          // but the stored value is only checked to be a ValidPayload here. The
+          // offline session validates it with `uploads.resolvedRefSchema`, when
+          // configured, before exposing it.
           resolvedRef: __LEGIT_CAST__<TResolvedRef, ValidPayload>(
             compactRecord.r,
           ),

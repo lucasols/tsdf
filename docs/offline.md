@@ -206,6 +206,69 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 
 Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
+### Upload refs
+
+The value the `upload` transport resolves to is the upload ref: whatever the server needs to reference the uploaded file (a string, or an object such as `{ fileId, url }`). `createStoreManager` infers its type from the transport, so it does not have to be narrowed by hand:
+
+```ts
+const uploadRefSchema = rc_object({ fileId: rc_string, url: rc_string });
+
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    uploads: {
+      adapter: opfsOfflineUploadAdapter,
+      // Resolves to `{ fileId: string; url: string }`.
+      upload: ({ file, onProgress }) => api.uploadFile(file, onProgress),
+      // Optional: validates refs restored from storage or other tabs.
+      resolvedRefSchema: uploadRefSchema,
+    },
+  },
+});
+
+// `{ fileId: string; url: string }`
+type UploadRef = StoreManagerUploadRef<typeof storeManager>;
+
+const result = await storeManager.resolveOfflineUpload(attachmentId);
+if (result.ok) console.log(result.value.url);
+```
+
+- `resolveOfflineUpload(id)`, `resolveOfflineUploads(ids)` and the `resolvedRef` of the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()` are typed with the inferred ref.
+- Let the manager type be inferred. Annotating it as plain `StoreManager` (or its config as plain `OfflineSessionConfig`) replaces the inferred ref with the default `ValidPayload`. A manager with a typed ref is still accepted wherever a plain `StoreManager` is expected, including `storeManager` on every store.
+- Stores are created with explicit type arguments, so TypeScript cannot carry the ref type from the `storeManager` option into `execute`. Pass it as the last type argument of `DefineDocumentOfflineOperations`, `DefineCollectionOfflineOperations` or `DefineListQueryOfflineOperations` (the single-operation `*OfflineOperationDefinition` aliases take it last too). Without it, operations keep the default `ValidPayload`:
+
+```ts
+type UserOfflineOperations = DefineListQueryOfflineOperations<
+  User,
+  UsersQuery,
+  UserPayload,
+  { setAvatar: DefineOfflineOperation<{ id: number; uploadId: string }> },
+  UploadRef
+>;
+
+// In the operation definition:
+dependsOnUploads: ({ input }) => [input.uploadId],
+execute: ({ input, uploads }) => {
+  // `UploadRef | undefined`
+  const avatar = uploads.resolvedRefsById[input.uploadId];
+  if (!avatar) throw new Error('Missing avatar upload');
+
+  return api.setUserAvatar(input.id, avatar.fileId);
+},
+```
+
+#### Validating restored refs
+
+A ref returned by the `upload` transport is trusted. A ref can also reach the session without going through the transport: it is persisted with the upload record, so it is read back from the upload adapter after a reload, and other browser tabs publish the refs they resolved. Either source can come from a different app version with a different ref shape.
+
+Set `resolvedRefSchema` to validate those refs. It accepts the same schemas as an operation `inputSchema` (a `runcheck` type or a synchronous Standard Schema such as zod), and its output has to agree with what the transport returns: the inferred ref type is what both produce.
+
+- Refs restored from the upload adapter are parsed once when their record is loaded, and refs received from another tab once per record version.
+- A ref that fails the schema is dropped and its upload goes back to `pending`. The staged file is kept with the record, so the next `resolveOfflineUpload(s)` call or the replay of an operation that depends on the upload sends the file through the transport again and stores the new ref. The dependent operation is not failed, and `execute` never receives the invalid ref. The file uploaded under the old ref is not cleaned up by TSDF.
+- Queued operations only persist upload ids. Their refs are resolved when the operation replays, so they are covered by the same validation.
+- Without `resolvedRefSchema`, restored refs are exposed as they were stored.
+
 ### Upload metadata
 
 The session has a single `upload` transport, so uploads that need different request parameters (target kind, parent ids, ...) carry them as `metadata` instead of encoding them in the upload id:

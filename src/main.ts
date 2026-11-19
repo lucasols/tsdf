@@ -17,6 +17,7 @@ export {
   type CreateStoreManagerOptions,
   type DynamicRealtimeThrottleMs,
   type StoreManager,
+  type StoreManagerUploadRef,
 } from './storeManager';
 export type {
   TSDFFocusDebugOperation,
@@ -117,6 +118,7 @@ export type {
   OfflineUpload,
   OfflineUploadAdapter,
   OfflineUploadProgress,
+  OfflineUploadRefSchema,
   OfflineUploadSource,
   OfflineUploadState,
   OfflineUploadTransportContext,

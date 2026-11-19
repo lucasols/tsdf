@@ -70,7 +70,9 @@ export type Row = {
 
 type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
   string,
-  AnyOfflineOperationDefinition & {
+  // Mirrors the store constraint: `any` as the upload ref keeps operations
+  // typed with a specific upload ref assignable.
+  AnyOfflineOperationDefinition<__LEGIT_ANY__> & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
     }) => ListQueryOfflineEntityRef<ListQueryItemPayload>[];
