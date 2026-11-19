@@ -1297,7 +1297,9 @@ export function createMutationApi<
     };
   }
 
-  function applyOptimisticListUpdates(itemKeys: string[]) {
+  function applyOptimisticListUpdates(
+    items: { itemKey: string; payload: ItemPayload }[],
+  ) {
     if (!optimisticListUpdates) return;
 
     const queriesToInvalidate = new Map<string, QueryPayload>();
@@ -1308,7 +1310,7 @@ export function createMutationApi<
       ];
 
     store.produceState((draftState) => {
-      for (const itemKey of itemKeys) {
+      for (const { itemKey, payload: itemPayload } of items) {
         const item = draftState.items[itemKey];
 
         if (!item) continue;
@@ -1326,7 +1328,23 @@ export function createMutationApi<
             const queryState = draftState.queries[queryKey];
 
             if (filterItem) {
-              const itemShouldBeIncluded = filterItem(item);
+              // The membership scan is shared between `context.isInQuery` and
+              // the add/remove branches below, so it runs at most once per
+              // query and not at all when the rule returns `null` without
+              // reading `isInQuery`.
+              let cachedItemIndex: number | undefined;
+              const getItemIndex = () =>
+                (cachedItemIndex ??= queryState
+                  ? queryState.items.indexOf(itemKey)
+                  : -1);
+
+              const itemShouldBeIncluded = filterItem(item, {
+                queryPayload: payload,
+                itemPayload,
+                get isInQuery() {
+                  return getItemIndex() !== -1;
+                },
+              });
 
               if (itemShouldBeIncluded === null) continue;
 
@@ -1349,22 +1367,24 @@ export function createMutationApi<
                   continue;
                 }
 
-                if (queryState.items.includes(itemKey)) continue;
+                // Existing members skip the insertion but still reach the sort
+                // block below, their sort values may have changed.
+                if (getItemIndex() === -1) {
+                  if (invalidateQueries) {
+                    queriesToInvalidate.set(queryKey, payload);
+                  }
 
-                if (invalidateQueries) {
-                  queriesToInvalidate.set(queryKey, payload);
+                  if (appendNewTo === 'end') {
+                    queryState.items.push(itemKey);
+                  } else {
+                    queryState.items.unshift(itemKey);
+                  }
+                  changedQueryKeys.add(queryKey);
                 }
-
-                if (appendNewTo === 'end') {
-                  queryState.items.push(itemKey);
-                } else {
-                  queryState.items.unshift(itemKey);
-                }
-                changedQueryKeys.add(queryKey);
               } else {
                 if (!queryState) continue;
 
-                const itemIndex = queryState.items.indexOf(itemKey);
+                const itemIndex = getItemIndex();
 
                 if (itemIndex !== -1) {
                   captureAndLockOptimisticMutationQuery(queryKey);
@@ -1388,6 +1408,10 @@ export function createMutationApi<
 
               captureAndLockOptimisticMutationQuery(queryKey);
 
+              if (invalidateQueries) {
+                queriesToInvalidate.set(queryKey, payload);
+              }
+
               queryState.items = sortBy(
                 queryState.items,
                 (itemId) => {
@@ -1395,7 +1419,9 @@ export function createMutationApi<
                   const itemPayloadFromState =
                     store.state.itemQueries[itemId]?.payload;
 
-                  if (!itemState || !itemPayloadFromState) return Infinity;
+                  if (!itemState || itemPayloadFromState === undefined) {
+                    return Infinity;
+                  }
 
                   return sort.sortBy(itemState, itemPayloadFromState);
                 },
@@ -1528,7 +1554,7 @@ export function createMutationApi<
         });
 
         if (someItemWasUpdated) {
-          applyOptimisticListUpdates(itemKeys.map((i) => i.itemKey));
+          applyOptimisticListUpdates(itemKeys);
         }
 
         if (options.ifNothingWasUpdated && !someItemWasUpdated) {
@@ -1613,7 +1639,7 @@ export function createMutationApi<
         { action: 'create-item-state' },
       );
 
-      applyOptimisticListUpdates([itemKey]);
+      applyOptimisticListUpdates([{ itemKey, payload: itemPayload }]);
     });
 
     publishItemSnapshot(itemKey);
