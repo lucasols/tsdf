@@ -1178,6 +1178,12 @@ export function createCollectionStore<
 
               rebindOfflineOverlays(itemKeyRewrites);
             },
+            revalidateDiscardedEntities: (entityRefs) => {
+              for (const { entityKey } of entityRefs) {
+                const item = store.state[entityKey];
+                if (item) invalidateItem(item.payload, 'highPriority');
+              }
+            },
             syncEntityOverlays: ({ entities, sessionKey }) => {
               if (offlineOverlaySessionKey !== sessionKey)
                 clearOfflineOverlays(sessionKey);

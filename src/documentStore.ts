@@ -761,6 +761,9 @@ export function createDocumentStore<
             normalizeEntityRefs: () => [
               { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
             ],
+            revalidateDiscardedEntities: () => {
+              invalidateData('highPriority');
+            },
             getProtectedCacheKeys: () => {
               const sessionKey = getSessionKeyForRuntime();
               if (sessionKey === false) return [];
