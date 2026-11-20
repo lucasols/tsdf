@@ -334,6 +334,40 @@ describe('stores deleted from the app', () => {
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });
 
+  test('a removed store is cleaned from localStorage when the app uses an empty session key', async () => {
+    // Previous app version: an app without accounts persists everything under
+    // an empty session key.
+    const previousStoreManager = createAppStoreManager('');
+    const previousSettings = createSettingsEnv(
+      previousStoreManager,
+      'local-sync',
+      'settings',
+    );
+    renderHook(() => previousSettings.apiStore.useDocument());
+    await flushAllTimers();
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.23 kb)
+      ├ .settings (0.10 kb)
+      └ _m (0.13 kb)
+        ├ g (0.04 kb)
+        └ r.s:.settings.m (0.08 kb)"
+    `);
+
+    // Next app version: the store was deleted and declared as removed.
+    restartApp(previousSettings);
+    createAppStoreManager('', [{ id: 'settings', adapter: 'local-sync' }]);
+    await flushAllTimers();
+
+    // Only the maintenance bookkeeping and the cleanup marker are left.
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf._m (0.11 kb)
+      ├ g (0.04 kb)
+      └ rs (0.06 kb)"
+    `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
   test('a removed store is cleaned from an async adapter that no remaining store uses', async () => {
     // Previous app version: `settings` was the only store persisting to OPFS.
     const previousStoreManager = createAppStoreManager('sess1');
@@ -372,6 +406,35 @@ describe('stores deleted from the app', () => {
       "tsdf (0.07 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a removed store is skipped without creating storage for users who never had data on its adapter', async () => {
+    // A user who first opens the app in the version that already removed the
+    // OPFS store: nothing was ever written to OPFS on this device.
+    const storeManager = createAppStoreManager('sess1', [
+      { id: 'settings', adapter: opfsPersistentStorage },
+    ]);
+    const profile = createSettingsEnv(
+      storeManager,
+      'local-sync',
+      'settings-profile',
+    );
+    renderHook(() => profile.apiStore.useDocument());
+    await flushAllTimers();
+
+    // The cleanup finds nothing to remove and creates nothing in OPFS (not
+    // even an empty `tsdf` root directory), then marks the pair as done
+    // without reporting errors.
+    expect(
+      opfsStore.operations.filter(
+        (operation) => operation.type === 'ensureDir' && operation.created,
+      ),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`"empty"`);
+    expect(localStorage.getItem('tsdf._m.rs')).toMatchInlineSnapshot(
+      `"{"opfs":["settings"]}"`,
+    );
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });
 

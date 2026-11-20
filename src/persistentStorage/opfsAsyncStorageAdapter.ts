@@ -24,6 +24,7 @@ import {
   getDirectoryHandleIfExists,
   getFileHandleIfExists,
   getNavigatorStorageDirectory,
+  getNavigatorStorageDirectoryIfAvailable,
 } from './opfsHelpers';
 import type {
   AsyncStorageDiscoveredScope,
@@ -766,19 +767,40 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       path: string;
     }>
   > {
-    const root = await this.#getRootDir();
-    return sessionKey === undefined
-      ? await this.#listDirectoryEntries(root, OPFS_ROOT_DIR, cacheContext)
-      : [
-          {
-            handle: await this.#getSessionDir(sessionKey, {
-              create: false,
-              cacheContext,
-            }),
-            name: encodePathSegment(sessionKey),
-            path: this.#getSessionDirPath(sessionKey),
-          },
-        ];
+    if (sessionKey === undefined) {
+      const root = await this.#getExistingRootDir();
+      return root === null
+        ? []
+        : await this.#listDirectoryEntries(root, OPFS_ROOT_DIR, cacheContext);
+    }
+
+    return [
+      {
+        handle: await this.#getSessionDir(sessionKey, {
+          create: false,
+          cacheContext,
+        }),
+        name: encodePathSegment(sessionKey),
+        path: this.#getSessionDirPath(sessionKey),
+      },
+    ];
+  }
+
+  /**
+   * Root directory for listings, which must not create storage: `null` when
+   * OPFS is unavailable or TSDF never wrote to it, since nothing can be
+   * stored there either way.
+   */
+  async #getExistingRootDir(): Promise<FileSystemDirectoryHandle | null> {
+    if (this.#rootDirPromise !== null) return this.#rootDirPromise;
+
+    const navigatorRoot = await getNavigatorStorageDirectoryIfAvailable();
+    if (navigatorRoot === null) return null;
+
+    const root = await getDirectoryHandleIfExists(navigatorRoot, OPFS_ROOT_DIR);
+    // An existing root is reused by later writes instead of opened again
+    if (root !== null) this.#rootDirPromise ??= Promise.resolve(root);
+    return root;
   }
 
   async #getRootDir(): Promise<FileSystemDirectoryHandle> {

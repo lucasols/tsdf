@@ -4,7 +4,6 @@ import {
   parseManagedLocalStorageManifestOwner,
   readRemovedStoresCleanupMarker,
   writeRemovedStoresCleanupMarker,
-  type RemovedStoresCleanupMarker,
 } from './localStorageMetadata';
 import { removeStoreLeftoversFromLocalStorage } from './persistentStorageManager';
 import { scheduleInitialMaintenanceCleanup } from './scheduleIdleCleanup';
@@ -69,9 +68,11 @@ async function runRemovedStoresCleanup(
   removedStores: readonly RemovedStore[],
   reportError: PersistentStorageErrorHandler,
 ): Promise<void> {
-  let cleanedMarker: RemovedStoresCleanupMarker;
+  // Read into a Map: storage ids are app-provided strings, so plain object
+  // lookups could hit inherited properties such as `constructor`.
+  let cleanedMarker: Map<string, string[]>;
   try {
-    cleanedMarker = readRemovedStoresCleanupMarker();
+    cleanedMarker = new Map(Object.entries(readRemovedStoresCleanupMarker()));
   } catch {
     // `localStorage` is unavailable (e.g. site data blocked), and so is
     // every other storage the removed stores could have used
@@ -121,20 +122,20 @@ async function runRemovedStoresCleanup(
   }
 
   // The marker only keeps configured entries, so it never outgrows the config
-  const nextMarker: RemovedStoresCleanupMarker = {};
+  const nextMarker = new Map<string, string[]>();
   const pendingCleanups: Array<{
     cleanup: RemovedStoresAdapterCleanup;
     storeNames: Set<string>;
   }> = [];
   for (const cleanup of cleanups.values()) {
-    const cleanedStoreNames = new Set(cleanedMarker[cleanup.storageId]);
+    const cleanedStoreNames = new Set(cleanedMarker.get(cleanup.storageId));
     const done: string[] = [];
     const pending = new Set<string>();
     for (const storeName of cleanup.storeNames) {
       if (cleanedStoreNames.has(storeName)) done.push(storeName);
       else pending.add(storeName);
     }
-    if (done.length > 0) nextMarker[cleanup.storageId] = done;
+    if (done.length > 0) nextMarker.set(cleanup.storageId, done);
     if (pending.size > 0)
       pendingCleanups.push({ cleanup, storeNames: pending });
   }
@@ -170,19 +171,21 @@ async function runRemovedStoresCleanup(
       continue;
     }
 
-    nextMarker[cleanup.storageId] = [
-      ...(nextMarker[cleanup.storageId] ?? []),
+    nextMarker.set(cleanup.storageId, [
+      ...(nextMarker.get(cleanup.storageId) ?? []),
       ...storeNames,
-    ];
+    ]);
     markerChanged = true;
   }
 
-  if (markerChanged) writeRemovedStoresCleanupMarker(nextMarker);
+  if (markerChanged) {
+    writeRemovedStoresCleanupMarker(Object.fromEntries(nextMarker));
+  }
 }
 
-function countMarkerEntries(marker: RemovedStoresCleanupMarker): number {
+function countMarkerEntries(marker: Map<string, string[]>): number {
   let count = 0;
-  for (const storeNames of Object.values(marker)) count += storeNames.length;
+  for (const storeNames of marker.values()) count += storeNames.length;
   return count;
 }
 

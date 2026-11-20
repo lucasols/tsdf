@@ -1923,12 +1923,18 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     return this.#driver.storageId;
   }
 
+  /**
+   * Lists every scope of the given stores, in every session. Uses the
+   * isolated cleanup driver when available, so this full scan does not fill
+   * the caches of the stores the app is using.
+   */
   async #listStoreScopes(
     storeNames: ReadonlySet<string>,
   ): Promise<AsyncStorageNamespaceScope[]> {
-    return (await this.#listDiscoveredScopes()).filter((scope) =>
-      storeNames.has(scope.storeName),
+    const scopes = await this.#withCleanupDriver((driver) =>
+      this.#listDiscoveredScopes(undefined, driver),
     );
+    return scopes.filter((scope) => storeNames.has(scope.storeName));
   }
 
   /**

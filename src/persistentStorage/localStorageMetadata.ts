@@ -1451,8 +1451,9 @@ export function parseManagedLocalStorageManifestOwner(
   }
 
   const storeNameStart = storageKey.lastIndexOf('.') + 1;
-  // `tsdf.` plus a non-empty session key must come before the store id
-  if (storeNameStart <= 'tsdf.'.length + 1) return null;
+  // `tsdf.` plus the session key (which may be empty) and a `.` must come
+  // before the store id
+  if (storeNameStart <= 'tsdf.'.length) return null;
 
   return { storageKey, storeName: storageKey.slice(storeNameStart) };
 }
