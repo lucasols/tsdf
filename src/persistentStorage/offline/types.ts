@@ -331,8 +331,10 @@ export type ItemOfflineState = {
   /** Whether the item is waiting for a manual resolution. */
   requiresResolution: boolean;
   /**
-   * Whether the item was created offline and the server has not confirmed it
-   * yet, so it only exists locally under its temporary payload. It stays
+   * Whether the item was created offline through a `tempEntity` /
+   * `tempEntities` operation and the server has not confirmed it yet, so it
+   * only exists locally under its temporary payload. Creations queued without
+   * a temp entity (e.g. with a client-generated id) report `false`. It stays
    * `true` while the creation itself is being sent. Once the server entity is
    * reconciled, the temporary payload has no state anymore and the final
    * payload reports any mutation still queued with `isUnsentCreation: false`.

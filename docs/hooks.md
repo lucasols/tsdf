@@ -373,7 +373,8 @@ Behavior:
   (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
 - `isUnsentCreation` - `true` while the item was created offline (a
   `tempEntity` / `tempEntities` operation) and the server has not confirmed it
-  yet, so it only exists locally under its temporary payload
+  yet, so it only exists locally under its temporary payload. Creations queued
+  without a temp entity (e.g. with a client-generated id) report `false`
 
 ### Items created offline
 
