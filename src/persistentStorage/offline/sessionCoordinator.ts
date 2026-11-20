@@ -169,7 +169,7 @@ type SessionStoreState = {
  *
  * - offline, or with queued mutations still to replay: anything fetched now
  *   may predate the replayed mutations, in any store
- * - a store with entities waiting for a manual resolution: a refetch would
+ * - a store with changes waiting for a manual resolution: a refetch would
  *   replace the local changes the user still has to decide on
  */
 function getStoresAwaitingRecovery(
@@ -184,13 +184,18 @@ function getStoresAwaitingRecovery(
     if (entity.requiresResolution) storeNames.add(entity.storeName);
   }
 
+  // Also from the resolutions: an operation may reference no entity
+  for (const resolution of state.resolutions) {
+    storeNames.add(resolution.storeName);
+  }
+
   return storeNames;
 }
 
 /**
  * Subscribes to stores recovering in this tab (any session key; listeners
  * filter by the key they care about). A store recovers when its session is
- * back online with its queued mutations replayed and the store has no entity
+ * back online with its queued mutations replayed and the store has no change
  * left waiting for a manual resolution: from then on its cached data can be
  * revalidated against the server.
  * @internal
@@ -225,7 +230,7 @@ export function recheckIsSessionInOfflineMode(
   const coordinator = registry.get(sessionKey);
   if (!coordinator?.getStatus().isOfflineMode) return false;
 
-  void coordinator.refreshNetworkState();
+  coordinator.recheckNetworkState();
   return true;
 }
 
@@ -682,6 +687,7 @@ class SessionOfflineCoordinator {
   #classificationToken = 0;
   #retriableFailureToken = 0;
   #networkStateToken = 0;
+  #isRecheckingNetworkState = false;
   #lastRemoteSnapshotAt = 0;
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
@@ -764,6 +770,7 @@ class SessionOfflineCoordinator {
     this.store.subscribe(({ prev, current }) => {
       if (
         prev.entities === current.entities &&
+        prev.resolutions === current.resolutions &&
         prev.hasQueuedMutations === current.hasQueuedMutations &&
         prev.status.isOfflineMode === current.status.isOfflineMode
       ) {
@@ -1402,6 +1409,20 @@ class SessionOfflineCoordinator {
 
     this.setNetworkActive(false, { classified: false });
     return false;
+  }
+
+  /**
+   * Re-checks connectivity on a hint that it may be back. Hints from several
+   * stores (e.g. their window-focus handlers) share a re-check still in flight
+   * instead of calling `getIsOffline` once per store.
+   */
+  recheckNetworkState(): void {
+    if (this.#isRecheckingNetworkState) return;
+
+    this.#isRecheckingNetworkState = true;
+    void this.refreshNetworkState().finally(() => {
+      this.#isRecheckingNetworkState = false;
+    });
   }
 
   async refreshNetworkState(): Promise<boolean> {

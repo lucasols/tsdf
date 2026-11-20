@@ -841,3 +841,67 @@ test('a window focus re-checks connectivity and leaves offline mode entered by a
 
   hook.unmount();
 });
+
+test('a window focus while offline probes the connection once for all the stores of the session', async () => {
+  const sessionKey = 'offline-focus-single-probe-session';
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  // The app probes the connection itself (e.g. pinging its server), which
+  // takes a while and costs a request per call.
+  const probeConnection = vi.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return network.isOffline();
+  });
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      network: {
+        ...network.config,
+        listenToBrowserEvents: false,
+        getIsOffline: probeConnection,
+      },
+    },
+  });
+  const createStoreEnv = (id: string) =>
+    createDocumentStoreTestEnv(1, {
+      id,
+      getSessionKey: () => sessionKey,
+      storeManager,
+      revalidateOnWindowFocus: true,
+      bindFocusController: tabs.bind('a'),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: { operations: {} },
+      },
+    });
+  const profileEnv = createStoreEnv('offline-focus-probe-profile');
+  const settingsEnv = createStoreEnv('offline-focus-probe-settings');
+
+  const hook = renderHook(() => {
+    profileEnv.apiStore.useDocument();
+    settingsEnv.apiStore.useDocument();
+  });
+  await flushAllTimers();
+
+  // The connection drops: the next fetch finds out the session is offline.
+  network.setOffline();
+  act(() => {
+    profileEnv.apiStore.invalidateData('highPriority');
+  });
+  await flushAllTimers();
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(true);
+
+  // Coming back to the tab while still offline: both stores would revalidate
+  // on focus, but a single probe is enough to know the session is offline.
+  probeConnection.mockClear();
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(probeConnection).toHaveBeenCalledTimes(1);
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(true);
+
+  hook.unmount();
+});

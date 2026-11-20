@@ -115,7 +115,7 @@ Each store attached to the manager revalidates by itself once it recovers, witho
 
 - the session left offline mode, and
 - its queued mutations finished replaying (data fetched earlier could predate them), and
-- the store has no entity left waiting for a manual resolution (a refetch would replace the local changes the user still has to decide on; resolving or discarding them triggers the revalidation).
+- the store has no change left waiting for a manual resolution (a refetch would replace the local changes the user still has to decide on; resolving or discarding them triggers the revalidation).
 
 Mounted data refetches right away, unmounted data on its next mount. Stores with `usesRealTimeUpdates` revalidate with `realtimeUpdate` priority, other stores with `highPriority`. Tabs that are not focused revalidate when they get focus. Items that only exist locally (offline creations not sent yet) are skipped by invalidations, since there is nothing to fetch for them.
 
