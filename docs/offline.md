@@ -151,6 +151,49 @@ Supported resolution actions include:
 
 Use `parseOfflineResolutionConflict(resolution)` to narrow a persisted resolution back to the operation-specific conflict/input type before rendering a manual resolution UI.
 
+### Resolving From A Session-Wide UI
+
+An app-wide "sync problems" panel that lists `storeManager.useOfflineResolutions()` does not need to import every store to offer Retry / Discard. The manager applies the generic actions to any resolution of the session by finding the store that owns it:
+
+```tsx
+function SyncProblems() {
+  const resolutions = storeManager.useOfflineResolutions();
+
+  async function resolve(id: string, action: 'retry' | 'discard') {
+    const result = await storeManager.resolveOfflineResolution(id, action);
+    if (!result.ok) showToast(result.error.message);
+  }
+
+  return resolutions.map((resolution) => {
+    const isBlocked = resolution.blockedResolutionCount > 0;
+
+    return (
+      <SyncProblemRow
+        key={resolution.id}
+        resolution={resolution}
+        canRetry={resolution.kind === 'retry-exhausted' && !isBlocked}
+        canDiscard={!isBlocked}
+        onRetry={() => resolve(resolution.id, 'retry')}
+        onDiscard={() => resolve(resolution.id, 'discard')}
+      />
+    );
+  });
+}
+```
+
+The behavior is the same as calling the owning store's `resolveOfflineResolution(id, operation, { action })`, including retrying retryable descendants and discarding dependents. Only `retry` and `discard` are available here; `requeue` and `commit` need operation-typed input and stay on the store API.
+
+Failures are returned as a `Result` instead of thrown. `result.error` is an `OfflineResolutionActionError` with the `resolutionId`, the owning `storeName` (when known), and a `code`:
+
+| `code`                   | Meaning                                                                                                                                                                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolution-not-found`   | No resolution with this id in the active session, e.g. it was already resolved or the session is logged out. It is also returned when another tab created the record after this tab's store loaded its resolutions; act on it from the tab that created it or after a reload. |
+| `store-not-registered`   | The owning store was not created with this manager (yet). Resolutions are shared by the whole session, including other tabs, so a record can be listed before its store exists here.                                                                                          |
+| `retry-not-supported`    | `retry` was requested for a `conflict` record. Conflicts are resolved with `discard`, or with `requeue` / `commit` on the store API.                                                                                                                                          |
+| `resolution-blocked`     | The record is blocked by parent resolutions (`blockedByResolutionIds`). Resolve the parents first.                                                                                                                                                                            |
+| `offline-not-configured` | The manager was created without `offlineSession`.                                                                                                                                                                                                                             |
+| `action-failed`          | The owning store failed while applying the action. The original error is in `error.cause`.                                                                                                                                                                                    |
+
 ## Reading Offline State
 
 Use manager-level APIs for session-wide UI:
@@ -160,6 +203,8 @@ const status = storeManager.useOfflineStatus();
 const entities = storeManager.useOfflineEntities();
 const resolutions = storeManager.useOfflineResolutions();
 ```
+
+`storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` acts on any of those resolutions without the owning store instance (see [Resolving From A Session-Wide UI](#resolving-from-a-session-wide-ui)).
 
 Equivalent global helpers are exported for code that only has a session key:
 
@@ -286,6 +331,10 @@ const storeManager = createStoreManager({
     uploads: {
       adapter: opfsOfflineUploadAdapter,
       upload: ({ file, metadata, onProgress }) => {
+        // Uploads staged without metadata (direct mutation uploads, uploads
+        // saved by older versions) use the default request.
+        if (metadata === undefined) return uploadFile(file, onProgress);
+
         // Restored from storage: validate before use.
         const target = rc_parse(metadata, uploadMetadataSchema).unwrap();
 
@@ -306,6 +355,6 @@ await storeManager.saveOfflineUpload({
 
 - `metadata` is optional and must be a JSON-serializable `ValidPayload` (`string`, `number`, or a plain object).
 - It is persisted with the upload record, so it survives reloads, is passed to the `upload` transport both on replay and on `resolveOfflineUpload(s)`, and is exposed as `metadata` on the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()`.
-- Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata (including the ones persisted by older versions) reach the transport with `metadata: undefined`.
-- `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed.
+- Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata reach the transport with `metadata: undefined`, so handle that case explicitly. This includes the ones persisted by older versions and files attached directly to a mutation with its `upload` option, which can't carry metadata.
+- `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed. Both fail while that upload is queued or being sent.
 - Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.

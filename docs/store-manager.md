@@ -111,7 +111,7 @@ const storeManager = createStoreManager({
 });
 ```
 
-Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers return `Result.err(...)` where applicable.
+Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers and `resolveOfflineResolution(...)` return `Result.err(...)` where applicable.
 
 ## Offline Status APIs
 
@@ -136,6 +136,20 @@ Runtime controls:
 
 - `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`
 - `resetOfflineRuntimeConfig()` restores the static `offlineSession` controls
+
+Resolution actions:
+
+- `resolveOfflineResolution(resolutionId, 'retry' | 'discard')` applies a generic action to any resolution of the session by delegating to the registered store that owns it, so session-wide UI does not need the store instance or the operation name
+
+```ts
+const result = await storeManager.resolveOfflineResolution(
+  resolution.id,
+  'discard',
+);
+if (!result.ok) console.warn(result.error.code, result.error.message);
+```
+
+It resolves to a `Result<void, OfflineResolutionActionError>` instead of throwing. `error.code` tells why the action was not applied: `resolution-not-found`, `store-not-registered` (the owning store was not created with this manager), `retry-not-supported` (conflict records), `resolution-blocked`, `offline-not-configured`, or `action-failed`. See [Offline](./offline.md#resolving-from-a-session-wide-ui) for details. `requeue` and `commit` stay on the owning store's `resolveOfflineResolution(...)`.
 
 ## Upload APIs
 
