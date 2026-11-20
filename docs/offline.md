@@ -251,7 +251,7 @@ Configure uploads on `offlineSession.uploads` when queued mutations depend on lo
 - `resolveOfflineUploads(ids)`
 - `useOfflineUploads()`
 
-Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
+Operations can declare `dependsOnUploads({ input })` and then read resolved upload refs from `execute({ uploads })`. When queued mutations are merged (`accumulation.mergeInput`), the dependencies are computed again from the merged input, so files referenced by any of the merged edits are uploaded before `execute` runs. `opfsOfflineUploadAdapter` is exported as a built-in OPFS-backed upload adapter.
 
 ### Upload metadata
 
