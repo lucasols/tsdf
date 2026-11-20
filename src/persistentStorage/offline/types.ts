@@ -161,6 +161,16 @@ export type OfflineFailureContext = {
   operationName?: string;
   /** Session key used by browser tab and persistence scoping. */
   sessionKey: string;
+  /**
+   * Set when replaying `operationName` (`phase: 'sync'`) failed while
+   * resolving one of its `dependsOnUploads` uploads: the id of that upload.
+   * The operation's `execute` was not called. The error is usually the one
+   * thrown by the session `upload` transport, but it can also be a storage
+   * error reading or updating the staged upload, or the error for an upload
+   * that no longer exists. `undefined` for every failure that did not come
+   * from a dependency upload.
+   */
+  uploadId?: string;
 };
 
 /** Re-check strategy for recovery probing. Omitted fields use built-in defaults (which differ between network and outage modes). */
@@ -244,6 +254,10 @@ export type OfflineSessionConfig<
    * `network` activates network offline handling for future operations only
    * when `network.enabled` is true. Existing offline recovery may keep using
    * classifications until already-active work finishes recovering.
+   *
+   * Failures of the `uploads.upload` transport during replay are classified
+   * here too, with `ctx.uploadId` set: `outage` / `network` keep the upload
+   * `pending` and the dependent operation queued until the session recovers.
    */
   classifyFailure?: (
     error: unknown,
@@ -258,6 +272,11 @@ export type OfflineSessionConfig<
    * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
    * conflict checks can run before the mutation is promoted to manual
    * resolution.
+   *
+   * When `ctx.uploadId` is set the failure came from a dependency upload and
+   * the mutation was not sent: return `true` to run the upload again on the
+   * `replayRetry` cadence, or `false` for a permanent failure (file rejected),
+   * which moves the operation to manual resolution right away.
    */
   classifyRetryableFailure?: (
     error: unknown,
@@ -310,6 +329,45 @@ export type GlobalOfflineStatus = {
 /** Queue state of an offline mutation entry. */
 export type OfflineSyncState = 'pending' | 'syncing' | 'needs-confirmation';
 
+/**
+ * Offline sync state of one collection/list-query item, returned by the
+ * stores' `useItemOfflineState(...)` and `getItemOfflineState(...)`.
+ */
+export type ItemOfflineState = {
+  /**
+   * Where the item's offline work stands (same value as the item's
+   * {@link GlobalOfflineEntity.syncState}):
+   *
+   * - `pending`: queued, waiting to be sent
+   * - `syncing`: being sent
+   * - `needs-confirmation`: a send failed and it is not known whether it
+   *   reached the server, so the mutation is re-checked or retried
+   * - `resolution-required`: waiting for a manual resolution
+   *
+   * With several mutations queued for the item this is the most urgent state
+   * among them (`needs-confirmation` > `syncing` > `pending`): the item is
+   * `syncing` while any of its mutations is being sent (`pendingMutations`
+   * drops as each one finishes).
+   */
+  syncState: OfflineSyncState | 'resolution-required';
+  /** Number of queued mutations of the item still waiting to sync. */
+  pendingMutations: number;
+  /** Whether the item is waiting for a manual resolution. */
+  requiresResolution: boolean;
+  /**
+   * Whether the item was created offline through a `tempEntity` /
+   * `tempEntities` operation and the server has not confirmed it yet, so it is
+   * still tracked under its temporary payload. Creations queued without a temp
+   * entity (e.g. with a client-generated id) report `false`. It stays `true`
+   * while the creation itself is being sent, so the server may already have
+   * it while `syncState` is `syncing` or `needs-confirmation`; only with
+   * `syncState: 'pending'` has it not been sent yet. Once the server entity is
+   * reconciled, the temporary payload has no state anymore and the final
+   * payload reports any mutation still queued with `isUnsentCreation: false`.
+   */
+  isUnsentCreation: boolean;
+};
+
 /** Aggregated offline status for a tracked document/item/query entity. */
 export type GlobalOfflineEntity = {
   /** Internal entity identifier tracked by offline machinery. */
@@ -328,7 +386,12 @@ export type GlobalOfflineEntity = {
   kind: OfflineEntityMutationKind;
   /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
-  /** Current sync state for the entity. */
+  /**
+   * Current sync state for the entity. With several mutations queued for it
+   * this is the most urgent state among them (`needs-confirmation` >
+   * `syncing` > `pending`): the entity is `syncing` while any of its mutations
+   * is being sent.
+   */
   syncState: OfflineSyncState | 'resolution-required';
   /** Whether the entity currently requires manual resolution. */
   requiresResolution: boolean;
@@ -457,7 +520,10 @@ type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   enqueuedAt: number;
   /** Entity references involved in the resolution. */
   entityRefs: OfflineEntityRef[];
-  /** Last replay error snapshot captured before exhaustion. */
+  /**
+   * Last replay error snapshot captured before exhaustion. When a dependency
+   * upload failed permanently, this is the error of the `upload` transport.
+   */
   lastReplayError: { message: string };
   /** Resolution creation timestamp. */
   createdAt: number;
@@ -511,19 +577,34 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns the latest session-scoped offline uploads for the session. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  /**
+   * Resolves a staged upload id to its latest final ref, uploading first if
+   * needed. Rejects with the error thrown by the `upload` transport, leaving
+   * the upload `failed`; the session failure classifiers are not consulted.
+   */
   resolveOfflineUpload: (id: string) => Promise<TUploadRef>;
-  /** Resolves multiple staged upload ids to their latest final refs. */
+  /**
+   * Resolves multiple staged upload ids to their latest final refs. Rejects
+   * with the first transport error, like `resolveOfflineUpload`.
+   */
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<Record<string, TUploadRef>>;
-  /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
+  /**
+   * Saves a session-scoped upload locally for later dependency resolution or
+   * ref usage. It is deleted automatically once the queued work that depends
+   * on it leaves the queue.
+   */
   saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
   /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
   replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<File | null>;
-  /** Deletes a stored upload when it is no longer referenced. */
+  /**
+   * Deletes a stored upload that no queued work references. Only needed for
+   * uploads no queued mutation used: the others are deleted with the work that
+   * depends on them.
+   */
   deleteOfflineUpload: (id: string) => Promise<void>;
   /** React hook subscribing to the session's global offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;
@@ -1214,7 +1295,17 @@ export type OfflineOperationDefinition<
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
-  /** Lifecycle classification for the queued operation. */
+  /**
+   * Lifecycle classification for the queued operation. TSDF derives the
+   * lifecycle of each entity the operation references (`getEntityRefs`) from
+   * it.
+   *
+   * Every item a `create` references is treated as created by it: discarding
+   * a `create` without temp entity removes all of them locally, without
+   * refetching them. Return only the
+   * created items, change existing items in a separate `update` operation, and
+   * reference the items the creation needs with `dependsOn`.
+   */
   kind: OfflineOperationKind;
   /**
    * Optional queue pruning for newer operations that supersede older queued work.
@@ -1454,7 +1545,11 @@ export type DocumentOfflineOperationDefinition<
     TUploadRef
   >
 > & {
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (
     ctx: OperationEntityRefsContext<DocumentOperationInput<TOptions>>,
   ) => string[];
@@ -1580,7 +1675,11 @@ export type CollectionOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
 } & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
 
@@ -1697,7 +1796,11 @@ export type ListQueryOfflineOperationDefinition<
   dependsOn?: (
     ctx: OperationEntityRefsContext<TInput>,
   ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
-  /** Declares which upload ids must finish before replaying this operation. */
+  /**
+   * Declares which upload ids must finish before replaying this operation.
+   * A staged upload is deleted once the last queued operation or resolution
+   * record that declares it leaves the queue.
+   */
   dependsOnUploads?: (ctx: OperationEntityRefsContext<TInput>) => string[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
     ? never

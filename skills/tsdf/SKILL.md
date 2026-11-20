@@ -71,11 +71,11 @@ Every store ships React hooks with consistent behavior:
 - Common options: `disabled`, `disableRefetches`, `disableRefetchOnMount`, `returnIdleStatus`, `returnRefetchingStatus`, `requireFreshData`, `selector`, `debouncePayload`.
 - Use `requireFreshData` sparingly. It unconditionally schedules a high-priority fetch on every enabled hook mount—even with successful cached data—and reports `loading` until that refresh succeeds or fails. Cached `data` remains available. Prefer normal cache behavior or targeted invalidation unless the component must wait for a new server response; broad use can substantially increase request volume. It overrides `disableRefetches` / `disableRefetchOnMount` and cannot be combined with `debouncePayload` on single-item or single-query hooks.
 
-| Store             | Hooks                                                                                                            |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `DocumentStore`   | `useDocument`, `useListItem`, `useListItemIsLoading`, `useListItemIsDeleted`                                     |
-| `CollectionStore` | `useItem`, `useMultipleItems`, `useListItem*`                                                                    |
-| `ListQueryStore`  | `useListQuery`, `useMultipleListQueries`, `useItem`, `useMultipleItems`, `useFindItem`, `usePendingOfflineItems` |
+| Store             | Hooks                                                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `DocumentStore`   | `useDocument`, `useListItem`, `useListItemIsLoading`, `useListItemIsDeleted`                                                            |
+| `CollectionStore` | `useItem`, `useMultipleItems`, `useListItem*`, `useItemOfflineState`                                                                    |
+| `ListQueryStore`  | `useListQuery`, `useMultipleListQueries`, `useItem`, `useMultipleItems`, `useFindItem`, `usePendingOfflineItems`, `useItemOfflineState` |
 
 Return shape: `{ data, status, error, isLoading, ... }`. `status` is `'idle' | 'loading' | 'success' | 'error' | 'refetching'` plus `'loadingMore'` (list queries) or `'deleted'` (items).
 
@@ -230,7 +230,7 @@ Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`
 
 Offline creates: `tempEntity` / `tempEntities` (Collection and List Query) insert a pending entity under a temp payload and reconcile it to the server payload after replay. In List Query stores, `addToQueries` puts the pending entity in the lists that should show it (no manual `addItemToState`), and `loadedFields` declares its loaded fields when partial resources are enabled.
 
-Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query).
+Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation }`, re-rendering only when that item's state changes.
 
 Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
 
@@ -238,7 +238,7 @@ Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOffli
 
 Recovery: while offline, `onTransportReconnect()` and focus revalidations only re-check connectivity; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities (or the ones they `dependsOn`) are still pending.
 
-Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
+Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. A staged upload is deleted automatically once the last queued mutation or resolution that declares it (`dependsOnUploads`) leaves the queue (replayed, discarded, superseded, cancelled); uploads no queued mutation used stay until `deleteOfflineUpload` or expiry. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter. A failing `upload` transport during replay goes through `classifyFailure` / `classifyRetryableFailure` with `ctx.uploadId` set (`'network'` / `'outage'` / retryable keep the upload `pending` and the operation queued; an unclassified error is permanent and moves the operation to a `retry-exhausted` resolution); `resolveOfflineUpload(s)` just returns the error. See `docs/offline.md` ("Upload failure handling").
 
 Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
 
