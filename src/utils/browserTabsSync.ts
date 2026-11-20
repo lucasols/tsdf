@@ -22,7 +22,7 @@ export type BrowserTabsStoreType =
   | 'offline';
 
 export type BrowserTabsMessageMeta = {
-  protocolVersion: 1;
+  protocolVersion: typeof PROTOCOL_VERSION;
   messageId: string;
   storeType: BrowserTabsStoreType;
   sessionKey: string;
@@ -44,7 +44,11 @@ type BrowserTabsCoordinator<Message extends { kind: string }> = {
   close: () => void;
 };
 
-const PROTOCOL_VERSION = 1 as const;
+/**
+ * Bump when a message shape changes: tabs running another tsdf release then
+ * ignore each other instead of misreading messages.
+ */
+const PROTOCOL_VERSION = 2 as const;
 const CHANNEL_PREFIX = 'tsdf';
 
 function createBrowserTabsChannelName(

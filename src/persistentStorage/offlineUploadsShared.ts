@@ -29,6 +29,7 @@ export function stripStoredUploadFile<
     file: _file,
     lastOnlineSessionStartedAt: _lastOnlineSessionStartedAt,
     lastModified: _lastModified,
+    storeName: _storeName,
     ...upload
   } = record;
   return upload;
@@ -48,6 +49,7 @@ export function createStoredUploadRecord<
   lastError?: OfflineStoredUploadRecord<TResolvedRef>['lastError'],
   lastOnlineSessionStartedAt?: number,
   metadata?: ValidPayload,
+  storeName?: string,
 ): OfflineStoredUploadRecord<TResolvedRef> {
   const file = normalizeUploadFile(fileInput, id);
   const now = Date.now();
@@ -73,6 +75,7 @@ export function createStoredUploadRecord<
     ...(metadata !== undefined ? { metadata } : {}),
     file,
     lastModified: file.lastModified,
+    ...(storeName !== undefined ? { storeName } : {}),
   };
 }
 

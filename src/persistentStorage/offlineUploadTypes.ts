@@ -148,6 +148,12 @@ export type OfflineStoredUploadRecord<
   lastOnlineSessionStartedAt?: number;
   /** File last-modified timestamp. */
   lastModified: number;
+  /**
+   * Store whose queued mutation attached this file, set on uploads with
+   * `source: 'mutation'`. Custom adapters must persist it: the file is removed
+   * once that store's queue no longer uses it.
+   */
+  storeName?: string;
 };
 
 /** Storage backend contract for session-scoped offline upload files. */
