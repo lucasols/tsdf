@@ -1123,63 +1123,28 @@ export function createOfflineStoreController<
 
       queueEntries.clear();
       resolutions.clear();
-      const loadedUnknownOperationUploadIds: string[] = [];
-      const loadedUnknownOperationEntityRefs: OfflineEntityRef[] = [];
-      let loadedEarliestUnknownQueueEntry: OfflineQueueEntry | null = null;
-      const loadedUnknownQueueEntries: OfflineQueueEntry[] = [];
-      const removedQueueEntryIds: string[] = [];
-      const removedResolutionIds: string[] = [];
-      const removedUploadIds: string[] = [];
-      const removedTempEntityKeys: string[] = [];
-      const unknownOperationNames = new Set<string>();
       // Records of an operation this deploy doesn't define were written by a
       // newer deploy, unless the app lists the operation as removed. They stay
       // in storage for a deploy that can send or resolve them, and this tab
       // neither lists nor replays them. Records of removed operations are
       // deleted.
-      const skipUndefinedOperation = (
+      const classifyRecordOperation = (
         record: OfflineQueueEntry | PersistedOfflineResolutionRecord,
-        removedRecordIds: string[],
       ): 'known' | 'unknown' | 'removed' => {
         if (operations[record.operation]) return 'known';
-        const attachedUploadIds = Object.values(record.attachedUploadIds ?? {});
-        if (removedOperations?.includes(record.operation)) {
-          removedRecordIds.push(record.id);
-          // Only the record's own files: the uploads it depends on were saved
-          // by the app, which still owns them.
-          removedUploadIds.push(...attachedUploadIds);
-          // A removed creation never reaches the server, so the work queued
-          // for the entities it created is deleted with it.
-          if (record.tempIds && record.tempIds.length > 0) {
-            for (const entityRef of record.entityRefs) {
-              if (entityRef.entityKind === 'item') {
-                removedTempEntityKeys.push(entityRef.entityKey);
-              }
-            }
-          }
-          return 'removed';
-        }
-        loadedUnknownOperationUploadIds.push(
-          ...attachedUploadIds,
-          ...(record.dependencyUploadIds ?? []),
-        );
-        loadedUnknownOperationEntityRefs.push(...record.entityRefs);
-        unknownOperationNames.add(record.operation);
-        return 'unknown';
+        return removedOperations?.includes(record.operation)
+          ? 'removed'
+          : 'unknown';
       };
+      const unknownEntries: OfflineQueueEntry[] = [];
+      const unknownResolutions: PersistedOfflineResolutionRecord[] = [];
+      const removedEntries: OfflineQueueEntry[] = [];
+      const removedResolutions: PersistedOfflineResolutionRecord[] = [];
       for (const entry of loadedQueueEntries.values()) {
-        const kind = skipUndefinedOperation(entry, removedQueueEntryIds);
-        if (kind === 'known') {
-          queueEntries.set(entry.id, entry);
-        } else if (kind === 'unknown') {
-          loadedUnknownQueueEntries.push(entry);
-          if (
-            loadedEarliestUnknownQueueEntry === null ||
-            compareQueueEntries(entry, loadedEarliestUnknownQueueEntry) < 0
-          ) {
-            loadedEarliestUnknownQueueEntry = entry;
-          }
-        }
+        const kind = classifyRecordOperation(entry);
+        if (kind === 'known') queueEntries.set(entry.id, entry);
+        else if (kind === 'unknown') unknownEntries.push(entry);
+        else removedEntries.push(entry);
       }
       for (const resolution of loadedResolutionEntries.values()) {
         const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
@@ -1187,35 +1152,138 @@ export function createOfflineStoreController<
           void current.resolutionNamespace.remove(resolution.id);
           continue;
         }
+        const kind = classifyRecordOperation(resolution);
+        if (kind === 'known') resolutions.set(resolution.id, resolution);
+        else if (kind === 'unknown') unknownResolutions.push(resolution);
+        else removedResolutions.push(resolution);
+      }
+
+      // A removed creation never reaches the server, so the work queued for
+      // the items it created (and for the items those would have created) is
+      // deleted with it, whether this deploy defines its operation or not.
+      // The operation of a record this deploy doesn't define is unknown, so
+      // any record with temp ids counts as the creation of its items.
+      const getCreatedItemKeys = (
+        record: OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      ): string[] =>
+        operations[record.operation]
+          ? getTempLifecycleEntityKeys(record)
+          : record.tempIds && record.tempIds.length > 0
+            ? record.entityRefs
+                .filter((entityRef) => entityRef.entityKind === 'item')
+                .map((entityRef) => entityRef.entityKey)
+            : [];
+      const pendingRemovedItemKeys = [
+        ...removedEntries,
+        ...removedResolutions,
+      ].flatMap(getCreatedItemKeys);
+      const seenRemovedItemKeys = new Set(pendingRemovedItemKeys);
+      const moveDependentRecords = <
+        T extends OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      >(
+        itemKey: string,
+        records: Iterable<T>,
+        removed: T[],
+        onRemove: (record: T) => void,
+      ) => {
+        for (const record of [...records]) {
+          if (getCreatedItemKeys(record).includes(itemKey)) continue;
+          if (
+            !record.entityRefs.some(
+              (entityRef) => entityRef.entityKey === itemKey,
+            ) &&
+            !getDependencyBlockerEntityKeys(record).has(itemKey)
+          ) {
+            continue;
+          }
+          onRemove(record);
+          removed.push(record);
+          for (const createdItemKey of getCreatedItemKeys(record)) {
+            if (seenRemovedItemKeys.has(createdItemKey)) continue;
+            seenRemovedItemKeys.add(createdItemKey);
+            pendingRemovedItemKeys.push(createdItemKey);
+          }
+        }
+      };
+      while (pendingRemovedItemKeys.length > 0) {
+        const itemKey = pendingRemovedItemKeys.shift();
+        if (itemKey === undefined) continue;
+        moveDependentRecords(
+          itemKey,
+          queueEntries.values(),
+          removedEntries,
+          (entry) => {
+            queueEntries.delete(entry.id);
+          },
+        );
+        moveDependentRecords(
+          itemKey,
+          resolutions.values(),
+          removedResolutions,
+          (resolution) => {
+            resolutions.delete(resolution.id);
+          },
+        );
+        moveDependentRecords(
+          itemKey,
+          unknownEntries,
+          removedEntries,
+          (entry) => {
+            unknownEntries.splice(unknownEntries.indexOf(entry), 1);
+          },
+        );
+        moveDependentRecords(
+          itemKey,
+          unknownResolutions,
+          removedResolutions,
+          (resolution) => {
+            unknownResolutions.splice(
+              unknownResolutions.indexOf(resolution),
+              1,
+            );
+          },
+        );
+      }
+      const removedUploadIds: string[] = [];
+      for (const record of [...removedEntries, ...removedResolutions]) {
+        // Only the record's own files: the uploads it depends on were saved
+        // by the app, which still owns them.
+        removedUploadIds.push(...Object.values(record.attachedUploadIds ?? {}));
+        // The items it created are only optimistic rows the server never
+        // gets. The adapters only need the temp id, so this also works for
+        // operations this deploy doesn't define.
+        if (getCreatedItemKeys(record).length === 0) continue;
+        for (const tempId of record.tempIds ?? []) {
+          storeAdapter.rollbackPendingEntity?.({
+            operationName: record.operation,
+            input: record.input,
+            tempId,
+            pendingEntity: undefined,
+          });
+        }
+      }
+
+      const unknownRecords = [...unknownEntries, ...unknownResolutions];
+      unknownOperationUploadIds = unknownRecords.flatMap((record) => [
+        ...Object.values(record.attachedUploadIds ?? {}),
+        ...(record.dependencyUploadIds ?? []),
+      ]);
+      unknownOperationEntityRefs = unknownRecords.flatMap(
+        (record) => record.entityRefs,
+      );
+      const unknownOperationNames = new Set(
+        unknownRecords.map((record) => record.operation),
+      );
+      earliestUnknownQueueEntry = null;
+      for (const entry of unknownEntries) {
         if (
-          skipUndefinedOperation(resolution, removedResolutionIds) !== 'known'
-        )
-          continue;
-        resolutions.set(resolution.id, resolution);
-      }
-      for (const entityKey of removedTempEntityKeys) {
-        const descendants = collectTempCreateDescendants({
-          parentEntityKey: entityKey,
-        });
-        for (const entry of descendants.queueEntries) {
-          queueEntries.delete(entry.id);
-          removedQueueEntryIds.push(entry.id);
-          removedUploadIds.push(
-            ...Object.values(entry.attachedUploadIds ?? {}),
-          );
-        }
-        for (const resolution of descendants.resolutions) {
-          resolutions.delete(resolution.id);
-          removedResolutionIds.push(resolution.id);
-          removedUploadIds.push(
-            ...Object.values(resolution.attachedUploadIds ?? {}),
-          );
+          earliestUnknownQueueEntry === null ||
+          compareQueueEntries(entry, earliestUnknownQueueEntry) < 0
+        ) {
+          earliestUnknownQueueEntry = entry;
         }
       }
-      unknownOperationUploadIds = loadedUnknownOperationUploadIds;
-      unknownOperationEntityRefs = loadedUnknownOperationEntityRefs;
-      earliestUnknownQueueEntry = loadedEarliestUnknownQueueEntry;
-      unknownQueueEntries = loadedUnknownQueueEntries;
+      unknownQueueEntries = unknownEntries;
       // Unknown entries keep their place in the queue order.
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
@@ -1227,16 +1295,16 @@ export function createOfflineStoreController<
       if (unknownOperationNames.size > 0) {
         onPersistentStorageError?.(
           new Error(
-            `[tsdf] Store "${storeName}" has unsent offline work of operations this deploy does not define (${[...unknownOperationNames].join(', ')}). It is kept for a deploy that defines them${loadedEarliestUnknownQueueEntry ? ', and the store pauses sending its offline work until then' : ''}. If they were removed for good, list them in removedOperations.`,
+            `[tsdf] Store "${storeName}" has unsent offline work of operations this deploy does not define (${[...unknownOperationNames].join(', ')}). It is kept for a deploy that defines them${earliestUnknownQueueEntry ? ', and the store pauses sending its offline work until then' : ''}. If they were removed for good, list them in removedOperations.`,
           ),
         );
       }
 
-      if (removedQueueEntryIds.length > 0 || removedResolutionIds.length > 0) {
+      if (removedEntries.length > 0 || removedResolutions.length > 0) {
         await deleteRemovedOperationRecords(
           current,
-          removedQueueEntryIds,
-          removedResolutionIds,
+          removedEntries.map((entry) => entry.id),
+          removedResolutions.map((resolution) => resolution.id),
           removedUploadIds,
         );
       }

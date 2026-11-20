@@ -1305,18 +1305,10 @@ function createPatchUserNameOperation(sent: string[]): PatchUserNameOperation {
   };
 }
 
-type PatchUserNameOperations = { patchUserName: PatchUserNameOperation };
-
-test('removing a create operation also deletes the queued edits of the items it would have created', async () => {
-  const sessionKey = 'offline-removed-create-operation-session';
-  const storeName = 'offline-removed-create-operation-users';
-  const sent: string[] = [];
-  const reportedErrors: string[] = [];
-
-  // In a deploy that still has `createUser`, the user creates a user offline
-  // and renames it. They also rename a user that already exists.
-  network.setOffline();
-  const createUser: CreateListQueryUserOperations['createUser'] = {
+function createCreateUserOperation(
+  sent: string[],
+): CreateListQueryUserOperations['createUser'] {
+  return {
     inputSchema: collectionCreateInputSchema,
     kind: 'create',
     getEntityRefs: ({ input }) => [`temp:${input.name}`],
@@ -1332,6 +1324,20 @@ test('removing a create operation also deletes the queued edits of the items it 
       return Promise.resolve({ id: 3, name: input.name });
     },
   };
+}
+
+type PatchUserNameOperations = { patchUserName: PatchUserNameOperation };
+
+test('removing a create operation also deletes the queued edits of the items it would have created', async () => {
+  const sessionKey = 'offline-removed-create-operation-session';
+  const storeName = 'offline-removed-create-operation-users';
+  const sent: string[] = [];
+  const reportedErrors: string[] = [];
+
+  // In a deploy that still has `createUser`, the user creates a user offline
+  // and renames it. They also rename a user that already exists.
+  network.setOffline();
+  const createUser = createCreateUserOperation(sent);
   const olderEnv = createListQueryStoreTestEnv<
     OfflineStorageUserRow,
     false,
@@ -1406,8 +1412,113 @@ test('removing a create operation also deletes the queued edits of the items it 
   expect(reportedErrors).toMatchInlineSnapshot(
     `- '[tsdf] Store "offline-removed-create-operation-users" still had 2 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.'`,
   );
+  // The optimistic row of the user that will never be created is removed
+  // too, instead of staying as a normal row the user could keep editing
+  expect(newerEnv.apiStore.getItemState('temp:Linus')).toBeNull();
 
   newerHook.unmount();
+});
+
+test('removing a create operation also deletes the queued edits of its items that the deploy does not define', async () => {
+  const sessionKey = 'offline-removed-create-unknown-edit-session';
+  const storeName = 'offline-removed-create-unknown-edit-users';
+  const sent: string[] = [];
+  const reportedErrors: string[] = [];
+
+  // In a deploy with `createUser` and `patchUserName`, the user creates a user
+  // offline and renames it.
+  network.setOffline();
+  const olderEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    CreateListQueryUserOperations & PatchUserNameOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      createUser: createCreateUserOperation(sent),
+      patchUserName: createPatchUserNameOperation(sent),
+    }),
+  });
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
+    }),
+  );
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation('temp:Linus', {
+      mutation: () => Promise.resolve({ name: 'Linus T.' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'temp:Linus', name: 'Linus T.' },
+      },
+    }),
+  );
+  await flushAllTimers();
+
+  // The next deploy deletes `createUser` for good and, for now, has no
+  // `patchUserName` either (it only renames through `renameUser`). The user
+  // opens it online.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const middleEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    { renameUser: PatchUserNameOperation }
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey, (error) => {
+      reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+    }),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage(
+      { renameUser: createPatchUserNameOperation(sent) },
+      ['createUser'],
+    ),
+  });
+  const middleHook = renderHook(() =>
+    middleEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+
+  // The rename of the user that will never exist is deleted with its creation,
+  // although this deploy can't read it: kept, it would pause the store's sync
+  // and later be sent for an item the server doesn't have
+  expect(reportedErrors).toMatchInlineSnapshot(
+    `- '[tsdf] Store "offline-removed-create-unknown-edit-users" still had 2 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.'`,
+  );
+  middleHook.unmount();
+
+  // A later deploy brings `patchUserName` back. Nothing is left to send.
+  resetSessionForTests();
+  const laterEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    PatchUserNameOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage(
+      { patchUserName: createPatchUserNameOperation(sent) },
+      ['createUser'],
+    ),
+  });
+  const laterHook = renderHook(() =>
+    laterEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+
+  expect(sent).toMatchInlineSnapshot(`[]`);
+
+  laterHook.unmount();
 });
 
 test('local-sync offline edits of list-query items are persisted without storage errors', async () => {
