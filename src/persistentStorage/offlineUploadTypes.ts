@@ -94,8 +94,8 @@ export type OfflineStoredUploadRecord<
   lastModified: number;
   /**
    * Store whose queued mutation attached this file, set on uploads with
-   * `source: 'mutation'`. Custom adapters must persist it: a `mutation` upload
-   * without it is never removed early, only by the one-week retention.
+   * `source: 'mutation'`. Custom adapters must persist it: the file is removed
+   * once that store's queue no longer uses it.
    */
   storeName?: string;
 };

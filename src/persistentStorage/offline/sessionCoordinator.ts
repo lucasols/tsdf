@@ -2244,8 +2244,13 @@ class SessionOfflineCoordinator {
       .filter(
         (upload) =>
           upload.source === 'mutation' &&
-          upload.storeName !== undefined &&
-          this.#registrations.has(upload.storeName),
+          (upload.storeName !== undefined
+            ? this.#registrations.has(upload.storeName)
+            : // Records persisted before `storeName` existed: mutation upload
+              // ids start with the id of the queue entry, `${storeName}:…`.
+              [...this.#registrations.keys()].some((storeName) =>
+                upload.id.startsWith(`${storeName}:`),
+              )),
       )
       .map((upload) => upload.id)
       .filter(

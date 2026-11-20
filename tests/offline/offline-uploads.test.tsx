@@ -2128,12 +2128,121 @@ test('a file queued offline is kept after a restart when another store is create
     network.goOnline();
     await Promise.resolve();
   });
-  await flushAllTimers();
+  // A minute online, far less than the one-week retention of unused files.
+  await advanceTime(60_000);
 
   expect(replayedFiles).toMatchInlineSnapshot(`
     - { fileName: 'avatar.txt', fileText: 'avatar body' }
   `);
   // Once the profile store exists and its edit is sent, the file is unused
   // and removed as usual.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
+test('a file queued offline by an older version is removed once its edit is sent', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-legacy-upload-session';
+  const replayedFiles: Array<string | null> = [];
+
+  function createManager() {
+    return createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
+      },
+    });
+  }
+
+  function createProfileStore(
+    storeManager: ReturnType<typeof createManager>,
+    testScenario: 'loaded' | 'idle',
+  ) {
+    return createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(1, {
+      id: 'offline-legacy-profile-doc',
+      storeManager,
+      testScenario,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: rc_object({ value: rc_number }),
+              kind: 'update',
+              execute: async (ctx) => {
+                const file = ctx.uploads.filesById.avatar;
+                replayedFiles.push(file ? await file.text() : null);
+                return ctx.input;
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    });
+  }
+
+  // Queue a profile edit with an avatar while offline.
+  network.setOffline();
+  const storeManager = createManager();
+  storeManager.getOfflineStatus();
+  const profileEnv = createProfileStore(storeManager, 'loaded');
+  await flushAllTimers();
+
+  await resolveAfterAllTimers(
+    profileEnv.apiStore.performMutation({
+      mutation: () => Promise.resolve({ value: 2 }),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+      upload: {
+        avatar: new File(['avatar body'], 'avatar.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+      },
+    }),
+  );
+  await flushAllTimers();
+  const [queuedUpload] = storeManager.getOfflineUploads();
+  if (!queuedUpload) throw new Error('Expected the queued avatar upload');
+
+  // Older versions didn't persist which store queued the file: drop it from
+  // the stored record to get the same data an upgraded app finds.
+  const metadataPath = getOfflineUploadOpfsPath(
+    sessionKey,
+    queuedUpload.id,
+    'metadata.json',
+  );
+  const storedMetadata = mockBrowserOpfs.readFile(metadataPath);
+  const legacyMetadata = storedMetadata?.replace(
+    ',"s":"offline-legacy-profile-doc"',
+    '',
+  );
+  if (legacyMetadata === undefined || legacyMetadata === storedMetadata) {
+    throw new Error('Expected the stored record to have a store name');
+  }
+  mockBrowserOpfs.writeFile(metadataPath, legacyMetadata);
+
+  // The upgraded app restarts on the profile screen and the connection comes
+  // back: the queued edit is sent with the original file.
+  resetSessionForTests();
+  const restartedStoreManager = createManager();
+  restartedStoreManager.getOfflineStatus();
+  createProfileStore(restartedStoreManager, 'idle');
+  await flushAllTimers();
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  // A minute online, far less than the one-week retention of unused files.
+  await advanceTime(60_000);
+
+  expect(replayedFiles).toMatchInlineSnapshot(`['avatar body']`);
+  // Nothing in the profile queue uses the file anymore, so it's removed right
+  // away instead of staying in storage until the retention expires.
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
