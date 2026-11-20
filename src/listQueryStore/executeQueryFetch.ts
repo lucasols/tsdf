@@ -190,10 +190,14 @@ export async function executeQueryFetch<
       const appendToExisting =
         !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
 
-      // Tracked here instead of being read back from the caught exception: a
-      // chunk failure reaches the `catch` wrapped by the chunk queue, and an
-      // app error may use the `offline` id too.
-      let failedOffline = false;
+      // The first failed request, kept here instead of being read back from
+      // the caught exception: a chunk failure reaches the `catch` wrapped by
+      // the chunk queue (which turns app errors that are not `Error`s into
+      // generic ones), and an app error may use the `offline` id too.
+      let failure:
+        | { offline: true }
+        | { offline: false; error: unknown }
+        | null = null;
 
       try {
         // A fetch that replaces the list in offset mode (a load, or a loadMore
@@ -238,7 +242,7 @@ export async function executeQueryFetch<
                 }),
               ).then((result) => {
                 if (!result.ok) {
-                  if (result.offline) failedOffline = true;
+                  failure ??= result;
                   throw result.offline
                     ? offlineConnectivityError
                     : result.error;
@@ -264,7 +268,7 @@ export async function executeQueryFetch<
               }),
           );
           if (!fetchResult.ok) {
-            if (fetchResult.offline) failedOffline = true;
+            failure = fetchResult;
             throw fetchResult.offline
               ? offlineConnectivityError
               : fetchResult.error;
@@ -310,9 +314,13 @@ export async function executeQueryFetch<
           return;
         }
 
+        const failedOffline = failure?.offline === true;
         const error = failedOffline
           ? offlineConnectivityError
-          : normalizeStoreError(exception, errorNormalizer);
+          : normalizeStoreError(
+              failure && !failure.offline ? failure.error : exception,
+              errorNormalizer,
+            );
         store.produceState(
           (draft) => {
             const query = draft.queries[queryKey];

@@ -153,7 +153,7 @@ export function useMultipleItems<
   offlineOverlays: Readonly<
     Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
   >,
-  isOfflineFetchModeActive: () => boolean,
+  isOfflineMode: boolean,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   const isOffScreenFromContext = useContext(IsOffScreenContext);
 
@@ -514,12 +514,11 @@ export function useMultipleItems<
           // The missing data cannot be fetched while offline (the fetch effect
           // does not even try), so the read settles on the offline error
           // instead of waiting on a `loading` that no fetch will resolve. Data
-          // stays hidden exactly as it would be while loading. The offline
-          // check comes last so it only runs for reads with missing data.
+          // stays hidden exactly as it would be while loading.
           if (
             hasMissingRequestedData &&
             itemQuery.status === 'success' &&
-            isOfflineFetchModeActive()
+            isOfflineMode
           ) {
             status = 'error';
             error = offlineConnectivityError;
@@ -549,7 +548,7 @@ export function useMultipleItems<
     [
       activeOfflineOverlays,
       getUnresolvedPendingInvalidationFields,
-      isOfflineFetchModeActive,
+      isOfflineMode,
       itemsPendingFullInvalidation,
       loadFromStateOnly,
       offlineEntitiesByKey,
@@ -1112,14 +1111,12 @@ export function useMultipleItems<
             // This fetch targets an already loaded item, so failing offline
             // leaves the item at `success` — which never trips the automatic
             // retry lockout, and the fetch would be scheduled again on every
-            // effect run. While a fetch would be treated as offline it is not
-            // scheduled at all; recovering from offline mode invalidates the
-            // store, which refetches it. The offline check comes last so it
-            // only runs when there is such a fetch to schedule.
+            // effect run. While offline it is not scheduled at all; recovering
+            // from offline mode invalidates the store, which refetches it.
             if (
               (hasMissingFields || shouldFetchForInvalidation) &&
               !itemFetchIsActive &&
-              !isOfflineFetchModeActive()
+              !isOfflineMode
             ) {
               shouldFetch = true;
               requiredFetch = true;
@@ -1180,7 +1177,7 @@ export function useMultipleItems<
             if (
               (missingFullItem || shouldFetchForInvalidation) &&
               !itemFetchIsActive &&
-              !isOfflineFetchModeActive()
+              !isOfflineMode
             ) {
               shouldFetch = true;
               requiredFetch = true;
@@ -1295,7 +1292,7 @@ export function useMultipleItems<
     fetchQueriesWithId,
     getUnresolvedPendingInvalidationFields,
     ignoreItemsInRefetchOnMount,
-    isOfflineFetchModeActive,
+    isOfflineMode,
     itemHasMissingRequestedData,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,

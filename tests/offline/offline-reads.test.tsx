@@ -1066,6 +1066,94 @@ test('when item hooks request fields that are not cached while offline, they sho
   hook.unmount();
 });
 
+test('when an online component reads an item with fields that are not cached next to a list query, the missing fields load instead of looping on renders', async () => {
+  const env = createPartialUsersEnv('online-partial-item-next-to-list-query');
+
+  // Only `name` is loaded (and so cached) before the component mounts.
+  const nameHook = renderHook(() =>
+    env.apiStore.useItem('users||1', { fields: ['name'] }),
+  );
+  await flushAllTimers();
+  nameHook.unmount();
+
+  // The list query hook subscribes to the offline status, so anything that
+  // writes the offline status while the item hook renders re-renders this
+  // component, which would loop until React gives up.
+  const renders = createLoggerStore();
+  const hook = renderHook(() => {
+    const item = env.apiStore.useItem('users||1', { fields: ['name', 'age'] });
+    const list = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { fields: ['name'] },
+    );
+
+    renders.add({
+      item: `${item.status} (${JSON.stringify(item.data)}) error: ${item.error?.id ?? null}`,
+      list: `${list.status} (${list.items.length} items)`,
+    });
+  });
+  await flushAllTimers();
+
+  // The item loads its missing field and the list loads; a render loop would
+  // have thrown before getting here.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> item: loading (null) error: null ⋅ list: loading (0 items)
+    -> item: success ({"name":"Ada","age":30}) error: null ⋅ list: loading (0 items)
+    -> item: success ({"name":"Ada","age":30}) error: null ⋅ list: success (1 items)
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('fetches made while online do not re-render a component showing the offline status', async () => {
+  const sessionKey = 'online-fetches-offline-status-banner';
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+  });
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      getSessionKey: () => sessionKey,
+      storeManager,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: {} },
+      },
+    },
+  );
+
+  // An offline banner, as an app would show it.
+  let bannerRenders = 0;
+  const banner = renderHook(() => {
+    bannerRenders++;
+    return storeManager.useOfflineStatus().isOfflineMode;
+  });
+  await flushAllTimers();
+  const bannerRendersBeforeFetches = bannerRenders;
+
+  // Each fetch reads the offline status to decide if it can be sent. Reading
+  // it must not rewrite it, which would re-render every status subscriber.
+  const list = renderHook(() =>
+    env.apiStore.useListQuery({ tableId: 'users' }),
+  );
+  await flushAllTimers();
+  env.scheduleFetch('highPriority', { tableId: 'users' });
+  await flushAllTimers();
+
+  expect(list.result.current.status).toBe('success');
+  expect(bannerRenders - bannerRendersBeforeFetches).toBe(0);
+
+  list.unmount();
+  banner.unmount();
+});
+
 test('when list query hooks request fields that are not cached while offline, they show the offline error without retrying, the hook on cached fields is unaffected, and all load after recovering', async () => {
   const env = createPartialUsersEnv('offline-partial-query-uncached-fields');
   const usersQuery = { tableId: 'users' };
@@ -1225,7 +1313,7 @@ test('when fields of a loaded list query are invalidated while offline, the list
 
   // The list settles after the single refetch attempt of the invalidation
   // (which is not sent) instead of re-rendering on every retry.
-  expect(renderCount).toMatchInlineSnapshot(`5`);
+  expect(renderCount).toMatchInlineSnapshot(`4`);
 
   renders.addMark('back online');
   act(() => {
@@ -1406,7 +1494,7 @@ test('when the fetch of the missing fields of an item is what reveals a backend 
   expect(recoveryChecks).toMatchInlineSnapshot(`5`);
   // ...but one fetch attempt was enough to reveal the outage, and the row
   // then settles instead of re-rendering on every retry or failed probe.
-  expect(renderCount).toMatchInlineSnapshot(`3`);
+  expect(renderCount).toMatchInlineSnapshot(`4`);
   expect(isOfflineStoreError(hook.result.current.error)).toBe(true);
 
   renders.addMark('backend is back');

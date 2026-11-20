@@ -1482,6 +1482,22 @@ class SessionOfflineCoordinator {
       ? (options.classified ?? this.#classifiedNetworkActive)
       : false;
 
+    const currentStatus = this.store.state.status;
+    // Every `configure` call (each status read through the session, each
+    // fetch) re-primes the network state; when nothing changes, writing,
+    // persisting and broadcasting the status again would only re-render
+    // every status subscriber.
+    if (
+      currentStatus.network.enabled === nextEnabled &&
+      currentStatus.network.active === nextActive &&
+      !(nextActive && options.recordFailureAt) &&
+      (options.recoveryCheckAt === undefined ||
+        options.recoveryCheckAt === currentStatus.lastRecoveryCheckAt)
+    ) {
+      this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
+      return;
+    }
+
     this.#updateStatus((current) => ({
       ...current,
       network: { enabled: nextEnabled, active: nextActive },
@@ -2866,22 +2882,24 @@ export function useOfflineStoreEntities(args: {
 }
 
 /**
- * React hook returning offline status for a session or inactive scope.
+ * React hook returning whether a session or inactive scope is in offline mode.
+ * Only this flag is selected, so the other status changes (e.g. `updatedAt`)
+ * don't re-render the store hooks using it.
  */
-export function useOfflineStoreStatus(args: {
+export function useOfflineStoreIsOfflineMode(args: {
   sessionKey: string | false;
   inactiveScope: string;
-}): GlobalOfflineStatus {
+}): boolean {
   const coordinator = useSessionOfflineCoordinator(
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
     false,
   );
-  const statusSelector = useCallback(
-    (state: SessionStoreState) => state.status,
-    [],
-  );
 
-  return coordinator.store.useSelector(statusSelector);
+  return coordinator.store.useSelector(selectIsOfflineMode);
+}
+
+function selectIsOfflineMode(state: SessionStoreState): boolean {
+  return state.status.isOfflineMode;
 }
 
 /**
