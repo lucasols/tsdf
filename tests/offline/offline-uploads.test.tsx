@@ -1279,6 +1279,133 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
   uploadHook.unmount();
 });
 
+test('an upload id still held by the app after its mutation replayed resolves to the same ref without uploading again', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-reuse-session';
+  const replayEvents: string[] = [];
+
+  network.setOffline();
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id }) => {
+          replayEvents.push(`upload:${id}`);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+    1,
+    {
+      id: 'offline-upload-reuse-doc',
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateWithAttachment: {
+              inputSchema: rc_object({
+                attachmentId: rc_string,
+                value: rc_number,
+              }),
+              kind: 'update',
+              dependsOnUploads: ({ input }) => [input.attachmentId],
+              execute: async (ctx) => {
+                replayEvents.push(
+                  `execute:${ctx.input.value}:${JSON.stringify(
+                    ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+                  )}`,
+                );
+                await env.serverMock.delayedSetData(ctx.input.value);
+                return { value: ctx.input.value };
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+  await flushAllTimers();
+
+  function queueEditWithAttachment(value: number) {
+    return resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = value;
+          });
+        },
+        mutation: () => Promise.resolve({ value }),
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { attachmentId: 'asset-1', value },
+        },
+      }),
+    );
+  }
+
+  // The user attaches a file offline and saves an edit that depends on it.
+  (
+    await resolveAfterAllTimers(
+      storeManager.saveOfflineUpload({
+        id: 'asset-1',
+        file: new File(['attachment body'], 'attachment.txt', {
+          type: 'text/plain',
+        }),
+      }),
+    )
+  ).unwrap();
+  await queueEditWithAttachment(2);
+
+  // Reconnecting replays the edit: the file is uploaded once and the staged
+  // upload is deleted because no queued work declares it anymore.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(3_000);
+  expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+  // The connection drops again before the app swapped the attachment id for
+  // the server ref, so the user's next edit is queued still declaring it.
+  network.setOffline();
+  await advanceTime(0);
+  await queueEditWithAttachment(3);
+
+  // On reconnect the second edit replays with the ref of the first upload
+  // instead of failing on a staged upload that no longer exists.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(3_000);
+
+  // The app can also still resolve the id itself while online.
+  expect(
+    (
+      await resolveAfterAllTimers(storeManager.resolveOfflineUpload('asset-1'))
+    ).unwrap(),
+  ).toMatchInlineSnapshot(`"server:asset-1"`);
+
+  // The file was uploaded only once, and both edits reached the server with
+  // its ref.
+  expect(replayEvents).toMatchInlineSnapshot(
+    `['upload:asset-1', 'execute:2:"server:asset-1"', 'execute:3:"server:asset-1"']`,
+  );
+  // Neither edit was sent to manual resolution.
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+});
+
 type AccumulatedAttachmentsOperations = {
   setAttachments: DocumentOfflineOperationDefinition<
     { value: number },

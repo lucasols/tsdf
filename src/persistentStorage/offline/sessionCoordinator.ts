@@ -688,6 +688,12 @@ class SessionOfflineCoordinator {
    * skip them until a store reports that reference.
    */
   #stagedMutationUploadIds = new Set<string>();
+  /**
+   * Refs of uploads that were uploaded and then released, so data still
+   * holding their ids (optimistic or draft state) resolves to the same ref
+   * for the rest of the session instead of failing.
+   */
+  #releasedUploadRefs = new Map<string, ValidPayload>();
   /** Adapter removals in flight, awaited before the same id is read or saved. */
   #uploadRemovals = new Map<string, Promise<void>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1144,6 +1150,7 @@ class SessionOfflineCoordinator {
 
     // A file staged again under a released id is a new upload.
     this.#pendingUploadReleases.delete(args.id);
+    this.#releasedUploadRefs.delete(args.id);
     if (args.source === 'mutation') this.#stagedMutationUploadIds.add(args.id);
 
     const existing = this.#uploads.get(args.id);
@@ -1200,6 +1207,7 @@ class SessionOfflineCoordinator {
       throw new Error(`Cannot delete upload "${id}" while it is uploading`);
     }
     this.#stagedMutationUploadIds.delete(id);
+    this.#releasedUploadRefs.delete(id);
     await this.#removeUploads([id]);
   }
 
@@ -1252,7 +1260,11 @@ class SessionOfflineCoordinator {
       this.#pendingUploadReleases.delete(id);
       // An upload queued work references again is released again when that
       // work leaves the queue.
-      if (this.#uploads.has(id) && !this.#referencedUploadIds.has(id)) {
+      const upload = this.#uploads.get(id);
+      if (upload && !this.#referencedUploadIds.has(id)) {
+        if (upload.state === 'uploaded' && upload.resolvedRef !== undefined) {
+          this.#releasedUploadRefs.set(id, upload.resolvedRef);
+        }
         removableIds.push(id);
       }
     }
@@ -2081,6 +2093,8 @@ class SessionOfflineCoordinator {
   ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
+      const releasedRef = this.#releasedUploadRefs.get(id);
+      if (releasedRef !== undefined) return releasedRef;
       throw new Error(`Unknown offline upload "${id}"`);
     }
     if (
@@ -2103,6 +2117,8 @@ class SessionOfflineCoordinator {
       .resultifyAdd(async () => {
         const queuedRecord = await this.#getUploadRecord(id);
         if (!queuedRecord) {
+          const releasedRef = this.#releasedUploadRefs.get(id);
+          if (releasedRef !== undefined) return releasedRef;
           throw new Error(`Unknown offline upload "${id}"`);
         }
         if (

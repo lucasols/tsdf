@@ -135,7 +135,8 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
   /**
    * Resolves a staged upload id to its latest final ref, uploading first if
-   * needed.
+   * needed. An upload deleted after it was sent keeps resolving to its ref for
+   * the rest of the app session.
    *
    * When the `upload` transport fails, the result is `Result.err` with the
    * transport error and the upload becomes `failed` with `lastError` set. The
@@ -156,7 +157,9 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   /**
    * Saves a session-scoped upload locally for later dependency resolution. It
    * is deleted automatically once the queued work that depends on it leaves
-   * the queue.
+   * the queue. Only stores created in the current app session count as
+   * depending on it, so create the stores that share an upload id before
+   * their queued work replays.
    */
   saveOfflineUpload: (
     args: SaveOfflineUploadArgs,
