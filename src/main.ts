@@ -18,6 +18,7 @@ export {
   type DynamicRealtimeThrottleMs,
   type StoreManager,
 } from './storeManager';
+export type { RemovedStore } from './persistentStorage/removedStoresCleanup';
 export type {
   TSDFFocusDebugOperation,
   TSDFDebugLogArea,

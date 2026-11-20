@@ -1,10 +1,18 @@
 import { asPossiblyUndefined } from '@ls-stack/utils/typingFnUtils';
 
 export async function getNavigatorStorageDirectory(): Promise<FileSystemDirectoryHandle> {
-  const storage = asPossiblyUndefined(globalThis.navigator)?.storage;
-  if (storage?.getDirectory === undefined) {
+  const root = await getNavigatorStorageDirectoryIfAvailable();
+  if (root === null) {
     throw new Error('[TSDF] OPFS is unavailable in this environment.');
   }
+
+  return root;
+}
+
+/** Returns `null` when the environment has no OPFS at all. */
+export async function getNavigatorStorageDirectoryIfAvailable(): Promise<FileSystemDirectoryHandle | null> {
+  const storage = asPossiblyUndefined(globalThis.navigator)?.storage;
+  if (storage?.getDirectory === undefined) return null;
 
   return storage.getDirectory();
 }

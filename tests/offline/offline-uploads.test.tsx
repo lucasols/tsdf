@@ -1064,6 +1064,118 @@ test('replayed mutations wait for pre-upload dependencies and receive the origin
   uploadHook.unmount();
 });
 
+test('replacing the attachment of a queued offline edit uploads and sends the new attachment', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-accumulated-upload-dependency-session';
+  const replayEvents: string[] = [];
+
+  network.setOffline();
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ id }) => {
+          replayEvents.push(`upload:${id}`);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UploadDependencyOperations>(
+    1,
+    {
+      id: 'offline-accumulated-upload-dependency-doc',
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateWithAttachment: {
+              inputSchema: rc_object({
+                attachmentId: rc_string,
+                value: rc_number,
+              }),
+              kind: 'update',
+              dependsOnUploads: ({ input }) => [input.attachmentId],
+              // The latest edit wins: both the value and the attachment
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute: async (ctx) => {
+                const resolvedRef =
+                  ctx.uploads.resolvedRefsById[ctx.input.attachmentId];
+                replayEvents.push(
+                  `execute:${ctx.input.attachmentId}:${JSON.stringify(resolvedRef)}`,
+                );
+                await env.serverMock.delayedSetData(ctx.input.value);
+                return { value: ctx.input.value };
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+  await flushAllTimers();
+
+  async function saveAttachment(id: string) {
+    (
+      await resolveAfterAllTimers(
+        storeManager.saveOfflineUpload({
+          id,
+          file: new File([`${id} body`], `${id}.txt`, {
+            type: 'text/plain',
+            lastModified: 1,
+          }),
+        }),
+      )
+    ).unwrap();
+  }
+
+  async function editWithAttachment(attachmentId: string, value: number) {
+    await resolveAfterAllTimers(
+      env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState(() => ({ value }));
+        },
+        mutation: () => Promise.resolve({ value }),
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { attachmentId, value },
+        },
+      }),
+    );
+  }
+
+  // Offline, the user attaches a file, then changes their mind and attaches
+  // another one: the second edit is merged into the queued first one.
+  await saveAttachment('photo-1');
+  await editWithAttachment('photo-1', 2);
+  await saveAttachment('photo-2');
+  await editWithAttachment('photo-2', 3);
+
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+
+  // The replay uploads the attachment the merged edit references and sends
+  // its server ref, not the one of the replaced attachment.
+  expect(replayEvents).toMatchInlineSnapshot(
+    `['upload:photo-2', 'execute:photo-2:"server:photo-2"']`,
+  );
+  expect(env.serverMock.current).toMatchInlineSnapshot(`3`);
+});
+
 test('online mutations can resolve staged upload ids after reconnect and use the final refs in the direct request', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'online-staged-upload-session';

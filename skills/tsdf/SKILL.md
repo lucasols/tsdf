@@ -204,6 +204,8 @@ Loaded data must pass `storageSchema`, then `convertFromStorage(...)`, then `sto
 
 Changing a store's `adapter` starts it with an empty cache; nothing is migrated. Moving from `'local-sync'` to an async adapter auto-removes the store's old `localStorage` entries, except while it still has queued offline work there (kept and reported through `onPersistentStorageError`, replayed only under `'local-sync'`).
 
+Deleting a store leaves its data behind: list it in `createStoreManager({ removedStores: [{ id, adapter }] })` and TSDF removes its data once, in every session, including unsent offline work (reported through `onPersistentStorageError`). A listed id cannot be used by an attached store. Custom async adapters need a driver `storageId` to be listed.
+
 Utilities: `clearSessionStorage(sessionKey, adapter)`, `clearAllSessionStorage(sessionKey)`.
 
 Docs: `docs/persistent-storage.md`.
@@ -229,6 +231,8 @@ Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`
 Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query).
 
 Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied).
+
+Recovery: while offline, `onTransportReconnect()` and focus revalidations only re-check connectivity; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities (or the ones they `dependsOn`) are still pending.
 
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. `storeManager.useOfflineUploadFile(id)` returns `{ status, url, file, error }` for rendering a staged file by upload id: `url` is a shared, TSDF-managed object URL (never revoke it), a falsy id disables the hook, and `status: 'missing'` means the upload is no longer staged. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 

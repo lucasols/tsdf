@@ -78,19 +78,13 @@ function stripInternalEntityPayload(
   return publicEntity;
 }
 
-type SessionStoreState = {
-  status: GlobalOfflineStatus;
-  entities: InternalGlobalOfflineEntity[];
-  resolutions: OfflineResolutionRecord[];
-  uploads: OfflineUpload[];
-};
-
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
+  hasQueuedMutations: boolean;
 };
 
 type OfflineSessionMessage =
@@ -164,6 +158,97 @@ const appVersionByOfflineSession = new WeakMap<
   OfflineSession,
   string | undefined
 >();
+type OfflineRecoveryListener = (
+  sessionKey: string,
+  hasStoreRecovered: (storeName: string) => boolean,
+) => void;
+
+const offlineRecoveryListeners = new Set<OfflineRecoveryListener>();
+
+type SessionStoreState = {
+  status: GlobalOfflineStatus;
+  entities: InternalGlobalOfflineEntity[];
+  resolutions: OfflineResolutionRecord[];
+  uploads: OfflineUpload[];
+  /**
+   * Whether any store of the session still has mutations in its queue,
+   * including the ones that reference no entity (they have no entry in
+   * `entities`).
+   */
+  hasQueuedMutations: boolean;
+};
+
+/**
+ * The stores (by name) that cannot be revalidated against the server yet, or
+ * `null` when no store of the session can:
+ *
+ * - offline, or with queued mutations still to replay: anything fetched now
+ *   may predate the replayed mutations, in any store
+ * - a store with changes waiting for a manual resolution: a refetch would
+ *   replace the local changes the user still has to decide on
+ */
+function getStoresAwaitingRecovery(
+  state: SessionStoreState,
+): ReadonlySet<string> | null {
+  if (state.status.isOfflineMode || state.hasQueuedMutations) return null;
+
+  const storeNames = new Set<string>();
+
+  for (const entity of state.entities) {
+    if (entity.pendingMutations > 0) return null;
+    if (entity.requiresResolution) storeNames.add(entity.storeName);
+  }
+
+  // Also from the resolutions: an operation may reference no entity
+  for (const resolution of state.resolutions) {
+    storeNames.add(resolution.storeName);
+  }
+
+  return storeNames;
+}
+
+/**
+ * Subscribes to stores recovering in this tab (any session key; listeners
+ * filter by the key they care about). A store recovers when its session is
+ * back online with its queued mutations replayed and the store has no change
+ * left waiting for a manual resolution: from then on its cached data can be
+ * revalidated against the server.
+ * @internal
+ */
+export function subscribeToOfflineRecovery(
+  listener: OfflineRecoveryListener,
+): () => void {
+  offlineRecoveryListeners.add(listener);
+
+  return () => {
+    offlineRecoveryListeners.delete(listener);
+  };
+}
+
+/**
+ * Whether the session is in offline mode in this tab, without creating or
+ * reconfiguring its coordinator (a session nothing tracks is online).
+ *
+ * While it is, also re-checks connectivity: callers ask on a hint that the
+ * connection may be back (a transport reconnect, a window focus), and some
+ * setups have nothing else that ends offline mode (a custom `getIsOffline`
+ * without browser events, a classified network failure without a recovery
+ * check). Leaving offline mode notifies the recovery listeners, which
+ * revalidate the stores, so callers skip their own revalidation either way.
+ * @internal
+ */
+export function recheckIsSessionInOfflineMode(
+  sessionKey: string | false,
+): boolean {
+  if (sessionKey === false) return false;
+
+  const coordinator = registry.get(sessionKey);
+  if (!coordinator?.getStatus().isOfflineMode) return false;
+
+  coordinator.recheckNetworkState();
+  return true;
+}
+
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
@@ -619,6 +704,7 @@ class SessionOfflineCoordinator {
   #classificationToken = 0;
   #retriableFailureToken = 0;
   #networkStateToken = 0;
+  #isRecheckingNetworkState = false;
   #lastRemoteSnapshotAt = 0;
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
@@ -695,9 +781,35 @@ class SessionOfflineCoordinator {
         entities: [],
         resolutions: [],
         uploads: [],
+        hasQueuedMutations: false,
       }),
     });
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    this.store.subscribe(({ prev, current }) => {
+      if (
+        prev.entities === current.entities &&
+        prev.resolutions === current.resolutions &&
+        prev.hasQueuedMutations === current.hasQueuedMutations &&
+        prev.status.isOfflineMode === current.status.isOfflineMode
+      ) {
+        return;
+      }
+
+      const awaitingStores = getStoresAwaitingRecovery(current);
+      if (awaitingStores === null) return;
+
+      const prevAwaitingStores = getStoresAwaitingRecovery(prev);
+      if (prevAwaitingStores?.size === 0) return;
+
+      for (const listener of offlineRecoveryListeners) {
+        listener(
+          sessionKey,
+          (storeName) =>
+            !awaitingStores.has(storeName) &&
+            (prevAwaitingStores === null || prevAwaitingStores.has(storeName)),
+        );
+      }
+    });
 
     this.#browserTabs =
       createBrowserTabsCoordinatorWithPriority<OfflineSessionMessage>(
@@ -1379,6 +1491,20 @@ class SessionOfflineCoordinator {
     return false;
   }
 
+  /**
+   * Re-checks connectivity on a hint that it may be back. Hints from several
+   * stores (e.g. their window-focus handlers) share a re-check still in flight
+   * instead of calling `getIsOffline` once per store.
+   */
+  recheckNetworkState(): void {
+    if (this.#isRecheckingNetworkState) return;
+
+    this.#isRecheckingNetworkState = true;
+    void this.refreshNetworkState().finally(() => {
+      this.#isRecheckingNetworkState = false;
+    });
+  }
+
   async refreshNetworkState(): Promise<boolean> {
     const token = ++this.#networkStateToken;
     const detectedOffline = this.#getCurrentOfflineState();
@@ -2038,7 +2164,9 @@ class SessionOfflineCoordinator {
     const allResolutions: OfflineResolutionRecord[] = [];
     const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    let hasQueuedMutations = false;
     for (const contribution of this.#storeContributions.values()) {
+      if (contribution.replayHead !== null) hasQueuedMutations = true;
       allEntities.push(...contribution.entities);
       allResolutions.push(...contribution.resolutions);
       for (const uploadId of contribution.referencedUploadIds) {
@@ -2166,7 +2294,7 @@ class SessionOfflineCoordinator {
     }
 
     this.store.setPartialState(
-      { entities, resolutions },
+      { entities, resolutions, hasQueuedMutations },
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
@@ -2223,6 +2351,7 @@ class SessionOfflineCoordinator {
       entities: this.store.state.entities,
       resolutions: this.store.state.resolutions,
       uploads: this.store.state.uploads,
+      hasQueuedMutations: this.store.state.hasQueuedMutations,
     });
   }
 
@@ -2239,6 +2368,7 @@ class SessionOfflineCoordinator {
         entities: message.entities,
         resolutions: message.resolutions,
         uploads: message.uploads,
+        hasQueuedMutations: message.hasQueuedMutations,
       },
       { action: 'offline-session-remote' },
     );

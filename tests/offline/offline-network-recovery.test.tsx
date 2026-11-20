@@ -1,13 +1,18 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getGlobalOfflineStatus, useGlobalOfflineStatus } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
+import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { advanceTime } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { docSchema } from './offlineTestShared';
+import { userRowSchema } from './offlineReplayTestShared';
+import { docSchema, listQueryQueryPayloadSchema } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
 
@@ -435,4 +440,573 @@ test('coming back online after browser-driven network takeover clears the interr
     "
   `);
   statusHook.unmount();
+});
+
+function createRealtimeUsersEnv(sessionKey: string) {
+  return createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      usesRealTimeUpdates: true,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: {} },
+      },
+    },
+  );
+}
+
+function renderUsersList(
+  env: ReturnType<typeof createRealtimeUsersEnv>,
+  renders: ReturnType<typeof createLoggerStore>,
+) {
+  return renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { returnRefetchingStatus: true },
+    );
+
+    renders.add({
+      status: query.status,
+      names: query.items.map((item) => item.name),
+    });
+  });
+}
+
+test('a realtime transport reconnect while offline keeps the cached list untouched and revalidates it once when back online', async () => {
+  const env = createRealtimeUsersEnv('offline-reconnect-hold-session');
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+
+  env.serverTable.updateItem('users||1', { name: 'Ada (edited elsewhere)' });
+
+  // The websocket reconnects while the session is offline (e.g. a captive
+  // network): revalidating now could only fail, so nothing is invalidated.
+  renders.addMark('offline, then the realtime transport reconnects');
+  act(() => {
+    network.goOffline();
+  });
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  // Leaving offline mode revalidates by itself, without the app having to
+  // signal a reconnect again.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> offline, then the realtime transport reconnects
+
+    -> status: success ⋅ names: [Ada]
+
+    >>> back online
+
+    -> status: success ⋅ names: [Ada]
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada (edited elsewhere)]
+    "
+  `);
+  // One load plus the single revalidation after recovering.
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }).length,
+  ).toBe(2);
+
+  hook.unmount();
+});
+
+test('coming back online and then reconnecting the realtime transport revalidates the list once', async () => {
+  const env = createRealtimeUsersEnv('offline-recovery-then-reconnect-session');
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+  env.serverTable.clearFetchHistory();
+
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(5_000);
+
+  env.serverTable.updateItem('users||1', { name: 'Ada (edited elsewhere)' });
+
+  // The usual order in a realtime app: the browser is back online first and
+  // the app's websocket reconnects a moment later.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(500);
+  // Recovering waits for the transport reconnect that usually follows it:
+  // nothing was refetched yet.
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(0);
+
+  renders.addMark('the realtime transport reconnects');
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  // Both are covered by a single revalidation, run right at the reconnect.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> back online
+
+    -> status: success ⋅ names: [Ada]
+
+    >>> the realtime transport reconnects
+
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada (edited elsewhere)]
+    "
+  `);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(1);
+
+  hook.unmount();
+});
+
+test('coming back online without a realtime transport reconnect revalidates the list once the reconnect cooldown ends', async () => {
+  const env = createRealtimeUsersEnv(
+    'offline-recovery-without-reconnect-session',
+  );
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+  env.serverTable.clearFetchHistory();
+
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(5_000);
+
+  env.serverTable.updateItem('users||1', { name: 'Ada (edited elsewhere)' });
+
+  // The transport was already back (or never dropped), so no reconnect
+  // follows the recovery.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  // The recovery waits for a transport reconnect during the 2s reconnect
+  // cooldown...
+  await advanceTime(1_900);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(0);
+
+  // ...and still revalidates once the cooldown ends without one.
+  renders.addMark('the reconnect cooldown ends');
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> back online
+
+    -> status: success ⋅ names: [Ada]
+
+    >>> the reconnect cooldown ends
+
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada (edited elsewhere)]
+    "
+  `);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(1);
+
+  hook.unmount();
+});
+
+test('a reconnect revalidation deferred by the cooldown does not run after the session goes offline', async () => {
+  const env = createRealtimeUsersEnv('offline-reconnect-cooldown-session');
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+
+  // First reconnect revalidates right away; a second one inside the cooldown
+  // window is deferred to the end of the window.
+  renders.addMark('two reconnects in a row');
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  // The session goes offline before the deferred revalidation fires.
+  renders.addMark('offline before the deferred revalidation fires');
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  // The deferred revalidation is dropped: the list is not sent into a
+  // refetch that can only fail.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> two reconnects in a row
+
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada]
+
+    >>> offline before the deferred revalidation fires
+
+    -> status: success ⋅ names: [Ada]
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a document that failed to load offline loads by itself when the session comes back online', async () => {
+  const sessionKey = 'offline-recovery-document-session';
+  network.setOffline();
+
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+  const renders = createLoggerStore();
+
+  // Nothing is cached, so the offline mount can only show the offline error.
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({ status: doc.status, data: doc.data, error: doc.error?.id });
+  });
+  await flushAllTimers();
+
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // No remount or manual invalidation is needed to recover.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null ⋅ error: undefined
+    -> status: error ⋅ data: null ⋅ error: offline
+
+    >>> back online
+
+    -> status: loading ⋅ data: null ⋅ error: undefined
+    -> status: success ⋅ data: {value:1} ⋅ error: undefined
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a store of a manager without offline support revalidates when another manager of the same session recovers', async () => {
+  const sessionKey = 'offline-recovery-shared-session';
+
+  // Two managers share the session: only one of them has offline support,
+  // but the session's offline mode applies to the stores of both.
+  const offlineManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+  });
+  createDocumentStoreTestEnv(1, {
+    id: 'offline-enabled-doc',
+    getSessionKey: () => sessionKey,
+    storeManager: offlineManager,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv(1, {
+    id: 'realtime-doc',
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+    }),
+    usesRealTimeUpdates: true,
+  });
+  const renders = createLoggerStore();
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({ status: doc.status, data: doc.data });
+  });
+  await flushAllTimers();
+
+  env.serverMock.setData(2);
+
+  // The realtime transport reconnects while the session is offline: the
+  // revalidation is held, since it could only fail.
+  renders.addMark('offline, then the realtime transport reconnects');
+  act(() => {
+    network.goOffline();
+  });
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  // The held revalidation runs once the session recovers.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null
+    -> status: success ⋅ data: {value:1}
+
+    >>> offline, then the realtime transport reconnects
+
+    >>> back online
+
+    -> status: success ⋅ data: {value:2}
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('a realtime transport reconnect re-checks connectivity and leaves offline mode when the app tracks it itself', async () => {
+  const sessionKey = 'offline-reconnect-recheck-session';
+
+  // The app ties offline detection to its own realtime socket and does not
+  // listen to browser events: nothing else tells the session when the
+  // connection is back.
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      network: { ...network.config, listenToBrowserEvents: false },
+    },
+  });
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager,
+    usesRealTimeUpdates: true,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+  const renders = createLoggerStore();
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({ status: doc.status, data: doc.data });
+  });
+  await flushAllTimers();
+
+  // The socket drops: the next fetch finds out the session is offline.
+  renders.addMark('socket drops');
+  network.setOffline();
+  act(() => {
+    env.apiStore.invalidateData('highPriority');
+  });
+  await flushAllTimers();
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(true);
+
+  env.serverMock.setData(2);
+
+  // The socket reconnects and the app signals it: the reconnect re-checks
+  // connectivity, leaves offline mode and the document revalidates.
+  renders.addMark('socket reconnects');
+  network.setOnline();
+  act(() => {
+    storeManager.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(false);
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null
+    -> status: success ⋅ data: {value:1}
+
+    >>> socket drops
+
+    >>> socket reconnects
+
+    -> status: success ⋅ data: {value:2}
+    "
+  `);
+  // The load plus a single revalidation: the offline fetch never reached
+  // the server, and the reconnect did not refetch on top of the recovery.
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
+
+  hook.unmount();
+});
+
+test('a window focus re-checks connectivity and leaves offline mode entered by a classified network failure', async () => {
+  const sessionKey = 'offline-focus-recheck-session';
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  // Fetch failures classified as network errors put the session in offline
+  // mode while the browser still reports being online, and no recovery
+  // check is configured to probe the connection.
+  const env = createDocumentStoreTestEnv(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        classifyFailure: () => 'network',
+        network: network.config,
+      },
+    }),
+    revalidateOnWindowFocus: true,
+    bindFocusController: tabs.bind('a'),
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+  const renders = createLoggerStore();
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({ status: doc.status, data: doc.data });
+  });
+  await flushAllTimers();
+
+  renders.addMark('a fetch fails with a network error');
+  env.serverMock.setNextFetchError('connection lost');
+  act(() => {
+    env.apiStore.invalidateData('highPriority');
+  });
+  await flushAllTimers();
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(true);
+
+  env.serverMock.setData(2);
+
+  // Coming back to the tab re-checks connectivity: the browser reports being
+  // online, so the session leaves offline mode and the document revalidates.
+  renders.addMark('user comes back to the tab');
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(false);
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null
+    -> status: success ⋅ data: {value:1}
+
+    >>> a fetch fails with a network error
+
+    >>> user comes back to the tab
+
+    -> status: success ⋅ data: {value:2}
+    "
+  `);
+  // The load, the failed fetch and a single revalidation: the focus did not
+  // refetch on top of the recovery.
+  expect(env.serverMock.numOfStartedFetches).toBe(3);
+
+  hook.unmount();
+});
+
+test('a window focus while offline probes the connection once for all the stores of the session', async () => {
+  const sessionKey = 'offline-focus-single-probe-session';
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  // The app probes the connection itself (e.g. pinging its server), which
+  // takes a while and costs a request per call.
+  const probeConnection = vi.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return network.isOffline();
+  });
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      network: {
+        ...network.config,
+        listenToBrowserEvents: false,
+        getIsOffline: probeConnection,
+      },
+    },
+  });
+  const createStoreEnv = (id: string) =>
+    createDocumentStoreTestEnv(1, {
+      id,
+      getSessionKey: () => sessionKey,
+      storeManager,
+      revalidateOnWindowFocus: true,
+      bindFocusController: tabs.bind('a'),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: { operations: {} },
+      },
+    });
+  const profileEnv = createStoreEnv('offline-focus-probe-profile');
+  const settingsEnv = createStoreEnv('offline-focus-probe-settings');
+
+  const hook = renderHook(() => {
+    profileEnv.apiStore.useDocument();
+    settingsEnv.apiStore.useDocument();
+  });
+  await flushAllTimers();
+
+  // The connection drops: the next fetch finds out the session is offline.
+  network.setOffline();
+  act(() => {
+    profileEnv.apiStore.invalidateData('highPriority');
+  });
+  await flushAllTimers();
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(true);
+
+  // Coming back to the tab while still offline: both stores would revalidate
+  // on focus, but a single probe is enough to know the session is offline.
+  probeConnection.mockClear();
+  await tabs.blur();
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(probeConnection).toHaveBeenCalledTimes(1);
+  expect(getGlobalOfflineStatus(sessionKey).isOfflineMode).toBe(true);
+
+  hook.unmount();
 });
