@@ -403,6 +403,8 @@ describe('opfs: list query store persistence', () => {
     // The cached list is missing "User 1" and cannot be refetched: it must
     // not be presented as the complete list. The remaining row stays
     // available next to the offline error.
+    // While loading, the list shows the cached rows it can restore (all of
+    // them once "User 1" is saved), then the fetch error.
     expect(usersList.renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ error: null ⋅ names: []
@@ -445,6 +447,79 @@ describe('opfs: list query store persistence', () => {
       -> status: loading ⋅ error: null ⋅ names: []
       -> status: loading ⋅ error: null ⋅ names: [User 2]
       -> status: error ⋅ error: offline ⋅ names: [User 2]
+      "
+    `);
+  });
+
+  test('a cached list that lost a row keeps its stored entry when the row is loaded elsewhere and the list fetch then fails', async () => {
+    const { startNextSession } = await cacheUsersListAndEvictRows({
+      storeName: 'lq-opfs-evicted-row-loaded-elsewhere',
+      evictedRows: 'User 1',
+      offlineNetwork: network.config,
+    });
+
+    // In the next session both projects are deleted, which frees the item
+    // budget: "User 1" fits again once it is loaded.
+    const session = startNextSession();
+    session.apiStore.deleteItemState('projects||1');
+    session.apiStore.deleteItemState('projects||2');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The users list (cached without "User 1") is mounted next to the details
+    // of "User 1". The list request is slow and fails.
+    session.serverTable.addListFetchStartDelay(3000);
+    session.serverTable.setNextListFetchError('Server error');
+    const usersList = mountUsersList(session);
+    const userDetails = renderHook(() => session.apiStore.useItem('users||1'));
+
+    // "User 1" is loaded by its details and saved while the list is still
+    // loading, so every row of the cached list can be restored again.
+    await advanceTime(2000);
+
+    // While the list is still loading, "User 2" is renamed and its details
+    // are opened. The list renders again and reads the cached list from
+    // storage, which now has every row back.
+    session.serverTable.updateItem('users||2', { name: 'User 2 renamed' });
+    const otherUserDetails = renderHook(() =>
+      session.apiStore.useItem('users||2'),
+    );
+
+    // Then the list request fails.
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(usersList.renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: loading ⋅ error: null ⋅ names: [User 2]
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      -> status: error ⋅ error: fetch-error ⋅ names: [User 2 renamed]
+      "
+    `);
+
+    usersList.unmount();
+    userDetails.unmount();
+    otherUserDetails.unmount();
+
+    // The list was never loaded in that session, so its stored entry must be
+    // kept: the next offline start still shows the cached list, with no
+    // request.
+    network.setOffline();
+    const nextSession = startNextSession();
+    const { renders: nextStartRenders } = mountUsersList(nextSession);
+    await flushAllTimers();
+
+    expect(
+      nextSession.serverTable.getRequestHistory('all', { includeTime: false }),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(nextStartRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: []
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2 renamed]
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2 renamed]
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2 renamed]
       "
     `);
   });

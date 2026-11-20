@@ -1784,11 +1784,11 @@ export function setupListQueryPersistence<
       maxQuerySize,
     );
 
-    if (!hasAllRows) {
-      incompleteRestoredQueryKeys.add(queryKey);
-    } else if (incompleteRestoredQueryKeys.size > 0) {
-      incompleteRestoredQueryKeys.delete(queryKey);
-    }
+    // Only a load of the query (or forgetting it) clears the record: storage
+    // can be re-read with every row back (e.g. the hook fallback after a
+    // missing row is saved by another query) while the query in state is
+    // still not loaded, and its stored entry must survive until it loads.
+    if (!hasAllRows) incompleteRestoredQueryKeys.add(queryKey);
 
     return {
       error: null,
