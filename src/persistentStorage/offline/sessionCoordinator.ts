@@ -213,7 +213,8 @@ type SessionRegistration = {
   onOfflineCycle?: () => void;
   /**
    * Called when another store of the session cancelled or discarded temp
-   * entities (serialized temp payloads) that will never exist on the server.
+   * entities (temp payloads keyed with `getCompositeKey`) that will never
+   * exist on the server.
    * Only registered by stores with `cancelledWith` operations.
    */
   onTempEntitiesCancelled?: (
@@ -1302,7 +1303,13 @@ class SessionOfflineCoordinator {
       );
     }
 
-    await Promise.all(pendingCleanups);
+    // The source store already applied the cancellation: a store that fails
+    // to clean up its work is reported without failing it.
+    for (const result of await Promise.allSettled(pendingCleanups)) {
+      if (result.status === 'rejected') {
+        this.#onPersistentStorageError?.(result.reason);
+      }
+    }
   }
 
   /** Tells the other tabs that this tab saved or removed (`null`) a queue entry. */

@@ -1,5 +1,6 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject, isPromise } from '@ls-stack/utils/typeGuards';
 import {
@@ -2719,20 +2720,11 @@ export function createOfflineStoreController<
     >,
     removedEntityKeys: Set<string>,
   ): void {
-    if (
-      getOperationLifecycleKind(workItem.operation) !== 'create' ||
-      isTempCreateOperation(workItem.operation)
-    ) {
-      return;
-    }
-
-    for (const ref of workItem.entityRefs) {
-      if (ref.entityKind !== 'item') continue;
-
+    for (const entityKey of getClientIdCreatedEntityKeys(workItem)) {
       const payload = getPayloadForEntityRef({
         operationName: workItem.operation,
         input: workItem.input,
-        entityKey: ref.entityKey,
+        entityKey,
       });
       if (payload === undefined) continue;
 
@@ -2742,8 +2734,30 @@ export function createOfflineStoreController<
         tempId: payload,
         pendingEntity: undefined,
       });
-      removedEntityKeys.add(ref.entityKey);
+      removedEntityKeys.add(entityKey);
     }
+  }
+
+  /**
+   * Keys of the items a `create` without temp entity adds to the store with
+   * a client-generated id.
+   */
+  function getClientIdCreatedEntityKeys(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'entityRefs'
+    >,
+  ): string[] {
+    if (
+      getOperationLifecycleKind(workItem.operation) !== 'create' ||
+      isTempCreateOperation(workItem.operation)
+    ) {
+      return [];
+    }
+
+    return workItem.entityRefs
+      .filter((entityRef) => entityRef.entityKind === 'item')
+      .map((entityRef) => entityRef.entityKey);
   }
 
   async function promoteBlockedTempCreateDescendants(args: {
@@ -2816,7 +2830,8 @@ export function createOfflineStoreController<
    * removed by the caller) was cancelled before being sent or discarded:
    *
    * - the queued work and manual resolutions of this store that target or
-   *   depend on those entities, recursively
+   *   depend on those entities, or on the items an unsent dropped creation
+   *   added with a client-generated id, recursively
    * - the temp entities themselves, and the items the dropped work created
    *   with a client-generated id
    * - the work of other stores declared as `cancelledWith` those entities
@@ -2838,18 +2853,33 @@ export function createOfflineStoreController<
       PersistedOfflineResolutionRecord
     >();
 
+    // The descendants of temp entities are collected recursively. An item
+    // created with a client-generated id by a creation that was never sent is
+    // dropped as well, so the work queued on it is collected the same way. A
+    // creation that was sent may exist on the server: the work on its item
+    // waits for its own decision.
+    const parentEntityKeys: string[] = [];
     for (const tempCreate of tempCreates) {
-      for (const entityKey of getTempLifecycleEntityKeys(tempCreate)) {
-        const descendants = collectTempCreateDescendants({
-          parentEntityKey: entityKey,
-        });
+      parentEntityKeys.push(...getTempLifecycleEntityKeys(tempCreate));
+      if ('syncState' in tempCreate && isUnsentQueueEntry(tempCreate)) {
+        parentEntityKeys.push(...getClientIdCreatedEntityKeys(tempCreate));
+      }
+    }
 
-        for (const queueEntry of descendants.queueEntries) {
-          descendantQueueEntries.set(queueEntry.id, queueEntry);
+    for (const entityKey of parentEntityKeys) {
+      const descendants = collectTempCreateDescendants({
+        parentEntityKey: entityKey,
+      });
+
+      for (const queueEntry of descendants.queueEntries) {
+        if (descendantQueueEntries.has(queueEntry.id)) continue;
+        descendantQueueEntries.set(queueEntry.id, queueEntry);
+        if (isUnsentQueueEntry(queueEntry)) {
+          parentEntityKeys.push(...getClientIdCreatedEntityKeys(queueEntry));
         }
-        for (const resolution of descendants.resolutions) {
-          descendantResolutions.set(resolution.id, resolution);
-        }
+      }
+      for (const resolution of descendants.resolutions) {
+        descendantResolutions.set(resolution.id, resolution);
       }
     }
 
@@ -2882,7 +2912,10 @@ export function createOfflineStoreController<
 
       rollbackTempCreatePendingEntity(workItem);
       for (const tempId of workItem.tempIds) {
-        cancelledTempIds.add(serializePayload(tempId));
+        // A key independent of the property order of object payloads: the
+        // other stores match it against the refs their `cancelledWith`
+        // builds.
+        cancelledTempIds.add(getCompositeKey(tempId));
       }
     }
 
@@ -2955,9 +2988,7 @@ export function createOfflineStoreController<
         externalEntityRefs.some(
           (externalEntityRef) =>
             externalEntityRef.storeName === sourceStoreName &&
-            serializedTempIds.has(
-              serializePayload(externalEntityRef.entityRef),
-            ),
+            serializedTempIds.has(getCompositeKey(externalEntityRef.entityRef)),
         )
       );
     }
@@ -3444,17 +3475,24 @@ export function createOfflineStoreController<
               : undefined,
           updatedAt: now,
         };
-        workingQueue.set(nextEntry.id, nextEntry);
 
-        return {
-          operationName,
-          validatedInput,
-          tempIds,
-          pendingEntities,
-          nextEntry,
-          removedEntries: [existingEntry],
-          accumulatedEntry: existingEntry,
-        };
+        // Merged work held behind a temp creation would leave the existing
+        // entry queued with its old input, and replay that input again after
+        // the later edits once the creation is retried: only the incoming
+        // mutation is held, in a fresh entry.
+        if (!isHeldBehindTempCreateResolution(nextEntry)) {
+          workingQueue.set(nextEntry.id, nextEntry);
+
+          return {
+            operationName,
+            validatedInput,
+            tempIds,
+            pendingEntities,
+            nextEntry,
+            removedEntries: [existingEntry],
+            accumulatedEntry: existingEntry,
+          };
+        }
       }
     }
 

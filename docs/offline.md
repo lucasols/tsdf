@@ -221,7 +221,7 @@ addComment: {
 },
 ```
 
-When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. `cancelledWith` only drives this cleanup: it does not delay replay or rewrite the input when the task gets its server id, and it only reaches stores that are instantiated when the cancellation happens.
+When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, with the work queued on it. `cancelledWith` only drives this cleanup: it does not delay replay or rewrite the input when the task gets its server id, and it only reaches stores that are instantiated when the cancellation happens.
 
 ## Conflict Resolution
 

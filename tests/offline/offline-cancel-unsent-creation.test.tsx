@@ -74,6 +74,8 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 type TaskRow = { id: number; name: string; parentId?: string };
+type TaskPatch = { itemId: string; name?: string; parentId?: string };
+
 type TasksOperations = {
   createTask: ListQueryOfflineOperationDefinition<
     TaskRow,
@@ -112,7 +114,15 @@ type TasksOperations = {
     { itemId: string; parentId: string },
     unknown
   >;
+  editTask: ListQueryOfflineOperationDefinition<
+    TaskRow,
+    ListQueryParams,
+    string,
+    TaskPatch,
+    unknown
+  >;
 };
+
 type TasksEnv = ReturnType<
   typeof createListQueryStoreTestEnv<TaskRow, false, false, TasksOperations>
 >;
@@ -123,6 +133,11 @@ const taskRowSchema = rc_object({
   parentId: rc_string.optionalKey(),
 });
 const subtaskInputSchema = rc_object({ name: rc_string, parentId: rc_string });
+const taskPatchSchema = rc_object({
+  itemId: rc_string,
+  name: rc_string.optionalKey(),
+  parentId: rc_string.optionalKey(),
+});
 const tasksQuery = { tableId: 'tasks' } as const;
 
 /**
@@ -132,6 +147,8 @@ const tasksQuery = { tableId: 'tasks' } as const;
  *   server assigns `tasks||<id>` starting at 3)
  * - a subtask, or an existing task moved under another one, declares its
  *   parent task with `dependsOn`
+ * - `editTask` sends a partial change of a task (name and/or parent); the
+ *   offline edits of the same task are merged into one request
  * - deleting a task supersedes its queued edits and, when the task was
  *   created offline and never sent, cancels the creation instead of deleting
  * - the delete treats a not-found answer as success
@@ -300,6 +317,34 @@ function createTasksEnv(
               },
               onSuccessExecute: () => {},
             },
+            editTask: {
+              inputSchema: taskPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              dependsOn: ({ input }) =>
+                input.parentId === undefined ? [] : [input.parentId],
+              accumulation: {
+                // The fields the incoming edit does not change keep their
+                // queued value.
+                mergeInput: ({ existingInput, incomingInput }) => ({
+                  itemId: incomingInput.itemId,
+                  name: incomingInput.name ?? existingInput.name,
+                  parentId: incomingInput.parentId ?? existingInput.parentId,
+                }),
+              },
+              execute: async ({ input: { itemId, name, parentId } }) => {
+                // Only the fields the edit changes are sent.
+                const patch = {
+                  ...(name === undefined ? {} : { name }),
+                  ...(parentId === undefined ? {} : { parentId }),
+                };
+                sentRequests.push(
+                  `editTask ${itemId} ${JSON.stringify(patch)}`,
+                );
+                await env.serverTable.delayedUpdateItem(itemId, patch);
+              },
+              onSuccessExecute: () => {},
+            },
           },
         },
       },
@@ -372,6 +417,25 @@ function createTasksEnv(
     });
   }
 
+  function editTask(patch: TaskPatch) {
+    const { itemId, ...changes } = patch;
+    return act(async () => {
+      await env.apiStore.performMutation(itemId, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(itemId, (item) => ({
+            ...item,
+            ...changes,
+          }));
+        },
+        mutation: async () => {
+          sentRequests.push(`editTask ${itemId} ${JSON.stringify(changes)}`);
+          await env.serverTable.delayedUpdateItem(itemId, changes);
+        },
+        offline: { operation: 'editTask', input: patch },
+      });
+    });
+  }
+
   /** The app removes only the deleted row from its lists right away. */
   function deleteTask(itemId: string) {
     return act(async () => {
@@ -412,6 +476,7 @@ function createTasksEnv(
     createSubtask,
     renameTask,
     moveTask,
+    editTask,
     deleteTask,
     renderTaskList,
     /** Queued mutations of the store, in replay order. */
@@ -1270,6 +1335,12 @@ describe('items of other stores', () => {
       { itemId: string; text: string },
       unknown
     >;
+    addCommentWithId: CollectionOfflineOperationDefinition<
+      { value: CommentItem },
+      string,
+      { id: string; text: string; taskId: string },
+      unknown
+    >;
   };
   type CommentsEnv = ReturnType<
     typeof createCollectionStoreTestEnv<CommentItem, CommentsOperations>
@@ -1281,12 +1352,19 @@ describe('items of other stores', () => {
     itemId: rc_string,
     text: rc_string,
   });
+  const commentWithIdInputSchema = rc_object({
+    id: rc_string,
+    text: rc_string,
+    taskId: rc_string,
+  });
 
   /**
    * A task list plus a separate comments collection in the same offline
    * session. Comments can be added offline (temp items `temp:<text>`), also
    * to a task that was itself created offline: `cancelledWith` tells the
    * comments store which task of the tasks store a queued comment belongs to.
+   * `addCommentWithId` adds a comment whose id the app generates on the
+   * client, so it needs no temp item.
    */
   function createTasksAndCommentsEnv(sessionKey: string) {
     const tasksStoreName = `${sessionKey}-tasks`;
@@ -1357,6 +1435,24 @@ describe('items of other stores', () => {
                   });
                 },
               },
+              addCommentWithId: {
+                inputSchema: commentWithIdInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [input.id],
+                cancelledWith: ({ input }) => [
+                  { storeName: tasksStoreName, entityRef: input.taskId },
+                ],
+                execute: async ({ input: { id, text, taskId } }) => {
+                  sentRequests.push(
+                    `addCommentWithId ${id} "${text}" to ${taskId}`,
+                  );
+                  await comments.serverTable.delayedSetItem(id, {
+                    text,
+                    taskId,
+                  });
+                },
+                onSuccessExecute: () => {},
+              },
             },
           },
         },
@@ -1375,6 +1471,22 @@ describe('items of other stores', () => {
             return result;
           },
           offline: { operation: 'addComment', input: { text, taskId } },
+        });
+      });
+    }
+
+    function addCommentWithId(id: string, text: string, taskId: string) {
+      return act(async () => {
+        await comments.apiStore.performMutation(id, {
+          optimisticUpdate: () => {
+            comments.apiStore.addItemToState(id, { value: { text, taskId } });
+          },
+          mutation: () =>
+            comments.serverTable.delayedSetItem(id, { text, taskId }),
+          offline: {
+            operation: 'addCommentWithId',
+            input: { id, text, taskId },
+          },
         });
       });
     }
@@ -1423,6 +1535,7 @@ describe('items of other stores', () => {
       comments,
       sentRequests,
       addComment,
+      addCommentWithId,
       editComment,
       renderTasksAndComments,
       /** Queued mutations of both stores, in replay order. */
@@ -1521,6 +1634,60 @@ describe('items of other stores', () => {
       7.02s | Due on friday                          | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
+
+    list.unmount();
+  });
+
+  test('deleting a task created offline also drops the edits of a comment added to it with a client-generated id', async () => {
+    network.setOffline();
+    const env = createTasksAndCommentsEnv('cancel-unsent-task-with-id-comment');
+    const list = env.renderTasksAndComments();
+    await flushAllTimers();
+
+    // Offline: create a task, add a comment to it with an id generated by the
+    // app, then edit the comment.
+    await env.tasks.createTask('Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'Ask Ana about dates',
+      'temp:Plan trip',
+    );
+    await env.editComment('comments||c1', 'Ask Ana about the dates');
+
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`
+      - input: { name: 'Plan trip' }
+        operation: 'createTask'
+      - input: { id: 'comments||c1', taskId: 'temp:Plan trip', text: 'Ask Ana about dates' }
+        operation: 'addCommentWithId'
+      - input: { itemId: 'comments||c1', text: 'Ask Ana about the dates' }
+        operation: 'editComment'
+    `);
+
+    await env.tasks.deleteTask('temp:Plan trip');
+    await flushAllTimers();
+
+    // The comment is cancelled with the task. Its edit would be sent for a
+    // comment the server never gets: it is dropped with it.
+    expect(env.getSessionQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.getLocalComments(['comments||c1'])).toMatchInlineSnapshot(
+      `comments||c1: null`,
+    );
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is sent, and nothing is left for the user to resolve.
+    expect([
+      ...env.tasks.sentRequests,
+      ...env.sentRequests,
+    ]).toMatchInlineSnapshot(`[]`);
+    expect(env.comments.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
 
     list.unmount();
   });
@@ -1881,6 +2048,85 @@ describe('tasks whose creation waits for a manual decision', () => {
       17.22s | Write report, Review budget            | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
+
+    list.unmount();
+  });
+
+  test('moving a task under the waiting task holds only the move: the renames merged in the queue before and after it are not overwritten when the move is sent', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWhoseCreationKeepsFailing(
+        'merged-edit-unresolved-task-session',
+        'merged-edit-unresolved-task-store',
+      );
+
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+
+    // Offline: rename an existing task, move it under the task whose creation
+    // waits for a decision, then rename it again. The edits of a task are
+    // normally merged into one request.
+    await env.editTask({ itemId: 'tasks||1', name: 'Write draft' });
+    await env.editTask({ itemId: 'tasks||1', parentId: 'temp:Plan trip' });
+    await env.editTask({ itemId: 'tasks||1', name: 'Write final report' });
+
+    // The move cannot be sent before the waiting task exists: it waits with
+    // the creation, on its own (it leaves the name as is). The renames before
+    // and after it stay merged in the queue, without the move.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { itemId: 'tasks||1', name: 'Write final report' }
+        operation: 'editTask'
+        syncState: 'pending'
+    `);
+    expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+      .toMatchInlineSnapshot(`
+        - blocks: 1
+          error: 'connection lost'
+          input: 'name: "Plan trip"'
+          kind: 'retry-exhausted'
+          on: 'item:temp:Plan trip'
+          op: 'createTask'
+          tempIds: ['temp:Plan trip']
+        - blockedBy: 1
+          error: 'Blocked by unresolved dependency'
+          input: 'itemId: "tasks||1", name: undefined, parentId: "temp:Plan trip"'
+          kind: 'retry-exhausted'
+          on: 'item:tasks||1'
+          op: 'editTask'
+      `);
+
+    // Back online the rename is sent; then the user sends the creation again,
+    // and the move follows it with the id the server assigned.
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'editTask tasks||1 {"name":"Write final report"}'
+      - 'createTask "Plan trip"'
+      - 'editTask tasks||1 {"parentId":"tasks||3"}'
+    `);
+    // The task keeps its last name: the move does not send the earlier one
+    // again.
+    expect(pick(env.serverTable.getAll()['tasks||1'], ['name', 'parentId']))
+      .toMatchInlineSnapshot(`
+      name: 'Write final report'
+      parentId: 'tasks||3'
+    `);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 
     list.unmount();
   });
