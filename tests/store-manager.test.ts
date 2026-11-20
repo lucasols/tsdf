@@ -782,6 +782,29 @@ test('offline manager api returns empty defaults when offline is not configured'
   expect((await storeManager.loadOfflineUpload('avatar')).unwrap()).toBeNull();
   (await storeManager.deleteOfflineUpload('avatar')).unwrap();
   expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+  // There is nothing to resolve without an offline session, so a resolution
+  // action resolves to an explicit error result instead of throwing or
+  // pretending the action was applied.
+  const resolveResult = await storeManager.resolveOfflineResolution(
+    'any-resolution-id',
+    'discard',
+  );
+  expect(
+    resolveResult.ok
+      ? 'ok'
+      : {
+          code: resolveResult.error.code,
+          message: resolveResult.error.message,
+          name: resolveResult.error.name,
+          resolutionId: resolveResult.error.resolutionId,
+        },
+  ).toMatchInlineSnapshot(`
+    code: 'offline-not-configured'
+    message: '[tsdf] Offline is not configured for this manager'
+    name: 'OfflineResolutionActionError'
+    resolutionId: 'any-resolution-id'
+  `);
   expect(offlineHook.result.current).toMatchInlineSnapshot(`
     entities: []
     resolutions: []

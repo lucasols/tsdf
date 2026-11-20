@@ -111,7 +111,7 @@ const storeManager = createStoreManager({
 });
 ```
 
-Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers return `Result.err(...)` where applicable.
+Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers and `resolveOfflineResolution(...)` return `Result.err(...)` where applicable.
 
 ## Offline Status APIs
 
@@ -138,23 +138,44 @@ Runtime controls:
 - `resetOfflineRuntimeConfig()` restores the static `offlineSession` controls
 - `setForcedOfflineMode(forced)` forces the session offline (or releases it) without cutting the real connection, for testing offline flows. Returns a `Promise<Result<void, Error>>` that resolves once the flag is persisted. The flag is stored per session key, survives reloads, is shared across tabs and is reported by `getOfflineStatus().isForcedOffline`. See [Offline](./offline.md#forced-offline-mode)
 
+Resolution actions:
+
+- `resolveOfflineResolution(resolutionId, 'retry' | 'discard')` applies a generic action to any resolution of the session by delegating to the registered store that owns it, so session-wide UI does not need the store instance or the operation name
+
+```ts
+const result = await storeManager.resolveOfflineResolution(
+  resolution.id,
+  'discard',
+);
+if (!result.ok) console.warn(result.error.code, result.error.message);
+```
+
+It resolves to a `Result<void, OfflineResolutionActionError>` instead of throwing. `error.code` tells why the action was not applied: `resolution-not-found`, `store-not-registered` (the owning store was not created with this manager), `retry-not-supported` (conflict records), `resolution-blocked`, `offline-not-configured`, or `action-failed`. See [Offline](./offline.md#resolving-from-a-session-wide-ui) for details. `requeue` and `commit` stay on the owning store's `resolveOfflineResolution(...)`.
+
 ## Upload APIs
 
 When `offlineSession.uploads` is configured, the manager also owns session-scoped upload storage and resolution:
 
 ```ts
-await storeManager.saveOfflineUpload({ id: 'avatar', file });
+await storeManager.saveOfflineUpload({
+  id: 'avatar',
+  file,
+  // Optional per-upload data for the session `upload` transport.
+  metadata: { kind: 'profile', userId },
+});
 const resolved = await storeManager.resolveOfflineUpload('avatar');
 ```
 
 Upload methods:
 
-- `saveOfflineUpload({ id, file })`
-- `replaceOfflineUpload({ id, file })`
+- `saveOfflineUpload({ id, file, metadata? })`
+- `replaceOfflineUpload({ id, file, metadata? })` keeps the saved metadata unless new `metadata` is passed
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
 - `useOfflineUploads()`
+
+`metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
 
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.
