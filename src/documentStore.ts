@@ -1867,6 +1867,8 @@ export function createDocumentStore<
     id,
     reset,
     onTransportReconnect,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {

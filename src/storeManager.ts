@@ -17,13 +17,18 @@ import {
 import type {
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  OfflineResolutionGenericAction,
+  OfflineResolutionGenericActionFailure,
   OfflineResolutionRecord,
   OfflineRuntimeConfig,
   OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
 } from './persistentStorage/offline/types';
-import { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
+import {
+  defaultOfflineRuntimeConfig,
+  OfflineResolutionActionError,
+} from './persistentStorage/offline/types';
 import {
   idleUploadFile,
   missingUploadFile,
@@ -104,6 +109,26 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   getOfflineEntities: () => readonly GlobalOfflineEntity[];
   /** Returns the latest aggregated offline resolutions for this manager. */
   getOfflineResolutions: () => readonly OfflineResolutionRecord[];
+  /**
+   * Applies a generic `retry` / `discard` action to any resolution listed by
+   * `getOfflineResolutions()` / `useOfflineResolutions()`, delegating to the
+   * store that owns it. Equivalent to calling that store's
+   * `resolveOfflineResolution(id, operation, { action })`, without needing the
+   * store instance or the operation name.
+   *
+   * Failures are returned instead of thrown: when the action is not applied,
+   * the result is an `OfflineResolutionActionError` whose `code` says why
+   * (unknown id, owning store not created with this manager, `retry` on a
+   * conflict, blocked resolution, ...). `requeue` and `commit` need
+   * operation-typed input and stay on the owning store API.
+   *
+   * A record can be retried when `kind === 'retry-exhausted'`, and can be
+   * retried or discarded only while `blockedResolutionCount === 0`.
+   */
+  resolveOfflineResolution: (
+    resolutionId: string,
+    action: OfflineResolutionGenericAction,
+  ) => Promise<ResultType<void, OfflineResolutionActionError>>;
   /** Returns the latest session-scoped offline uploads for this manager. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
   /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
@@ -176,6 +201,17 @@ type RegisteredStore = {
   id: string;
   reset: () => void;
   onTransportReconnect: () => void;
+  /**
+   * Applies a generic resolution action to one of the store's own offline
+   * resolutions, returning why it was not applied. `undefined` when the store
+   * has no offline operations.
+   */
+  resolveOfflineResolution:
+    | ((
+        resolutionId: string,
+        action: OfflineResolutionGenericAction,
+      ) => Promise<OfflineResolutionGenericActionFailure | undefined>)
+    | undefined;
 };
 
 type StoreManagerRegistry = {
@@ -237,6 +273,15 @@ function createDisabledStoreManagerOfflineApi<
     getOfflineStatus,
     getOfflineEntities: () => EMPTY_OFFLINE_ENTITIES,
     getOfflineResolutions: () => EMPTY_OFFLINE_RESOLUTIONS,
+    resolveOfflineResolution: (resolutionId) =>
+      Promise.resolve(
+        Result.err(
+          new OfflineResolutionActionError(
+            'offline-not-configured',
+            resolutionId,
+          ),
+        ),
+      ),
     getOfflineUploads: () => emptyUploads,
     resolveOfflineUpload: () =>
       Promise.resolve(
@@ -316,6 +361,12 @@ export function createStoreManager<
     ? resolveTSDFLogger(options.debugLogger)
     : undefined;
   const logger = resolveTSDFLogger(options.logger ?? true);
+  const registry: StoreManagerRegistry = {
+    appVersion,
+    browserTabsPresence: undefined,
+    nextStoreRegistrationId: 0,
+    stores: new Map(),
+  };
   let resolvedOfflineSession: OfflineSession<TUploadRef> | undefined;
   if (options.offlineSession) {
     const createOfflineSessionOptions: Parameters<
@@ -348,6 +399,58 @@ export function createStoreManager<
         getOfflineEntities: () => resolvedOfflineSession.getOfflineEntities(),
         getOfflineResolutions: () =>
           resolvedOfflineSession.getOfflineResolutions(),
+        resolveOfflineResolution: async (resolutionId, action) => {
+          const storeName = resolvedOfflineSession
+            .getOfflineResolutions()
+            .find((resolution) => resolution.id === resolutionId)?.storeName;
+          if (storeName === undefined) {
+            return Result.err(
+              new OfflineResolutionActionError(
+                'resolution-not-found',
+                resolutionId,
+              ),
+            );
+          }
+
+          let resolveInStore: RegisteredStore['resolveOfflineResolution'];
+          for (const registeredStore of registry.stores.values()) {
+            if (registeredStore.id === storeName) {
+              resolveInStore = registeredStore.resolveOfflineResolution;
+              break;
+            }
+          }
+          if (!resolveInStore) {
+            return Result.err(
+              new OfflineResolutionActionError(
+                'store-not-registered',
+                resolutionId,
+                storeName,
+              ),
+            );
+          }
+
+          try {
+            const failure = await resolveInStore(resolutionId, action);
+            return failure
+              ? Result.err(
+                  new OfflineResolutionActionError(
+                    failure,
+                    resolutionId,
+                    storeName,
+                  ),
+                )
+              : Result.ok(undefined);
+          } catch (error) {
+            return Result.err(
+              new OfflineResolutionActionError(
+                'action-failed',
+                resolutionId,
+                storeName,
+                normalizeStoreManagerOfflineError(error),
+              ),
+            );
+          }
+        },
         getOfflineUploads: () => resolvedOfflineSession.getOfflineUploads(),
         resolveOfflineUpload: (id: string) =>
           resultify(
@@ -388,13 +491,6 @@ export function createStoreManager<
           resolvedOfflineSession.useOfflineUploadFile(id),
       }
     : createDisabledStoreManagerOfflineApi<TUploadRef>(options.getSessionKey);
-
-  const registry: StoreManagerRegistry = {
-    appVersion,
-    browserTabsPresence: undefined,
-    nextStoreRegistrationId: 0,
-    stores: new Map(),
-  };
 
   const storeManager: StoreManager<TUploadRef> = {
     getSessionKey: options.getSessionKey,

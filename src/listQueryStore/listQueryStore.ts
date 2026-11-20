@@ -3690,6 +3690,8 @@ export function createListQueryStore<
     id,
     reset,
     onTransportReconnect,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {

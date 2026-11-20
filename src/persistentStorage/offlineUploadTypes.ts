@@ -186,7 +186,8 @@ export type OfflineUploadTransportContext = {
   /**
    * App-defined metadata saved with this upload, for request parameters that
    * differ per upload (target kind, parent ids, ...). `undefined` when the
-   * upload was staged without metadata.
+   * upload was staged without metadata, which is always the case for files
+   * attached directly to a mutation with its `upload` option.
    *
    * The value is restored from storage, so it is typed as an unvalidated
    * JSON-safe payload: parse it (e.g. with a `runcheck` schema) before use.
