@@ -4,6 +4,7 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
+  type CollectionOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   useGlobalOfflineEntities,
@@ -25,6 +26,7 @@ import {
   getOfflineQueueEntries,
   getSortedSessionQueueSummary,
   type PatchUserOperations,
+  type UpdateValueConflictOperations,
   type UpdateValueExecuteContext,
   type UpdateValueOperations,
   userPatchSchema,
@@ -34,10 +36,13 @@ import {
   classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   collectionSchema,
+  docConflictSchema,
   docMutationInputSchema,
   docSchema,
   listQueryQueryPayloadSchema,
   parsePersistedObject,
+  resolveOfflineResolutionThroughManager,
+  summarizeResolution,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -1795,4 +1800,531 @@ test('a store initialized while an earlier shared-session replay is already in f
 
   restartedHookA.unmount();
   restartedHookB.unmount();
+});
+
+type RenameCollectionUserOperations = {
+  renameUser: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { itemId: string; name: string },
+    unknown
+  >;
+};
+
+// An app-wide "sync problems" panel lists every failed offline mutation of the
+// session. It only has the store manager, so it must be able to offer Retry /
+// Discard without importing each store and mapping `storeName` to it by hand.
+test('a session-wide sync problems panel can retry or discard failed mutations from any store through the manager', async () => {
+  network.setOffline();
+  const sessionKey = 'manager-resolution-actions';
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      network: network.config,
+      classifyRetryableFailure: (error, ctx) =>
+        classifyRetryableReplayFailure(error, ctx.phase),
+      // A single failed replay is enough to require a manual resolution.
+      replayRetry: { maxFailures: 1, intervalMs: 1 },
+    },
+  });
+
+  // Document store: the first replay fails, the replay after "retry" succeeds.
+  const updateValueExecute = vi
+    .fn<(ctx: UpdateValueExecuteContext) => Promise<{ value: number }>>()
+    .mockRejectedValueOnce(new Error('document replay failed'))
+    .mockImplementation(async ({ input }) => {
+      await docEnv.serverMock.delayedSetData(input.value);
+      return input;
+    });
+  const docEnv = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: 'manager-resolution-actions-doc',
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: updateValueExecute,
+            onSuccessExecute: ({ input }) => {
+              docEnv.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Collection store (a different store type on the same manager): every
+  // replay fails, so the user ends up discarding the rename.
+  const renameUserExecute = vi
+    .fn<
+      (ctx: {
+        input: { itemId: string; name: string };
+      }) => Promise<{ value: { name: string } }>
+    >()
+    .mockRejectedValue(new Error('rename replay failed'));
+  const collectionEnv = createCollectionStoreTestEnv<
+    { name: string },
+    RenameCollectionUserOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: 'manager-resolution-actions-users',
+      getSessionKey: () => sessionKey,
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            renameUser: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: renameUserExecute,
+              onSuccessExecute: ({ input }) => {
+                collectionEnv.apiStore.updateItemState(
+                  input.itemId,
+                  (draft) => {
+                    draft.value.name = input.name;
+                  },
+                );
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+  await Promise.resolve();
+
+  // The panel renders straight from the manager, with no reference to the
+  // stores that own each record.
+  const panelRenders = createLoggerStore();
+  const panel = renderHook(() => {
+    const resolutions = storeManager.useOfflineResolutions();
+    panelRenders.add({
+      problems: resolutions.map(
+        (resolution) =>
+          `${resolution.storeName} › ${resolution.operation} (${resolution.kind})`,
+      ),
+    });
+    return resolutions;
+  });
+
+  // Each store's own screen keeps rendering its data and sync state, so the
+  // timelines show what the user sees after each panel action.
+  const docScreen = renderHook(() => {
+    const doc = docEnv.apiStore.useDocument();
+    const entity = docEnv.apiStore.useOfflineEntities()[0];
+    docEnv.trackUIChanges(
+      `value:${doc.data?.value ?? 'null'} sync:${entity?.syncState ?? 'none'}`,
+    );
+  });
+  const usersScreen = renderHook(() => {
+    const user = collectionEnv.apiStore.useItem('users||1', {
+      selector: (item) => item?.value.name ?? null,
+    });
+    const entity = collectionEnv.apiStore.useOfflineEntities()[0];
+    collectionEnv.trackItemUI(
+      'user-1',
+      `${user.data ?? 'null'} sync:${entity?.syncState ?? 'none'}`,
+    );
+  });
+  await flushAllTimers();
+
+  // Both stores observe the disconnect before they queue work.
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  // --- Setup: queue one mutation per store while offline ---
+  await act(async () => {
+    await docEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        docEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await docEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+    await collectionEnv.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        collectionEnv.apiStore.updateItemState('users||1', (draft) => {
+          draft.value.name = 'Ada renamed';
+        });
+      },
+      mutation: async () => {
+        await collectionEnv.serverTable.delayedUpdateItem('users||1', {
+          name: 'Ada renamed',
+        });
+        return { value: { name: 'Ada renamed' } };
+      },
+      offline: {
+        operation: 'renameUser',
+        input: { itemId: 'users||1', name: 'Ada renamed' },
+      },
+    });
+  });
+
+  // --- Setup: reconnect so both replays fail and need manual resolution ---
+  panelRenders.addMark('reconnect — both replays fail');
+  docEnv.addTimelineComments('beforeNextAction', [
+    'reconnect — the replay fails once and requires manual resolution',
+  ]);
+  collectionEnv.addTimelineComments('beforeNextAction', [
+    'reconnect — the replay fails once and requires manual resolution',
+  ]);
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+    await flushAllTimers();
+    await waitForMicrotaskCondition(() => panel.result.current.length === 2);
+  });
+
+  // The panel lists the failed mutation of each store.
+  expect(
+    panel.result.current.map((resolution) => ({
+      store: resolution.storeName,
+      ...summarizeResolution(resolution),
+    })),
+  ).toMatchInlineSnapshot(`
+    - error: 'document replay failed'
+      input: 'value: 2'
+      kind: 'retry-exhausted'
+      on: 'document:document'
+      op: 'updateValue'
+      store: 'manager-resolution-actions-doc'
+    - error: 'rename replay failed'
+      input: 'itemId: "users||1", name: "Ada renamed"'
+      kind: 'retry-exhausted'
+      on: 'item:users||1'
+      op: 'renameUser'
+      store: 'manager-resolution-actions-users'
+  `);
+
+  const docResolution = panel.result.current.find(
+    (resolution) => resolution.storeName === 'manager-resolution-actions-doc',
+  );
+  const usersResolution = panel.result.current.find(
+    (resolution) => resolution.storeName === 'manager-resolution-actions-users',
+  );
+  if (!docResolution || !usersResolution) {
+    throw new Error('Expected one failed mutation per store');
+  }
+
+  // --- Action: "Retry" on the document row, using only the manager ---
+  panelRenders.addMark('user clicks Retry on the document row');
+  docEnv.addTimelineComments('beforeNextAction', [
+    'user clicks Retry in the panel — the manager requeues the mutation in its store',
+  ]);
+  const retryResult = await resolveOfflineResolutionThroughManager(
+    storeManager,
+    docResolution.id,
+    'retry',
+  );
+  await flushAllTimers();
+
+  // The action is reported as applied and the retried replay reached the server.
+  expect(retryResult).toMatchInlineSnapshot(`"ok"`);
+  expect(updateValueExecute).toHaveBeenCalledTimes(2);
+  expect(docEnv.serverMock.current).toMatchInlineSnapshot(`2`);
+  expect(docEnv.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+  // --- Action: "Discard" on the collection row, using only the manager ---
+  panelRenders.addMark('user clicks Discard on the users row');
+  collectionEnv.addTimelineComments('beforeNextAction', [
+    'user clicks Discard in the panel — the manager drops the mutation in its store',
+  ]);
+  const discardResult = await resolveOfflineResolutionThroughManager(
+    storeManager,
+    usersResolution.id,
+    'discard',
+  );
+  await flushAllTimers();
+
+  // The discarded rename is dropped for good: it is not replayed again and no
+  // offline work is left anywhere in the session.
+  expect(discardResult).toMatchInlineSnapshot(`"ok"`);
+  expect(renameUserExecute).toHaveBeenCalledTimes(1);
+  expect(panel.result.current).toMatchInlineSnapshot(`[]`);
+  expect([
+    ...docEnv.apiStore.getOfflineEntities(),
+    ...collectionEnv.apiStore.getOfflineEntities(),
+  ]).toMatchInlineSnapshot(`[]`);
+
+  // The panel went from two problems to none, one row per user action.
+  expect(panelRenders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> problems: []
+
+    >>> reconnect — both replays fail
+
+    -> problems: [manager-resolution-actions-doc › updateValue (retry-exhausted)]
+    problems: [manager-resolution-actions-doc › updateValue (retry-exhausted), manager-resolution-actions-users › renameUser (retry-exhausted)]
+
+    >>> user clicks Retry on the document row
+
+    -> problems: [manager-resolution-actions-users › renameUser (retry-exhausted)]
+
+    >>> user clicks Discard on the users row
+
+    -> problems: []
+    "
+  `);
+  // Each store went through the same flow the store-level API produces.
+  expect(docEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui                                 |
+    0     | "value:1 sync:none"                | ui-initialized
+    12s   | "value:2 sync:none"                | ui-changed
+    .     | "value:2 sync:pending"             | ui-changed
+    .     | "value:2 sync:pending"             | offline:updateValue queued
+    .     | "value:2 sync:pending"             | -- reconnect — the replay fails once and requires manual resolution
+    .     | "value:2 sync:syncing"             | ui-changed
+    .     | "value:2 sync:syncing"             | offline:updateValue replay-started
+    .     | "value:2 sync:syncing"             | offline:updateValue resolution-required
+    .     | "value:2 sync:resolution-required" | ui-changed
+    13s   | "value:2 sync:resolution-required" | -- user clicks Retry in the panel — the manager requeues the mutation in its store
+    .     | "value:2 sync:pending"             | ui-changed
+    .     | "value:2 sync:syncing"             | ui-changed
+    .     | "value:2 sync:syncing"             | offline:updateValue replay-started
+    14.2s | "value:2 sync:syncing"             | server-data-changed (value: 2)
+    .     | "value:2 sync:syncing"             | offline:updateValue replay-finished
+    .     | "value:2 sync:none"                | ui-changed
+    "
+  `);
+  expect(collectionEnv.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | user-1                               |
+    0     | Ada sync:none                        | ui-initialized
+    12s   | Ada renamed sync:none                | ui-changed
+    .     | Ada renamed sync:pending             | ui-changed
+    .     | Ada renamed sync:pending             | offline:renameUser queued
+    .     | Ada renamed sync:pending             | -- reconnect — the replay fails once and requires manual resolution
+    .     | Ada renamed sync:syncing             | ui-changed
+    .     | Ada renamed sync:syncing             | offline:renameUser replay-started
+    .     | Ada renamed sync:syncing             | offline:renameUser resolution-required
+    .     | Ada renamed sync:resolution-required | ui-changed
+    14.2s | Ada renamed sync:resolution-required | -- user clicks Discard in the panel — the manager drops the mutation in its store
+    .     | Ada renamed sync:none                | ui-changed
+    "
+  `);
+
+  panel.unmount();
+  docScreen.unmount();
+  usersScreen.unmount();
+});
+
+// Failures the panel must be able to show: the manager reports why an action
+// was not applied instead of silently doing nothing.
+test('the manager reports why a resolution action could not be applied', async () => {
+  network.setOffline();
+  const sessionKey = 'manager-resolution-action-errors';
+  const offlineSessionConfig: OfflineSessionConfig = {
+    network: network.config,
+  };
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: offlineSessionConfig,
+  });
+  const execute = vi.fn(({ input }: { input: { value: number } }) =>
+    env.serverMock.delayedSetData(input.value).then(() => input),
+  );
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      id: 'manager-resolution-action-errors-doc',
+      getSessionKey: () => sessionKey,
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              execute,
+              conflictHandling: {
+                schema: docConflictSchema,
+                // Every replay is stopped as a conflict before execute runs.
+                detectConflict: () => ({ reason: 'server-changed' }),
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // The session-wide panel and the document's own screen.
+  const panel = renderHook(() => storeManager.useOfflineResolutions());
+  const screen = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    const entity = env.apiStore.useOfflineEntities()[0];
+    env.trackUIChanges(
+      `value:${doc.data?.value ?? 'null'} sync:${entity?.syncState ?? 'none'}`,
+    );
+  });
+
+  // --- Setup: an offline edit that becomes a conflict record on reconnect ---
+  await act(async () => {
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await env.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+  });
+  env.addTimelineComments('beforeNextAction', [
+    'reconnect — the replay is stopped as a conflict before execute runs',
+  ]);
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+    await flushAllTimers();
+  });
+
+  const [conflict] = panel.result.current;
+  if (!conflict) throw new Error('Expected a conflict resolution record');
+  expect(summarizeResolution(conflict)).toMatchInlineSnapshot(`
+    input: 'value: 2'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
+    reason: 'server-changed'
+  `);
+
+  // --- Unknown id: e.g. a stale row that was already resolved elsewhere ---
+  expect(
+    await resolveOfflineResolutionThroughManager(
+      storeManager,
+      'already-resolved-id',
+      'discard',
+    ),
+  ).toMatchInlineSnapshot(`
+    error: 'resolution-not-found'
+    message: '[tsdf] Offline resolution not found in the active session'
+  `);
+
+  // --- Retry on a conflict: a conflict is not a failed attempt that can be
+  // sent again as-is. Besides `discard`, it is resolved with `requeue` /
+  // `commit`, which need operation-typed input and stay on the store API ---
+  expect(
+    await resolveOfflineResolutionThroughManager(
+      storeManager,
+      conflict.id,
+      'retry',
+    ),
+  ).toMatchInlineSnapshot(`
+    error: 'retry-not-supported'
+    message: '[tsdf] Only retry-exhausted offline resolutions can be retried'
+    storeName: 'manager-resolution-action-errors-doc'
+  `);
+
+  // --- Owning store not created with this manager: resolutions are shared by
+  // the whole session, so a manager that did not create the store can list a
+  // record it cannot act on (in production: a tab that has not created that
+  // store, since tabs share the session's resolutions) ---
+  const panelOnlyManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: offlineSessionConfig,
+  });
+  const panelOnlyResolutions = renderHook(() =>
+    panelOnlyManager.useOfflineResolutions(),
+  );
+  // The second manager lists the conflict even though it never created the
+  // store that owns it.
+  expect(
+    panelOnlyResolutions.result.current.map((resolution) => ({
+      store: resolution.storeName,
+      ...summarizeResolution(resolution),
+    })),
+  ).toMatchInlineSnapshot(`
+    - input: 'value: 2'
+      kind: 'conflict'
+      on: 'document:document'
+      op: 'updateValue'
+      reason: 'server-changed'
+      store: 'manager-resolution-action-errors-doc'
+  `);
+  expect(
+    await resolveOfflineResolutionThroughManager(
+      panelOnlyManager,
+      conflict.id,
+      'discard',
+    ),
+  ).toMatchInlineSnapshot(`
+    error: 'store-not-registered'
+    message: '[tsdf] The store that owns this offline resolution is not registered in this manager'
+    storeName: 'manager-resolution-action-errors-doc'
+  `);
+
+  // None of the rejected actions touched the record or replayed the mutation.
+  expect(panel.result.current).toHaveLength(1);
+  expect(panel.result.current[0]).toEqual(conflict);
+  expect(execute).not.toHaveBeenCalled();
+
+  // --- The generic action a conflict does support still works ---
+  env.addTimelineComments('beforeNextAction', [
+    'the rejected actions above left no trace — discard through the manager drops the conflict',
+  ]);
+  const discardResult = await resolveOfflineResolutionThroughManager(
+    storeManager,
+    conflict.id,
+    'discard',
+  );
+  await flushAllTimers();
+
+  expect(discardResult).toMatchInlineSnapshot(`"ok"`);
+  expect(panel.result.current).toMatchInlineSnapshot(`[]`);
+  expect(panelOnlyResolutions.result.current).toMatchInlineSnapshot(`[]`);
+  expect(execute).not.toHaveBeenCalled();
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui                                 |
+    0     | "value:1 sync:none"                | ui-initialized
+    .     | "value:2 sync:none"                | ui-changed
+    .     | "value:2 sync:pending"             | ui-changed
+    .     | "value:2 sync:pending"             | offline:updateValue queued
+    .     | "value:2 sync:pending"             | -- reconnect — the replay is stopped as a conflict before execute runs
+    .     | "value:2 sync:syncing"             | ui-changed
+    .     | "value:2 sync:syncing"             | offline:updateValue resolution-required
+    .     | "value:2 sync:resolution-required" | ui-changed
+    10ms  | "value:2 sync:resolution-required" | 🔴 >fetch-started
+    810ms | "value:2 sync:resolution-required" | 🔴 <fetch-finished (value: 1)
+    .     | "value:1 sync:resolution-required" | ui-changed
+    12s   | "value:1 sync:resolution-required" | -- the rejected actions above left no trace — discard through the manager drops the conflict
+    .     | "value:1 sync:none"                | ui-changed
+    "
+  `);
+
+  panel.unmount();
+  screen.unmount();
+  panelOnlyResolutions.unmount();
 });
