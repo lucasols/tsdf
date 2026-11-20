@@ -538,9 +538,9 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
-async function iterateCursor<T>(
-  request: IDBRequest<IDBCursorWithValue | null>,
-  callback: (cursor: IDBCursorWithValue) => T | Promise<T>,
+async function iterateCursor<TCursor extends IDBCursor, T>(
+  request: IDBRequest<TCursor | null>,
+  callback: (cursor: TCursor) => T | Promise<T>,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     request.onerror = () =>
@@ -669,12 +669,14 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   readonly #instrumentation: IndexedDbDriverInstrumentation | undefined;
 
   readonly databaseName: string;
+  readonly storageId: string;
 
   constructor(
     databaseName: string = DEFAULT_INDEXED_DB_NAME,
     instrumentation: IndexedDbDriverInstrumentation | undefined = undefined,
   ) {
     this.databaseName = databaseName;
+    this.storageId = `indexedDb:${databaseName}`;
     this.#instrumentation = instrumentation;
   }
 
@@ -858,19 +860,20 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       INDEXED_DB_NAMESPACE_POLICY_STORE,
     );
     const discoveredScopes: AsyncStorageDiscoveredScope[] = [];
+    // Only primary keys are read, so key cursors skip loading the values
     const policyRequest =
       sessionKey === undefined
-        ? policyStore.openCursor()
+        ? policyStore.openKeyCursor()
         : policyStore
             .index('bySession')
-            .openCursor(IDBKeyRange.only(sessionKey));
+            .openKeyCursor(IDBKeyRange.only(sessionKey));
     await iterateCursor(policyRequest, async (cursor) => {
       const scope = getScopeFromPrimaryKey(cursor.primaryKey);
       if (scope === null) return;
       const keys = new Set<string>([ASYNC_NAMESPACE_INDEX_RECORD_KEY]);
 
       await iterateCursor(
-        entryStore.openCursor(createScopeKeyRange(scope)),
+        entryStore.openKeyCursor(createScopeKeyRange(scope)),
         (entryCursor) => {
           const entryKey = getEntryKeyFromPrimaryKey(entryCursor.primaryKey);
           if (entryKey === null) return;
