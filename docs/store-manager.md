@@ -156,18 +156,25 @@ It resolves to a `Result<void, OfflineResolutionActionError>` instead of throwin
 When `offlineSession.uploads` is configured, the manager also owns session-scoped upload storage and resolution:
 
 ```ts
-await storeManager.saveOfflineUpload({ id: 'avatar', file });
+await storeManager.saveOfflineUpload({
+  id: 'avatar',
+  file,
+  // Optional per-upload data for the session `upload` transport.
+  metadata: { kind: 'profile', userId },
+});
 const resolved = await storeManager.resolveOfflineUpload('avatar');
 ```
 
 Upload methods:
 
-- `saveOfflineUpload({ id, file })`
-- `replaceOfflineUpload({ id, file })`
+- `saveOfflineUpload({ id, file, metadata? })`
+- `replaceOfflineUpload({ id, file, metadata? })` keeps the saved metadata unless new `metadata` is passed
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
 - `resolveOfflineUpload(id)`
 - `resolveOfflineUploads(ids)`
 - `useOfflineUploads()`
+
+`metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
 
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.
