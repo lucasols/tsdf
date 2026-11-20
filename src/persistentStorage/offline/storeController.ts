@@ -103,10 +103,11 @@ type OfflineStoreAdapter = {
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
   }) => void;
   /**
-   * Another tab reconciled a temp entity of the store. The item data arrives
-   * through the store's tab sync, so this only notifies the store's listeners.
+   * Another tab reconciled a temp entity of the store. The final item's data
+   * arrives through the store's tab sync; this applies what only this tab
+   * knows (like where the temp item sits in its lists) and notifies listeners.
    */
-  emitTempEntityReconciled?: (
+  applyTempReconciliationFromAnotherTab?: (
     tempId: ValidPayload,
     finalPayload: ValidPayload,
   ) => void;
@@ -1028,9 +1029,13 @@ export function createOfflineStoreController<
       },
       onRemoteTempReconciled: (tempId, finalPayload) => {
         // The replaying tab already rewrote and broadcast the queued records
-        // that referenced the temp entity; this tab only maps the temp payload
+        // that referenced the temp entity; this tab maps the temp payload and
+        // replaces its own copy of the temp entity
         rememberResolvedEntityRef(tempId, finalPayload);
-        storeAdapter.emitTempEntityReconciled?.(tempId, finalPayload);
+        storeAdapter.applyTempReconciliationFromAnotherTab?.(
+          tempId,
+          finalPayload,
+        );
       },
     });
 
@@ -1097,14 +1102,18 @@ export function createOfflineStoreController<
    * so the leader replays entries queued by any tab and every tab stops
    * showing (and can never replay) an entry another tab already replayed.
    */
-  function applyRecordChangeFromAnotherTab(applyChange: () => void): void {
+  function applyRecordChangeFromAnotherTab(
+    applyChange: () => void,
+    changeSession: ActiveSessionState | null = activeSession,
+  ): void {
     const current = activeSession;
-    if (!current) return;
+    // A change deferred behind hydration belongs to the session it came from
+    if (!current || current !== changeSession) return;
 
     if (hydratedPromise) {
       // The hydration in flight may have read the records before the change
       const applyAfterHydration = (): void => {
-        applyRecordChangeFromAnotherTab(applyChange);
+        applyRecordChangeFromAnotherTab(applyChange, current);
       };
       void hydratedPromise.then(applyAfterHydration, applyAfterHydration);
       return;
@@ -2185,6 +2194,13 @@ export function createOfflineStoreController<
         args.result,
         tempId,
       );
+      // Sent first so the other tabs move the temp item before the store's
+      // tab sync tells them it was deleted
+      args.current.session.publishTempReconciled(
+        storeName,
+        tempId,
+        reconciliation.finalPayload,
+      );
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,
@@ -2192,11 +2208,6 @@ export function createOfflineStoreController<
         result: args.result,
         reconciliation,
       });
-      args.current.session.publishTempReconciled(
-        storeName,
-        tempId,
-        reconciliation.finalPayload,
-      );
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
         entryIdToSkip: args.entryIdToSkip,
@@ -2226,6 +2237,11 @@ export function createOfflineStoreController<
     });
 
     for (const reconciliation of reconciliations) {
+      args.current.session.publishTempReconciled(
+        storeName,
+        reconciliation.tempId,
+        reconciliation.finalPayload,
+      );
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,
@@ -2233,11 +2249,6 @@ export function createOfflineStoreController<
         result: args.result,
         reconciliation,
       });
-      args.current.session.publishTempReconciled(
-        storeName,
-        reconciliation.tempId,
-        reconciliation.finalPayload,
-      );
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
         entryIdToSkip: args.entryIdToSkip,

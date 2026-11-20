@@ -10,10 +10,12 @@ import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { getOpfsDirTree } from '../utils/persistentStorageOptimizationTestUtils';
-import type {
-  CreateUserOperations,
-  UpdateValueConflictOperations,
-  UpdateValueOperations,
+import {
+  type CreateListQueryUserOperations,
+  type CreateUserOperations,
+  type UpdateValueConflictOperations,
+  type UpdateValueOperations,
+  userRowSchema,
 } from './offlineReplayTestShared';
 import {
   collectionCreateInputSchema,
@@ -21,6 +23,7 @@ import {
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
+  listQueryQueryPayloadSchema,
 } from './offlineTestShared';
 
 /**
@@ -121,6 +124,10 @@ let network = createOfflineNetworkMock();
 let serverCalls: string[] = [];
 let sharedServer = createSharedServerMockState(1);
 let sharedUsersServer = createSharedServerTableState<{ name: string }>({});
+let sharedUserRowsServer = createSharedServerTableState<{
+  id: number;
+  name: string;
+}>({});
 const openTabs: Array<{ close: () => void }> = [];
 
 beforeEach(() => {
@@ -139,6 +146,9 @@ beforeEach(() => {
   serverCalls = [];
   sharedServer = createSharedServerMockState(1);
   sharedUsersServer = createSharedServerTableState({});
+  sharedUserRowsServer = createSharedServerTableState({
+    'users||1': { id: 1, name: 'Grace' },
+  });
   localStorage.clear();
 });
 
@@ -494,6 +504,128 @@ async function openUsersTab(name: string, options: { focused: boolean }) {
         mutation: async () => {
           const result = { id: `users||${userName}`, name: userName };
           await env.serverTable.delayedSetItem(result.id, { name: userName });
+          return result;
+        },
+        offline: { operation: 'createUser', input: { name: userName } },
+      });
+      await advanceTime(10);
+    },
+    close() {
+      env.apiStore.dispose();
+      sessionModule.__resetSessionOfflineCoordinatorRegistryForTests();
+      const index = openTabs.indexOf(tab);
+      if (index >= 0) openTabs.splice(index, 1);
+    },
+  };
+  openTabs.push(tab);
+  await advanceTime(50);
+  return tab;
+}
+
+const usersListQuery = { tableId: 'users' } as const;
+
+/**
+ * Opens a simulated tab (see `openTab`) with a users list-query store whose
+ * offline `createUser` operation lists the new user under a temp id
+ * (`temp:<name>`) until the server assigns its final id (`users||<id>`). With
+ * `listOpen` the tab shows the users list; otherwise it is on another screen.
+ */
+async function openUsersListTab(
+  name: string,
+  options: { focused: boolean; listOpen: boolean },
+) {
+  setDocumentHidden(!options.focused);
+  vi.resetModules();
+  const [
+    { createStoreManager },
+    { createListQueryStoreTestEnv },
+    sessionModule,
+  ] = await Promise.all([
+    import('../../src/storeManager'),
+    import('../mocks/listQueryStoreTestEnv'),
+    import('../../src/persistentStorage/offline/sessionCoordinator'),
+  ]);
+
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+  });
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    CreateListQueryUserOperations
+  >(
+    {},
+    {
+      id: 'users-list',
+      getSessionKey: () => sessionKey,
+      storeManager,
+      sharedServerTableState: sharedUserRowsServer,
+      testScenario: options.listOpen
+        ? { loaded: { queries: [usersListQuery] } }
+        : 'idle',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent create ${input.name}`);
+                const result = { id: 2, name: input.name };
+                await env.serverTable.delayedSetItem('users||2', result);
+                return result;
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const tab = {
+    name,
+    storeManager,
+    /** The rows the users list shows, like `Ada (temp id)`. */
+    getListRows() {
+      const query = env.apiStore.getQueryState(usersListQuery);
+      return (query?.items ?? []).map((itemKey) => {
+        const user = env.store.state.items[itemKey];
+        if (!user) return '<missing row>';
+        return user.id < 0
+          ? `${user.name} (temp id)`
+          : `${user.name} (id ${user.id})`;
+      });
+    },
+    /** Creates a user from the list's "new user" form in this tab. */
+    async queueCreate(userName: string) {
+      await env.apiStore.performMutation(`temp:${userName}`, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            `temp:${userName}`,
+            { id: -1, name: userName },
+            {
+              addItemToQueries: { queries: [usersListQuery], appendTo: 'end' },
+            },
+          );
+        },
+        mutation: async () => {
+          const result = { id: 2, name: userName };
+          await env.serverTable.delayedSetItem('users||2', result);
           return result;
         },
         offline: { operation: 'createUser', input: { name: userName } },
@@ -966,6 +1098,43 @@ test('the tab that created an item offline learns its final id when another tab 
     final: 'Ada'
     temp: null
   `);
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: []
+      leader: '✅'
+      resolutions: []
+
+    tab B:
+      entities: []
+      leader: '❌'
+      resolutions: []
+  `);
+});
+
+test('a user created offline stays in the list of its tab when a tab on another screen sends it', async () => {
+  network.setOffline();
+  // Tab A leads but is on another screen: it never loaded the users list
+  const tabA = await openUsersListTab('A', { focused: true, listOpen: false });
+  const tabB = await openUsersListTab('B', { focused: false, listOpen: true });
+  await blurWindow();
+
+  // While offline the user adds "Ada" from the users list in tab B
+  await tabB.queueCreate('Ada');
+  expect(tabB.getListRows()).toMatchInlineSnapshot(
+    `['Grace (id 1)', 'Ada (temp id)']`,
+  );
+
+  // The user switches to tab A, which sends tab B's creation on reconnect
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(`['tab A sent create Ada']`);
+
+  // Ada stays in tab B's list, at the same position, under her final id.
+  // Tab A had no list to move her in, so tab B moves its own row.
+  expect(tabB.getListRows()).toMatchInlineSnapshot(
+    `['Grace (id 1)', 'Ada (id 2)']`,
+  );
   expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
     tab A:
       entities: []

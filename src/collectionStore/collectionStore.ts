@@ -1161,7 +1161,7 @@ export function createCollectionStore<
                 finalPayload,
               });
             },
-            emitTempEntityReconciled: (tempId, finalPayload) => {
+            applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
               storeEvents.emit('tempEntityReconciled', {
                 // WORKAROUND: Offline temp ids and final payloads are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when notifying listeners.
                 tempId: __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
