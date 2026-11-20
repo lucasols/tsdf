@@ -1130,10 +1130,8 @@ test('when list query hooks request fields that are not cached while offline, th
 
   // Recovering refetches the query without a remount, now with every field
   // the mounted lists need.
-  // While that refetch is in flight the lists with missing fields report
-  // `success` with no items instead of `loading`. That is not an offline
-  // behavior: a list requesting fields that are not loaded yet does the same
-  // when it mounts online (the persisted fallback of the query is used).
+  // While that refetch is in flight the lists with missing fields stay
+  // `loading` with their items hidden, as they would online.
   renders.addMark('back online');
   act(() => {
     network.goOnline();
@@ -1152,8 +1150,8 @@ test('when list query hooks request fields that are not cached while offline, th
 
     ┌─
     ⋅ cachedFields: refetching ([{"name":"Ada"}]) error: null
-    ⋅ uncachedFields: success ([]) error: null
-    ⋅ allFields: success ([]) error: null
+    ⋅ uncachedFields: loading ([]) error: null
+    ⋅ allFields: loading ([]) error: null
     └─
     ┌─
     ⋅ cachedFields: success ([{"name":"Ada"}]) error: null

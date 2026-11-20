@@ -1640,6 +1640,12 @@ describe('offline fetching scenarios', () => {
       ⋅ uncachedItem: loading (no data) error: null
       └─
       ┌─
+      ⋅ cachedQuery: loading [] error: null
+      ⋅ uncachedQuery: loading [] error: null
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: loading (no data) error: null
+      └─
+      ┌─
       ⋅ cachedQuery: success [Ada (cached)] error: null
       ⋅ uncachedQuery: loading [] error: null
       ⋅ cachedItem: success (Ada (cached)) error: null
