@@ -107,9 +107,13 @@ type OfflineStoreAdapter = {
    * them back to, so the store refetches the entities from the server.
    * `payload` is the item payload the operation referenced, if any: the
    * store may have no state left to read it from (an item deleted locally).
+   * `hasPendingResolutions` is `true` while other changes of the store still
+   * wait for a manual resolution: a broad refetch (e.g. of lists) would
+   * replace them, so the store should limit itself to the discarded entities.
    */
   revalidateDiscardedEntities?: (
     entities: (OfflineEntityRef & { payload: ValidPayload | undefined })[],
+    hasPendingResolutions: boolean,
   ) => void;
 };
 
@@ -2565,7 +2569,7 @@ export function createOfflineStoreController<
 
     if (entities.length === 0) return;
 
-    storeAdapter.revalidateDiscardedEntities?.(entities);
+    storeAdapter.revalidateDiscardedEntities?.(entities, resolutions.size > 0);
   }
 
   function collectRetryResolutionChain(args: {

@@ -2328,15 +2328,18 @@ export function createListQueryStore<
 
           rebindOfflineOverlays(itemKeyRewrites);
         },
-        revalidateDiscardedEntities: (entities) => {
-          // Queries too: the discarded change may have removed the item from
-          // lists (a delete) or moved it between them.
+        revalidateDiscardedEntities: (entities, hasPendingResolutions) => {
           invalidateQueryAndItems({
             itemPayload: filterAndMap(
               entities,
               (ref) => store.state.itemQueries[ref.entityKey]?.payload ?? false,
             ),
-            queryPayload: () => true,
+            // Queries too: the discarded change may have removed the item
+            // from lists (a delete) or moved it between them. Unless other
+            // changes of the store still wait for a decision: refetched lists
+            // would replace them. The recovery revalidation refreshes the
+            // lists once the last one is handled.
+            queryPayload: hasPendingResolutions ? false : () => true,
             type: 'highPriority',
           });
 

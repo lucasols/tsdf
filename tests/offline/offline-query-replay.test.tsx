@@ -2368,13 +2368,13 @@ test('discarding failed offline changes puts the rows back to what the server ha
   }
 
   // Discard the rename. Nothing can roll the optimistic rename back, so the
-  // store refetches what the discarded change touched: the item and the lists
-  // (a discarded change may also have moved or removed the row). Ada shows the
-  // server name again even though the store still has an unresolved change.
-  // Grace is listed again too: her delete never reached the server, and a
-  // change waiting for a decision is not kept applied over fresh server data.
+  // store refetches what the discarded change touched. The lists are not
+  // refetched yet: Grace's delete still waits for a decision, and refetched
+  // lists would bring her back while the user still has to decide on her
+  // delete. Only Ada's item would be refetched, and no screen shows it outside
+  // of the list, so the row keeps the renamed value for now.
   env.addTimelineComments('beforeNextAction', [
-    'discard the rename: the list is refetched and shows the server rows',
+    'discard the rename: no refetch while the delete waits for a decision',
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
@@ -2385,10 +2385,14 @@ test('discarding failed offline changes puts the rows back to what the server ha
   });
   await flushAllTimers();
 
-  // Discard the delete: Grace stays listed, and with nothing left to
-  // resolve the store revalidates once more.
+  // Grace is still hidden while her delete waits for a decision.
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada renamed']`);
+
+  // Discard the delete: with nothing left to resolve the store revalidates
+  // its lists, which puts both rows back to what the server has. Grace, deleted
+  // locally, is also fetched for screens that show only her.
   env.addTimelineComments('beforeNextAction', [
-    'discard the delete: Grace stays listed',
+    'discard the delete: the lists are refetched and show the server rows',
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
@@ -2404,11 +2408,11 @@ test('discarding failed offline changes puts the rows back to what the server ha
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time   | rows               |
-    0      | Ada, Grace         | ui-initialized
+    0      | Ada, Grace         | [rows] ui-initialized
     3.01s  | Ada, Grace         | -- offline: rename Ada and delete Grace
-    .      | Ada renamed, Grace | ui-changed
+    .      | Ada renamed, Grace | [rows] ui-changed
     .      | Ada renamed, Grace | offline:patchUserName queued
-    .      | Ada renamed        | ui-changed
+    .      | Ada renamed        | [rows] ui-changed
     .      | Ada renamed        | offline:deleteUser queued
     .      | Ada renamed        | -- back online: the server rejects both changes until they need a resolution
     .      | Ada renamed        | offline:patchUserName replay-started
@@ -2419,13 +2423,13 @@ test('discarding failed offline changes puts the rows back to what the server ha
     18.01s | Ada renamed        | offline:deleteUser replay-started
     23.01s | Ada renamed        | offline:deleteUser replay-started
     .      | Ada renamed        | offline:deleteUser resolution-required
-    33.02s | Ada renamed        | -- discard the rename: the list is refetched and shows the server rows
+    34.02s | Ada renamed        | -- discard the rename: no refetch while the delete waits for a decision
+    .      | Ada renamed        | -- discard the delete: the lists are refetched and show the server rows
     .      | Ada renamed        | 🔴 >list-fetch-started
-    33.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
-    .      | Ada, Grace         | ui-changed
-    34.83s | Ada, Grace         | -- discard the delete: Grace stays listed
-    .      | Ada, Grace         | 🟠 >list-fetch-started
-    35.63s | Ada, Grace         | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Ada renamed        | 🟠 [users||2] >fetch-started
+    34.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
+    .      | Ada, Grace         | [rows] ui-changed
+    .      | Ada, Grace         | 🟠 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
     "
   `);
 
