@@ -93,7 +93,7 @@ type TasksOperations = {
     ListQueryParams,
     string,
     { name: string; parentId: string },
-    unknown,
+    { reason: string },
     TaskRow
   >;
   createSubtaskWithId: ListQueryOfflineOperationDefinition<
@@ -164,9 +164,9 @@ export const tasksQuery = { tableId: 'tasks' } as const;
  *   parent task with `dependsOn`
  * - `createSubtaskWithId` creates a subtask whose id (`tasks||<id>`) the app
  *   generates on the client, so it needs no temp row
- * - when `conflicts.createTask` is set, the replay of a task creation reports
- *   a conflict (the server already has a task with that name) instead of
- *   sending it
+ * - when `conflicts.createTask` (or `conflicts.createSubtask`) is set, the
+ *   replay of a task (or subtask) creation reports a conflict (the server
+ *   already has a task with that name) instead of sending it
  * - `editTask` sends a partial change of a task (name and/or parent); the
  *   offline edits of the same task are merged into one request
  * - deleting a task supersedes its queued edits and, when the task was
@@ -187,7 +187,7 @@ export function createTasksEnv(
     createTask: [],
     deleteTask: [],
   };
-  const conflicts = { createTask: false };
+  const conflicts = { createTask: false, createSubtask: false };
 
   async function createOnServer(input: { name: string; parentId?: string }) {
     const result: TaskRow = { id: nextTaskId, ...input };
@@ -265,6 +265,11 @@ export function createTasksEnv(
                   finalPayload: `tasks||${result.id}`,
                   finalData: result,
                 }),
+              },
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () =>
+                  conflicts.createSubtask ? { reason: 'name-taken' } : false,
               },
               execute: ({ input }) => {
                 sentRequests.push(

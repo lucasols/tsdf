@@ -520,7 +520,9 @@ export type ItemOfflineState = {
   /**
    * Whether the creation of an unsent creation left the "never sent" state:
    * it is being sent, failed with an unknown outcome, or waits for a manual
-   * resolution, so the server may have the item. While `isUnsentCreation` is
+   * resolution, so the server may have the item. A creation only held behind
+   * the creation of another entity that waits for a resolution was never
+   * sent, so it stays `false`. While `isUnsentCreation` is
    * `true` and this is `false`, the item only exists locally: deleting it
    * with an operation that cancels pending creations (see
    * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends

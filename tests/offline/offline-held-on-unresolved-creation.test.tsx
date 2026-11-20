@@ -517,6 +517,49 @@ describe('tasks whose creation waits for a manual decision', () => {
 
     list.unmount();
   });
+
+  test('a subtask added to the waiting task reports its creation as never sent, and deleting it sends nothing', async () => {
+    const { env, list } = await createTaskWhoseCreationKeepsFailing(
+      'delete-held-subtask-session',
+      'delete-held-subtask-store',
+    );
+
+    // The subtask creation waits behind the creation of its parent: it was
+    // never sent, so the app can treat deleting it as a local-only change.
+    await env.createSubtask('Book flights', 'temp:Plan trip');
+    await flushAllTimers();
+    expect(env.apiStore.getItemOfflineState('temp:Book flights'))
+      .toMatchInlineSnapshot(`
+      creationAttempted: '❌'
+      isUnsentCreation: '✅'
+      pendingMutations: 0
+      requiresResolution: '✅'
+      syncState: 'resolution-required'
+    `);
+
+    // Deleting it cancels the creation: nothing is sent for the subtask, and
+    // only the decision about "Plan trip" is left.
+    await env.deleteTask('temp:Book flights');
+    await flushAllTimers();
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createTask "Plan trip"', 'createTask "Plan trip"', 'createTask "Plan trip"']`,
+    );
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['kind', 'op', 'tempIds']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - kind: 'retry-exhausted'
+        op: 'createTask'
+        tempIds: ['temp:Plan trip']
+    `);
+    expect(list.result.current.items).not.toContain('Book flights');
+
+    list.unmount();
+  });
 });
 
 describe('tasks whose creation waits for a conflict decision', () => {
@@ -689,6 +732,90 @@ describe('tasks whose creation waits for a conflict decision', () => {
     expect(env.sentRequests).toMatchInlineSnapshot(
       `['createTask "Plan trip"', 'moveTask tasks||9 under tasks||3']`,
     );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a rename of a subtask whose creation the user sends again under a task still waiting for a decision keeps waiting for that task', async () => {
+    // Offline, the user creates a task that will fail on every attempt (3),
+    // a second task with a subtask, and renames the subtask.
+    network.setOffline();
+    const env = createTasksEnv(
+      'requeue-under-held',
+      'requeue-under-held-tasks',
+    );
+    await env.createTask('Holidays');
+    await env.createTask('Plan trip');
+    await env.createSubtask('Book flights', 'temp:Plan trip');
+    await env.renameTask('temp:Book flights', 'Book cheap flights');
+
+    // On reconnect "Holidays" never gets through and asks for a decision,
+    // "Plan trip" is created, and the server reports a conflict for the
+    // subtask: its rename waits behind that conflict.
+    env.faults.createTask.push('request-lost', 'request-lost', 'request-lost');
+    env.conflicts.createSubtask = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createSubtask = false;
+
+    const resolutions = env.apiStore.getOfflineResolutions();
+    const failedHolidays = resolutions.find(
+      (resolution) => resolution.kind === 'retry-exhausted',
+    );
+    const subtaskConflict = resolutions.find(
+      (resolution) => resolution.kind === 'conflict',
+    );
+    if (!failedHolidays || !subtaskConflict) {
+      throw new Error('Expected the failed creation and the subtask conflict');
+    }
+
+    // The user creates the subtask anyway, under "Holidays" instead. That
+    // creation cannot be sent before "Holidays" exists: it waits for it.
+    env.sentRequests.length = 0;
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        subtaskConflict.id,
+        'createSubtask',
+        {
+          action: 'requeue',
+          input: { name: 'Book flights', parentId: 'temp:Holidays' },
+        },
+      );
+    });
+    await flushAllTimers();
+
+    // The rename is not sent with the temporary id of the subtask: it keeps
+    // waiting with the subtask creation, behind "Holidays".
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['kind', 'op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - { kind: 'retry-exhausted', op: 'createTask' }
+      - { blockedBy: 1, kind: 'retry-exhausted', op: 'renameTask' }
+      - { blockedBy: 1, kind: 'retry-exhausted', op: 'createSubtask' }
+    `);
+
+    // Once the user sends "Holidays" again, the subtask and its rename follow
+    // it with the ids the server assigned.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedHolidays.id,
+        'createTask',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTask "Holidays"'
+      - 'createSubtask "Book flights" of tasks||4'
+      - 'renameTask tasks||5 to "Book cheap flights"'
+    `);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   });
 });

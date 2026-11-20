@@ -337,6 +337,8 @@ They follow the decision about the creation: `retry` (default scope) sends the c
 
 A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it, and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly.
 
+When the merged input still depends on the waiting entity, the changes merged into it go with the decision about the creation too: discarding the creation also drops them, e.g. a rename of a server task merged into its held move under the waiting entity.
+
 ### Resolving From A Session-Wide UI
 
 An app-wide "sync problems" panel that lists `storeManager.useOfflineResolutions()` does not need to import every store to offer Retry / Discard. The manager applies the generic actions to any resolution of the session by finding the store that owns it:

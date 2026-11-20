@@ -1781,8 +1781,10 @@ export function createOfflineStoreController<
         });
 
         // A creation held for a manual resolution cannot be cancelled
-        // locally anymore, whether or not it reached the server.
-        if (tempId !== undefined) {
+        // locally anymore, whether or not it reached the server. One held
+        // behind another creation waiting for a decision was never sent: a
+        // delete still cancels it (see `findHeldWorkResolutions`).
+        if (tempId !== undefined && !isHeldWorkResolution(resolution)) {
           attemptedCreationEntityKeys.add(ref.entityKey);
         }
       }
@@ -2797,11 +2799,8 @@ export function createOfflineStoreController<
     for (const resolution of resolutions.values()) {
       if (
         resolution.id === excludedResolutionId ||
-        resolution.kind !== 'retry-exhausted' ||
-        resolution.lastReplayError.message !==
-          BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE ||
         !matches(resolution) ||
-        !isHeldBehindTempCreateResolution(resolution)
+        !isHeldWorkResolution(resolution)
       ) {
         continue;
       }
@@ -2809,6 +2808,18 @@ export function createOfflineStoreController<
     }
 
     return heldResolutions.sort(compareResolutionRecords);
+  }
+
+  /** Work held behind a temp creation waiting for a decision, never sent. */
+  function isHeldWorkResolution(
+    resolution: PersistedOfflineResolutionRecord,
+  ): boolean {
+    return (
+      resolution.kind === 'retry-exhausted' &&
+      resolution.lastReplayError.message ===
+        BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE &&
+      isHeldBehindTempCreateResolution(resolution)
+    );
   }
 
   /**
@@ -3305,6 +3316,38 @@ export function createOfflineStoreController<
     await ensureReplayScheduled();
   }
 
+  /**
+   * Removes from `descendants` the ones that also wait for a creation still
+   * held in a resolution outside them (other than `decidedResolutionId`),
+   * directly or behind one such descendant: they cannot be sent yet and go
+   * with the decision about that creation.
+   */
+  function dropDescendantsHeldElsewhere(
+    descendants: Map<string, PersistedOfflineResolutionRecord>,
+    dependencySnapshot: ResolutionDependencySnapshot,
+    decidedResolutionId: string | undefined,
+  ): void {
+    let removedHeldDescendant = true;
+    while (removedHeldDescendant) {
+      removedHeldDescendant = false;
+      for (const resolution of descendants.values()) {
+        const blockers =
+          dependencySnapshot.blockedByResolutionIdsByResolutionId.get(
+            resolution.id,
+          ) ?? [];
+        if (
+          blockers.some(
+            (blockerId) =>
+              blockerId !== decidedResolutionId && !descendants.has(blockerId),
+          )
+        ) {
+          descendants.delete(resolution.id);
+          removedHeldDescendant = true;
+        }
+      }
+    }
+  }
+
   function collectRetryResolutionChain(args: {
     resolution: PersistedOfflineResolutionRecord;
     scope: 'self' | 'self-and-descendants';
@@ -3331,29 +3374,11 @@ export function createOfflineStoreController<
       }
     }
 
-    // A descendant that also waits for another creation still held in a
-    // resolution (or behind one such descendant) cannot be sent yet: it stays
-    // and goes with the decision about that creation.
-    let removedHeldDescendant = true;
-    while (removedHeldDescendant) {
-      removedHeldDescendant = false;
-      for (const resolution of descendantResolutions.values()) {
-        const blockers =
-          dependencySnapshot.blockedByResolutionIdsByResolutionId.get(
-            resolution.id,
-          ) ?? [];
-        if (
-          blockers.some(
-            (blockerId) =>
-              blockerId !== args.resolution.id &&
-              !descendantResolutions.has(blockerId),
-          )
-        ) {
-          descendantResolutions.delete(resolution.id);
-          removedHeldDescendant = true;
-        }
-      }
-    }
+    dropDescendantsHeldElsewhere(
+      descendantResolutions,
+      dependencySnapshot,
+      args.resolution.id,
+    );
 
     const orderedDescendants: PersistedOfflineResolutionRecord[] = [];
     const remainingDescendants = [...descendantResolutions.values()].sort(
@@ -4695,13 +4720,31 @@ export function createOfflineStoreController<
         : [];
     const requeueHeldDescendants = async (): Promise<void> => {
       // Read again: the decision rewrote their temp refs.
-      const heldDescendants = heldDescendantIds.flatMap((id) => {
+      const heldDescendants = new Map<
+        string,
+        PersistedOfflineResolutionRecord
+      >();
+      for (const id of heldDescendantIds) {
         const descendant = resolutions.get(id);
-        return descendant ? [descendant] : [];
-      });
-      if (heldDescendants.length === 0) return;
+        if (descendant) heldDescendants.set(id, descendant);
+      }
+      if (heldDescendants.size === 0) return;
 
-      await requeueResolutions(current, heldDescendants, undefined);
+      // A replacement creation held behind another creation waiting for a
+      // decision still holds the work on its entity.
+      dropDescendantsHeldElsewhere(
+        heldDescendants,
+        createResolutionDependencySnapshot(),
+        undefined,
+      );
+      if (heldDescendants.size === 0) return;
+
+      // Kept in the order collected, which sends parents first.
+      await requeueResolutions(
+        current,
+        [...heldDescendants.values()],
+        undefined,
+      );
     };
 
     if (action === 'requeue') {
