@@ -19,6 +19,7 @@ import {
   filterActiveOfflineOverlays,
   getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
+import { offlineConnectivityError } from '../persistentStorage/offline/fetchRuntime';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import {
@@ -152,6 +153,7 @@ export function useMultipleItems<
   offlineOverlays: Readonly<
     Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
   >,
+  isOfflineMode: boolean,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   const isOffScreenFromContext = useContext(IsOffScreenContext);
 
@@ -377,6 +379,8 @@ export function useMultipleItems<
           }
 
           let status = itemQuery.status;
+          let error = itemQuery.error;
+          let hasMissingRequestedData = false;
           const itemFieldInvalidationFields =
             state.itemFieldInvalidationFields[itemKey];
 
@@ -405,6 +409,7 @@ export function useMultipleItems<
             );
 
             if (absentFields.length > 0) {
+              hasMissingRequestedData = true;
               status =
                 hasCachedDataInState && showPartialAsRefetching
                   ? 'refetching'
@@ -443,6 +448,7 @@ export function useMultipleItems<
               );
 
             if (isIncomplete) {
+              hasMissingRequestedData = true;
               status =
                 hasCachedDataInState && showPartialAsRefetching
                   ? 'refetching'
@@ -498,6 +504,19 @@ export function useMultipleItems<
             status = 'success';
           }
 
+          // Offline, the fetch effect does not schedule the refetch of stale or
+          // invalidated cached fields, so `refetching` would never settle: the
+          // cached data is shown as settled until recovering refetches it.
+          if (
+            status === 'refetching' &&
+            !hasMissingRequestedData &&
+            isOfflineMode &&
+            itemQuery.status === 'success'
+          ) {
+            status = 'success';
+            loadingFields = undefined;
+          }
+
           if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
@@ -505,10 +524,23 @@ export function useMultipleItems<
           const shouldHideDataWhileLoading =
             status === 'loading' && partialResources;
 
+          // The missing data cannot be fetched while offline (the fetch effect
+          // does not even try), so the read settles on the offline error
+          // instead of waiting on a `loading` that no fetch will resolve. Data
+          // stays hidden exactly as it would be while loading.
+          if (
+            hasMissingRequestedData &&
+            itemQuery.status === 'success' &&
+            isOfflineMode
+          ) {
+            status = 'error';
+            error = offlineConnectivityError;
+          }
+
           return {
             itemStateKey: itemKey,
             status,
-            error: itemQuery.error,
+            error,
             isLoading: status === 'loading',
             ...(loadingFields ? { loadingFields } : {}),
             data: shouldHideDataWhileLoading
@@ -529,6 +561,7 @@ export function useMultipleItems<
     [
       activeOfflineOverlays,
       getUnresolvedPendingInvalidationFields,
+      isOfflineMode,
       itemsPendingFullInvalidation,
       loadFromStateOnly,
       offlineEntitiesByKey,
@@ -1088,9 +1121,16 @@ export function useMultipleItems<
               (!invalidationPriority ||
                 !ignoreItemsInRefetchOnMount.has(itemKey));
 
+            // This fetch targets an already loaded item, so failing offline
+            // leaves the item at `success` — which never trips the automatic
+            // retry lockout, and the fetch would be scheduled again on every
+            // effect run. While offline it is not scheduled at all; this effect
+            // re-runs when offline mode ends (`isOfflineMode` dependency) and
+            // schedules it then.
             if (
               (hasMissingFields || shouldFetchForInvalidation) &&
-              !itemFetchIsActive
+              !itemFetchIsActive &&
+              !isOfflineMode
             ) {
               shouldFetch = true;
               requiredFetch = true;
@@ -1147,9 +1187,11 @@ export function useMultipleItems<
               (!invalidationPriority ||
                 !ignoreItemsInRefetchOnMount.has(itemKey));
 
+            // Not scheduled while offline, see the array-field branch above.
             if (
               (missingFullItem || shouldFetchForInvalidation) &&
-              !itemFetchIsActive
+              !itemFetchIsActive &&
+              !isOfflineMode
             ) {
               shouldFetch = true;
               requiredFetch = true;
@@ -1264,6 +1306,7 @@ export function useMultipleItems<
     fetchQueriesWithId,
     getUnresolvedPendingInvalidationFields,
     ignoreItemsInRefetchOnMount,
+    isOfflineMode,
     itemHasMissingRequestedData,
     itemPendingInvalidationFields,
     itemsPendingFullInvalidation,

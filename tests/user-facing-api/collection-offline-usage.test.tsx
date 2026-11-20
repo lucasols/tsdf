@@ -350,7 +350,7 @@ test('direct collection store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-collection-offline-session'
-    updatedAt: 1735689600010
+    updatedAt: 1735689600000
   `);
 
   const invalidTempSuccessServerTable = createServerTableMock<TodoItem>({});
@@ -749,7 +749,7 @@ test('direct collection store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-collection-offline-session'
-    updatedAt: 1735689619050
+    updatedAt: 1735689612000
   `);
 
   const onlineRenameResult = await act(async () => {
