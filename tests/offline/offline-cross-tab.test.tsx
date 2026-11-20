@@ -485,6 +485,19 @@ type RenameUserOperations = {
   >;
 };
 
+/**
+ * Creates a user under an id the app generates on the client (no temp
+ * entity). The server rejects every such creation with a conflict.
+ */
+type CreateUserWithIdOperations = {
+  createUserWithId: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { id: string; name: string },
+    { reason: string }
+  >;
+};
+
 async function openUsersTab(
   name: string,
   options: {
@@ -512,7 +525,7 @@ async function openUsersTab(
   });
   const env = createCollectionStoreTestEnv<
     { name: string },
-    CreateUserOperations & RenameUserOperations
+    CreateUserOperations & RenameUserOperations & CreateUserWithIdOperations
   >(
     Object.fromEntries(
       (options.loadedUsers ?? []).map((payload) => [
@@ -575,6 +588,27 @@ async function openUsersTab(
                 });
               },
             },
+            createUserWithId: {
+              inputSchema: renameUserInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.id],
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: () => ({ reason: 'server-changed' }),
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent create ${input.name}`);
+                await env.serverTable.delayedSetItem(input.id, {
+                  name: input.name,
+                });
+                return { value: { name: input.name } };
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.addItemToState(input.id, {
+                  value: { name: input.name },
+                });
+              },
+            },
           },
         },
       },
@@ -630,6 +664,26 @@ async function openUsersTab(
           return result;
         },
         offline: { operation: 'createUser', input: { name: userName } },
+      });
+      await advanceTime(10);
+    },
+    /**
+     * Creates a user offline under an id generated in this tab, showing it
+     * right away.
+     */
+    async queueCreateWithId(payload: string, userName: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(payload, { value: { name: userName } });
+        },
+        mutation: async () => {
+          await env.serverTable.delayedSetItem(payload, { name: userName });
+          return { value: { name: userName } };
+        },
+        offline: {
+          operation: 'createUserWithId',
+          input: { id: payload, name: userName },
+        },
       });
       await advanceTime(10);
     },
@@ -1498,5 +1552,75 @@ test('discarding a conflict in one tab refetches the user in the tab that made t
     ⋅ bobMarkedForRefetch: ❌
     └─
     "
+  `);
+});
+
+test('discarding a user created offline with a client-generated id removes it from every tab', async () => {
+  network.setOffline();
+  const tabA = await openUsersTab('A', { focused: true });
+  const tabB = await openUsersTab('B', { focused: false });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // The user creates Linus in tab B while offline, under an id the app
+  // generated. On reconnect tab A replays the creation and the server rejects
+  // it with a conflict.
+  await tabB.queueCreateWithId('users||Linus', 'Linus');
+  network.goOnline();
+  await advanceTime(10_000);
+
+  const users = createLoggerStore();
+  function logTabs(label: string) {
+    users.add({
+      label,
+      tabA: tabA.getUserName('users||Linus'),
+      tabAMarkedForRefetch: tabA.isMarkedForRefetch('users||Linus'),
+      tabB: tabB.getUserName('users||Linus'),
+      tabBMarkedForRefetch: tabB.isMarkedForRefetch('users||Linus'),
+    });
+  }
+  logTabs('creation rejected');
+
+  // The user discards the creation from tab A's offline panel
+  const [createConflict] = tabA.storeManager.getOfflineResolutions();
+  await tabA.storeManager.resolveOfflineResolution(
+    createConflict?.id ?? 'missing',
+    'discard',
+  );
+  await advanceTime(3_000);
+  logTabs('creation discarded in tab A');
+
+  // Linus never reached the server: both tabs drop him instead of keeping the
+  // unsaved user or marking him for a refetch the server would answer with
+  // "not found".
+  expect(users.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ label: creation rejected
+    ⋅ tabA: Linus
+    ⋅ tabAMarkedForRefetch: ❌
+    ⋅ tabB: Linus
+    ⋅ tabBMarkedForRefetch: ❌
+    └─
+    ┌─
+    ⋅ label: creation discarded in tab A
+    ⋅ tabA: null
+    ⋅ tabAMarkedForRefetch: ❌
+    ⋅ tabB: null
+    ⋅ tabBMarkedForRefetch: ❌
+    └─
+    "
+  `);
+  expect(serverCalls).toMatchInlineSnapshot(`[]`);
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: []
+      leader: '✅'
+      resolutions: []
+
+    tab B:
+      entities: []
+      leader: '❌'
+      resolutions: []
   `);
 });
