@@ -33,7 +33,7 @@ import {
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
-  isSessionInOfflineMode,
+  recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreEntitiesWithPayload,
   useOfflineStoreItemState,
@@ -2341,17 +2341,41 @@ export function createListQueryStore<
 
           rebindOfflineOverlays(itemKeyRewrites);
         },
-        revalidateDiscardedEntities: (entityRefs) => {
-          // Queries too: the discarded change may have removed the item from
-          // lists (a delete) or moved it between them.
+        revalidateDiscardedEntities: (entities, hasPendingResolutions) => {
           invalidateQueryAndItems({
             itemPayload: filterAndMap(
-              entityRefs,
+              entities,
               (ref) => store.state.itemQueries[ref.entityKey]?.payload ?? false,
             ),
-            queryPayload: () => true,
+            // Queries too: the discarded change may have removed the item
+            // from lists (a delete) or moved it between them. Unless other
+            // changes of the store still wait for a decision: refetched lists
+            // would replace them. The recovery revalidation refreshes the
+            // lists once the last one is handled.
+            queryPayload: hasPendingResolutions ? false : () => true,
             type: 'highPriority',
           });
+
+          if (!fetchItemFn) return;
+
+          for (const { entityKey, payload } of entities) {
+            if (
+              store.state.itemQueries[entityKey] !== null ||
+              payload === undefined
+            ) {
+              continue;
+            }
+
+            // The discarded change deleted the item locally and invalidations
+            // skip deleted items: fetch it again for screens that show it
+            // outside of a list.
+            scheduleItemFetch(
+              'highPriority',
+              // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+              { fields: '*' },
+            );
+          }
         },
         syncEntityOverlays: ({ entities, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)
@@ -3349,7 +3373,7 @@ export function createListQueryStore<
   }
 
   function getIsOfflineMode(): boolean {
-    return isSessionInOfflineMode(storeManager.getSessionKey());
+    return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
   const focusLifecycle = createStoreFocusLifecycle(
@@ -3738,6 +3762,8 @@ export function createListQueryStore<
     reset,
     onTransportReconnect,
     onOfflineRecovery: focusLifecycle.onOfflineRecovery,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {

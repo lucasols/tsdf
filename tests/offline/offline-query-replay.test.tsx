@@ -2368,13 +2368,13 @@ test('discarding failed offline changes puts the rows back to what the server ha
   }
 
   // Discard the rename. Nothing can roll the optimistic rename back, so the
-  // store refetches what the discarded change touched: the item and the lists
-  // (a discarded change may also have moved or removed the row). Ada shows the
-  // server name again even though the store still has an unresolved change.
-  // Grace is listed again too: her delete never reached the server, and a
-  // change waiting for a decision is not kept applied over fresh server data.
+  // store refetches what the discarded change touched. The lists are not
+  // refetched yet: Grace's delete still waits for a decision, and refetched
+  // lists would bring her back while the user still has to decide on her
+  // delete. Only Ada's item would be refetched, and no screen shows it outside
+  // of the list, so the row keeps the renamed value for now.
   env.addTimelineComments('beforeNextAction', [
-    'discard the rename: the list is refetched and shows the server rows',
+    'discard the rename: no refetch while the delete waits for a decision',
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
@@ -2385,10 +2385,14 @@ test('discarding failed offline changes puts the rows back to what the server ha
   });
   await flushAllTimers();
 
-  // Discard the delete: Grace stays listed, and with nothing left to
-  // resolve the store revalidates once more.
+  // Grace is still hidden while her delete waits for a decision.
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada renamed']`);
+
+  // Discard the delete: with nothing left to resolve the store revalidates
+  // its lists, which puts both rows back to what the server has. Grace, deleted
+  // locally, is also fetched for screens that show only her.
   env.addTimelineComments('beforeNextAction', [
-    'discard the delete: Grace stays listed',
+    'discard the delete: the lists are refetched and show the server rows',
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
@@ -2404,11 +2408,11 @@ test('discarding failed offline changes puts the rows back to what the server ha
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time   | rows               |
-    0      | Ada, Grace         | ui-initialized
+    0      | Ada, Grace         | [rows] ui-initialized
     3.01s  | Ada, Grace         | -- offline: rename Ada and delete Grace
-    .      | Ada renamed, Grace | ui-changed
+    .      | Ada renamed, Grace | [rows] ui-changed
     .      | Ada renamed, Grace | offline:patchUserName queued
-    .      | Ada renamed        | ui-changed
+    .      | Ada renamed        | [rows] ui-changed
     .      | Ada renamed        | offline:deleteUser queued
     .      | Ada renamed        | -- back online: the server rejects both changes until they need a resolution
     .      | Ada renamed        | offline:patchUserName replay-started
@@ -2419,13 +2423,150 @@ test('discarding failed offline changes puts the rows back to what the server ha
     18.01s | Ada renamed        | offline:deleteUser replay-started
     23.01s | Ada renamed        | offline:deleteUser replay-started
     .      | Ada renamed        | offline:deleteUser resolution-required
-    33.02s | Ada renamed        | -- discard the rename: the list is refetched and shows the server rows
+    34.02s | Ada renamed        | -- discard the rename: no refetch while the delete waits for a decision
+    .      | Ada renamed        | -- discard the delete: the lists are refetched and show the server rows
     .      | Ada renamed        | 🔴 >list-fetch-started
-    33.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
-    .      | Ada, Grace         | ui-changed
-    34.83s | Ada, Grace         | -- discard the delete: Grace stays listed
-    .      | Ada, Grace         | 🟠 >list-fetch-started
-    35.63s | Ada, Grace         | 🟠 <list-fetch-finished (value: {"count":2})
+    .      | Ada renamed        | 🟠 [users||2] >fetch-started
+    34.82s | Ada renamed        | 🔴 <list-fetch-finished (value: {"count":2})
+    .      | Ada, Grace         | [rows] ui-changed
+    .      | Ada, Grace         | 🟠 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('discarding a failed offline delete shows the item again on screens that only display that item', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-delete-item-session';
+  type RejectedDeleteOperations = {
+    deleteUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { itemId: string },
+      unknown
+    >;
+  };
+
+  // The server rejects the delete on every replay attempt, so it ends up
+  // waiting for the user to decide what to do with it.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    RejectedDeleteOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-discard-delete-item-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            deleteUser: {
+              inputSchema: deleteItemInputSchema,
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('delete rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // A detail screen: only Grace's item is displayed, no list is mounted.
+  const hook = renderHook(() => {
+    const grace = env.apiStore.useItem('users||2');
+
+    env.trackItemUI('grace', grace.data?.name ?? `- ${grace.status}`);
+    return grace;
+  });
+  await flushAllTimers();
+
+  env.addTimelineComments('beforeNextAction', ['offline: delete Grace']);
+  await act(async () => {
+    await env.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||2');
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+    });
+  });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the delete until it needs a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(15_000);
+  await flushAllTimers();
+
+  const [deleteResolution] = env.apiStore.getOfflineResolutions();
+  if (!deleteResolution) {
+    throw new Error('Expected the delete to be waiting for a resolution');
+  }
+
+  // Discard the delete: it never reached the server, so the item is fetched
+  // again and the screen shows Grace instead of a deleted item.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the delete: Grace is fetched again',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      deleteResolution.id,
+      'deleteUser',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(pick(hook.result.current, ['status', 'data'])).toMatchInlineSnapshot(`
+    data: { id: 2, name: 'Grace' }
+    status: 'success'
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | grace     |
+    0      | Grace     | [grace] ui-initialized
+    3.01s  | Grace     | -- offline: delete Grace
+    .      | - deleted | [grace] ui-changed
+    .      | - deleted | offline:deleteUser queued
+    .      | - deleted | -- back online: the server rejects the delete until it needs a resolution
+    .      | - deleted | offline:deleteUser replay-started
+    8.01s  | - deleted | offline:deleteUser replay-started
+    13.01s | - deleted | offline:deleteUser replay-started
+    .      | - deleted | offline:deleteUser resolution-required
+    18.02s | - deleted | -- discard the delete: Grace is fetched again
+    .      | - loading | [grace] ui-changed
+    .      | - loading | 🔴 [users||2] >fetch-started
+    18.82s | - loading | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
+    .      | Grace     | [grace] ui-changed
     "
   `);
 
