@@ -1788,7 +1788,9 @@ test('saving a new file over an upload that is still being sent is rejected, so 
   // upload.
   expect(
     saveDuringUpload.ok ? 'saved' : saveDuringUpload.error.message,
-  ).toMatchInlineSnapshot(`"Cannot save upload "avatar" while uploading"`);
+  ).toMatchInlineSnapshot(
+    `"Cannot change upload "avatar" while it is queued or uploading"`,
+  );
 
   // Let the first upload finish. A bounded advance keeps the 7-day retention
   // cleanup of the uploaded file from running before the assertions.
@@ -1808,4 +1810,80 @@ test('saving a new file over an upload that is still being sent is rejected, so 
   expect(transportCalls).toMatchInlineSnapshot(
     `['upload-start:first.png', 'upload-finish:first.png']`,
   );
+});
+
+test('upload concurrency is respected across separate resolve calls, and an upload waiting in the queue cannot be replaced', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-concurrency-session';
+  const transportCalls: string[] = [];
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        // Only one file may be sent at a time.
+        concurrency: 1,
+        upload: async ({ file }) => {
+          transportCalls.push(`upload-start:${file.name}`);
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          transportCalls.push(`upload-finish:${file.name}`);
+          return `server:${file.name}`;
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  for (const name of ['first', 'second']) {
+    (
+      await resolveAfterAllTimers(
+        storeManager.saveOfflineUpload({
+          id: name,
+          file: new File([`${name} photo`], `${name}.png`, {
+            type: 'image/png',
+            lastModified: 1,
+          }),
+        }),
+      )
+    ).unwrap();
+  }
+
+  // The app resolves each upload from a separate call, e.g. two form fields
+  // submitted one after the other.
+  const firstResolve = storeManager.resolveOfflineUpload('first');
+  await advanceTime(100);
+  const secondResolve = storeManager.resolveOfflineUpload('second');
+  await advanceTime(100);
+
+  // The second upload waits behind the first one, so its file can no longer
+  // be swapped: the queued transport would send it and pair the ref with it.
+  const replaceWhileQueued = await storeManager.replaceOfflineUpload({
+    id: 'second',
+    file: new File(['other photo'], 'other.png', {
+      type: 'image/png',
+      lastModified: 2,
+    }),
+  });
+  expect(
+    replaceWhileQueued.ok ? 'replaced' : replaceWhileQueued.error.message,
+  ).toMatchInlineSnapshot(
+    `"Cannot change upload "second" while it is queued or uploading"`,
+  );
+
+  // Bounded advance: both uploads take 1s each, and retention cleanup of the
+  // uploaded files must not run before the assertions.
+  await advanceTime(2_500);
+  expect((await firstResolve).unwrap()).toBe('server:first.png');
+  expect((await secondResolve).unwrap()).toBe('server:second.png');
+
+  // The second file only starts after the first one finished.
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - 'upload-start:first.png'
+    - 'upload-finish:first.png'
+    - 'upload-start:second.png'
+    - 'upload-finish:second.png'
+  `);
 });

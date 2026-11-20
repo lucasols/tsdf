@@ -816,15 +816,21 @@ class SessionOfflineCoordinator {
           `[tsdf] Incompatible offline upload configuration for session "${this.sessionKey}"`,
         );
       }
+      // Every manager call reconfigures the session, so the queue is only
+      // recreated when the config changes; recreating it on each call would
+      // let new uploads bypass the concurrency limit of the running ones.
+      if (!sameUploadsConfig(this.#uploadsConfig, options.uploads)) {
+        this.#uploadQueue = createAsyncQueue<ValidPayload>({
+          autoStart: true,
+          concurrency:
+            options.uploads.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY,
+        });
+      }
       this.#uploadsConfig = options.uploads;
       registerOfflineUploadAdapterForSession(
         this.sessionKey,
         options.uploads.adapter,
       );
-      this.#uploadQueue = createAsyncQueue<ValidPayload>({
-        autoStart: true,
-        concurrency: options.uploads.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY,
-      });
       void this.hydrate();
     }
 
@@ -1010,10 +1016,13 @@ class SessionOfflineCoordinator {
       );
     }
 
-    // The pending transport marks the record as uploaded when it finishes, so
-    // swapping the file under it would pair the new file with the old ref.
+    // The queued or running transport marks the record as uploaded when it
+    // finishes, so swapping the file under it would pair the new file with
+    // the old ref.
     if (this.#uploadPromisesById.has(args.id)) {
-      throw new Error(`Cannot save upload "${args.id}" while uploading`);
+      throw new Error(
+        `Cannot change upload "${args.id}" while it is queued or uploading`,
+      );
     }
 
     const existing = this.#uploads.get(args.id);
