@@ -757,6 +757,55 @@ describe('operations that stop making progress', () => {
     `);
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });
+
+  test('the cleanup of a store removed from the app finishes when storage stops answering while it lists the stored data', async () => {
+    // Previous app version: two stores cached their documents in IndexedDB.
+    const previousRemoved = createDocumentApp('doc-removed', 5);
+    const previousKept = createDocumentApp('doc-kept', 7);
+    renderHook(() => previousRemoved.env.apiStore.useDocument());
+    renderHook(() => previousKept.env.apiStore.useDocument());
+    await flushAllTimers();
+    closeApps();
+    // Count only the connections of the next app version.
+    openDatabase.mockClear();
+
+    // Next app version: `doc-removed` was deleted from the code and declared
+    // as removed. The cleanup runs on its own in idle time after startup.
+    const adapter = createAdapter();
+    apps.push({ adapter, dispose: () => {} });
+    const listScopes = vi.spyOn(IDBObjectStore.prototype, 'openKeyCursor');
+    const storage = freezeStorage();
+    createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      onPersistentStorageError,
+      removedStores: [{ id: 'doc-removed', adapter }],
+    });
+
+    // Storage answers one step at a time until the cleanup starts listing what
+    // is stored, and then stops answering.
+    while (listScopes.mock.calls.length === 0) {
+      storage.runNextTask();
+      await advanceTime(1000);
+    }
+    storage.recoverLosingPendingWork();
+
+    // One check without progress is not enough to give up on the listing.
+    await advanceTime(STALL_CHECK_INTERVAL_MS);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+
+    // The second one is: the listing runs again on a new connection and the
+    // cleanup carries on instead of staying pending until a reload.
+    await advanceTime(STALL_CHECK_INTERVAL_MS);
+    await flushAllTimers();
+
+    expect(openDatabase).toHaveBeenCalledTimes(2);
+    // Only the removed store's data is gone, and the app saw no error.
+    expect(await readPersistedEntries()).toMatchInlineSnapshot(
+      `doc-kept/d: { value: 7 }`,
+    );
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
 });
 
 describe('queued offline mutations', () => {
