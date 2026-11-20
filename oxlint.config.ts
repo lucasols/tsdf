@@ -169,6 +169,17 @@ export default defineConfig({
       files: ['tests/**/*.{ts,tsx}'],
       rules: { 'typescript/no-non-null-assertion': 'off' },
     },
+    {
+      // keep test files small enough to navigate and review, split large
+      // suites by theme instead
+      files: ['tests/**/*.test.{ts,tsx}', 'src/**/*.test.{ts,tsx}'],
+      rules: {
+        'max-lines': [
+          'error',
+          { max: 2000, skipBlankLines: true, skipComments: true },
+        ],
+      },
+    },
   ],
   ignorePatterns: ['dist', '**/*.d.ts'],
 });
