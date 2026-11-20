@@ -365,15 +365,17 @@ Behavior:
 - `syncState` - `'pending'` (waiting to be sent), `'syncing'` (being sent),
   `'needs-confirmation'` (a send failed and it is not known whether it reached
   the server, so it is re-checked or retried) or `'resolution-required'`. With
-  several mutations queued for the item this is the state of the newest one:
-  the item stays `'pending'` while its older mutations are sent
+  several mutations queued for the item this is the most urgent state among
+  them (`'needs-confirmation'` > `'syncing'` > `'pending'`): the item is
+  `'syncing'` while any of its mutations is being sent
 - `pendingMutations` - Number of queued mutations of the item still waiting to
   sync
 - `requiresResolution` - `true` while the item waits for a manual resolution
   (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
 - `isUnsentCreation` - `true` while the item was created offline (a
   `tempEntity` / `tempEntities` operation) and the server has not confirmed it
-  yet, so it is only known locally under its temporary payload
+  yet, so it is still tracked under its temporary payload. Creations queued
+  without a temp entity (e.g. with a client-generated id) report `false`
 - `creationAttempted` - Only `true` for an unsent creation whose create
   request is being sent, failed without telling whether the server got it, or
   waits for a manual resolution: the server may already have the item. While
