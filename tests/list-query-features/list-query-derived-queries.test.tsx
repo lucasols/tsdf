@@ -13,7 +13,10 @@ import {
   vi,
 } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
-import type { DerivedQueriesConfig } from '../../src/main';
+import type {
+  DerivedQueriesConfig,
+  ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import { createStoreManager } from '../../src/storeManager';
@@ -728,7 +731,7 @@ test('isComplete receives sibling query metadata from the same derived group', a
   `);
 });
 
-test('offline derived queries stay sticky across reconnect until the query is invalidated', async () => {
+test('offline derived queries stay derived until reconnecting revalidates the query from the server', async () => {
   const network = createOfflineNetworkMock();
   network.install();
   const sessionKey = 'derived-queries-offline';
@@ -792,18 +795,20 @@ test('offline derived queries stay sticky across reconnect until the query is in
   });
   await flushAllTimers();
 
-  renders.addMark('Reconnect without invalidation');
+  renders.addMark('Reconnect');
 
-  // Reconnecting alone should not drop the sticky derived result or trigger a refetch yet.
+  // Recovering from offline mode revalidates the store by itself: the query
+  // leaves the derived view and is refetched from the server, which drops the
+  // local-only item.
   act(() => {
     network.goOnline();
   });
   await flushAllTimers();
 
-  // No server requests — the sticky derived result stays active until explicit invalidation.
+  // Exactly one server request: the recovery revalidation.
   expect(
     env.serverTable.getRequestHistory('list', { includeTime: false }).length,
-  ).toBe(0);
+  ).toBe(1);
   expect(
     Array.from(
       new Map(
@@ -819,14 +824,11 @@ test('offline derived queries stay sticky across reconnect until the query is in
         }),
       ).values(),
     ),
-  ).toMatchInlineSnapshot(`
-    - { deriveSource: 'offline', isOfflineMode: '✅' }
-    - { deriveSource: 'sticky-offline', isOfflineMode: '❌' }
-  `);
+  ).toMatchInlineSnapshot(`- { deriveSource: 'offline', isOfflineMode: '✅' }`);
 
   renders.addMark('Invalidate after reconnect');
 
-  // Explicit invalidation is what clears the sticky derived mode and resumes normal fetching.
+  // Back to normal fetching: an explicit invalidation refetches the exact query.
   act(() => {
     env.apiStore.invalidateQueryAndItems({
       itemPayload: false,
@@ -836,10 +838,10 @@ test('offline derived queries stay sticky across reconnect until the query is in
   });
   await flushAllTimers();
 
-  // Invalidation cleared sticky mode and triggered exactly one server fetch.
+  // The invalidation triggered exactly one more server fetch.
   expect(
     env.serverTable.getRequestHistory('list', { includeTime: false }).length,
-  ).toBe(1);
+  ).toBe(2);
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
@@ -850,25 +852,21 @@ test('offline derived queries stay sticky across reconnect until the query is in
     ⋅ itemNames: [Ada, Alan, Grace, Offline user]
     └─
 
-    >>> Reconnect without invalidation
+    >>> Reconnect
 
-    ┌─
-    ⋅ status: success
-    ⋅ isOnline: ✅
-    ⋅ isDerived: ✅
-    ⋅ itemNames: [Ada, Alan, Grace, Offline user]
-    └─
+    -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    -> status: refetching ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
 
     >>> Invalidate after reconnect
 
-    -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
     -> status: refetching ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
     -> status: success ⋅ isOnline: ✅ ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
     "
   `);
 });
 
-test('sticky offline-derived queries keep following local updates and deletes until invalidation', async () => {
+test('offline-derived queries keep following local updates and deletes until reconnecting revalidates them', async () => {
   const network = createOfflineNetworkMock();
   network.install();
   const sessionKey = 'derived-queries-offline-local-edits';
@@ -947,18 +945,20 @@ test('sticky offline-derived queries keep following local updates and deletes un
   });
   await flushAllTimers();
 
-  renders.addMark('Reconnect without invalidation');
+  renders.addMark('Reconnect');
 
-  // Reconnecting still must not fetch until invalidation explicitly clears sticky mode.
+  // The local-only edits were never sent to the server (they are plain state
+  // updates, not queued mutations), so the recovery revalidation replaces
+  // them with the server data.
   act(() => {
     network.goOnline();
   });
   await flushAllTimers();
 
-  // No server requests — the sticky derived result survives reconnection.
+  // Exactly one server request: the recovery revalidation.
   expect(
     env.serverTable.getRequestHistory('list', { includeTime: false }).length,
-  ).toBe(0);
+  ).toBe(1);
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
@@ -972,9 +972,163 @@ test('sticky offline-derived queries keep following local updates and deletes un
 
     -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Alan, Beatrice, Offline user]
 
-    >>> Reconnect without invalidation
+    >>> Reconnect
 
-    -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Alan, Beatrice, Offline user]
+    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Beatrice, Alan]
+    -> status: refetching ⋅ isDerived: ❌ ⋅ itemNames: [Beatrice, Alan]
+    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+    "
+  `);
+});
+
+type RenameUserOperations = {
+  renameUser: ListQueryOfflineOperationDefinition<
+    Row,
+    ListQueryParams,
+    string,
+    { itemId: string; name: string },
+    unknown
+  >;
+};
+
+test('offline-derived queries stay derived while queued mutations replay after reconnecting', async () => {
+  const network = createOfflineNetworkMock();
+  network.install();
+  const sessionKey = 'derived-queries-offline-replay';
+  const renders = createLoggerStore({ arrays: 'all' });
+  const deriveSources = new Set<string>();
+  const env = createListQueryStoreTestEnv<
+    Row,
+    false,
+    false,
+    RenameUserOperations
+  >(initialServerData, {
+    derivedQueries: {
+      getQueryGroup,
+      getItemGroup,
+      isComplete: alwaysComplete,
+      deriveQuery: (queryPayload, items, context) => {
+        deriveSources.add(context.deriveSource);
+
+        return items
+          .sort((left, right) => left.data.name.localeCompare(right.data.name))
+          .map(({ key }) => key);
+      },
+    },
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: rowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryQueryPayloadSchema,
+      offline: {
+        operations: {
+          renameUser: {
+            inputSchema: rc_object({ itemId: rc_string, name: rc_string }),
+            kind: 'update',
+            getEntityRefs: ({ input }) => [input.itemId],
+            execute: async ({ input }) => {
+              await env.serverTable.delayedUpdateItem(
+                input.itemId,
+                { name: input.name },
+                { durationMs: 2000 },
+              );
+              return { name: input.name };
+            },
+            onSuccessExecute: ({ input }) => {
+              env.apiStore.updateItemState(input.itemId, (item) => ({
+                ...item,
+                name: input.name,
+              }));
+            },
+          },
+        },
+      },
+    },
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { disableRefetchOnMount: true, returnRefetchingStatus: true },
+    );
+
+    renders.add({
+      status: query.status,
+      isDerived: query.isDerived,
+      itemNames: query.items.map((item) => item.name),
+    });
+  });
+  await flushAllTimers();
+
+  // Rename a user while offline: the mutation is queued and the derived view
+  // reorders the list right away.
+  renders.addMark('Offline rename (queued)');
+  act(() => {
+    network.goOffline();
+  });
+  await act(async () => {
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (item) => ({
+          ...item,
+          name: 'Zoe',
+        }));
+      },
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('users||1', { name: 'Zoe' });
+        return { name: 'Zoe' };
+      },
+      offline: {
+        operation: 'renameUser',
+        input: { itemId: 'users||1', name: 'Zoe' },
+      },
+    });
+  });
+  await flushAllTimers();
+
+  // Back online the queued rename takes 2s to replay. The query keeps its
+  // derived view meanwhile (it is not swapped for the stale cached result),
+  // and is revalidated from the server only after the replay finishes.
+  renders.addMark('Reconnect: replay, then revalidation');
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(1000);
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }).length,
+  ).toBe(0);
+
+  await flushAllTimers();
+
+  expect(
+    env.serverTable.getRequestHistory('list', { includeTime: false }).length,
+  ).toBe(1);
+  // While the replay was running the derivation ran in sticky mode.
+  expect([...deriveSources]).toMatchInlineSnapshot(
+    `['offline', 'sticky-offline']`,
+  );
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Ada, Grace, Alan]
+
+    >>> Offline rename (queued)
+
+    -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Ada, Alan, Grace]
+    -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Alan, Grace, Zoe]
+
+    >>> Reconnect: replay, then revalidation
+
+    -> status: success ⋅ isDerived: ✅ ⋅ itemNames: [Alan, Grace, Zoe]
+    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Zoe, Grace, Alan]
+    -> status: refetching ⋅ isDerived: ❌ ⋅ itemNames: [Zoe, Grace, Alan]
+    -> status: success ⋅ isDerived: ❌ ⋅ itemNames: [Zoe, Grace, Alan]
     "
   `);
 });

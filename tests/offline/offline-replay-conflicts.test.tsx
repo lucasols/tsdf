@@ -324,10 +324,13 @@ test('offline conflicts are detected before execute, surface through selectors, 
   expect(globalResolutionHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(storeOfflineHook.result.current).toMatchInlineSnapshot(`[]`);
   expect(globalOfflineHook.result.current).toMatchInlineSnapshot(`[]`);
+  // With the conflict resolved the store has nothing left to sync, so it is
+  // marked for revalidation; no document hook is mounted, so the refetch
+  // waits for the next mount.
   expect(env.store.state).toMatchInlineSnapshot(`
     data: { value: 2 }
     error: null
-    refetchOnMount: '❌'
+    refetchOnMount: 'highPriority'
     status: 'success'
   `);
   storeOfflineHook.unmount();

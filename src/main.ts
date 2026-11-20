@@ -19,6 +19,7 @@ export {
   type StoreManager,
   type StoreManagerUploadRef,
 } from './storeManager';
+export type { RemovedStore } from './persistentStorage/removedStoresCleanup';
 export type {
   TSDFFocusDebugOperation,
   TSDFDebugLogArea,
