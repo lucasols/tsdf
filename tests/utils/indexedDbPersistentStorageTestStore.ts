@@ -819,6 +819,18 @@ export type IndexedDbPersistentStorageTestStore = {
 let currentIndexedDbPersistentStorageTestStore: IndexedDbPersistentStorageTestStore | null =
   null;
 
+/** `flushWrites()` calls of any test store that have not returned yet. */
+let callsWaitingForFlushWrites = 0;
+
+/**
+ * Whether a call into a test store is still held back by `flushWrites()`.
+ * Such a call has not reached the adapter yet and resumes on a later real
+ * task tick, so a test must not end while this is true.
+ */
+export function hasIndexedDbTestStoreCallsWaitingForFlushWrites(): boolean {
+  return callsWaitingForFlushWrites > 0;
+}
+
 export function getCurrentIndexedDbPersistentStorageTestStore(): IndexedDbPersistentStorageTestStore {
   if (currentIndexedDbPersistentStorageTestStore === null) {
     throw new Error(
@@ -921,22 +933,30 @@ function createIndexedDbPersistentStorageTestStoreInternal(
   }
 
   async function flushWrites(): Promise<void> {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await vi.advanceTimersByTimeAsync(0);
-      const currentPendingWrites = pendingWrites;
-      await currentPendingWrites;
-      await Promise.resolve();
+    callsWaitingForFlushWrites++;
+    try {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await vi.advanceTimersByTimeAsync(0);
+        const currentPendingWrites = pendingWrites;
+        await currentPendingWrites;
+        await Promise.resolve();
 
-      if (currentPendingWrites === pendingWrites && vi.getTimerCount() === 0) {
-        break;
+        if (
+          currentPendingWrites === pendingWrites &&
+          vi.getTimerCount() === 0
+        ) {
+          break;
+        }
+
+        if (currentPendingWrites !== pendingWrites) continue;
+
+        await waitForRealTaskTick();
       }
 
-      if (currentPendingWrites !== pendingWrites) continue;
-
-      await waitForRealTaskTick();
+      await settlePendingWrites();
+    } finally {
+      callsWaitingForFlushWrites--;
     }
-
-    await settlePendingWrites();
   }
 
   async function openDatabase(): Promise<IDBDatabase> {

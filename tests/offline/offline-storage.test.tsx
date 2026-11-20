@@ -7,6 +7,7 @@ import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   clearSessionStorage,
   type CollectionOfflineOperationDefinition,
+  type DocumentOfflineOperationDefinition,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
@@ -36,16 +37,19 @@ import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type CreateListQueryUserOperations,
   deleteItemInputSchema,
+  type UpdateValueConflictOperations,
   type UpdateValueOperations,
   userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
   collectionCreateInputSchema,
+  docConflictSchema,
   docMutationInputSchema,
   docSchema,
   getGlobalOfflineStatusSummary,
   listQueryQueryPayloadSchema,
+  summarizeResolution,
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -89,12 +93,15 @@ function createOfflineDocumentEnv({
   storeName,
   testScenario,
   onExecute,
+  startedLongBeforeTestTime = false,
 }: {
   adapter: 'local-sync' | typeof opfsPersistentStorage;
   sessionKey: string;
   storeName: string;
   testScenario: 'idle' | 'loaded';
   onExecute?: (input: { value: number }) => void;
+  /** The app ran days before `TEST_INITIAL_TIME`. */
+  startedLongBeforeTestTime?: boolean;
 }) {
   const envRef: {
     current: ReturnType<
@@ -111,6 +118,7 @@ function createOfflineDocumentEnv({
       offlineSession: { network: network.config },
     }),
     testScenario,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: startedLongBeforeTestTime,
     persistentStorage: {
       adapter,
       schema: docSchema,
@@ -283,6 +291,108 @@ function createOfflinePendingItemsListQueryEnv({
   });
 
   return env;
+}
+
+/**
+ * A document store with an `updateValue` operation whose replay of `value: 3`
+ * ends in a conflict. In the deploy tests, it is the app after the deploy that
+ * added `updateValue`.
+ */
+function createConflictingDocumentEnv({
+  sessionKey,
+  storeName,
+  onExecute,
+  adapter = 'local-sync',
+  startedLongBeforeTestTime = false,
+}: {
+  sessionKey: string;
+  storeName: string;
+  onExecute?: (input: { value: number }) => void;
+  adapter?: 'local-sync' | typeof opfsPersistentStorage;
+  /** The app ran days before `TEST_INITIAL_TIME`. */
+  startedLongBeforeTestTime?: boolean;
+}) {
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'loaded',
+      __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: startedLongBeforeTestTime,
+      persistentStorage: {
+        adapter,
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              execute: async ({ input }) => {
+                onExecute?.(input);
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input }) =>
+                  input.value === 3 ? { reason: 'server-changed' } : false,
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  return env;
+}
+
+type OlderDeployOperations = {
+  legacyUpdateValue: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { value: number } }
+  >;
+};
+
+/**
+ * The same store in a tab still running the deploy from before `updateValue`
+ * existed: it only knows `legacyUpdateValue`.
+ */
+function createOlderDeployDocumentEnv({
+  sessionKey,
+  storeName,
+}: {
+  sessionKey: string;
+  storeName: string;
+}) {
+  return createDocumentStoreTestEnv<number, OlderDeployOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          legacyUpdateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: ({ input }) => Promise.resolve(input),
+          },
+        },
+      },
+    },
+  });
 }
 
 beforeEach(() => {
@@ -598,6 +708,67 @@ test('local-sync offline persistence replays queued data when a new browser sess
     isLoading: '❌'
     pendingSync: '❌'
     status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+
+  hook.unmount();
+});
+
+test('local-sync offline edits are still sent when the app is reopened more than a week later', async () => {
+  const sessionKey = 'offline-sync-week-later-session';
+  const storeName = 'offline-sync-week-later-doc';
+  const replayedInputs: { value: number }[] = [];
+
+  // Eight days ago, longer than the cache max age, the user edited offline
+  // and closed the app before reconnecting.
+  vi.setSystemTime(TEST_INITIAL_TIME - 8 * 24 * 60 * 60 * 1000);
+  network.setOffline();
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+    startedLongBeforeTestTime: true,
+  });
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Today the user reopens the app online.
+  resetSessionForTests();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+  act(() => {
+    network.goOnline();
+  });
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    onExecute: (input) => {
+      replayedInputs.push(input);
+    },
+  });
+  const hook = renderHook(() => restartedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  // The queued edit is not expired like cached data: it is still sent.
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
   `);
   expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
     `[]`,
@@ -1462,3 +1633,259 @@ test('clearing an OPFS-backed session also clears the shared offline status snap
     sessionKey: 'offline-opfs-clear-session'
   `);
 }, 10_000);
+
+test('opfs conflicts left unresolved for more than two weeks can still be resolved', async () => {
+  createOpfsPersistentStorageTestStore();
+  const sessionKey = 'offline-opfs-old-conflict-session';
+  const storeName = 'offline-opfs-old-conflict-doc';
+
+  // Fifteen days ago, longer than the async cache max age, an offline edit
+  // ended in a conflict when the connection came back, and the user left it
+  // unresolved.
+  vi.setSystemTime(TEST_INITIAL_TIME - 15 * 24 * 60 * 60 * 1000);
+  network.setOffline();
+  const firstEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    adapter: opfsPersistentStorage,
+    startedLongBeforeTestTime: true,
+  });
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(3);
+        return 3;
+      },
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    }),
+  );
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(firstEnv.apiStore.getOfflineResolutions()).toHaveLength(1);
+
+  // Today the user opens the app online, which runs the storage cleanup.
+  resetSessionForTests();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+  const restartedEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    adapter: opfsPersistentStorage,
+  });
+  const restartedHook = renderHook(() => restartedEnv.apiStore.useDocument());
+  await flushAllTimers();
+  restartedHook.unmount();
+
+  // The conflict is unsent work, not cached data: it doesn't expire, so it is
+  // still there when the app is opened again.
+  resetSessionForTests();
+  const reopenedEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    adapter: opfsPersistentStorage,
+  });
+  const reopenedHook = renderHook(() => reopenedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  const [resolution] = reopenedEnv.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected the conflict to be kept');
+  expect(summarizeResolution(resolution)).toMatchInlineSnapshot(`
+    input: 'value: 3'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
+    reason: 'server-changed'
+  `);
+
+  reopenedHook.unmount();
+});
+
+test('an older deploy keeps edits queued for an operation only a newer deploy knows, and the newer deploy sends them', async () => {
+  const sessionKey = 'offline-unknown-operation-entry-session';
+  const storeName = 'offline-unknown-operation-entry-doc';
+  const sentByNewerDeploy: { value: number }[] = [];
+
+  // The user edits offline in the newer deploy.
+  network.setOffline();
+  const newerEnv = createConflictingDocumentEnv({ sessionKey, storeName });
+  await resolveAfterAllTimers(
+    newerEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        newerEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await newerEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // The connection comes back while only a tab of the older deploy is open
+  // (e.g. a tab that was not reloaded after the deploy).
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const olderEnv = createOlderDeployDocumentEnv({ sessionKey, storeName });
+  const olderHook = renderHook(() => olderEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  // The older deploy can't send an operation it doesn't define, so it doesn't
+  // list it either. Before, its replay deleted the edit from storage.
+  expect(olderEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  olderHook.unmount();
+
+  // The user reloads into the newer deploy: the edit is still queued and is
+  // sent once.
+  resetSessionForTests();
+  const reloadedEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    onExecute: (input) => {
+      sentByNewerDeploy.push(input);
+    },
+  });
+  const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  expect(sentByNewerDeploy).toMatchInlineSnapshot(`
+    - value: 2
+  `);
+  expect(reloadedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  reloadedHook.unmount();
+});
+
+test('an older deploy keeps conflicts of an operation only a newer deploy knows', async () => {
+  const sessionKey = 'offline-unknown-operation-resolution-session';
+  const storeName = 'offline-unknown-operation-resolution-doc';
+
+  // In the newer deploy, an offline edit ends in a conflict when it is sent.
+  network.setOffline();
+  const newerEnv = createConflictingDocumentEnv({ sessionKey, storeName });
+  await resolveAfterAllTimers(
+    newerEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        newerEnv.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: async () => {
+        await newerEnv.serverMock.delayedSetData(3);
+        return 3;
+      },
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    }),
+  );
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(newerEnv.apiStore.getOfflineResolutions()).toHaveLength(1);
+
+  // A tab of the older deploy opens the store. It can't resolve a conflict of
+  // an operation it doesn't define, so it doesn't list it. Before, it deleted
+  // the conflict from storage while loading it.
+  resetSessionForTests();
+  const olderEnv = createOlderDeployDocumentEnv({ sessionKey, storeName });
+  const olderHook = renderHook(() => olderEnv.apiStore.useDocument());
+  await flushAllTimers();
+  expect(olderEnv.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  olderHook.unmount();
+
+  // Back in the newer deploy, the user can still resolve the conflict.
+  resetSessionForTests();
+  const reloadedEnv = createConflictingDocumentEnv({ sessionKey, storeName });
+  const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  const [resolution] = reloadedEnv.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected the conflict to still be queued');
+  expect(summarizeResolution(resolution)).toMatchInlineSnapshot(`
+    input: 'value: 3'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
+    reason: 'server-changed'
+  `);
+
+  reloadedHook.unmount();
+});
+
+test('local-sync offline edits of list-query items are persisted without storage errors', async () => {
+  const sessionKey = 'offline-entity-payload-session';
+  const storeName = 'offline-entity-payload-users';
+  const reportedErrors: string[] = [];
+
+  // The user renames an existing user while offline. The store keeps the
+  // edited item's payload with the offline work it saves for that item.
+  network.setOffline();
+  const env = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    {
+      patchUserName: ListQueryOfflineOperationDefinition<
+        OfflineStorageUserRow,
+        ListQueryParams,
+        string,
+        { itemId: string; name: string },
+        unknown
+      >;
+    }
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+      onPersistentStorageError: (error) => {
+        reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+      },
+    }),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: userRowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryQueryPayloadSchema,
+      offline: {
+        operations: {
+          patchUserName: {
+            inputSchema: userPatchSchema,
+            kind: 'update',
+            getEntityRefs: ({ input }) => [input.itemId],
+            execute: ({ input }) => Promise.resolve({ name: input.name }),
+            // Only what is saved offline matters here
+            onSuccessExecute: () => {},
+          },
+        },
+      },
+    },
+  });
+  await resolveAfterAllTimers(
+    env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.resolve({ name: 'Ada L.' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada L.' },
+      },
+    }),
+  );
+  await flushAllTimers();
+
+  // Saving the offline state of an item with a payload must not fail: the
+  // app's storage error handler would otherwise report it on every offline
+  // edit of a list-query or collection item.
+  expect(reportedErrors).toMatchInlineSnapshot(`[]`);
+});

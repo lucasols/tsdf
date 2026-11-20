@@ -114,6 +114,10 @@ const storeManager = createStoreManager({
 
 Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers and `resolveOfflineResolution(...)` return `Result.err(...)` where applicable.
 
+To detect outages and network failures the browser does not report, pass `offlineSession.healthCheck: { check, timeoutMs? }`. `check({ sessionKey, signal })` answers `'up'`, `'outage'` or `'unreachable'`, and the session uses it both to classify failed requests and as the recovery check of the active offline mode. Concurrent callers share one in-flight call. `'up'` for a failed request leaves the session online: the failure is handled by that request (its error, or the replay retry budget and then a `retry-exhausted` resolution). See [Health Check](./offline.md#health-check).
+
+To turn the whole offline layer on and off at runtime (feature flag, per-workspace setting) without recreating the manager, pass `offlineSession.enabled: () => boolean`. While it returns `false` the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations; work already queued is kept and replayed after the gate reopens. See [Session gate](./offline.md#session-gate).
+
 ## Offline Status APIs
 
 Read session-wide offline state:
@@ -135,7 +139,7 @@ Synchronous equivalents:
 
 Runtime controls:
 
-- `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`
+- `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`. Every update, even an empty `{}`, also re-reads the `offlineSession.enabled` gate right away
 - `resetOfflineRuntimeConfig()` restores the static `offlineSession` controls
 
 Resolution actions:

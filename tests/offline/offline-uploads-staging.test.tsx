@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object } from 'runcheck';
 import { expect, test, vi } from 'vitest';
+import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
   clearSessionStorage,
   createStoreManager,
@@ -1361,4 +1362,165 @@ test('upload concurrency is respected across separate resolve calls, and an uplo
     - 'upload-start:second.png'
     - 'upload-finish:second.png'
   `);
+});
+
+function createUploadsStoreManager(sessionKey: string) {
+  return createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`server:${id}`),
+      },
+    },
+  });
+}
+
+type DocumentValueOperation = DocumentOfflineOperationDefinition<
+  { value: number },
+  { input: { value: number } }
+>;
+
+/**
+ * A document store defining `operationNames`. Each replay is logged in `sent`
+ * with the content of its attached `avatar` file.
+ */
+function createRecordingDocumentEnv({
+  storeManager,
+  storeName,
+  operationNames,
+  sent,
+}: {
+  storeManager: ReturnType<typeof createUploadsStoreManager>;
+  storeName: string;
+  operationNames: readonly string[];
+  sent: string[];
+}) {
+  const operations: Record<string, DocumentValueOperation> = {};
+  for (const operationName of operationNames) {
+    operations[operationName] = {
+      inputSchema: rc_object({ value: rc_number }),
+      kind: 'update',
+      execute: async (ctx) => {
+        const avatar = ctx.uploads.filesById.avatar;
+        sent.push(
+          `${operationName}(${ctx.input.value})${avatar ? ` with avatar "${await avatar.text()}"` : ''}`,
+        );
+        return ctx.input;
+      },
+    };
+  }
+
+  return createDocumentStoreTestEnv<
+    number,
+    Record<string, DocumentValueOperation>
+  >(1, {
+    id: storeName,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations },
+    },
+  });
+}
+
+function queueOfflineEdit(
+  env: ReturnType<typeof createRecordingDocumentEnv>,
+  operation: string,
+  value: number,
+  avatarContent?: string,
+) {
+  return resolveAfterAllTimers(
+    env.apiStore.performMutation({
+      mutation: () => Promise.resolve(value),
+      offline: { operation, input: { value } },
+      upload:
+        avatarContent === undefined
+          ? undefined
+          : {
+              avatar: new File([avatarContent], 'avatar.txt', {
+                type: 'text/plain',
+                lastModified: 1,
+              }),
+            },
+    }),
+  );
+}
+
+test('an older deploy keeps the attached file of an edit queued for an operation only a newer deploy knows', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-unknown-operation-upload-session';
+  const storeName = 'offline-unknown-operation-upload-doc';
+  const sent: string[] = [];
+
+  // In the newer deploy, which added `updateValue`, the user attaches a file
+  // to an offline edit.
+  network.setOffline();
+  const newerStoreManager = createUploadsStoreManager(sessionKey);
+  const newerEnv = createRecordingDocumentEnv({
+    storeManager: newerStoreManager,
+    storeName,
+    operationNames: ['updateValue', 'legacyUpdateValue'],
+    sent,
+  });
+  await queueOfflineEdit(newerEnv, 'updateValue', 2, 'new photo');
+  await flushAllTimers();
+  const [queuedUpload] = newerStoreManager.getOfflineUploads();
+  if (!queuedUpload) throw new Error('Expected the attached file to be saved');
+
+  // A tab of the older deploy, which only knows `legacyUpdateValue`, opens
+  // the store while online. Then the connection drops and the user makes
+  // another offline edit there. Refreshing its offline state cleans up the
+  // files no queued work references, and it can't see the newer deploy's
+  // edit.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const olderStoreManager = createUploadsStoreManager(sessionKey);
+  const olderEnv = createRecordingDocumentEnv({
+    storeManager: olderStoreManager,
+    storeName,
+    operationNames: ['legacyUpdateValue'],
+    sent,
+  });
+  const olderHook = renderHook(() => olderEnv.apiStore.useDocument());
+  await advanceTime(5_000);
+  act(() => {
+    network.setOffline();
+  });
+  await queueOfflineEdit(olderEnv, 'legacyUpdateValue', 3);
+  await advanceTime(5_000);
+  olderHook.unmount();
+
+  // The file of the edit the older deploy can't see is kept.
+  expect(
+    olderStoreManager
+      .getOfflineUploads()
+      .map(({ id }) => (id === queuedUpload.id ? 'attached file' : id)),
+  ).toMatchInlineSnapshot(`['attached file']`);
+
+  // Back in the newer deploy, both edits are sent, the first one with its file.
+  resetSessionForTests();
+  const reloadedEnv = createRecordingDocumentEnv({
+    storeManager: createUploadsStoreManager(sessionKey),
+    storeName,
+    operationNames: ['updateValue', 'legacyUpdateValue'],
+    sent,
+  });
+  const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(sent).toMatchInlineSnapshot(
+    `['updateValue(2) with avatar "new photo"', 'legacyUpdateValue(3)']`,
+  );
+
+  reloadedHook.unmount();
 });

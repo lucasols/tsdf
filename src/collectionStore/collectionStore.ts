@@ -48,7 +48,6 @@ import {
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
-  OfflineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import {
   offlineItemEntityRefSchema,
@@ -2470,20 +2469,15 @@ export function createCollectionStore<
       : [payloadToUse];
     const affectedItemEntries = getItemsKeyArray(payloadToUse);
 
-    if (offline && offlineController && !offlineController.canQueueMutation()) {
-      return Result.err(
-        toStoreMutationError(
-          new OfflineSessionUnavailableError(),
-          errorNormalizer,
-        ),
-      );
-    }
-
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
+    const runOnlineMutation = async () => ({
+      kind: 'online' as const,
+      data: await directMutation(),
+    });
 
     // Whether the server accepted the mutation, even if `onSuccess` threw
     let accepted = false;
@@ -2491,22 +2485,23 @@ export function createCollectionStore<
       () => startMutation(payloadToUse),
       offline
         ? () =>
-            runHybridOfflineMutation(
-              // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
-              __LEGIT_CAST__<
-                OfflineAwareMutationController<
-                  Exclude<TOfflineOperations, null>
-                > | null,
-                unknown
-              >(offlineController),
-              offline,
-              upload,
-              directMutation,
-            )
-        : async () => ({
-            kind: 'online' as const,
-            data: await directMutation(),
-          }),
+            // Without an active offline session (no session key, or the
+            // session gate is closed) it runs as a plain online mutation
+            offlineController?.canQueueMutation()
+              ? runHybridOfflineMutation(
+                  // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
+                  __LEGIT_CAST__<
+                    OfflineAwareMutationController<
+                      Exclude<TOfflineOperations, null>
+                    > | null,
+                    unknown
+                  >(offlineController),
+                  offline,
+                  upload,
+                  directMutation,
+                )
+              : runOnlineMutation()
+        : runOnlineMutation,
       (exception, rollbacks) => {
         const error = toStoreMutationError(exception, errorNormalizer);
 

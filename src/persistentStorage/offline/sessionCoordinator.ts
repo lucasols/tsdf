@@ -54,6 +54,8 @@ import type {
   ItemOfflineState,
   OfflineFailureClassification,
   OfflineFailureContext,
+  OfflineHealthCheckConfig,
+  OfflineHealthCheckResult,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
@@ -253,7 +255,9 @@ const DEFAULT_NETWORK_RECOVERY_PROBE: Required<OfflineRecoveryProbeConfig> = {
   backoffMultiplier: 2,
   jitterRatio: 0.2,
 };
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const defaultGetIsOffline = () => !navigator.onLine;
+const INACTIVE_MODE = { enabled: false, active: false } as const;
 
 const defaultStatusBySession = new Map<string, GlobalOfflineStatus>();
 const registry = new Map<string, SessionOfflineCoordinator>();
@@ -548,11 +552,15 @@ type SessionRecoveryMode = 'network' | 'outage';
 
 type SessionRecoveryTarget = {
   mode: SessionRecoveryMode;
-  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+  /** Probe of the mode itself. Without one the session health check is used. */
+  recoveryCheck:
+    | ((ctx: { sessionKey: string }) => Promise<boolean> | boolean)
+    | undefined;
   recoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
 
 type SessionCanonicalConfig = {
+  isSessionEnabled?: OfflineSessionConfig['enabled'];
   hasNetworkConfig: boolean;
   networkEnabledByDefault: boolean;
   networkListenToBrowserEvents: boolean;
@@ -567,6 +575,8 @@ type SessionCanonicalConfig = {
   };
   classifyFailure?: OfflineSessionConfig['classifyFailure'];
   classifyRetriableFailure?: OfflineSessionConfig['classifyRetryableFailure'];
+  healthCheck?: OfflineHealthCheckConfig['check'];
+  healthCheckTimeoutMs: number;
   outageRecoveryCheck?: OfflineOutageModeConfig['recoveryCheck'];
   outageRecoveryProbe: Required<OfflineRecoveryProbeConfig>;
 };
@@ -575,6 +585,7 @@ function toCanonicalConfig(
   config: OfflineSessionConfig | undefined,
 ): SessionCanonicalConfig {
   return {
+    isSessionEnabled: config?.enabled,
     hasNetworkConfig: config?.network !== undefined,
     networkEnabledByDefault: config?.network?.enabled ?? false,
     networkListenToBrowserEvents:
@@ -593,6 +604,9 @@ function toCanonicalConfig(
     },
     classifyFailure: config?.classifyFailure,
     classifyRetriableFailure: config?.classifyRetryableFailure,
+    healthCheck: config?.healthCheck?.check,
+    healthCheckTimeoutMs:
+      config?.healthCheck?.timeoutMs ?? DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
     outageRecoveryCheck: config?.outage?.recoveryCheck,
     outageRecoveryProbe: normalizeRecoveryProbe(
       config?.outage?.recoveryProbe,
@@ -632,6 +646,7 @@ function sameCanonicalConfig(
   right: SessionCanonicalConfig,
 ): boolean {
   return (
+    left.isSessionEnabled === right.isSessionEnabled &&
     left.hasNetworkConfig === right.hasNetworkConfig &&
     left.networkEnabledByDefault === right.networkEnabledByDefault &&
     left.networkListenToBrowserEvents === right.networkListenToBrowserEvents &&
@@ -646,6 +661,8 @@ function sameCanonicalConfig(
       right.mutationQueueingByDefault.outage &&
     left.classifyFailure === right.classifyFailure &&
     left.classifyRetriableFailure === right.classifyRetriableFailure &&
+    left.healthCheck === right.healthCheck &&
+    left.healthCheckTimeoutMs === right.healthCheckTimeoutMs &&
     left.outageRecoveryCheck === right.outageRecoveryCheck &&
     sameProbeConfig(left.outageRecoveryProbe, right.outageRecoveryProbe)
   );
@@ -845,7 +862,16 @@ class SessionOfflineCoordinator {
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
+  /** Health check in flight, shared by every caller asking meanwhile. */
+  #healthCheckInFlight: Promise<OfflineHealthCheckResult | null> | null = null;
   #classifiedNetworkActive = false;
+  /** Last value of the session gate applied to the status. */
+  #appliedSessionEnabled = true;
+  /**
+   * The gate reopened and no green cycle ran since: mutations queued before
+   * it closed are waiting for one to be replayed.
+   */
+  #gateReopenedWithoutReplay = false;
   /** Tabs of this session that sent anything on the session channel. */
   #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
@@ -1660,6 +1686,10 @@ class SessionOfflineCoordinator {
   }
 
   isReplayBlocked(): boolean {
+    // Queued mutations wait for the session gate to reopen. A closing noticed
+    // here (e.g. between two replayed entries) is applied, so the reopen is
+    // seen as one and resumes the replay
+    if (!this.#syncSessionGate()) return true;
     if (this.store.state.status.isOfflineMode) return true;
 
     const { network, outage } = this.store.state.status;
@@ -1714,11 +1744,20 @@ class SessionOfflineCoordinator {
     return !isWindowAvailable() || navigator.onLine !== false;
   }
 
+  /**
+   * Reads the session gate (`offlineSession.enabled`): while it is closed the
+   * session behaves as if no offline session existed.
+   */
+  #isSessionEnabled(): boolean {
+    return this.#canonicalConfig.isSessionEnabled?.() ?? true;
+  }
+
   #isNetworkEnabled(): boolean {
     return (
       this.#canonicalConfig.hasNetworkConfig &&
       (this.#networkEnabledOverride ??
-        this.#canonicalConfig.networkEnabledByDefault)
+        this.#canonicalConfig.networkEnabledByDefault) &&
+      this.#isSessionEnabled()
     );
   }
 
@@ -1726,8 +1765,41 @@ class SessionOfflineCoordinator {
     return (
       this.#canonicalConfig.hasOutageConfig &&
       (this.#outageEnabledOverride ??
-        this.#canonicalConfig.outageEnabledByDefault)
+        this.#canonicalConfig.outageEnabledByDefault) &&
+      this.#isSessionEnabled()
     );
+  }
+
+  /**
+   * Applies a flip of the session gate to the status: closing it leaves
+   * offline mode, whatever the cause. Returns whether the gate is open.
+   *
+   * Every status write runs it first, so the flip is applied whichever path
+   * notices it (a fetch, a recovery check, another tab's snapshot...).
+   */
+  #syncSessionGate(): boolean {
+    const enabled = this.#isSessionEnabled();
+    if (enabled === this.#appliedSessionEnabled) return enabled;
+
+    this.#appliedSessionEnabled = enabled;
+    if (enabled) this.#gateReopenedWithoutReplay = true;
+
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
+    this.#updateStatus((current) => ({
+      ...current,
+      network: {
+        enabled: this.#isNetworkEnabled(),
+        active: current.network.active,
+      },
+      outage: {
+        enabled: this.#isOutageEnabled(),
+        active: current.outage.active,
+      },
+    }));
+    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    this.#handleConnectivityChange(wasEffectivelyOffline, false);
+
+    return enabled;
   }
 
   #assertModeIsConfigured(mode: 'network' | 'outage'): void {
@@ -1875,7 +1947,8 @@ class SessionOfflineCoordinator {
     if (
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkRecoveryCheck
+      (this.#canonicalConfig.networkRecoveryCheck ||
+        this.#canonicalConfig.healthCheck)
     ) {
       this.#syncRecoveryProbe();
       return true;
@@ -1900,17 +1973,31 @@ class SessionOfflineCoordinator {
   }
 
   async refreshNetworkState(): Promise<boolean> {
+    const sessionEnabled = this.#syncSessionGate();
     const token = ++this.#networkStateToken;
-    const detectedOffline = this.#getCurrentOfflineState();
 
-    if (typeof detectedOffline === 'boolean') {
-      return Promise.resolve(
-        this.#applyRefreshedNetworkState(token, detectedOffline),
-      );
+    // A closed session gate ignores network detection
+    if (!sessionEnabled) return false;
+
+    const detectedOffline = this.#getCurrentOfflineState();
+    const isOffline = this.#applyRefreshedNetworkState(
+      token,
+      typeof detectedOffline === 'boolean'
+        ? detectedOffline
+        : await detectedOffline,
+    );
+
+    // The gate has reopened: once the network detection confirms the session
+    // is online, mutations queued before it closed can be replayed
+    if (
+      this.#gateReopenedWithoutReplay &&
+      !isOffline &&
+      !this.isReplayBlocked()
+    ) {
+      this.#notifyGreenCycle();
     }
 
-    const resolvedDetectedOffline = await Promise.resolve(detectedOffline);
-    return this.#applyRefreshedNetworkState(token, resolvedDetectedOffline);
+    return isOffline;
   }
 
   setNetworkActive(
@@ -1921,6 +2008,9 @@ class SessionOfflineCoordinator {
       recoveryCheckAt?: number;
     } = {},
   ): void {
+    // Applied before the classification below is set: applying a flip
+    // re-derives it from the status
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isNetworkEnabled();
@@ -1962,6 +2052,8 @@ class SessionOfflineCoordinator {
     active: boolean,
     options: { recoveryCheckAt?: number } = {},
   ): void {
+    // Applied before the previous state is read below
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isOutageEnabled();
@@ -1981,13 +2073,42 @@ class SessionOfflineCoordinator {
     error: unknown,
     ctx: OfflineFailureContext,
   ): Promise<OfflineFailureClassification> {
-    if (!this.#canonicalConfig.classifyFailure) return 'ignore';
+    if (!this.#canClassifyFailures()) return 'ignore';
 
-    const token = this.getClassificationToken();
-    const result = await this.#canonicalConfig.classifyFailure(error, ctx);
+    const { classifyFailure, healthCheck } = this.#canonicalConfig;
+    let result: OfflineFailureClassification | 'unknown' = 'unknown';
 
-    if (!this.isCurrentClassificationToken(token)) {
-      return 'ignore';
+    if (classifyFailure) {
+      const token = this.getClassificationToken();
+      result = await classifyFailure(error, ctx);
+
+      // The gate may have closed while the classifier ran
+      if (!this.#canClassifyFailures()) return 'ignore';
+
+      // An explicit answer overtaken by a newer classification is dropped.
+      // An `unknown` one decides nothing by itself: it goes on to the health
+      // check, whose answer is shared by every failure waiting for it
+      if (result !== 'unknown' && !this.isCurrentClassificationToken(token)) {
+        return 'ignore';
+      }
+    }
+
+    if (result === 'unknown') {
+      if (!healthCheck) return 'ignore';
+
+      // Already offline: the active mode explains the failure, and asking
+      // "are we back?" is the job of the recovery checks
+      if (this.store.state.status.outage.active) return 'outage';
+      if (this.store.state.status.network.active) return 'network';
+
+      const health = await this.#checkHealth(healthCheck);
+      if (health === null || health === 'up') return 'ignore';
+
+      result = health === 'outage' ? 'outage' : 'network';
+
+      // Every failure that shared the check gets here; the first one has
+      // already activated the mode
+      if (this.store.state.status[result].active) return result;
     }
 
     if (result === 'outage') {
@@ -2010,6 +2131,65 @@ class SessionOfflineCoordinator {
     }
 
     return 'ignore';
+  }
+
+  /**
+   * Runs `offlineSession.healthCheck`. While a check is in flight every
+   * caller (failing requests, a recovery tick) gets that same call instead of
+   * starting its own. A finished answer is not kept: an `up` reused for a
+   * later failure could hide an outage that started right after it.
+   *
+   * Resolves with `null` when the check gave no answer (it threw or timed
+   * out), which callers treat as "nothing learned".
+   */
+  #checkHealth(
+    check: OfflineHealthCheckConfig['check'],
+  ): Promise<OfflineHealthCheckResult | null> {
+    this.#healthCheckInFlight ??= this.#requestHealth(check).finally(() => {
+      this.#healthCheckInFlight = null;
+    });
+
+    return this.#healthCheckInFlight;
+  }
+
+  async #requestHealth(
+    check: OfflineHealthCheckConfig['check'],
+  ): Promise<OfflineHealthCheckResult | null> {
+    const abortController = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      return await Promise.race([
+        check({ sessionKey: this.sessionKey, signal: abortController.signal }),
+        new Promise<null>((resolve) => {
+          timeout = setTimeout(() => {
+            abortController.abort();
+            resolve(null);
+          }, this.#canonicalConfig.healthCheckTimeoutMs);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Whether classifying a failure can change anything: the session gate has
+   * to be open, with a mode enabled or still active (waiting to recover).
+   */
+  #canClassifyFailures(): boolean {
+    if (!this.#isSessionEnabled()) return false;
+
+    const { network, outage } = this.store.state.status;
+
+    return (
+      network.active ||
+      outage.active ||
+      this.#isNetworkEnabled() ||
+      this.#isOutageEnabled()
+    );
   }
 
   async classifyRetriableFailure(
@@ -2035,6 +2215,7 @@ class SessionOfflineCoordinator {
     if (this.store.state.status.isOfflineMode || !this.isLeader()) {
       return;
     }
+    this.#gateReopenedWithoutReplay = false;
     void this.#refreshUploadRetention();
     for (const registration of this.#registrations.values()) {
       registration.onGreenCycle?.();
@@ -2827,14 +3008,23 @@ class SessionOfflineCoordinator {
   }
 
   #deriveLocalStatus(status: GlobalOfflineStatus): GlobalOfflineStatus {
-    const isOfflineMode = getIsOfflineModeFromStatus(status);
+    // A closed session gate drops every offline cause, wherever it comes from
+    // (detection, classification, another tab or the persisted snapshot)
+    const gatedStatus = this.#isSessionEnabled()
+      ? status
+      : { ...status, network: INACTIVE_MODE, outage: INACTIVE_MODE };
+    const isOfflineMode = getIsOfflineModeFromStatus(gatedStatus);
 
-    return this.#stampLocalStatus({ ...status, isOfflineMode });
+    return this.#stampLocalStatus({ ...gatedStatus, isOfflineMode });
   }
 
   #updateStatus(
     updater: (status: GlobalOfflineStatus) => GlobalOfflineStatus,
   ): void {
+    // The status is derived with the current gate: a flip nothing applied
+    // yet has to be applied first, or it would be absorbed without its side
+    // effects (the replay owed on reopen, the recovery probe stopped on close)
+    this.#syncSessionGate();
     const derived = this.#deriveLocalStatus(updater(this.store.state.status));
 
     this.store.setPartialState(
@@ -2898,6 +3088,8 @@ class SessionOfflineCoordinator {
       return;
     }
     this.#lastRemoteSnapshotAt = message.sentAt;
+    // The snapshot is derived with the current gate, like a local write
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
 
@@ -3019,19 +3211,22 @@ class SessionOfflineCoordinator {
   }
 
   #getDesiredRecoveryTarget(): SessionRecoveryTarget | null {
-    if (!this.isLeader() || this.#registrations.size === 0) {
+    if (this.#disposed || !this.isLeader() || this.#registrations.size === 0) {
       return null;
     }
+
+    const { networkRecoveryCheck, outageRecoveryCheck, healthCheck } =
+      this.#canonicalConfig;
 
     if (
       this.store.state.status.network.active &&
       this.#classifiedNetworkActive &&
       this.#browserReportsOnline() &&
-      this.#canonicalConfig.networkRecoveryCheck
+      (networkRecoveryCheck || healthCheck)
     ) {
       return {
         mode: 'network',
-        recoveryCheck: this.#canonicalConfig.networkRecoveryCheck,
+        recoveryCheck: networkRecoveryCheck,
         recoveryProbe: this.#canonicalConfig.networkRecoveryProbe,
       };
     }
@@ -3039,11 +3234,11 @@ class SessionOfflineCoordinator {
     if (
       this.store.state.status.outage.active &&
       !this.store.state.status.network.active &&
-      this.#canonicalConfig.outageRecoveryCheck
+      (outageRecoveryCheck || healthCheck)
     ) {
       return {
         mode: 'outage',
-        recoveryCheck: this.#canonicalConfig.outageRecoveryCheck,
+        recoveryCheck: outageRecoveryCheck,
         recoveryProbe: this.#canonicalConfig.outageRecoveryProbe,
       };
     }
@@ -3052,6 +3247,12 @@ class SessionOfflineCoordinator {
   }
 
   #scheduleRecoveryProbe(target: SessionRecoveryTarget): void {
+    // A probe may already be armed: the status can change while a recovery
+    // check is in flight, which re-arms the probe before that check settles
+    // and gets here too. Only one timer may survive, or each would keep its
+    // own probe loop running
+    if (this.#recoveryTimer !== null) clearTimeout(this.#recoveryTimer);
+
     this.#scheduledRecoveryMode = target.mode;
     this.#recoveryTimer = setTimeout(() => {
       this.#recoveryTimer = null;
@@ -3061,20 +3262,36 @@ class SessionOfflineCoordinator {
   }
 
   async #runRecoveryProbe(target: SessionRecoveryTarget): Promise<void> {
+    // A gate closed since the probe was armed leaves offline mode, which
+    // stops the probe before it calls the check
+    this.#syncSessionGate();
     const nextTarget = this.#getDesiredRecoveryTarget();
     if (nextTarget === null || nextTarget.mode !== target.mode) {
       return;
     }
 
+    const { healthCheck, outageRecoveryCheck } = this.#canonicalConfig;
     let recovered = false;
+    // Answer of the session health check, when the mode has no probe of its
+    // own
+    let health: OfflineHealthCheckResult | null = null;
 
-    try {
-      recovered = await nextTarget.recoveryCheck({
-        sessionKey: this.sessionKey,
-      });
-    } catch {
-      recovered = false;
+    if (nextTarget.recoveryCheck) {
+      try {
+        recovered = await nextTarget.recoveryCheck({
+          sessionKey: this.sessionKey,
+        });
+      } catch {
+        recovered = false;
+      }
+    } else if (healthCheck) {
+      health = await this.#checkHealth(healthCheck);
+      recovered = health === 'up';
     }
+
+    // Disposed while the check was in flight: its answer must not touch the
+    // status, wake up the stores or re-arm the probe timer
+    if (this.#disposed) return;
 
     const recoveryCheckAt = Date.now();
 
@@ -3082,10 +3299,47 @@ class SessionOfflineCoordinator {
       this.#recoveryAttempt = 0;
       if (target.mode === 'network') {
         this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+
+        // A healthy backend also ends an outage that waits for the same
+        // health check, without spending a second check on it
+        if (
+          health === 'up' &&
+          !outageRecoveryCheck &&
+          this.store.state.status.outage.active &&
+          !this.store.state.status.network.active
+        ) {
+          this.setOutageActive(false, { recoveryCheckAt });
+        }
         return;
       }
 
       this.setOutageActive(false, { recoveryCheckAt });
+      return;
+    }
+
+    if (target.mode === 'network' && health === 'outage') {
+      // The backend is reachable again but down: the network cause is over.
+      // Outage mode takes over first (when it can be entered), so the
+      // session is not seen as online in between
+      if (!this.store.state.status.outage.active && this.#isOutageEnabled()) {
+        this.setOutageActive(true, { recoveryCheckAt });
+      }
+      this.setNetworkActive(false, { classified: false, recoveryCheckAt });
+      return;
+    }
+
+    if (
+      target.mode === 'outage' &&
+      health === 'unreachable' &&
+      this.#isNetworkEnabled()
+    ) {
+      // Nothing can be said about the outage while the backend cannot be
+      // reached: it is kept, and network mode leads the recovery from here
+      this.setNetworkActive(true, {
+        classified: true,
+        recordFailureAt: true,
+        recoveryCheckAt,
+      });
       return;
     }
 
