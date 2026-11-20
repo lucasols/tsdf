@@ -3716,6 +3716,15 @@ export function createOfflineStoreController<
 
         return { resolution: retryResolution, entry };
       });
+      // Nothing references the attached files between removing the
+      // resolutions and persisting their replacements.
+      current.session.protectStagedUploads(
+        nextEntries.flatMap((nextEntry) =>
+          nextEntry.entry
+            ? Object.values(nextEntry.entry.attachedUploadIds ?? {})
+            : [],
+        ),
+      );
       for (const retryResolution of resolutionsToRetry) {
         await removeResolution(retryResolution.id, current, true);
       }
@@ -3768,6 +3777,11 @@ export function createOfflineStoreController<
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
+      // Nothing references the attached files between removing the
+      // resolution and persisting the replacement.
+      current.session.protectStagedUploads(
+        Object.values(resolutionRecord.attachedUploadIds ?? {}),
+      );
       await removeResolution(resolutionId, current, true);
       await queuePreparedMutations(preparedMutation);
       // The replacement input declared its own dependencies: uploads it kept

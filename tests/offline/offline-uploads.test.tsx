@@ -4711,6 +4711,76 @@ test('saving a new file over an upload that is still being sent is rejected, so 
   );
 });
 
+test('replacing a staged file and resolving it in the same moment never pairs the new file with the previous file ref', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-save-and-resolve-together-session';
+  const transportCalls: string[] = [];
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ file }) => {
+          transportCalls.push(`upload-start:${file.name}`);
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          transportCalls.push(`upload-finish:${file.name}`);
+          return `server:${file.name}`;
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  (
+    await resolveAfterAllTimers(
+      storeManager.saveOfflineUpload({
+        id: 'avatar',
+        file: new File(['first photo'], 'first.png', {
+          type: 'image/png',
+          lastModified: 1,
+        }),
+      }),
+    )
+  ).unwrap();
+
+  // The app swaps the photo and immediately asks for its server ref, without
+  // waiting for the save to finish.
+  const savePromise = storeManager.saveOfflineUpload({
+    id: 'avatar',
+    file: new File(['second photo'], 'second.png', {
+      type: 'image/png',
+      lastModified: 2,
+    }),
+  });
+  const resolvePromise = storeManager.resolveOfflineUpload('avatar');
+
+  // Bounded advance: lets the upload finish without running the 7-day
+  // retention cleanup of the uploaded file.
+  await advanceTime(2_000);
+  const saveResult = await savePromise;
+  const resolvedRef = (await resolvePromise).unwrap();
+
+  // Whichever call wins, the stored file and the ref it is marked with must
+  // belong together: the ref the app got is the ref of the bytes kept under
+  // the id, and the file that was sent is the one now stored.
+  const storedUpload = storeManager.getOfflineUploads()[0];
+  expect({
+    save: saveResult.ok ? 'saved' : saveResult.error.message,
+    resolvedRef,
+    stored:
+      storedUpload && pick(storedUpload, ['fileName', 'state', 'resolvedRef']),
+    transportCalls,
+  }).toMatchInlineSnapshot(`
+    resolvedRef: 'server:first.png'
+    save: 'Cannot change upload "avatar" while it is queued or uploading'
+    stored: { fileName: 'first.png', resolvedRef: 'server:first.png', state: 'uploaded' }
+    transportCalls: ['upload-start:first.png', 'upload-finish:first.png']
+  `);
+});
+
 test('upload concurrency is respected across separate resolve calls, and an upload waiting in the queue cannot be replaced', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-concurrency-session';

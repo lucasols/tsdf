@@ -1138,6 +1138,10 @@ class SessionOfflineCoordinator {
     }
 
     await this.#restoreStoredUploads();
+    // Saving while the previous file of this id is being removed could let
+    // the removal delete the new file. Waited here, before the check below,
+    // so nothing yields between the check and publishing the new record.
+    await this.#waitForUploadRemoval(args.id);
 
     // The queued or running transport marks the record as uploaded when it
     // finishes, so swapping the file under it would pair the new file with
@@ -1209,6 +1213,17 @@ class SessionOfflineCoordinator {
     this.#stagedMutationUploadIds.delete(id);
     this.#releasedUploadRefs.delete(id);
     await this.#removeUploads([id]);
+  }
+
+  /**
+   * Keeps files attached to a mutation while it moves between work items
+   * (a resolution requeued as a new queue entry): between removing the old
+   * item and persisting the new one nothing references them, so cleanup of
+   * unused mutation uploads must skip them until a store reports the new
+   * reference. Call it synchronously before removing the old item.
+   */
+  protectStagedUploads(uploadIds: readonly string[]): void {
+    for (const id of uploadIds) this.#stagedMutationUploadIds.add(id);
   }
 
   /**
@@ -1827,7 +1842,7 @@ class SessionOfflineCoordinator {
     if (restored) return restored;
 
     // A removal in flight could still let the load find the removed record.
-    await this.#uploadRemovals.get(id);
+    await this.#waitForUploadRemoval(id);
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
     // A save during the load already persisted a newer record; keep it.
     const current = this.#uploads.get(id);
@@ -1840,6 +1855,14 @@ class SessionOfflineCoordinator {
     return loaded;
   }
 
+  async #waitForUploadRemoval(id: string): Promise<void> {
+    let removal = this.#uploadRemovals.get(id);
+    while (removal) {
+      await removal;
+      removal = this.#uploadRemovals.get(id);
+    }
+  }
+
   async #saveUploadRecord(record: OfflineStoredUploadRecord): Promise<void> {
     if (!this.#uploadsConfig) {
       throw new Error(
@@ -1848,8 +1871,11 @@ class SessionOfflineCoordinator {
     }
 
     // Saving while the previous file of this id is being removed could let
-    // the removal delete the new file.
-    await this.#uploadRemovals.get(record.id);
+    // the removal delete the new file. Only yields when a removal is in
+    // flight, so callers that checked the upload state just before still
+    // publish the record before anything else runs.
+    const removal = this.#uploadRemovals.get(record.id);
+    if (removal) await removal;
     this.#uploads.set(record.id, record);
     await this.#uploadsConfig.adapter.save(this.sessionKey, record.id, record);
     this.#syncUploadsState();
@@ -1984,9 +2010,7 @@ class SessionOfflineCoordinator {
         this.#uploads.delete(id);
       }
       await Promise.all(
-        expiredIds.map((id) =>
-          uploadsConfig.adapter.remove(this.sessionKey, id),
-        ),
+        expiredIds.map((id) => this.#removeStoredUpload(uploadsConfig, id)),
       );
       didChange = true;
     }
@@ -2214,22 +2238,33 @@ class SessionOfflineCoordinator {
     await Promise.all(
       ids.map((id) => {
         this.#uploads.delete(id);
-        const removal = uploadsConfig.adapter.remove(this.sessionKey, id);
-        const settled = removal.then(
-          () => {},
-          () => {},
-        );
-        this.#uploadRemovals.set(id, settled);
-        void settled.then(() => {
-          if (this.#uploadRemovals.get(id) === settled) {
-            this.#uploadRemovals.delete(id);
-          }
-        });
-        return removal;
+        return this.#removeStoredUpload(uploadsConfig, id);
       }),
     );
     this.#syncUploadsState();
     void this.#refreshUploadRetention();
+  }
+
+  /**
+   * Removes an upload from the adapter, tracking the removal so a save or
+   * load of the same id waits for it.
+   */
+  #removeStoredUpload(
+    uploadsConfig: OfflineSessionUploadsConfig,
+    id: string,
+  ): Promise<void> {
+    const removal = uploadsConfig.adapter.remove(this.sessionKey, id);
+    const settled = removal.then(
+      () => {},
+      () => {},
+    );
+    this.#uploadRemovals.set(id, settled);
+    void settled.then(() => {
+      if (this.#uploadRemovals.get(id) === settled) {
+        this.#uploadRemovals.delete(id);
+      }
+    });
+    return removal;
   }
 
   #refreshAggregates(): void {
