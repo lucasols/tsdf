@@ -162,13 +162,6 @@ type OfflineSessionMessage =
   | SessionWorkDiscardedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
-type SessionReplayHead = {
-  storeName: string;
-  entryId: string;
-  queueOrder: number;
-  createdAt: number;
-};
-
 type UploadFileEntry = {
   /** Change listeners of the hooks currently consuming this upload id. */
   listeners: Set<() => void>;
@@ -178,6 +171,13 @@ type UploadFileEntry = {
 };
 
 function noop(): void {}
+
+type SessionReplayHead = {
+  storeName: string;
+  entryId: string;
+  queueOrder: number;
+  createdAt: number;
+};
 
 type SessionStoreContribution = {
   adapter: StorageAdapter;
