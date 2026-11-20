@@ -31,6 +31,7 @@ import {
 import {
   advanceTime,
   flushAllTimers,
+  range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -611,11 +612,13 @@ describe('operations that stop making progress', () => {
     await advanceTime(10 * 60_000);
     expect(openDatabase).toHaveBeenCalledTimes(1);
 
-    // Back in the foreground the save still gets two full checks before it is
-    // considered stuck, so a save that completes on resume is never failed.
+    // Back in the foreground the save still gets two full checks of visible
+    // time before it is considered stuck, so a save that completes on resume
+    // is never failed. The first check after becoming visible mostly covers
+    // hidden time, so it does not count.
     visibility.mockReturnValue('visible');
     storage.recoverLosingPendingWork();
-    await advanceTime(STALL_CHECK_INTERVAL_MS);
+    await advanceTime(2 * STALL_CHECK_INTERVAL_MS);
     expect(openDatabase).toHaveBeenCalledTimes(1);
 
     await advanceTime(STALL_CHECK_INTERVAL_MS);
@@ -652,6 +655,34 @@ describe('operations that stop making progress', () => {
     expect(openDatabase).toHaveBeenCalledTimes(1);
     expect(await readPersistedEntries()).toMatchInlineSnapshot(
       `doc-hung-asleep/d: { value: 2 }`,
+    );
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a save left pending while the device sleeps before its first check still gets two full checks after it wakes', async () => {
+    const { env } = createDocumentApp('doc-hung-asleep-early', 1);
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
+
+    const storage = freezeStorage();
+    editDocument(env, 2);
+    // The debounced save starts, and the lid is closed right away.
+    await advanceTime(2000);
+
+    // An hour later the device wakes up. The overdue first check does not
+    // count against the save, and one more check is not enough to give up.
+    vi.setSystemTime(Date.now() + 60 * 60_000);
+    await advanceTime(2 * STALL_CHECK_INTERVAL_MS);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+
+    // Storage answers: the original save completes on the original
+    // connection, without a second attempt.
+    storage.resume();
+    await flushAllTimers();
+
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+    expect(await readPersistedEntries()).toMatchInlineSnapshot(
+      `doc-hung-asleep-early/d: { value: 2 }`,
     );
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });
@@ -755,6 +786,53 @@ describe('operations that stop making progress', () => {
       - 'col-slow/"e'
       - 'col-slow/"f'
     `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a slow removal of many items keeps making progress and is never interrupted', async () => {
+    const itemIds = range(1, 12).map((index) => `item-${index}`);
+    const adapter = createAdapter();
+    const env = createCollectionStoreTestEnv(
+      {},
+      {
+        id: 'col-slow-removal',
+        getSessionKey: () => sessionKey,
+        persistentStorage: {
+          adapter,
+          payloadSchema: rc_string,
+          schema: collectionItemSchema,
+          onPersistentStorageError,
+        },
+      },
+    );
+    apps.push({ adapter, dispose: () => env.apiStore.dispose() });
+
+    // The items are saved while storage is fast.
+    for (const id of itemIds) {
+      env.apiStore.addItemToState(id, { value: { id, name: `Name ${id}` } });
+    }
+    await flushAllTimers();
+    expect(Object.keys(await readPersistedEntries())).toHaveLength(12);
+
+    // A very slow device: storage needs 4s for every single step of work, so
+    // deleting all the items takes far longer than two stall checks.
+    const storage = freezeStorage();
+    for (const id of itemIds) {
+      env.apiStore.deleteItemState(id);
+    }
+
+    let idleSteps = 0;
+    while (idleSteps < 5) {
+      idleSteps = storage.runNextTask() ? 0 : idleSteps + 1;
+      await advanceTime(4000);
+    }
+    storage.recoverLosingPendingWork();
+    await flushAllTimers();
+
+    // Every deletion that completes counts as progress, so the removal is
+    // neither abandoned nor retried on a new connection.
+    expect(adapterConnections).toHaveLength(1);
+    expect(await readPersistedEntries()).toMatchInlineSnapshot(`{}`);
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });
 

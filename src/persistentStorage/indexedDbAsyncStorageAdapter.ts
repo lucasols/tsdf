@@ -77,12 +77,17 @@ function isIndexedDbConnectionError(error: unknown): boolean {
 }
 
 /**
- * IndexedDB events delivered to this page's adapters so far. While it keeps
- * growing the browser's storage backend is answering, so an operation that
- * is merely queued behind a long-running one is not mistaken for a stalled
- * one.
+ * IndexedDB events delivered so far to this page, per database. While a
+ * database's count keeps growing the browser's storage backend is answering
+ * for it, so an operation that is merely queued behind a long-running one is
+ * not mistaken for a stalled one. Operations only queue behind work on the
+ * same database, so other databases' events say nothing about it.
  */
-let indexedDbEventCount = 0;
+const indexedDbProgressByDatabase = new Map<string, { events: number }>();
+
+function isPageHidden(): boolean {
+  return asPossiblyUndefined(globalThis.document)?.visibilityState === 'hidden';
+}
 
 /**
  * Gives up on an open request or transaction when IndexedDB stopped
@@ -94,12 +99,21 @@ class IndexedDbStallWatch {
   readonly rejecters: Array<(error: Error) => void> = [];
 
   readonly #transaction: IDBTransaction | null;
-  #checkedEventCount = indexedDbEventCount;
-  #checkedAt = 0;
+  readonly #progress: { events: number };
+  #checkedEventCount: number;
+  #checkedAt = Date.now();
+  #hiddenAtCheck = isPageHidden();
   #stalledChecks = 0;
   #timer: ReturnType<typeof setTimeout>;
 
-  constructor(transaction: IDBTransaction | null) {
+  constructor(databaseName: string, transaction: IDBTransaction | null) {
+    let progress = indexedDbProgressByDatabase.get(databaseName);
+    if (progress === undefined) {
+      progress = { events: 0 };
+      indexedDbProgressByDatabase.set(databaseName, progress);
+    }
+    this.#progress = progress;
+    this.#checkedEventCount = progress.events;
     this.#transaction = transaction;
     this.#timer = setTimeout(this.#check, INDEXED_DB_STALL_CHECK_INTERVAL_MS);
     // Independent of how the operation's own code exits: the watch ends
@@ -107,6 +121,11 @@ class IndexedDbStallWatch {
     transaction?.addEventListener('complete', this.stop);
     transaction?.addEventListener('abort', this.stop);
   }
+
+  /** Records an IndexedDB event of the watched database. */
+  readonly progressed = (): void => {
+    this.#progress.events += 1;
+  };
 
   readonly stop = (): void => {
     clearTimeout(this.#timer);
@@ -117,22 +136,23 @@ class IndexedDbStallWatch {
     // hidden tab may have its storage paused, and a check that fires late
     // means the page itself was not running (frozen tab, sleeping device,
     // throttled timers), so IndexedDB had no chance to answer either. An
-    // operation is therefore never given up the moment a page resumes.
+    // interval that started hidden is not counted either. An operation is
+    // therefore never given up the moment a page resumes.
     const now = Date.now();
-    const firedLate =
-      this.#checkedAt !== 0 &&
-      now - this.#checkedAt > INDEXED_DB_STALL_CHECK_INTERVAL_MS * 1.5;
+    const hidden = isPageHidden();
     if (
-      indexedDbEventCount !== this.#checkedEventCount ||
-      firedLate ||
-      asPossiblyUndefined(globalThis.document)?.visibilityState === 'hidden'
+      this.#progress.events !== this.#checkedEventCount ||
+      now - this.#checkedAt > INDEXED_DB_STALL_CHECK_INTERVAL_MS * 1.5 ||
+      hidden ||
+      this.#hiddenAtCheck
     ) {
       this.#stalledChecks = 0;
     } else {
       this.#stalledChecks += 1;
     }
-    this.#checkedEventCount = indexedDbEventCount;
+    this.#checkedEventCount = this.#progress.events;
     this.#checkedAt = now;
+    this.#hiddenAtCheck = hidden;
 
     if (this.#stalledChecks < 2) {
       this.#timer = setTimeout(this.#check, INDEXED_DB_STALL_CHECK_INTERVAL_MS);
@@ -638,7 +658,7 @@ function openRequestAsPromise<T>(
   return new Promise<T>((resolve, reject) => {
     watch.rejecters.push(reject);
     request.onsuccess = () => {
-      indexedDbEventCount += 1;
+      watch.progressed();
       // WORKAROUND: DOM IndexedDB requests expose `result` as `unknown`/`any`;
       // callers choose the expected shape at each read boundary.
       resolve(__LEGIT_CAST__<T, unknown>(request.result));
@@ -655,7 +675,7 @@ function transactionDone(
   return new Promise<void>((resolve, reject) => {
     watch.rejecters.push(reject);
     transaction.oncomplete = () => {
-      indexedDbEventCount += 1;
+      watch.progressed();
       resolve();
     };
     transaction.onerror = (event) =>
@@ -681,7 +701,7 @@ async function iterateCursor<TCursor extends IDBCursor, T>(
     request.onerror = () =>
       reject(request.error ?? new Error('IndexedDB cursor request failed.'));
     request.onsuccess = async () => {
-      indexedDbEventCount += 1;
+      watch.progressed();
       const cursor = request.result;
       if (cursor === null) {
         resolve();
@@ -734,7 +754,7 @@ async function getMaintenanceState(
   database: IDBDatabase,
 ): Promise<{ lastSuccessfulCleanupAt: number | null }> {
   const transaction = database.transaction(INDEXED_DB_META_STORE, 'readonly');
-  const watch = new IndexedDbStallWatch(transaction);
+  const watch = new IndexedDbStallWatch(database.name, transaction);
   const store = transaction.objectStore(INDEXED_DB_META_STORE);
   const value = await openRequestAsPromise<IndexedDbMetaRecord | undefined>(
     watch,
@@ -766,7 +786,7 @@ async function setMaintenanceState(
   value: { lastSuccessfulCleanupAt: number | null },
 ): Promise<void> {
   const transaction = database.transaction(INDEXED_DB_META_STORE, 'readwrite');
-  const watch = new IndexedDbStallWatch(transaction);
+  const watch = new IndexedDbStallWatch(database.name, transaction);
   transaction
     .objectStore(INDEXED_DB_META_STORE)
     .put({
@@ -907,18 +927,15 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   async removeMany(
     scope: AsyncStorageNamespaceScope,
     keys: string[],
-    isRetry = false,
   ): Promise<void> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const startTime =
         import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readwrite',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -929,7 +946,10 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       for (const key of keys) {
         const parsedKey = parseAsyncStorageRecordKey(key);
         if (parsedKey.recordKind === 'payload') {
-          entryStore.delete(createEntryPrimaryKey(scope, parsedKey.userKey));
+          // Unawaited, so each deletion reports its own progress.
+          entryStore.delete(
+            createEntryPrimaryKey(scope, parsedKey.userKey),
+          ).onsuccess = watch.progressed;
           removedAnyEntry = true;
           continue;
         }
@@ -943,6 +963,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       if (removedAnyEntry && !removedScope) {
         const countRequest = entryStore.count(createScopeKeyRange(scope));
         countRequest.onsuccess = () => {
+          watch.progressed();
           if (countRequest.result === 0) {
             policyStore.delete(createScopePolicyKey(scope));
           }
@@ -966,10 +987,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         time: Date.now(),
         type: 'removeManagedRecords',
       });
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.removeMany(scope, keys, true);
-    }
+    });
   }
 
   async listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
@@ -995,18 +1013,15 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   async listScopesWithKnownRecordKeys(
     sessionKey?: string,
-    isRetry = false,
   ): Promise<AsyncStorageDiscoveredScope[]> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const startTime =
         import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readonly',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1066,32 +1081,26 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       });
 
       return discoveredScopes;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.listScopesWithKnownRecordKeys(sessionKey, true);
-    }
+    });
   }
 
   async readManagedEntries<TValue>(
     scope: AsyncStorageNamespaceScope,
     keys: string[],
-    isRetry = false,
   ): Promise<
     Map<
       string,
       AsyncStorageNamespaceGetResult<TValue, Record<string, unknown>> | null
     >
   > {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const startTime =
         import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         INDEXED_DB_ENTRY_STORE,
         'readonly',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const uniqueKeys = [...new Set(keys)];
       const result = new Map<
@@ -1141,10 +1150,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       });
 
       return result;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.readManagedEntries<TValue>(scope, keys, true);
-    }
+    });
   }
 
   async listManagedMetadata(
@@ -1153,19 +1159,16 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       filter?: IndexedDbManagedMetadataFilter;
       order?: AsyncStorageMetadataOrder;
     } = {},
-    isRetry = false,
   ): Promise<AsyncStorageEntryMetadata<Record<string, unknown>>[]> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const startTime =
         import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
       const order = args.order ?? 'key';
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         INDEXED_DB_ENTRY_STORE,
         'readonly',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const entries: AsyncStorageEntryMetadata<Record<string, unknown>>[] = [];
       let usedIndex: 'group' | 'key' | 'lru' = 'key';
@@ -1258,10 +1261,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       });
 
       return filteredEntries;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.listManagedMetadata(scope, args, true);
-    }
+    });
   }
 
   async listManagedKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
@@ -1271,18 +1271,15 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
 
   async clearManagedNamespace(
     scope: AsyncStorageNamespaceScope,
-    isRetry = false,
   ): Promise<void> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const startTime =
         import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readwrite',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1307,10 +1304,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         time: Date.now(),
         type: 'clearManagedNamespace',
       });
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.clearManagedNamespace(scope, true);
-    }
+    });
   }
 
   async applyManagedCommit(
@@ -1326,18 +1320,15 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         currentCustomMetadata: Record<string, unknown> | undefined,
       ) => Record<string, unknown> | undefined;
     },
-    isRetry = false,
   ): Promise<ReadonlySet<string>> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const startTime =
         import.meta.env.DEV && this.debugLogger ? getTSDFDebugTimingMs() : null;
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readwrite',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1407,7 +1398,9 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       }
 
       for (const key of removes) {
-        entryStore.delete(createEntryPrimaryKey(scope, key));
+        // Unawaited, so each deletion reports its own progress.
+        entryStore.delete(createEntryPrimaryKey(scope, key)).onsuccess =
+          watch.progressed;
       }
 
       const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
@@ -1485,8 +1478,11 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           watch,
           policyStore.put(
             {
+              // `null` clears the policy, only a commit without one keeps it.
               p: serializeIndexedDbPersistedStaticPolicy(
-                normalizedStaticPolicy ?? existingStaticPolicy,
+                normalizedStaticPolicy === undefined
+                  ? existingStaticPolicy
+                  : normalizedStaticPolicy,
               ),
               s: scope.sessionKey,
             } satisfies IndexedDbNamespacePolicyRecord,
@@ -1523,26 +1519,20 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           .sort((left, right) => left.localeCompare(right)),
       });
       return staleConditionalRemoveKeys;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.applyManagedCommit(scope, args, helpers, true);
-    }
+    });
   }
 
   async readNamespaceIndexState(
     scope: AsyncStorageNamespaceScope,
     knownRecordKeys_?: string[] | null,
-    isRetry = false,
   ): Promise<IndexedDbManagedIndexState> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       void knownRecordKeys_;
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readonly',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1655,10 +1645,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         valid: result.valid,
       });
       return result;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.readNamespaceIndexState(scope, knownRecordKeys_, true);
-    }
+    });
   }
 
   async persistNamespaceIndexState(
@@ -1667,17 +1654,14 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       entries: Map<string, IndexedDbManagedMetadataRecord>;
       staticPolicy: AsyncStorageNamespaceStaticPolicy | null;
     },
-    isRetry = false,
   ): Promise<void> {
-    let database: IDBDatabase | undefined;
-    try {
-      database = await this.#getDatabase();
+    return this.#withConnection(async (database) => {
       const existingEntries = new Map<string, IndexedDbEntryRecord>();
       const readTransaction = database.transaction(
         INDEXED_DB_ENTRY_STORE,
         'readonly',
       );
-      const readWatch = new IndexedDbStallWatch(readTransaction);
+      const readWatch = new IndexedDbStallWatch(database.name, readTransaction);
       const readStore = readTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const desiredKeys = [...state.entries.keys()];
 
@@ -1697,7 +1681,10 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readwrite',
       );
-      const writeWatch = new IndexedDbStallWatch(writeTransaction);
+      const writeWatch = new IndexedDbStallWatch(
+        database.name,
+        writeTransaction,
+      );
       const entryStore = writeTransaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = writeTransaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1709,6 +1696,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         const { extraMetadata, group, offlineProtected, payload } =
           splitCustomMetadata(metadata.customMetadata);
 
+        // Unawaited, so each write reports its own progress.
         entryStore.put(
           {
             ...existing,
@@ -1729,7 +1717,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
             ...(metadata.sizeBytes === undefined ? { z: undefined } : {}),
           } satisfies IndexedDbEntryRecord,
           createEntryPrimaryKey(scope, key),
-        );
+        ).onsuccess = writeWatch.progressed;
       }
 
       if (state.entries.size === 0) {
@@ -1753,24 +1741,16 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         time: Date.now(),
         type: 'persistManagedIndexState',
       });
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.persistNamespaceIndexState(scope, state, true);
-    }
+    });
   }
 
-  async readProtectedStorageKeys(
-    sessionKey: string,
-    isRetry = false,
-  ): Promise<string[]> {
-    let database: IDBDatabase | undefined;
-    try {
-      database = await this.#getDatabase();
+  async readProtectedStorageKeys(sessionKey: string): Promise<string[]> {
+    return this.#withConnection(async (database) => {
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readonly',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1806,26 +1786,20 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       });
 
       return values;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.readProtectedStorageKeys(sessionKey, true);
-    }
+    });
   }
 
   async syncSessionProtectedKeys(
     sessionKey: string,
     protectedKeys: Iterable<string>,
-    isRetry = false,
   ): Promise<void> {
-    let database: IDBDatabase | undefined;
-    try {
+    return this.#withConnection(async (database) => {
       const nextProtectedKeys = new Set(protectedKeys);
-      database = await this.#getDatabase();
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readwrite',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const store = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -1870,10 +1844,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
           left.localeCompare(right),
         ),
       });
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.syncSessionProtectedKeys(sessionKey, protectedKeys, true);
-    }
+    });
   }
 
   async readMaintenanceState(): Promise<{
@@ -1902,7 +1873,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       left.localeCompare(right),
     )) {
       const transaction = database.transaction(storeName, 'readonly');
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const store = transaction.objectStore(storeName);
       const indexes = [...store.indexNames]
         .sort((left, right) => left.localeCompare(right))
@@ -1937,16 +1908,13 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   async #getEntry(
     scope: AsyncStorageNamespaceScope,
     key: string,
-    isRetry = false,
   ): Promise<IndexedDbEntryRecord | null> {
-    let database: IDBDatabase | undefined;
-    try {
-      database = await this.#getDatabase();
+    return this.#withConnection(async (database) => {
       const transaction = database.transaction(
         INDEXED_DB_ENTRY_STORE,
         'readonly',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const record = await openRequestAsPromise<
         IndexedDbEntryRecord | undefined
       >(
@@ -1957,10 +1925,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       );
       await transactionDone(transaction, watch);
       return isValidEntryRecord(record) ? toEntryRecordValue(record) : null;
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.#getEntry(scope, key, true);
-    }
+    });
   }
 
   async #putEntryRecord(
@@ -1972,16 +1937,13 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       value: unknown;
       version: number;
     },
-    isRetry = false,
   ): Promise<void> {
-    let database: IDBDatabase | undefined;
-    try {
-      database = await this.#getDatabase();
+    return this.#withConnection(async (database) => {
       const transaction = database.transaction(
         [INDEXED_DB_ENTRY_STORE, INDEXED_DB_NAMESPACE_POLICY_STORE],
         'readwrite',
       );
-      const watch = new IndexedDbStallWatch(transaction);
+      const watch = new IndexedDbStallWatch(database.name, transaction);
       const entryStore = transaction.objectStore(INDEXED_DB_ENTRY_STORE);
       const policyStore = transaction.objectStore(
         INDEXED_DB_NAMESPACE_POLICY_STORE,
@@ -2018,7 +1980,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         createScopePolicyKey(scope),
       );
       policyRequest.onsuccess = () => {
-        indexedDbEventCount += 1;
+        watch.progressed();
         const existingScopeRecord = policyRequest.result;
         policyStore.put(
           {
@@ -2035,10 +1997,7 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         );
       };
       await transactionDone(transaction, watch);
-    } catch (error) {
-      if (!this.#shouldRetry(error, database, isRetry)) throw error;
-      return this.#putEntryRecord(scope, args, true);
-    }
+    });
   }
 
   #parsePersistedIndexState(
@@ -2092,10 +2051,10 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
       // Also bounds a request left pending by `blocked`, which needs no
       // handler of its own: it only means another connection has not closed
       // yet, and the request still succeeds once it does.
-      const watch = new IndexedDbStallWatch(null);
+      const watch = new IndexedDbStallWatch(this.databaseName, null);
       watch.rejecters.push(reject);
       request.onupgradeneeded = () => {
-        indexedDbEventCount += 1;
+        watch.progressed();
         const database = request.result;
         if (database.objectStoreNames.contains(INDEXED_DB_ENTRY_STORE)) {
           database.deleteObjectStore(INDEXED_DB_ENTRY_STORE);
@@ -2165,7 +2124,8 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   }
 
   /**
-   * Whether a failed operation should run once more on a new connection.
+   * Runs an operation and, when the connection fails under it, runs it once
+   * more on a new connection.
    *
    * Every operation of this driver is safe to repeat: each one is a single
    * atomic transaction (or a sequence of them) that reads what it needs inside
@@ -2174,14 +2134,20 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
    * leaves the same data. Quota, data and version errors are not connection
    * errors and are never retried.
    */
-  #shouldRetry(
-    error: unknown,
-    database: IDBDatabase | undefined,
-    isRetry: boolean,
-  ): boolean {
-    if (!isIndexedDbConnectionError(error)) return false;
-    if (database !== undefined) this.#dropDatabase(database);
-    return !isRetry;
+  async #withConnection<T>(
+    run: (database: IDBDatabase) => Promise<T>,
+    isRetry = false,
+  ): Promise<T> {
+    let database: IDBDatabase | undefined;
+    try {
+      database = await this.#getDatabase();
+      return await run(database);
+    } catch (error) {
+      if (!isIndexedDbConnectionError(error)) throw error;
+      if (database !== undefined) this.#dropDatabase(database);
+      if (isRetry) throw error;
+      return this.#withConnection(run, true);
+    }
   }
 
   #logAdapterOperation(
