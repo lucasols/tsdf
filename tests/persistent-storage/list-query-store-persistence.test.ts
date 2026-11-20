@@ -1563,6 +1563,273 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
+  test('a list requesting more fields than a loaded query holds shows a loading state, not an empty list, while the missing fields are fetched', async () => {
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName: 'lq-wider-fields-unrestorable-rows',
+      sessionKey: 'sess1',
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [
+          { id: 1, name: 'Ada', age: 30 },
+          { id: 2, name: 'Grace', age: 40 },
+        ],
+      },
+    });
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ showMoreColumns }: { showMoreColumns: boolean }) => {
+        // The list as first shown: only ids. Rows holding only `id` are saved
+        // to storage but cannot be restored from it, since the storage schema
+        // requires `name` — so storage has the query without any usable row.
+        const idsOnly = env.apiStore.useListQuery(usersQuery, {
+          fields: ['id'],
+        });
+        // The same query read with more columns, mounted later.
+        const moreColumns = env.apiStore.useListQuery(
+          showMoreColumns && usersQuery,
+          { fields: ['id', 'name', 'age'] },
+        );
+        // Same, but opting into showing the cached columns meanwhile.
+        const moreColumnsKeepingRows = env.apiStore.useListQuery(
+          showMoreColumns && usersQuery,
+          { fields: ['id', 'name', 'age'], showPartialAsRefetching: true },
+        );
+
+        renders.add({
+          idsOnly: `${idsOnly.status} ${JSON.stringify(idsOnly.items)}`,
+          moreColumns: `${moreColumns.status} (isLoading: ${moreColumns.isLoading}) ${JSON.stringify(moreColumns.items)}`,
+          moreColumnsKeepingRows: `${moreColumnsKeepingRows.status} (loadingFields: ${moreColumnsKeepingRows.loadingFields?.join(',') ?? 'none'}) ${JSON.stringify(moreColumnsKeepingRows.items)}`,
+        });
+      },
+      { initialProps: { showMoreColumns: false } },
+    );
+    await flushAllTimers();
+
+    renders.addMark('more columns are shown');
+    act(() => {
+      rerender({ showMoreColumns: true });
+    });
+    await flushAllTimers();
+
+    // While `name` and `age` are fetched the wider list must not report
+    // `success` with no rows (an empty state): it is `loading`, or keeps the
+    // cached rows with `showPartialAsRefetching`. The ids-only list is not
+    // disturbed.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ idsOnly: loading []
+      ⋅ moreColumns: idle (isLoading: false) []
+      ⋅ moreColumnsKeepingRows: idle (loadingFields: none) []
+      └─
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: idle (isLoading: false) []
+      ⋅ moreColumnsKeepingRows: idle (loadingFields: none) []
+      └─
+
+      >>> more columns are shown
+
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: loading (isLoading: true) []
+      ⋅ moreColumnsKeepingRows: success (loadingFields: name,age) [{"id":1},{"id":2}]
+      └─
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: success (isLoading: false) [{"id":1,"name":"Ada","age":30},{"id":2,"name":"Grace","age":40}]
+      ⋅ moreColumnsKeepingRows: success (loadingFields: none) [{"id":1,"name":"Ada","age":30},{"id":2,"name":"Grace","age":40}]
+      └─
+      "
+    `);
+    // One fetch for the first list, one for the columns that were missing.
+    expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 2
+        - _type: 'list'
+          payload:
+            fields: ['age', 'id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 2
+      `);
+  });
+
+  test('a list requesting more fields than a loaded query holds keeps loading when storage can restore the rows already loaded', async () => {
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName: 'lq-wider-fields-restorable-rows',
+      sessionKey: 'sess1',
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Ada', age: 30 }] },
+    });
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ showMoreColumns }: { showMoreColumns: boolean }) => {
+        // `id` and `name` satisfy the storage schema, so these rows can be
+        // restored from storage — but they still lack `age`.
+        const fewColumns = env.apiStore.useListQuery(usersQuery, {
+          fields: ['id', 'name'],
+        });
+        const moreColumns = env.apiStore.useListQuery(
+          showMoreColumns && usersQuery,
+          { fields: ['id', 'name', 'age'] },
+        );
+
+        renders.add({
+          fewColumns: `${fewColumns.status} ${JSON.stringify(fewColumns.items)}`,
+          moreColumns: `${moreColumns.status} ${JSON.stringify(moreColumns.items)}`,
+        });
+      },
+      { initialProps: { showMoreColumns: false } },
+    );
+    await flushAllTimers();
+
+    renders.addMark('more columns are shown');
+    act(() => {
+      rerender({ showMoreColumns: true });
+    });
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> fewColumns: loading [] ⋅ moreColumns: idle []
+      -> fewColumns: success [{"id":1,"name":"Ada"}] ⋅ moreColumns: idle []
+
+      >>> more columns are shown
+
+      -> fewColumns: success [{"id":1,"name":"Ada"}] ⋅ moreColumns: loading []
+      ┌─
+      ⋅ fewColumns: success [{"id":1,"name":"Ada"}]
+      ⋅ moreColumns: success [{"id":1,"name":"Ada","age":30}]
+      └─
+      "
+    `);
+  });
+
+  test('a list requesting more fields does not show only the rows another hook already loaded in full', async () => {
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName: 'lq-wider-fields-truncated-rows',
+      sessionKey: 'sess1',
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [
+          { id: 1, name: 'Ada', age: 30 },
+          { id: 2, name: 'Grace', age: 40 },
+        ],
+      },
+    });
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ showMoreColumns }: { showMoreColumns: boolean }) => {
+        // The list holds only ids, and a details view loaded the first user
+        // with every column the wider list will need. Storage can restore
+        // that user only: the row of the second user holds just `id`, which
+        // the storage schema rejects.
+        const idsOnly = env.apiStore.useListQuery(usersQuery, {
+          fields: ['id'],
+        });
+        env.apiStore.useItem('users||1', { fields: ['id', 'name', 'age'] });
+        const moreColumns = env.apiStore.useListQuery(
+          showMoreColumns && usersQuery,
+          { fields: ['id', 'name', 'age'] },
+        );
+
+        renders.add({
+          idsOnly: `${idsOnly.status} ${JSON.stringify(idsOnly.items)}`,
+          moreColumns: `${moreColumns.status} ${JSON.stringify(moreColumns.items)}`,
+        });
+      },
+      { initialProps: { showMoreColumns: false } },
+    );
+    await flushAllTimers();
+
+    renders.addMark('more columns are shown');
+    act(() => {
+      rerender({ showMoreColumns: true });
+    });
+    await flushAllTimers();
+
+    // The wider list must not report `success` with the first user alone
+    // while the columns of the second user are fetched.
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> idsOnly: loading [] ⋅ moreColumns: idle []
+      -> idsOnly: success [{"id":1},{"id":2}] ⋅ moreColumns: idle []
+
+      >>> more columns are shown
+
+      -> idsOnly: success [{"id":1},{"id":2}] ⋅ moreColumns: loading []
+      ┌─
+      ⋅ idsOnly: success [{"id":1},{"id":2}]
+      ⋅ moreColumns: success [{"id":1,"name":"Ada","age":30},{"id":2,"name":"Grace","age":40}]
+      └─
+      "
+    `);
+  });
+
+  test('useMultipleListQueries: adding an entry with more fields for a loaded query shows it loading, not as an empty list', async () => {
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName: 'lq-wider-fields-multiple-queries',
+      sessionKey: 'sess1',
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Ada', age: 30 }] },
+    });
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ showMoreColumns }: { showMoreColumns: boolean }) => {
+        // Rows holding only `id` cannot be restored from storage (the storage
+        // schema requires `name`).
+        const [idsOnly, moreColumns] = env.apiStore.useMultipleListQueries([
+          { payload: usersQuery, fields: ['id'] },
+          ...(showMoreColumns
+            ? [{ payload: usersQuery, fields: ['id', 'name', 'age'] }]
+            : []),
+        ]);
+
+        renders.add({
+          idsOnly: `${idsOnly?.status} ${JSON.stringify(idsOnly?.items)}`,
+          moreColumns: moreColumns
+            ? `${moreColumns.status} (isLoading: ${moreColumns.isLoading}) ${JSON.stringify(moreColumns.items)}`
+            : 'not requested',
+        });
+      },
+      { initialProps: { showMoreColumns: false } },
+    );
+    await flushAllTimers();
+
+    renders.addMark('more columns are shown');
+    act(() => {
+      rerender({ showMoreColumns: true });
+    });
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> idsOnly: loading [] ⋅ moreColumns: not requested
+      -> idsOnly: success [{"id":1}] ⋅ moreColumns: not requested
+
+      >>> more columns are shown
+
+      -> idsOnly: success [{"id":1}] ⋅ moreColumns: loading (isLoading: true) []
+      ┌─
+      ⋅ idsOnly: success [{"id":1}]
+      ⋅ moreColumns: success (isLoading: false) [{"id":1,"name":"Ada","age":30}]
+      └─
+      "
+    `);
+  });
+
   test('round-trip persistence preserves offset-pagination progress for loadMore', async () => {
     const productsQuery = { tableId: 'products' };
     const products = Array.from({ length: 20 }, (_, index) => ({
