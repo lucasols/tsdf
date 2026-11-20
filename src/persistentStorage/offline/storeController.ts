@@ -2441,6 +2441,48 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Removes the items a discarded `create` without temp entity (the app
+   * generated the id on the client) added to the store, like the rollback of a
+   * temp create, and adds their keys to `removedEntityKeys`. Like removed temp
+   * entities, they are not refetched: the server most likely never got them.
+   * If an earlier replay attempt did create one, the store's list
+   * revalidation brings it back.
+   */
+  function rollbackClientIdCreatedItems(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'entityRefs'
+    >,
+    removedEntityKeys: Set<string>,
+  ): void {
+    if (
+      getOperationLifecycleKind(workItem.operation) !== 'create' ||
+      isTempCreateOperation(workItem.operation)
+    ) {
+      return;
+    }
+
+    for (const ref of workItem.entityRefs) {
+      if (ref.entityKind !== 'item') continue;
+
+      const payload = getPayloadForEntityRef({
+        operationName: workItem.operation,
+        input: workItem.input,
+        entityKey: ref.entityKey,
+      });
+      if (payload === undefined) continue;
+
+      storeAdapter.rollbackPendingEntity?.({
+        operationName: workItem.operation,
+        input: workItem.input,
+        tempId: payload,
+        pendingEntity: undefined,
+      });
+      removedEntityKeys.add(ref.entityKey);
+    }
+  }
+
   async function promoteBlockedTempCreateDescendants(args: {
     current: ActiveSessionState;
     parentEntry: OfflineQueueEntry;
@@ -2504,8 +2546,10 @@ export function createOfflineStoreController<
 
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
+      const removedEntityKeys = new Set<string>();
+      rollbackClientIdCreatedItems(args.resolution, removedEntityKeys);
       refreshDerivedState(args.current);
-      revalidateDiscardedWork([args.resolution], new Set());
+      revalidateDiscardedWork([args.resolution], removedEntityKeys);
       return;
     }
 
@@ -2549,7 +2593,8 @@ export function createOfflineStoreController<
 
     // The temp entities were removed, but descendants may also have changed
     // entities that exist on the server (e.g. moved an item into the
-    // discarded one): those are refetched.
+    // discarded one): those are refetched. Items created on top of the temp
+    // entities with a client-generated id are removed instead.
     const discardedWork = [
       ...descendantQueueEntries.values(),
       ...descendantResolutions.values(),
@@ -2559,6 +2604,7 @@ export function createOfflineStoreController<
       for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
         removedTempEntityKeys.add(entityKey);
       }
+      rollbackClientIdCreatedItems(workItem, removedTempEntityKeys);
     }
     revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
   }
