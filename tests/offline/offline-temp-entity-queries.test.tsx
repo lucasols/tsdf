@@ -8,6 +8,7 @@ import type {
   ListQueryOfflineOperationDefinition,
   OfflineSessionConfig,
 } from '../../src/main';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
 import {
   createListQueryStoreTestEnv,
@@ -15,8 +16,13 @@ import {
   type ListQueryStoreTestScenario,
 } from '../mocks/listQueryStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type CreateListQueryUserOperations,
@@ -85,6 +91,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   nextUserIdRef = { current: 3 },
   createUserDurationMs,
   failCreateUser = false,
+  storageAdapter = 'local-sync',
 }: {
   sessionKey: string;
   storeName: string;
@@ -96,6 +103,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   nextUserIdRef?: { current: number };
   createUserDurationMs?: number;
   failCreateUser?: boolean;
+  storageAdapter?: 'local-sync' | typeof opfsPersistentStorage;
 }) {
   const env = createListQueryStoreTestEnv<
     UserRow,
@@ -113,7 +121,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
     testScenario,
     partialResources,
     persistentStorage: {
-      adapter: 'local-sync',
+      adapter: storageAdapter,
       schema: userRowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryQueryPayloadSchema,
@@ -913,6 +921,83 @@ describe('temp entities with partial resources', () => {
       .      | Ada, Grace, Linus, Margaret | success     | -        | deleted         | [list-status] ui-changed
       "
     `);
+
+    hook.unmount();
+  });
+
+  test('a row saved while the app is on another screen stays fully loaded, also with async storage', async () => {
+    createOpfsPersistentStorageTestStore();
+    const sessionKey = 'temp-queries-loaded-fields-background-session';
+    const storeName = 'temp-queries-loaded-fields-background-store';
+    const nextUserIdRef = { current: 3 };
+    const envOptions = {
+      sessionKey,
+      storeName,
+      testScenario: 'idle',
+      partialResources: partialResourcesConfig,
+      addToQueries: undefined,
+      loadedFields: '*',
+      nextUserIdRef,
+      // Rows are only read from OPFS when a screen needs them
+      storageAdapter: opfsPersistentStorage,
+    } as const;
+
+    network.setOffline();
+    const first = createUsersEnv<true>(envOptions);
+    await flushAllTimers();
+    // OPFS writes settle on timers, so they are flushed while the create is
+    // queued
+    await act(async () => {
+      await resolveAfterAllTimers(
+        first.env.apiStore.performMutation('temp:Linus', {
+          mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+          offline: { operation: 'createUser', input: { name: 'Linus' } },
+        }),
+      );
+    });
+    await flushAllTimers();
+    first.env.apiStore.dispose();
+
+    // Restart the app offline on a screen that shows no user, so the temp row
+    // is never read back from storage before its create is saved.
+    resetSessionForTests();
+    const restarted = createUsersEnv<true>(envOptions);
+    await flushAllTimers();
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(restarted.env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+      `[]`,
+    );
+
+    // Back offline, the user opens the saved row with a reader of every
+    // field: it was declared complete, so it is shown instead of failing to
+    // fetch its missing fields.
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    const hook = renderHook(() =>
+      restarted.env.apiStore.useItem('users||3', {
+        fields: '*',
+        selector: (item) => item?.name ?? null,
+      }),
+    );
+    await flushAllTimers();
+
+    expect({
+      status: hook.result.current.status,
+      data: hook.result.current.data,
+    }).toMatchInlineSnapshot(`
+      data: 'Linus'
+      status: 'success'
+    `);
+    // The saved row was never requested: it was complete when it was saved.
+    expect(
+      restarted.env.serverTable.getRequestHistory('item'),
+    ).toMatchInlineSnapshot(`[]`);
 
     hook.unmount();
   });

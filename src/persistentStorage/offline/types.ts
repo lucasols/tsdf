@@ -1174,7 +1174,9 @@ export type OfflineTempEntityConfig<
    * The pending entity does not exist on the server yet, so its missing
    * fields cannot be fetched: declare `'*'` when hooks that read every field
    * (`fields: '*'`) should show it. The same loaded fields are kept when the
-   * entity is reconciled to its final server payload.
+   * entity is reconciled to its final server payload, so a `finalData`
+   * returned by `reconcileServerEntity` must hold at least these fields (omit
+   * `finalData` to keep the pending entity's data).
    *
    * Without this option only `partialResources.inferFields` can vouch for the
    * fields of the pending entity.

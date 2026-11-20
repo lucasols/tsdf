@@ -213,7 +213,7 @@ createUser: {
 
 With `tempEntities`, each entry returned by `buildPendingEntities` declares its own `addToQueries`.
 
-With [partial resources](./partial-resources.md), the pending entity has no loaded-fields metadata, so only `inferFields` can vouch for it. Declare `loadedFields` (for example `'*'`) when the pending entity should count as loaded for hooks that read those fields: it cannot be fetched from the server before the mutation is replayed. The entity keeps the same loaded fields when it is reconciled to its final payload.
+With [partial resources](./partial-resources.md), the pending entity has no loaded-fields metadata, so only `inferFields` can vouch for it. Declare `loadedFields` (for example `'*'`) when the pending entity should count as loaded for hooks that read those fields: it cannot be fetched from the server before the mutation is replayed. The entity keeps the same loaded fields when it is reconciled to its final payload, so a `finalData` returned by the reconcile hook must hold at least those fields; omit `finalData` to keep the pending entity's data instead.
 
 ```ts
 tempEntity: {

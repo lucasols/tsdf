@@ -2279,11 +2279,13 @@ export function createListQueryStore<
             __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
           );
         },
-        reconcileTempEntity: ({ tempId, reconciliation }) => {
+        reconcileTempEntity: ({ tempId, reconciliation, loadedFields }) => {
           reconcileOfflineTempItem(
             tempId,
             reconciliation.finalPayload,
             reconciliation.finalData,
+            // Loaded fields are only tracked with partial resources
+            partialResources ? loadedFields : undefined,
           );
         },
         applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
@@ -2291,7 +2293,12 @@ export function createListQueryStore<
           // this tab moves its own memberships of the temp item to the final
           // one. The server data arrives next through the item snapshot.
           const reconciled = runWithoutBroadcast(() =>
-            reconcileOfflineTempItem(tempId, finalPayload, undefined),
+            reconcileOfflineTempItem(
+              tempId,
+              finalPayload,
+              undefined,
+              undefined,
+            ),
           );
           // The temp item is already gone here: listeners are still told
           if (!reconciled) emitTempItemReconciled(tempId, finalPayload);
@@ -2547,6 +2554,7 @@ export function createListQueryStore<
     tempId: ValidPayload,
     finalPayloadValue: ValidPayload,
     finalDataValue: unknown,
+    declaredLoadedFields: ItemLoadedFields | undefined,
   ): boolean {
     const tempPayload =
       // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
@@ -2571,8 +2579,10 @@ export function createListQueryStore<
       }))
       .filter(({ index }) => index !== -1);
     // The final entity replaces the temp one, so it is as loaded as the temp
-    // entity was declared to be
-    const tempLoadedFields = store.state.itemLoadedFields[tempItemKey];
+    // entity was declared to be. The declaration is used first: with async
+    // storage the temp item may not be loaded in memory.
+    const tempLoadedFields =
+      declaredLoadedFields ?? store.state.itemLoadedFields[tempItemKey];
 
     deleteItemState(tempPayload);
     addItemToState(finalPayload, finalData, undefined, tempLoadedFields);

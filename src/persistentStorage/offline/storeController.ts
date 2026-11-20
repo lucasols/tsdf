@@ -122,6 +122,11 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
     tempId: ValidPayload;
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
+    /**
+     * Loaded fields declared for the temp entity, passed because the temp
+     * item may not be loaded in memory (async storage)
+     */
+    loadedFields: ItemLoadedFields | undefined;
   }) => void;
   /**
    * Another tab reconciled a temp entity of the store. The final item's data
@@ -2361,6 +2366,7 @@ export function createOfflineStoreController<
         tempId,
         result: args.result,
         reconciliation,
+        loadedFields: tempEntity.loadedFields,
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
@@ -2389,8 +2395,15 @@ export function createOfflineStoreController<
           finalData: reconciliation.finalData,
         })),
     });
+    // Built again from the input for their declared loaded fields
+    const pendingEntries = orderByTempIds({
+      operationName: args.operationName,
+      label: 'Temp entities',
+      tempIds: args.tempIds,
+      items: tempEntities.buildPendingEntities(args.input, args.tempIds),
+    });
 
-    for (const reconciliation of reconciliations) {
+    for (const [index, reconciliation] of reconciliations.entries()) {
       args.current.session.publishTempReconciled(
         storeName,
         reconciliation.tempId,
@@ -2402,6 +2415,7 @@ export function createOfflineStoreController<
         tempId: reconciliation.tempId,
         result: args.result,
         reconciliation,
+        loadedFields: pendingEntries[index]?.loadedFields,
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
