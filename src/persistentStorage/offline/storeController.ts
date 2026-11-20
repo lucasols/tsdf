@@ -984,8 +984,12 @@ export function createOfflineStoreController<
       onRemoteQueueEntryChange: (entryId, entry) => {
         applyRecordChangeFromAnotherTab(() => {
           if (entry) {
-            queueEntries.set(entryId, entry);
             nextQueueOrder = Math.max(nextQueueOrder, getQueueOrder(entry) + 1);
+            // Queued by a tab running a newer deploy of the app: this tab
+            // cannot replay it, and must not drop it from storage either
+            if (!operations[entry.operation]) return;
+
+            queueEntries.set(entryId, entry);
             return;
           }
 
