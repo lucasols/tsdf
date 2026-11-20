@@ -413,8 +413,9 @@ test('discarding a failed create also deletes the staged uploads of the queued e
   // --- Replay: the create fails, so the rename is blocked behind it ---
   await reconnect();
 
-  // Back offline, the user edits the new user once more. This edit stays in
-  // the queue (it is not a resolution record) behind the failed create.
+  // Back offline, the user edits the new user once more. The creation waits
+  // for a resolution, so this edit is held behind it as a blocked resolution
+  // record too, with nothing left in the queue.
   await act(async () => {
     network.goOffline();
     await Promise.resolve();
@@ -422,20 +423,12 @@ test('discarding a failed create also deletes the staged uploads of the queued e
   await stageUpload(storeManager, 'second-rename-attachment');
   await env.queueRenameLinus('Linus Torvalds', 'second-rename-attachment');
 
-  // So the chain to discard has both kinds of dependents: the first rename is
-  // a blocked resolution record (below), the second one a plain queue entry.
   expect(
     getSortedQueueSummary(
       'offline-upload-cascade-discard-session',
       'offline-upload-cascade-discard-users',
     ),
-  ).toMatchInlineSnapshot(`
-    - input:
-        attachmentId: 'second-rename-attachment'
-        itemId: 'temp:Linus'
-        name: 'Linus Torvalds'
-      operation: 'renameUser'
-  `);
+  ).toMatchInlineSnapshot(`[]`);
 
   expect(
     env.apiStore
@@ -443,7 +436,7 @@ test('discarding a failed create also deletes the staged uploads of the queued e
       .map(summarizeResolution)
       .sort((left, right) => left.op.localeCompare(right.op)),
   ).toMatchInlineSnapshot(`
-    - blocks: 1
+    - blocks: 2
       error: 'create replay failed'
       input: 'avatarId: "linus-avatar", name: "Linus"'
       kind: 'retry-exhausted'
@@ -453,6 +446,12 @@ test('discarding a failed create also deletes the staged uploads of the queued e
     - blockedBy: 1
       error: 'Blocked by unresolved dependency'
       input: 'attachmentId: "rename-attachment", itemId: "temp:Linus", name: "Linus T."'
+      kind: 'retry-exhausted'
+      on: 'item:temp:Linus'
+      op: 'renameUser'
+    - blockedBy: 1
+      error: 'Blocked by unresolved dependency'
+      input: 'attachmentId: "second-rename-attachment", itemId: "temp:Linus", name: "Linus Torvalds"'
       kind: 'retry-exhausted'
       on: 'item:temp:Linus'
       op: 'renameUser'
