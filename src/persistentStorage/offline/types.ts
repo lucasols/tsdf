@@ -1077,9 +1077,10 @@ export type OfflineSupersedeConfig = {
    * operation. Meant for delete operations: deleting something that was
    * created offline and never sent should not send anything.
    *
-   * When the pruned entries include the creation of the entity (a
-   * `tempEntity` / `tempEntities` operation that was never sent), the whole
-   * temp-entity lifecycle is cancelled and no request is made:
+   * When the pruned entries include the creation of the entity, never sent
+   * (a `tempEntity` / `tempEntities` operation, or a `create` of an item
+   * whose id the app generated on the client), its whole lifecycle is
+   * cancelled and no request is made:
    *
    * - the creation, the queued operations targeting the entity and this
    *   operation itself are dropped
@@ -1087,7 +1088,11 @@ export type OfflineSupersedeConfig = {
    *   everything queued under them: the ones of this store that declare it in
    *   `dependsOn`, and the ones of other stores that declare it in
    *   `cancelledWith`
-   * - the temp entities of the dropped creations are removed from the store
+   * - the temp entities and the client-id items of the dropped creations are
+   *   removed from the store
+   *
+   * A creation held behind the creation of another entity that waits for a
+   * manual resolution was never sent either, and is cancelled the same way.
    *
    * A creation that was already sent is not cancelled, since the server may
    * have the entity: this operation is queued behind it and replays with the

@@ -284,7 +284,7 @@ deleteTask: {
 
 What happens depends on whether the creation was already sent:
 
-- **Never sent** (still waiting in the queue): nothing is sent. TSDF drops the creation, the queued edits of the entity, the delete itself and the queued work that depends on the entity (`dependsOn`), then removes the temporary entity from the store and its lists.
+- **Never sent** (still waiting in the queue, or held behind the creation of another entity that waits for a resolution): nothing is sent. TSDF drops the creation, the queued edits of the entity, the delete itself and the queued work that depends on the entity (`dependsOn`), then removes the temporary entity from the store and its lists. The same applies to a `create` of an item whose id the app generates on the client: the item is removed instead of a temporary entity.
 - **Created together with other entities** (a `tempEntities` operation that creates several entities at once): the creation is never cancelled, since the other entities still need it. The delete is queued behind it and sent with the server id, as for a creation that was sent.
 - **Sent** (`syncing`, `needs-confirmation`, or queued again after a `retry`): the server may have the entity, so the creation is kept and the delete stays queued behind it. Once the server id is known the delete is sent with it. `execute` should treat a not-found answer as success, as above: the server answers not-found when the creation never reached it, or when an earlier delete attempt did.
 - **Waiting for a manual resolution**: the creation is kept too, and the delete is held behind that resolution. See [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution).
@@ -334,6 +334,8 @@ Use `parseOfflineResolutionConflict(resolution)` to narrow a persisted resolutio
 While the creation of an entity made offline waits for a resolution, the server does not know the entity, so nothing else can be sent for it. The mutations that target or depend on it become blocked resolutions behind the creation (`blockedResolutionCount > 0`, error `Blocked by unresolved dependency`), whether they were queued before the creation failed or made afterwards, online or offline. `performMutation(...)` returns `{ kind: 'queued' }` for them and the optimistic update stays visible.
 
 They follow the decision about the creation: `retry` (default scope) sends the creation again and then the blocked mutations with the server id, `discard` drops them with the creation. For a creation that hit a conflict, `requeue` sends them after the new creation, and `commit` sends them with the ref of the entity the result keeps. This includes a delete with `dropSelfIfTempLifecycleCancelled`: the creation may have reached the server, so it is not cancelled locally; the delete is sent after the creation is retried, or dropped when it is discarded.
+
+A blocked mutation was never sent, so a later mutation of the same entity treats it like an unsent queued one: an `accumulation` operation merges into it, and a `supersedes` operation prunes it. This keeps the order the user made the changes in, e.g. moving a task under the waiting entity and then back under a server task sends only the second move, and retrying the creation does not move the task again. When the merged input no longer depends on the waiting entity, it is queued and sent right away. To make this possible, an online mutation of such an operation for an entity with blocked work is queued instead of sent directly.
 
 ### Resolving From A Session-Wide UI
 

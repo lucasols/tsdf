@@ -266,7 +266,7 @@ describe('tasks whose creation waits for a manual decision', () => {
     list.unmount();
   });
 
-  test('moving a task under the waiting task holds only the move: the renames merged in the queue before and after it are not overwritten when the move is sent', async () => {
+  test('moving a task under the waiting task holds only the move, and a later rename is merged into the held move: each edit is sent in the order the user made it', async () => {
     const { env, list, failedCreation } =
       await createTaskWhoseCreationKeepsFailing(
         'merged-edit-unresolved-task-session',
@@ -286,10 +286,12 @@ describe('tasks whose creation waits for a manual decision', () => {
     await env.editTask({ itemId: 'tasks||1', name: 'Write final report' });
 
     // The move cannot be sent before the waiting task exists: it waits with
-    // the creation, on its own (it leaves the name as is). The renames before
-    // and after it stay merged in the queue, without the move.
+    // the creation, on its own, leaving the first rename queued. The second
+    // rename is newer than the move, so it is merged into the held move
+    // rather than into the queued rename, which would be sent before the move
+    // and then overwritten by it.
     expect(env.getQueue()).toMatchInlineSnapshot(`
-      - input: { itemId: 'tasks||1', name: 'Write final report' }
+      - input: { itemId: 'tasks||1', name: 'Write draft' }
         operation: 'editTask'
         syncState: 'pending'
     `);
@@ -304,7 +306,7 @@ describe('tasks whose creation waits for a manual decision', () => {
           tempIds: ['temp:Plan trip']
         - blockedBy: 1
           error: 'Blocked by unresolved dependency'
-          input: 'itemId: "tasks||1", name: undefined, parentId: "temp:Plan trip"'
+          input: 'itemId: "tasks||1", name: "Write final report", parentId: "temp:Plan trip"'
           kind: 'retry-exhausted'
           on: 'item:tasks||1'
           op: 'editTask'
@@ -329,16 +331,114 @@ describe('tasks whose creation waits for a manual decision', () => {
       - 'createTask "Plan trip"'
       - 'createTask "Plan trip"'
       - 'createTask "Plan trip"'
-      - 'editTask tasks||1 {"name":"Write final report"}'
+      - 'editTask tasks||1 {"name":"Write draft"}'
       - 'createTask "Plan trip"'
-      - 'editTask tasks||1 {"parentId":"tasks||3"}'
+      - 'editTask tasks||1 {"name":"Write final report","parentId":"tasks||3"}'
     `);
-    // The task keeps its last name: the move does not send the earlier one
-    // again.
+    // The task keeps its last name: the held move carries it, and the
+    // earlier rename sent first is not replayed after it.
     expect(pick(env.serverTable.getAll()['tasks||1'], ['name', 'parentId']))
       .toMatchInlineSnapshot(`
       name: 'Write final report'
       parentId: 'tasks||3'
+    `);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('moving a task back out of the waiting task replaces the held move: sending the creation again does not move the task back under it', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWhoseCreationKeepsFailing(
+        'move-out-of-unresolved-task-session',
+        'move-out-of-unresolved-task-store',
+      );
+
+    // Online: move an existing task under the task whose creation waits for a
+    // decision. The move is held behind the creation.
+    await env.editTask({ itemId: 'tasks||1', parentId: 'temp:Plan trip' });
+    await flushAllTimers();
+
+    // The user changes their mind and moves it under a server task instead.
+    // The new move is merged into the held one, which no longer waits for
+    // anything: it is sent right away.
+    await env.editTask({ itemId: 'tasks||1', parentId: 'tasks||2' });
+    await flushAllTimers();
+
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'createTask "Plan trip"'
+      - 'editTask tasks||1 {"parentId":"tasks||2"}'
+    `);
+    // Only the creation is left for the user to decide.
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) => pick(summarizeResolution(resolution), ['op'])),
+    ).toMatchInlineSnapshot(`- op: 'createTask'`);
+
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // Sending the creation again does not replay the first move after the
+    // second: the task stays where the user last put it.
+    expect(env.sentRequests.slice(4)).toMatchInlineSnapshot(
+      `['createTask "Plan trip"']`,
+    );
+    expect(
+      pick(env.serverTable.getAll()['tasks||1'], ['parentId']),
+    ).toMatchInlineSnapshot(`parentId: 'tasks||2'`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('deleting a task whose move waits for the creation drops the held move: the delete is sent, and sending the creation again does not move the deleted task', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWhoseCreationKeepsFailing(
+        'delete-moved-task-session',
+        'delete-moved-task-store',
+      );
+
+    // Online: move an existing task under the waiting task (held), then
+    // delete the moved task.
+    await env.editTask({ itemId: 'tasks||1', parentId: 'temp:Plan trip' });
+    await env.deleteTask('tasks||1');
+    await flushAllTimers();
+
+    // The delete supersedes the held move, like a queued edit of the task:
+    // the delete is sent, and only the creation is left to decide.
+    expect(env.sentRequests.slice(3)).toMatchInlineSnapshot(
+      `['deleteTask tasks||1']`,
+    );
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) => pick(summarizeResolution(resolution), ['op'])),
+    ).toMatchInlineSnapshot(`- op: 'createTask'`);
+
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // Only the creation is sent: no move of the deleted task follows it.
+    expect(env.sentRequests.slice(4)).toMatchInlineSnapshot(
+      `['createTask "Plan trip"']`,
+    );
+    expect(env.getServerTasks()).toMatchInlineSnapshot(`
+      ['2: Review budget', '3: Plan trip']
     `);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
 

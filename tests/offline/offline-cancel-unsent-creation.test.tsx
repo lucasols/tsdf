@@ -143,6 +143,44 @@ describe('list-query rows', () => {
     list.unmount();
   });
 
+  test('deleting a subtask created offline with a client-generated id drops its creation, the subtask added under it and its edits, without sending anything', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'cancel-unsent-client-id-task-session',
+      'cancel-unsent-client-id-task-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    // Offline: add a subtask with an id the app generates under a server
+    // task, add another one under it, and rename the nested one.
+    await env.createSubtaskWithId(50, 'Book flights', 'tasks||1');
+    await env.createSubtaskWithId(51, 'Compare prices', 'tasks||50');
+    await env.renameTask('tasks||51', 'Compare flight prices');
+
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+
+    // The server never got the subtask: the delete cancels its creation
+    // instead of being sent for an id the server does not know, and the
+    // nested subtask and its rename, which depend on it, are dropped with it.
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(list.result.current.items).toMatchInlineSnapshot(`
+      ['Write report', 'Review budget']
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing is sent, and nothing is left for the user to resolve.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
   test('deleting a task created offline puts an existing task moved under it back under its server parent', async () => {
     network.setOffline();
     const env = createTasksEnv(
