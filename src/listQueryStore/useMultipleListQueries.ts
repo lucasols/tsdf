@@ -581,7 +581,10 @@ export function useMultipleListQueries<
       if (!isOfflineMode && !stickyDerived) {
         const groupQueries = Object.values(state.queries)
           .filter(
-            (query) => derivedQueries.getQueryGroup(query.payload) === groupKey,
+            // A query that never loaded has no rows to vouch for the group.
+            (query) =>
+              query.wasLoaded &&
+              derivedQueries.getQueryGroup(query.payload) === groupKey,
           )
           .map((query) => ({
             payload: query.payload,
