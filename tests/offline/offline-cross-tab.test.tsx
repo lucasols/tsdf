@@ -1207,6 +1207,48 @@ test('a file another tab uploaded and deleted is neither uploaded again nor writ
   expect(getOpfsDirTree(opfs)).not.toContain('binary.blob');
 });
 
+test('deleting a sent file in one tab makes its id unknown in every open tab', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // Offline, the user picks a photo in tab B and saves an edit with it, then
+  // switches to tab A, which sends both on reconnect and deletes the photo.
+  await tabB.stageFile('photo');
+  await tabB.queueEditWithStagedFile(2, 'photo');
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+
+  // Both tabs still resolve the photo's id to the server ref, for app data
+  // that holds it.
+  const resolveInBothTabs = async () => {
+    const results = Promise.all(
+      [tabA, tabB].map((tab) => tab.storeManager.resolveOfflineUpload('photo')),
+    );
+    // Reading the upload records takes a few timer ticks
+    await advanceTime(100);
+    return (await results).map((result) =>
+      result.ok ? result.value : result.error.message,
+    );
+  };
+  expect(await resolveInBothTabs()).toMatchInlineSnapshot(
+    `['server:photo', 'server:photo']`,
+  );
+
+  // The app forgets the photo from tab A, e.g. after the form was cleared.
+  const deleted = tabA.storeManager.deleteOfflineUpload('photo');
+  await advanceTime(100);
+  expect((await deleted).ok).toBe(true);
+
+  // Tab B forgets it too instead of still resolving the deleted id.
+  expect(await resolveInBothTabs()).toMatchInlineSnapshot(
+    `['Unknown offline upload "photo"', 'Unknown offline upload "photo"']`,
+  );
+});
+
 test('discarding a conflict in one tab deletes the file another tab staged for it', async () => {
   const opfs = createMockBrowserOpfs();
   network.setOffline();

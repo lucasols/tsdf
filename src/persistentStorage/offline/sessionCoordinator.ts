@@ -793,6 +793,11 @@ class SessionOfflineCoordinator {
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
   #storedUploadsRestore: Promise<void> | null = null;
+  /**
+   * Ids other tabs deleted while this tab's stored uploads were being listed,
+   * so the list result can't bring them back. `null` outside the listing.
+   */
+  #uploadsRemovedWhileListing: Set<string> | null = null;
   #referencedUploadIds = new Set<string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
@@ -2100,18 +2105,25 @@ class SessionOfflineCoordinator {
   async #listStoredUploads(
     uploadsConfig: OfflineSessionUploadsConfig,
   ): Promise<void> {
+    const removedWhileListing = new Set<string>();
+    this.#uploadsRemovedWhileListing = removedWhileListing;
     try {
       const uploads = await uploadsConfig.adapter.list(this.sessionKey);
       // Upload operations wait for this list, so nothing should have changed
       // the map meanwhile; if a record got in anyway, it was persisted after
-      // the listed one and wins.
+      // the listed one and wins. Records another tab deleted during the list
+      // were read before the removal and must not come back.
       this.#uploads = new Map([
-        ...uploads.map((upload) => [upload.id, upload] as const),
+        ...uploads
+          .filter((upload) => !removedWhileListing.has(upload.id))
+          .map((upload) => [upload.id, upload] as const),
         ...this.#uploads,
       ]);
       this.#syncUploadsState();
     } catch (error) {
       this.#onPersistentStorageError?.(error);
+    } finally {
+      this.#uploadsRemovedWhileListing = null;
     }
   }
 
@@ -2572,14 +2584,27 @@ class SessionOfflineCoordinator {
     ids: readonly string[],
     releasedRefs: ReadonlyArray<readonly [string, ValidPayload]>,
   ): void {
+    const removedIds = new Set(ids);
+    for (const id of removedIds) {
+      // An explicitly deleted upload carries no ref, so the id stops
+      // resolving here too.
+      this.#releasedUploadRefs.delete(id);
+      this.#pendingUploadReleases.delete(id);
+      this.#uploads.delete(id);
+      this.#uploadsRemovedWhileListing?.add(id);
+    }
     for (const [id, ref] of releasedRefs) this.#releasedUploadRefs.set(id, ref);
 
-    let didChange = false;
-    for (const id of ids) {
-      this.#pendingUploadReleases.delete(id);
-      if (this.#uploads.delete(id)) didChange = true;
+    // The sender already published its uploads list. Rebuilding it from this
+    // tab's records and publishing it would replace that list everywhere with
+    // upload states this tab never received.
+    const { uploads } = this.store.state;
+    if (uploads.some((upload) => removedIds.has(upload.id))) {
+      this.store.setPartialState(
+        { uploads: uploads.filter((upload) => !removedIds.has(upload.id)) },
+        { action: 'offline-session-uploads' },
+      );
     }
-    if (didChange) this.#syncUploadsState();
   }
 
   /**
@@ -2779,10 +2804,11 @@ class SessionOfflineCoordinator {
     if (
       publish &&
       this.#uploadsConfig &&
-      this.#uploads.size > 0 &&
       this.#storeContributions.size === this.#registrations.size
     ) {
-      void this.#cleanupUnusedMutationUploads();
+      if (this.#uploads.size > 0) void this.#cleanupUnusedMutationUploads();
+      // Released uploads may only be in storage (staged by another tab), so
+      // this doesn't depend on the in-memory records.
       void this.#releasePendingUploads();
     }
   }
