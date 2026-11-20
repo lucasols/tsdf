@@ -150,7 +150,11 @@ type SessionWorkDiscardedMessage = BrowserTabsMessageMeta & {
   kind: 'offline-work-discarded';
   storeName: string;
   discardedWork: DiscardedOfflineWork[];
-  /** Temp entities the discard removed: there is nothing to refetch. */
+  /**
+   * Entities the discard removed (temp entities and items of discarded
+   * creations): there is nothing to refetch. The field keeps its old name so
+   * tabs running another version of the app still read it.
+   */
   removedTempEntityKeys: string[];
 };
 
@@ -222,7 +226,7 @@ type SessionRegistration = {
   /** Another tab discarded queued work of the store. */
   onRemoteWorkDiscarded?: (
     discardedWork: DiscardedOfflineWork[],
-    removedTempEntityKeys: string[],
+    removedEntityKeys: string[],
   ) => void;
 };
 
@@ -1305,7 +1309,7 @@ class SessionOfflineCoordinator {
   publishWorkDiscarded(
     storeName: string,
     discardedWork: DiscardedOfflineWork[],
-    removedTempEntityKeys: string[],
+    removedEntityKeys: string[],
   ): void {
     if (this.#disposed) return;
 
@@ -1313,7 +1317,7 @@ class SessionOfflineCoordinator {
       kind: 'offline-work-discarded',
       storeName,
       discardedWork,
-      removedTempEntityKeys,
+      removedTempEntityKeys: removedEntityKeys,
     });
   }
 

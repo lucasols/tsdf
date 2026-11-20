@@ -14,6 +14,7 @@ import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
   deleteItemInputSchema,
+  getLocalStorageKeys,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
   type PatchUserOperations,
@@ -1572,4 +1573,521 @@ test('discarding a failed offline delete shows the item again on screens that on
   `);
 
   hook.unmount();
+});
+
+describe('discarding a failed offline creation with a client-generated id', () => {
+  type ClientIdCreateInput = {
+    itemId: string;
+    name: string;
+    managerId?: string;
+  };
+  type ClientIdCreateOperations = PatchUserOperations & {
+    createUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      ClientIdCreateInput,
+      unknown
+    >;
+    createManager: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { name: string },
+      unknown,
+      { id: number; name: string }
+    >;
+  };
+  const clientIdCreateInputSchema = rc_object({
+    itemId: rc_string,
+    name: rc_string,
+    managerId: rc_string.optionalKey(),
+  });
+
+  // The app generates the user id on the client, so the creation needs no
+  // temp entity: the created item already has its final key. Managers are
+  // created with a temp entity, and the server rejects them.
+  function createClientIdCreateEnv(
+    storeId: string,
+    executeCreateUser: (input: ClientIdCreateInput) => unknown,
+  ) {
+    const sessionKey = `${storeId}-session`;
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      ClientIdCreateOperations
+    >(
+      { users: [{ id: 1, name: 'Ada' }] },
+      {
+        id: storeId,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: {
+            network: network.config,
+            classifyRetryableFailure: (error, ctx) =>
+              classifyRetryableReplayFailure(error, ctx.phase),
+          },
+        }),
+        testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            operations: {
+              createUser: {
+                inputSchema: clientIdCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [input.itemId],
+                dependsOn: ({ input }) =>
+                  input.managerId ? [input.managerId] : [],
+                execute: ({ input }) => executeCreateUser(input),
+                onSuccessExecute: () => {},
+              },
+              createManager: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: () => {
+                  throw new Error('manager creation rejected');
+                },
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                kind: 'update',
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedUpdateItem(input.itemId, {
+                    name: input.name,
+                  });
+                },
+                onSuccessExecute: () => {},
+              },
+            },
+          },
+        },
+      },
+    );
+
+    async function createUserOffline(
+      id: number,
+      name: string,
+      managerId?: string,
+    ) {
+      await act(async () => {
+        await env.apiStore.performMutation(`users||${id}`, {
+          optimisticUpdate: () => {
+            env.apiStore.addItemToState(
+              `users||${id}`,
+              { id, name },
+              {
+                addItemToQueries: {
+                  queries: [{ tableId: 'users' }],
+                  appendTo: 'end',
+                },
+              },
+            );
+          },
+          mutation: () =>
+            Promise.reject(new Error('unreachable while offline')),
+          offline: {
+            operation: 'createUser',
+            input: { itemId: `users||${id}`, name, managerId },
+          },
+        });
+      });
+    }
+
+    async function discardResolution(
+      operation: 'createUser' | 'patchUserName' | 'createManager',
+    ) {
+      const resolution = env.apiStore
+        .getOfflineResolutions()
+        .find((record) => record.operation === operation);
+      if (!resolution) {
+        throw new Error(`Expected ${operation} to wait for a resolution`);
+      }
+
+      await act(async () => {
+        await env.apiStore.resolveOfflineResolution(resolution.id, operation, {
+          action: 'discard',
+        });
+      });
+      await flushAllTimers();
+    }
+
+    // The users list and the detail screen of the user created offline.
+    function renderScreens() {
+      return renderHook(() => {
+        const query = env.apiStore.useListQuery(
+          { tableId: 'users' },
+          { itemSelector: (item) => item.name },
+        );
+        const linus = env.apiStore.useItem('users||3');
+
+        env.trackItemUI('rows', query.items.join(', '));
+        env.trackItemUI('linus', linus.data?.name ?? `- ${linus.status}`);
+      });
+    }
+
+    return {
+      env,
+      sessionKey,
+      createUserOffline,
+      discardResolution,
+      renderScreens,
+    };
+  }
+
+  test('removes the created item from the store, its lists and the persisted cache', async () => {
+    network.setOffline();
+    const {
+      env,
+      sessionKey,
+      createUserOffline,
+      discardResolution,
+      renderScreens,
+    } = createClientIdCreateEnv(
+      'offline-discard-client-id-create-store',
+      () => {
+        throw new Error('creation rejected');
+      },
+    );
+
+    env.addTimelineComments('beforeNextAction', ['offline: create Linus']);
+    await createUserOffline(3, 'Linus');
+
+    // The user opens the users list and the detail screen of Linus.
+    const hook = renderScreens();
+    await flushAllTimers();
+
+    // The server rejects the creation on every replay attempt, so it ends up
+    // waiting for the user to decide what to do with it.
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the server rejects the creation until it needs a resolution',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(15_000);
+    await flushAllTimers();
+
+    // Discarding the creation removes Linus right away, from the list and
+    // from his detail screen, like the rollback of a temp entity. He is not
+    // fetched: the server never got him. With nothing left to sync, the store
+    // revalidates its lists, which confirms he does not exist.
+    env.addTimelineComments('beforeNextAction', [
+      'discard the creation: Linus is removed',
+    ]);
+    await discardResolution('createUser');
+
+    // The never-saved item is not readable as loaded data anymore.
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    // Its persisted cache entry is gone too, so a reload does not restore it.
+    expect(
+      getLocalStorageKeys().filter((key) =>
+        key.startsWith(
+          `tsdf.${sessionKey}.offline-discard-client-id-create-store.li.`,
+        ),
+      ),
+    ).toMatchInlineSnapshot(
+      `- 'tsdf.offline-discard-client-id-create-store-session.offline-discard-client-id-create-store.li."users||1'`,
+    );
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | linus     | rows       |
+      0      | -         | -          | -- offline: create Linus
+      .      | -         | -          | offline:createUser queued
+      .      | Linus     | Ada, Linus | [rows, linus] ui-initialized
+      3.01s  | Linus     | Ada, Linus | -- back online: the server rejects the creation until it needs a resolution
+      .      | Linus     | Ada, Linus | offline:createUser replay-started
+      8.01s  | Linus     | Ada, Linus | offline:createUser replay-started
+      13.01s | Linus     | Ada, Linus | offline:createUser replay-started
+      .      | Linus     | Ada, Linus | offline:createUser resolution-required
+      18.01s | Linus     | Ada, Linus | -- discard the creation: Linus is removed
+      .      | - deleted | Ada        | [rows, linus] ui-changed
+      18.02s | - deleted | Ada        | 🔴 >list-fetch-started
+      18.82s | - deleted | Ada        | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('brings the item back when an earlier attempt did create it on the server', async () => {
+    network.setOffline();
+    let createAttempts = 0;
+    const { env, createUserOffline, discardResolution, renderScreens } =
+      createClientIdCreateEnv(
+        'offline-discard-client-id-created-on-server-store',
+        async (input) => {
+          createAttempts += 1;
+          if (createAttempts > 1) throw new Error('user already exists');
+
+          // The first attempt creates the user, but its response is lost.
+          await env.serverTable.delayedSetItem(input.itemId, {
+            id: 3,
+            name: input.name,
+          });
+          throw new Error('connection lost');
+        },
+      );
+
+    env.addTimelineComments('beforeNextAction', ['offline: create Linus']);
+    await createUserOffline(3, 'Linus');
+
+    // The user opens the users list and the detail screen of Linus.
+    const hook = renderScreens();
+    await flushAllTimers();
+
+    // The first attempt creates Linus on the server but its response is lost,
+    // the next ones are rejected because he already exists.
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the creation reaches the server, its retries are rejected',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(15_000);
+    await flushAllTimers();
+
+    // Discarding removes Linus locally. With nothing left to sync, the store
+    // revalidates its lists, which find him on the server: the list and the
+    // detail screen show him again.
+    env.addTimelineComments('beforeNextAction', [
+      'discard the creation: Linus is removed, then restored from the server',
+    ]);
+    await discardResolution('createUser');
+
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus'
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | linus     | rows       |
+      0      | -         | -          | -- offline: create Linus
+      .      | -         | -          | offline:createUser queued
+      .      | Linus     | Ada, Linus | [rows, linus] ui-initialized
+      3.01s  | Linus     | Ada, Linus | -- back online: the creation reaches the server, its retries are rejected
+      .      | Linus     | Ada, Linus | offline:createUser replay-started
+      4.21s  | Linus     | Ada, Linus | [users||3] server-data-changed (value: {"id":3,"name":"Linus"})
+      9.21s  | Linus     | Ada, Linus | offline:createUser replay-started
+      14.21s | Linus     | Ada, Linus | offline:createUser replay-started
+      .      | Linus     | Ada, Linus | offline:createUser resolution-required
+      18.01s | Linus     | Ada, Linus | -- discard the creation: Linus is removed, then restored from the server
+      .      | - deleted | Ada        | [rows, linus] ui-changed
+      18.02s | - deleted | Ada        | 🔴 >list-fetch-started
+      18.82s | - deleted | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
+      .      | Linus     | Ada, Linus | [rows, linus] ui-changed
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('an edit queued after the creation needs its own decision and does not bring the item back', async () => {
+    network.setOffline();
+    const { env, createUserOffline, discardResolution, renderScreens } =
+      createClientIdCreateEnv(
+        'offline-discard-client-id-create-edit-store',
+        () => {
+          throw new Error('creation rejected');
+        },
+      );
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create Linus and rename him',
+    ]);
+    await createUserOffline(3, 'Linus');
+    await act(async () => {
+      await env.apiStore.performMutation('users||3', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||3', (item) => ({
+            ...item,
+            name: 'Linus T.',
+          }));
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||3', name: 'Linus T.' },
+        },
+      });
+    });
+
+    // The user opens the users list and the detail screen of Linus.
+    const hook = renderScreens();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'back online: both changes are rejected until they need a resolution',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(30_000);
+    await flushAllTimers();
+
+    // Unlike the changes made on top of a temp entity, the rename is not held
+    // behind the failed creation: it is sent on its own, the server does not
+    // know Linus, and it waits for its own decision (it is not blocked by the
+    // creation).
+    expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+      .toMatchInlineSnapshot(`
+        - error: 'creation rejected'
+          input: 'itemId: "users||3", managerId: undefined, name: "Linus"'
+          kind: 'retry-exhausted'
+          on: 'item:users||3'
+          op: 'createUser'
+        - error: 'Item not found: users||3'
+          input: 'itemId: "users||3", name: "Linus T."'
+          kind: 'retry-exhausted'
+          on: 'item:users||3'
+          op: 'patchUserName'
+      `);
+
+    // Discarding the creation removes Linus. Nothing is refetched while the
+    // rename still waits for a decision.
+    env.addTimelineComments('beforeNextAction', [
+      'discard the creation: Linus is removed, no refetch',
+    ]);
+    await discardResolution('createUser');
+
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
+
+    // Discarding the rename refetches what it changed: the lists and Linus,
+    // which the server does not have. He stays removed.
+    env.addTimelineComments('beforeNextAction', [
+      'discard the rename: Linus is refetched and not found',
+    ]);
+    await discardResolution('patchUserName');
+
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | linus     | rows          |
+      0      | -         | -             | -- offline: create Linus and rename him
+      .      | -         | -             | offline:createUser queued
+      .      | -         | -             | offline:patchUserName queued
+      .      | Linus T.  | Ada, Linus T. | [rows, linus] ui-initialized
+      3.01s  | Linus T.  | Ada, Linus T. | -- back online: both changes are rejected until they need a resolution
+      .      | Linus T.  | Ada, Linus T. | offline:createUser replay-started
+      8.01s  | Linus T.  | Ada, Linus T. | offline:createUser replay-started
+      13.01s | Linus T.  | Ada, Linus T. | offline:createUser replay-started
+      .      | Linus T.  | Ada, Linus T. | offline:createUser resolution-required
+      .      | Linus T.  | Ada, Linus T. | offline:patchUserName replay-started
+      19.21s | Linus T.  | Ada, Linus T. | offline:patchUserName replay-started
+      25.41s | Linus T.  | Ada, Linus T. | offline:patchUserName replay-started
+      26.61s | Linus T.  | Ada, Linus T. | offline:patchUserName resolution-required
+      33.01s | Linus T.  | Ada, Linus T. | -- discard the creation: Linus is removed, no refetch
+      .      | - deleted | Ada           | [rows, linus] ui-changed
+      34.02s | - deleted | Ada           | -- discard the rename: Linus is refetched and not found
+      .      | - deleted | Ada           | 🔴 >list-fetch-started
+      .      | - loading | Ada           | [linus] ui-changed
+      .      | - loading | Ada           | 🟠 [users||3] >fetch-started
+      34.82s | - loading | Ada           | 🔴 <list-fetch-finished (value: {"count":1})
+      .      | - error   | Ada           | [linus] ui-changed
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('an item created on top of a discarded temp creation is removed with it', async () => {
+    network.setOffline();
+    const { env, createUserOffline, discardResolution, renderScreens } =
+      createClientIdCreateEnv(
+        'offline-discard-client-id-under-temp-store',
+        () => {
+          throw new Error('unreachable: held behind the manager creation');
+        },
+      );
+
+    // Offline: create the manager Grace (temp entity), then Linus (client id)
+    // reporting to her.
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create Grace, then Linus reporting to her',
+    ]);
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Grace', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Grace',
+            { id: -1, name: 'Grace' },
+            {
+              addItemToQueries: {
+                queries: [{ tableId: 'users' }],
+                appendTo: 'end',
+              },
+            },
+          );
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'createManager', input: { name: 'Grace' } },
+      });
+    });
+    await createUserOffline(3, 'Linus', 'temp:Grace');
+
+    // The user opens the users list and the detail screen of Linus.
+    const hook = renderScreens();
+    await flushAllTimers();
+
+    // The server rejects Grace until she needs a resolution. Linus depends on
+    // her, so he is held as a blocked resolution without being sent.
+    env.addTimelineComments('beforeNextAction', [
+      'back online: Grace is rejected until she needs a resolution',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(15_000);
+    await flushAllTimers();
+
+    // Discarding Grace discards Linus with her: both are removed.
+    env.addTimelineComments('beforeNextAction', [
+      'discard Grace: Linus is discarded and removed with her',
+    ]);
+    await discardResolution('createManager');
+
+    expect(env.apiStore.getItemState('temp:Grace')).toMatchInlineSnapshot(
+      `null`,
+    );
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`null`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | linus     | rows              |
+      0      | -         | -                 | -- offline: create Grace, then Linus reporting to her
+      .      | -         | -                 | offline:createManager queued
+      .      | -         | -                 | offline:createUser queued
+      .      | Linus     | Ada, Grace, Linus | [rows, linus] ui-initialized
+      3.01s  | Linus     | Ada, Grace, Linus | -- back online: Grace is rejected until she needs a resolution
+      .      | Linus     | Ada, Grace, Linus | offline:createManager replay-started
+      8.01s  | Linus     | Ada, Grace, Linus | offline:createManager replay-started
+      13.01s | Linus     | Ada, Grace, Linus | offline:createManager replay-started
+      .      | Linus     | Ada, Grace, Linus | offline:createManager resolution-required
+      .      | Linus     | Ada, Grace, Linus | offline:createUser resolution-required
+      18.01s | Linus     | Ada, Grace, Linus | -- discard Grace: Linus is discarded and removed with her
+      .      | - deleted | Ada               | [rows, linus] ui-changed
+      18.02s | - deleted | Ada               | 🔴 >list-fetch-started
+      18.82s | - deleted | Ada               | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+
+    hook.unmount();
+  });
 });
