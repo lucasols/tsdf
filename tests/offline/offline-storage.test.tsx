@@ -1651,6 +1651,143 @@ test('removing a create operation also deletes the creations that only depend on
   laterHook.unmount();
 });
 
+type DeleteUserOperations = {
+  deleteUser: ListQueryOfflineOperationDefinition<
+    OfflineStorageUserRow,
+    ListQueryParams,
+    string,
+    { itemId: string },
+    unknown
+  >;
+};
+
+test('deleting an unsent item in an older deploy does not drop its creation while a newer deploy still has edits of it', async () => {
+  const sessionKey = 'offline-older-delete-unsent-item-session';
+  const storeName = 'offline-older-delete-unsent-item-users';
+  const sent: string[] = [];
+  const deleteUser: DeleteUserOperations['deleteUser'] = {
+    inputSchema: deleteItemInputSchema,
+    kind: 'delete',
+    getEntityRefs: ({ input }) => [input.itemId],
+    // Deleting an item that never reached the server drops its creation
+    // and the delete itself
+    supersedes: {
+      scope: 'same-entity',
+      dropSelfIfTempLifecycleCancelled: true,
+    },
+    execute: ({ input }) => {
+      sent.push(`deleteUser(${input.itemId})`);
+      return Promise.resolve(undefined);
+    },
+    // Only what is sent matters here.
+    onSuccessExecute: () => {},
+  };
+
+  // In the newer deploy, the user creates a user offline and renames it with
+  // `patchUserName`, an operation the older deploy doesn't have
+  network.setOffline();
+  const newerEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    CreateListQueryUserOperations &
+      PatchUserNameOperations &
+      DeleteUserOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      createUser: createCreateUserOperation(sent),
+      patchUserName: createPatchUserNameOperation(sent),
+      deleteUser,
+    }),
+  });
+  await resolveAfterAllTimers(
+    newerEnv.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
+    }),
+  );
+  await resolveAfterAllTimers(
+    newerEnv.apiStore.performMutation('temp:Linus', {
+      mutation: () => Promise.resolve({ name: 'Linus T.' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'temp:Linus', name: 'Linus T.' },
+      },
+    }),
+  );
+  await flushAllTimers();
+
+  // Still offline, the user opens the older deploy and deletes that user
+  resetSessionForTests();
+  const olderEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    CreateListQueryUserOperations & DeleteUserOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      createUser: createCreateUserOperation(sent),
+      deleteUser,
+    }),
+  });
+  const olderHook = renderHook(() =>
+    olderEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation('temp:Linus', {
+      mutation: () => Promise.resolve(undefined),
+      offline: { operation: 'deleteUser', input: { itemId: 'temp:Linus' } },
+    }),
+  );
+  await flushAllTimers();
+  olderHook.unmount();
+
+  // Back online in the newer deploy, the creation, the rename and the delete
+  // are sent in the order the user made them. Dropping the creation and the
+  // delete would have left the rename to be sent for an item the server never
+  // had.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const reloadedEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    CreateListQueryUserOperations &
+      PatchUserNameOperations &
+      DeleteUserOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      createUser: createCreateUserOperation(sent),
+      patchUserName: createPatchUserNameOperation(sent),
+      deleteUser,
+    }),
+  });
+  const reloadedHook = renderHook(() =>
+    reloadedEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+
+  expect(sent).toMatchInlineSnapshot(`
+    - 'createUser(Linus)'
+    - 'patchUserName(users||3, Linus T.)'
+    - 'deleteUser(users||3)'
+  `);
+
+  reloadedHook.unmount();
+});
+
 test('local-sync offline edits of list-query items are persisted without storage errors', async () => {
   const sessionKey = 'offline-entity-payload-session';
   const storeName = 'offline-entity-payload-users';

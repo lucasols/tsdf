@@ -3257,15 +3257,26 @@ export function createOfflineStoreController<
       }
     }
 
-    const supersededEntries = operation.supersedes
-      ? findSupersededEntries({
-          operationName,
-          entityRefs,
-          queueOrder,
-          supersedes: operation.supersedes,
-          entries: workingQueue.values(),
-        })
-      : [];
+    // Work only a newer deploy can send can't be superseded, so superseding
+    // the entries before it would leave that work targeting an entity whose
+    // creation or edits were dropped. The mutation queues behind it instead.
+    const supersededEntries =
+      operation.supersedes &&
+      !unknownQueueEntries.some((entry) =>
+        entry.entityRefs.some((queuedEntityRef) =>
+          entityRefs.some((entityRef) =>
+            isSameEntityRef(entityRef, queuedEntityRef),
+          ),
+        ),
+      )
+        ? findSupersededEntries({
+            operationName,
+            entityRefs,
+            queueOrder,
+            supersedes: operation.supersedes,
+            entries: workingQueue.values(),
+          })
+        : [];
 
     for (const entry of supersededEntries) {
       workingQueue.delete(entry.id);
