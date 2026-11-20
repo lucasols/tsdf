@@ -561,6 +561,8 @@ export function createOfflineStoreController<
     pendingEntities: PendingTempEntity[];
     nextEntry?: OfflineQueueEntry;
     removedEntries: OfflineQueueEntry[];
+    /** The queued entry `nextEntry` merges into, when accumulating */
+    accumulatedEntry?: OfflineQueueEntry;
   };
 
   type AppliedQueuedMutation = PlannedQueuedMutation & {
@@ -2927,46 +2929,33 @@ export function createOfflineStoreController<
           existingInput: existingEntry.input,
           incomingInput: validatedInput,
         });
-        const latestEntry = queueEntries.get(existingEntry.id);
+        const validatedMergedInput = validateWithSchema(
+          operation.inputSchema,
+          mergedInput,
+        );
 
-        // While an async merge ran, the replay may have picked the entry up
-        // or already sent it: merging into it would drop the incoming input
-        // or send the existing one again, so the mutation is queued on its
-        // own instead.
-        if (latestEntry === existingEntry) {
-          const validatedMergedInput = validateWithSchema(
-            operation.inputSchema,
-            mergedInput,
+        if (validatedMergedInput === null) {
+          throw new Error(
+            `Invalid accumulated offline operation input for "${operationName}"`,
           );
-
-          if (validatedMergedInput === null) {
-            throw new Error(
-              `Invalid accumulated offline operation input for "${operationName}"`,
-            );
-          }
-
-          const nextEntry = {
-            ...existingEntry,
-            input: validatedMergedInput,
-            updatedAt: now,
-          };
-          workingQueue.set(nextEntry.id, nextEntry);
-
-          return {
-            operationName,
-            validatedInput,
-            tempIds,
-            pendingEntities,
-            nextEntry,
-            removedEntries: [existingEntry],
-          };
         }
 
-        if (latestEntry) {
-          workingQueue.set(latestEntry.id, latestEntry);
-        } else {
-          workingQueue.delete(existingEntry.id);
-        }
+        const nextEntry = {
+          ...existingEntry,
+          input: validatedMergedInput,
+          updatedAt: now,
+        };
+        workingQueue.set(nextEntry.id, nextEntry);
+
+        return {
+          operationName,
+          validatedInput,
+          tempIds,
+          pendingEntities,
+          nextEntry,
+          removedEntries: [existingEntry],
+          accumulatedEntry: existingEntry,
+        };
       }
     }
 
@@ -3035,13 +3024,23 @@ export function createOfflineStoreController<
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
-    const workingQueue = new Map(queueEntries);
-    const plannedMutation = await planPreparedMutation({
-      current,
-      preparedMutation,
-      queueOrder,
-      workingQueue,
-    });
+    let plannedMutation: PlannedQueuedMutation;
+    // An async accumulation merge lets the replay pick up or send the entry
+    // being merged into before it is committed. Merging into it then would
+    // drop the incoming input or send the existing one twice, so the mutation
+    // is planned again. The check runs with no `await` before the commit below.
+    do {
+      plannedMutation = await planPreparedMutation({
+        current,
+        preparedMutation,
+        queueOrder,
+        workingQueue: new Map(queueEntries),
+      });
+    } while (
+      plannedMutation.accumulatedEntry &&
+      queueEntries.get(plannedMutation.accumulatedEntry.id) !==
+        plannedMutation.accumulatedEntry
+    );
 
     const persistedMutations: AppliedQueuedMutation[] = [];
     const persistedUploadIds: string[] = [];

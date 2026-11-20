@@ -1853,12 +1853,16 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
       { action: 'discard' },
     );
   });
+  // Let the refetch that follows the discard finish.
+  await flushAllTimers();
 
   // Both resolutions and entities should be empty after discard.
   expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 
   // Full timeline showing the retry → resolve → retry → discard lifecycle.
+  // The discard ends with a refetch (🟡), so the document shows the server
+  // value again instead of what the discarded change left behind.
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time   | ui                                           |
@@ -1902,6 +1906,8 @@ test('retry-exhausted resolutions can retry or discard queued work', async () =>
     .      | "value:2 sync:resolution-required pending:0" | ui-changed
     .      | "value:2 sync:resolution-required pending:0" | -- user resolves with "discard" — entry permanently removed
     .      | "value:2 sync:none pending:0"                | ui-changed
+    21.82s | "value:2 sync:none pending:0"                | 🟡 >fetch-started
+    22.62s | "value:2 sync:none pending:0"                | 🟡 <fetch-finished (value: 2)
     "
   `);
 });
