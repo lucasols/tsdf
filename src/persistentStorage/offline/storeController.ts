@@ -4249,7 +4249,13 @@ export function createOfflineStoreController<
   }
 
   function canQueueMutation(): boolean {
-    return !isDisposed && getSessionKey() !== false && isSessionEnabled();
+    if (isDisposed || getSessionKey() === false) return false;
+    if (isSessionEnabled()) return true;
+
+    // The mutation runs online: the closed gate is applied to the status
+    // too, as before a fetch, so it stops reporting offline mode
+    void ensureActiveSession()?.session.refreshNetworkState();
+    return false;
   }
 
   async function prepareForFetch(): Promise<void> {

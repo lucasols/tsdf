@@ -336,8 +336,8 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * resolutions) and are replayed after the gate reopens while online.
      *
      * It is read before every fetch and mutation, on browser online/offline
-     * events and before replaying queued mutations, so it must be synchronous
-     * and cheap. A flip is picked up by the next of those; call
+     * events, before each recovery check and before replaying queued
+     * mutations, so it must be synchronous and cheap. A flip is picked up by the next of those; call
      * `storeManager.setOfflineRuntimeConfig({})` to apply it right away.
      * @default () => true
      */

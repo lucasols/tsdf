@@ -17,6 +17,11 @@ import {
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
+  createHealthCheckMock,
+  HEALTH_CHECK_DURATION_MS,
+  healthRecoveryProbe,
+} from './offlineHealthCheckTestShared';
+import {
   getOfflineQueueEntries,
   getSortedQueueSummary,
   type PatchUserOperations,
@@ -1012,4 +1017,201 @@ test('failures are not classified while both network and outage modes are disabl
   await failingValueUpdate(3);
 
   expect(classifiedPhases).toMatchInlineSnapshot(`['mutation']`);
+});
+
+test('an offline-enabled mutation made after the gate closes also clears the offline status', async () => {
+  const sessionKey = 'gate-closed-mutation-clears-status';
+  const storeName = 'gate-closed-mutation-clears-status-doc';
+  const statusChanges = createLoggerStore();
+  // The flag the app flips at runtime.
+  let offlineEnabled = true;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => offlineEnabled,
+      // Every failed request means the backend is down.
+      classifyFailure: () => 'outage',
+      outage: {
+        enabled: true,
+        // The backend stays down, checked once a minute
+        recoveryCheck: () => false,
+        recoveryProbe: { initialIntervalMs: 60_000, jitterRatio: 0 },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await Promise.resolve();
+
+  // -- The backend goes down: a failed mutation puts the session in outage --
+  const queuedResult = await env.apiStore.performMutation({
+    mutation: () => Promise.reject(new Error('bad gateway')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  expect(queuedResult.ok && queuedResult.value).toMatchInlineSnapshot(`
+    kind: 'queued'
+  `);
+  statusChanges.addMark('Backend down');
+  statusChanges.add(getGlobalOfflineStatusSummary(sessionKey));
+
+  // -- The app closes the gate without calling anything, then the user edits
+  // the document again --
+  offlineEnabled = false;
+  const onlinePromise = env.apiStore.performMutation({
+    mutation: async () => {
+      await env.serverMock.delayedSetData(3);
+      return 3;
+    },
+    offline: { operation: 'updateValue', input: { value: 3 } },
+  });
+  // The server takes 1.2s to save it
+  await advanceTime(1_200);
+  const onlineResult = await onlinePromise;
+
+  // The mutation went straight to the server, as without an offline session
+  expect(onlineResult.ok && onlineResult.value).toMatchInlineSnapshot(`
+    data: 3
+    kind: 'online'
+  `);
+  expect(env.serverMock.current).toMatchInlineSnapshot(`3`);
+
+  // The status the UI renders follows the closed gate too, instead of still
+  // reporting the outage while mutations already go to the server
+  statusChanges.addMark('Mutation after the gate closed');
+  statusChanges.add(getGlobalOfflineStatusSummary(sessionKey));
+
+  expect(statusChanges.changesSnapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> Backend down
+
+    ┌─
+    ⋅ isOfflineMode: ✅
+    ⋅ network: {enabled:❌, active:❌}
+    ⋅ outage: {enabled:✅, active:✅}
+    ⋅ sessionKey: gate-closed-mutation-clears-status
+    └─
+
+    >>> Mutation after the gate closed
+
+    ┌─
+    ⋅ isOfflineMode: ❌
+    ⋅ network: {enabled:❌, active:❌}
+    ⋅ outage: {enabled:❌, active:❌}
+    ⋅ sessionKey: gate-closed-mutation-clears-status
+    └─
+    "
+  `);
+});
+
+test('mutations queued during an outage are replayed when the gate reopens, even if a recovery check was due while it was closed', async () => {
+  const sessionKey = 'gate-closed-during-outage-probe';
+  const storeName = 'gate-closed-during-outage-probe-doc';
+  const health = createHealthCheckMock();
+  const replayedInputs: { value: number }[] = [];
+  // The flag the app flips at runtime.
+  let offlineEnabled = true;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => offlineEnabled,
+      healthCheck: { check: health.check },
+      network: network.config,
+      outage: { enabled: true, recoveryProbe: healthRecoveryProbe },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              replayedInputs.push(input);
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await Promise.resolve();
+
+  // -- The backend goes down: the failed mutation is queued and the health
+  // check puts the session in outage mode --
+  health.setBackend('outage');
+  const queuedPromise = env.apiStore.performMutation({
+    mutation: () => Promise.reject(new Error('bad gateway')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+  await advanceTime(HEALTH_CHECK_DURATION_MS);
+  const queuedResult = await queuedPromise;
+
+  expect(queuedResult.ok && queuedResult.value).toMatchInlineSnapshot(`
+    kind: 'queued'
+  `);
+  expect(getGlobalOfflineStatusSummary(sessionKey).outage)
+    .toMatchInlineSnapshot(`
+    active: '✅'
+    enabled: '✅'
+  `);
+  const healthChecksBeforeClosing = health.check.mock.calls.length;
+
+  // -- The app closes the gate without calling anything, and the next
+  // recovery check comes due --
+  offlineEnabled = false;
+  await advanceTime(1_500);
+
+  // The health endpoint is not called while the gate is closed
+  expect(health.check.mock.calls.length - healthChecksBeforeClosing).toBe(0);
+  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
+
+  // -- The backend recovers and the app reopens the gate; the next fetch
+  // re-reads it --
+  health.setBackend('up');
+  offlineEnabled = true;
+  env.scheduleFetch('highPriority');
+  await flushAllTimers();
+
+  // The mutation queued during the outage finally reaches the server
+  expect(replayedInputs).toMatchInlineSnapshot(`- value: 2`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(env.serverMock.current).toMatchInlineSnapshot(`2`);
 });

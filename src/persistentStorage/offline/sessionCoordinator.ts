@@ -867,6 +867,11 @@ class SessionOfflineCoordinator {
   #classifiedNetworkActive = false;
   /** Last value of the session gate applied to the status. */
   #appliedSessionEnabled = true;
+  /**
+   * The gate reopened and no green cycle ran since: mutations queued before
+   * it closed are waiting for one to be replayed.
+   */
+  #gateReopenedWithoutReplay = false;
   /** Tabs of this session that sent anything on the session channel. */
   #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
@@ -1766,12 +1771,16 @@ class SessionOfflineCoordinator {
   /**
    * Applies a flip of the session gate to the status: closing it leaves
    * offline mode, whatever the cause. Returns whether the gate is open.
+   *
+   * Every status write runs it first, so the flip is applied whichever path
+   * notices it (a fetch, a recovery check, another tab's snapshot...).
    */
   #syncSessionGate(): boolean {
     const enabled = this.#isSessionEnabled();
     if (enabled === this.#appliedSessionEnabled) return enabled;
 
     this.#appliedSessionEnabled = enabled;
+    if (enabled) this.#gateReopenedWithoutReplay = true;
 
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     this.#updateStatus((current) => ({
@@ -1962,7 +1971,6 @@ class SessionOfflineCoordinator {
   }
 
   async refreshNetworkState(): Promise<boolean> {
-    const wasSessionEnabled = this.#appliedSessionEnabled;
     const sessionEnabled = this.#syncSessionGate();
     const token = ++this.#networkStateToken;
 
@@ -1977,9 +1985,13 @@ class SessionOfflineCoordinator {
         : await detectedOffline,
     );
 
-    // The gate has just reopened: mutations queued before it closed can be
-    // replayed
-    if (!wasSessionEnabled && !isOffline && !this.isReplayBlocked()) {
+    // The gate has reopened: once the network detection confirms the session
+    // is online, mutations queued before it closed can be replayed
+    if (
+      this.#gateReopenedWithoutReplay &&
+      !isOffline &&
+      !this.isReplayBlocked()
+    ) {
       this.#notifyGreenCycle();
     }
 
@@ -2193,6 +2205,7 @@ class SessionOfflineCoordinator {
     if (this.store.state.status.isOfflineMode || !this.isLeader()) {
       return;
     }
+    this.#gateReopenedWithoutReplay = false;
     void this.#refreshUploadRetention();
     for (const registration of this.#registrations.values()) {
       registration.onGreenCycle?.();
@@ -2998,6 +3011,10 @@ class SessionOfflineCoordinator {
   #updateStatus(
     updater: (status: GlobalOfflineStatus) => GlobalOfflineStatus,
   ): void {
+    // The status is derived with the current gate: a flip nothing applied
+    // yet has to be applied first, or it would be absorbed without its side
+    // effects (the replay owed on reopen, the recovery probe stopped on close)
+    this.#syncSessionGate();
     const derived = this.#deriveLocalStatus(updater(this.store.state.status));
 
     this.store.setPartialState(
@@ -3061,6 +3078,8 @@ class SessionOfflineCoordinator {
       return;
     }
     this.#lastRemoteSnapshotAt = message.sentAt;
+    // The snapshot is derived with the current gate, like a local write
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
 
@@ -3233,6 +3252,9 @@ class SessionOfflineCoordinator {
   }
 
   async #runRecoveryProbe(target: SessionRecoveryTarget): Promise<void> {
+    // A gate closed since the probe was armed leaves offline mode, which
+    // stops the probe before it calls the check
+    this.#syncSessionGate();
     const nextTarget = this.#getDesiredRecoveryTarget();
     if (nextTarget === null || nextTarget.mode !== target.mode) {
       return;
