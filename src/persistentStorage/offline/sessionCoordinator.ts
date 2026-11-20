@@ -40,6 +40,10 @@ import {
 } from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import {
+  getOfflineStoreEntityLookup,
+  toItemOfflineState,
+} from './entityMetadata';
+import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from './sessionProtectionRegistry';
@@ -47,17 +51,20 @@ import type {
   GlobalOfflineEntity,
   InternalGlobalOfflineEntity,
   GlobalOfflineStatus,
+  ItemOfflineState,
   OfflineFailureClassification,
   OfflineFailureContext,
   OfflineMutationQueueingPolicy,
   OfflineNetworkModeConfig,
   OfflineOutageModeConfig,
+  OfflineQueueEntry,
   OfflineRecoveryProbeConfig,
   OfflineResolutionRecord,
   OfflineRuntimeConfig,
   OfflineRuntimeConfigUpdate,
   OfflineSession,
   OfflineSessionConfig,
+  PersistedOfflineResolutionRecord,
 } from './types';
 import {
   COMPACT_OFFLINE_STATUS_FLAG,
@@ -76,14 +83,101 @@ function stripInternalEntityPayload(
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
+  /**
+   * The stores attached in the sending tab. `entities` and `resolutions` only
+   * cover these stores: a tab never echoes what it learned from other tabs,
+   * which may be outdated by the time it is sent again.
+   */
+  storeNames: string[];
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
-  hasQueuedMutations: boolean;
+  /** The stores of `storeNames` that still have mutations in their queue. */
+  queuedStoreNames: string[];
+};
+
+/**
+ * A tab saved (`entry`) or removed (`null`) a queue entry of a store. Every
+ * tab keeps its own in-memory copy of the queue, so the others apply the same
+ * change: the leader replays entries queued by any tab, and no tab keeps an
+ * entry that was already replayed.
+ *
+ * The record travels in the message because another tab's storage write is not
+ * visible right away: each tab's process has its own copy of `localStorage`,
+ * updated asynchronously, so re-reading storage could return the old record.
+ */
+type SessionQueueEntryMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-queue-entry';
+  storeName: string;
+  entryId: string;
+  entry: OfflineQueueEntry | null;
+};
+
+/** Same as {@link SessionQueueEntryMessage}, for a resolution record. */
+type SessionResolutionMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-resolution';
+  storeName: string;
+  resolutionId: string;
+  resolution: PersistedOfflineResolutionRecord | null;
+};
+
+/**
+ * A tab replayed the creation of a temp entity and the server assigned its
+ * final payload. The item data reaches the other tabs through the store's own
+ * tab sync; this message lets them map the temp payload to the final one, so
+ * a tab that queued the creation still learns where its temp entity went.
+ */
+type SessionTempReconciledMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-temp-reconciled';
+  storeName: string;
+  tempId: ValidPayload;
+  finalPayload: ValidPayload;
+};
+
+/** Queued work the user discarded: what its refetch needs. */
+type DiscardedOfflineWork = Pick<
+  OfflineQueueEntry,
+  'operation' | 'input' | 'entityRefs'
+>;
+
+/**
+ * A tab discarded queued work of a store. Its optimistic changes cannot be
+ * rolled back locally, so every tab with the store refetches the entities it
+ * referenced, like the tab that discarded it. Sent after the removals of the
+ * discarded records.
+ */
+type SessionWorkDiscardedMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-work-discarded';
+  storeName: string;
+  discardedWork: DiscardedOfflineWork[];
+  /**
+   * Entities the discard removed (temp entities and items of discarded
+   * creations): there is nothing to refetch. The field keeps its old name so
+   * tabs running another version of the app still read it.
+   */
+  removedTempEntityKeys: string[];
+};
+
+/**
+ * A tab deleted stored uploads. Each tab keeps its own in-memory copy of the
+ * upload records, so the others drop theirs: a stale copy would stay listed,
+ * be saved back to storage by the retention stamp, or be uploaded again.
+ * `releasedRefs` carries the server refs of uploads deleted after they were
+ * sent, so ids still held by app data resolve in every open tab.
+ */
+type SessionUploadsRemovedMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-uploads-removed';
+  ids: string[];
+  releasedRefs: Array<[id: string, ref: ValidPayload]>;
 };
 
 type OfflineSessionMessage =
   | SessionSnapshotMessage
+  | SessionQueueEntryMessage
+  | SessionResolutionMessage
+  | SessionTempReconciledMessage
+  | SessionWorkDiscardedMessage
+  | SessionUploadsRemovedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -102,10 +196,38 @@ type SessionStoreContribution = {
   replayHead: SessionReplayHead | null;
 };
 
+type SessionStoreItems = Pick<
+  SessionStoreContribution,
+  'entities' | 'resolutions'
+> & {
+  /** Whether the store still has mutations in its queue. */
+  hasQueuedMutations: boolean;
+};
+
 type SessionRegistration = {
   storeName: string;
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
+  /** Another tab saved or removed (`null`) a queue entry of the store. */
+  onRemoteQueueEntryChange?: (
+    entryId: string,
+    entry: OfflineQueueEntry | null,
+  ) => void;
+  /** Another tab saved or removed (`null`) a resolution of the store. */
+  onRemoteResolutionChange?: (
+    resolutionId: string,
+    resolution: PersistedOfflineResolutionRecord | null,
+  ) => void;
+  /** Another tab reconciled a temp entity of the store to its final payload. */
+  onRemoteTempReconciled?: (
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ) => void;
+  /** Another tab discarded queued work of the store. */
+  onRemoteWorkDiscarded?: (
+    discardedWork: DiscardedOfflineWork[],
+    removedEntityKeys: string[],
+  ) => void;
 };
 
 type SessionCoordinatorOptions = {
@@ -667,17 +789,46 @@ class SessionOfflineCoordinator {
 
   readonly #registrations = new Map<string, SessionRegistration>();
   readonly #storeContributions = new Map<string, SessionStoreContribution>();
+  /**
+   * Latest entities and resolutions other tabs reported for their stores. Only
+   * used for stores this tab has not attached, e.g. a store only another tab
+   * created.
+   */
+  readonly #remoteStoreItems = new Map<string, SessionStoreItems>();
   readonly #adapters = new Set<StorageAdapter>();
   #sessionHandle: PersistentStorageHandle<PersistedLocalSessionSnapshot>;
   readonly #browserTabs;
   #onPersistentStorageError: ((error: unknown) => void) | undefined;
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
+  #storedUploadsRestore: Promise<void> | null = null;
+  /**
+   * Ids other tabs deleted while this tab's stored uploads were being listed,
+   * so the list result can't bring them back. `null` outside the listing.
+   */
+  #uploadsRemovedWhileListing: Set<string> | null = null;
   #referencedUploadIds = new Set<string>();
-  /** Store that referenced each upload in this runtime, by upload id. */
-  readonly #uploadOwnerStores = new Map<string, string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
+  /**
+   * Uploads released by work that left the queue but not deleted yet: a store
+   * had not reported its references, or the upload was still being sent.
+   */
+  #pendingUploadReleases = new Set<string>();
+  /**
+   * Files attached to a mutation that is still being queued: saved before the
+   * queue entry that references them, so unused-mutation-upload cleanup must
+   * skip them until a store reports that reference.
+   */
+  #stagedMutationUploadIds = new Set<string>();
+  /**
+   * Refs of uploads that were uploaded and then released, so data still
+   * holding their ids (optimistic or draft state) resolves to the same ref
+   * for the rest of the session instead of failing.
+   */
+  #releasedUploadRefs = new Map<string, ValidPayload>();
+  /** Adapter removals in flight, awaited before the same id is read or saved. */
+  #uploadRemovals = new Map<string, Promise<void>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   #uploadOnlineSessionStartedAt: number | null = null;
   #uploadOnlineSessionStabilizationTimer: ReturnType<typeof setTimeout> | null =
@@ -695,6 +846,8 @@ class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
+  /** Tabs of this session that sent anything on the session channel. */
+  #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
   #outageEnabledOverride: boolean | undefined;
   #mutationQueueingOverrides:
@@ -801,12 +954,57 @@ class SessionOfflineCoordinator {
         `session:${sessionKey}`,
         () => this.sessionKey,
         (message) => {
+          const isNewTab = !this.#otherTabIds.has(message.tabId);
+          this.#otherTabIds.add(message.tabId);
+
           if (message.kind === 'tab-status') {
             this.#browserTabs.priority.onTabStatusMessage(
               message.tabId,
               message,
             );
+            // Tabs only announce themselves when they open or change focus,
+            // so answer a newcomer: otherwise it never learns about this tab
+            // and can consider itself the leader alongside it, nor lists the
+            // offline items of stores only this tab has attached.
+            if (isNewTab) {
+              this.#browserTabs.priority.publishLocalStatus();
+              this.#publishSnapshot();
+            }
             this.#refreshLeadership();
+            return;
+          }
+          if (message.kind === 'offline-queue-entry') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteQueueEntryChange?.(message.entryId, message.entry);
+            return;
+          }
+          if (message.kind === 'offline-resolution') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteResolutionChange?.(
+                message.resolutionId,
+                message.resolution,
+              );
+            return;
+          }
+          if (message.kind === 'offline-temp-reconciled') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteTempReconciled?.(message.tempId, message.finalPayload);
+            return;
+          }
+          if (message.kind === 'offline-work-discarded') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteWorkDiscarded?.(
+                message.discardedWork,
+                message.removedTempEntityKeys,
+              );
+            return;
+          }
+          if (message.kind === 'offline-uploads-removed') {
+            this.#applyRemoteUploadsRemoved(message.ids, message.releasedRefs);
             return;
           }
           this.#applyRemoteSnapshot(message);
@@ -815,7 +1013,28 @@ class SessionOfflineCoordinator {
         undefined,
         import.meta.env.DEV ? debugLogger : undefined,
         () => !isWindowAvailable() || !document.hidden,
-        undefined,
+        (noteFocusChange) => {
+          if (!isWindowAvailable()) return () => {};
+
+          // Leadership follows the visible tab. Re-evaluate it here as well:
+          // a tab that becomes the leader has to start replaying, and a tab
+          // being closed or hidden has to hand leadership over.
+          const onChange = (): void => {
+            noteFocusChange();
+            this.#refreshLeadership();
+          };
+
+          window.addEventListener('focus', onChange);
+          window.addEventListener('blur', onChange);
+          window.addEventListener('pagehide', onChange);
+          document.addEventListener('visibilitychange', onChange);
+          return () => {
+            window.removeEventListener('focus', onChange);
+            window.removeEventListener('blur', onChange);
+            window.removeEventListener('pagehide', onChange);
+            document.removeEventListener('visibilitychange', onChange);
+          };
+        },
         undefined,
         undefined,
         options.appVersion,
@@ -884,21 +1103,10 @@ class SessionOfflineCoordinator {
     this.#protectedKeys = [...protectedKeys].sort();
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
     if (this.#uploadsConfig) {
-      try {
-        const uploads = await this.#uploadsConfig.adapter.list(this.sessionKey);
-        if (hydrationToken === this.#hydrationToken) {
-          // Records saved or loaded while the list ran are already persisted
-          // and at least as recent as the listed ones, so they win.
-          this.#uploads = new Map([
-            ...uploads.map((upload) => [upload.id, upload] as const),
-            ...this.#uploads,
-          ]);
-          this.#syncUploadsState();
-          this.#scheduleUploadOnlineSessionStabilization();
-          void this.#refreshUploadRetention();
-        }
-      } catch (error) {
-        this.#onPersistentStorageError?.(error);
+      await this.#restoreStoredUploads();
+      if (hydrationToken === this.#hydrationToken) {
+        this.#scheduleUploadOnlineSessionStabilization();
+        void this.#refreshUploadRetention();
       }
     }
     void this.#persistSessionSnapshot();
@@ -1019,11 +1227,9 @@ class SessionOfflineCoordinator {
     return () => {
       this.#registrations.delete(registration.storeName);
       this.#storeContributions.delete(registration.storeName);
-      for (const [uploadId, storeName] of this.#uploadOwnerStores) {
-        if (storeName === registration.storeName) {
-          this.#uploadOwnerStores.delete(uploadId);
-        }
-      }
+      // Another tab's report for this store predates this tab's own records,
+      // which were just dropped, so it must not come back in the lists.
+      this.#remoteStoreItems.delete(registration.storeName);
       this.#refreshAggregates();
       this.#notifyGreenCycle();
       if (this.#registrations.size === 0) {
@@ -1035,6 +1241,7 @@ class SessionOfflineCoordinator {
   syncStoreData(
     storeName: string,
     contribution: SessionStoreContribution,
+    isRemoteChange = false,
   ): void {
     if (this.#disposed) return;
     const previousContribution = this.#storeContributions.get(storeName);
@@ -1043,10 +1250,83 @@ class SessionOfflineCoordinator {
       contribution.replayHead,
     );
     this.#storeContributions.set(storeName, contribution);
-    this.#refreshAggregates();
+    // A change made by another tab was already announced by that tab
+    this.#refreshAggregates(!isRemoteChange);
     if (replayHeadChanged) {
       this.#notifyGreenCycle();
     }
+  }
+
+  /** Tells the other tabs that this tab saved or removed (`null`) a queue entry. */
+  publishQueueEntryChange(
+    storeName: string,
+    entryId: string,
+    entry: OfflineQueueEntry | null,
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-queue-entry',
+      storeName,
+      entryId,
+      entry,
+    });
+  }
+
+  /** Tells the other tabs that this tab saved or removed (`null`) a resolution. */
+  publishResolutionChange(
+    storeName: string,
+    resolutionId: string,
+    resolution: PersistedOfflineResolutionRecord | null,
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-resolution',
+      storeName,
+      resolutionId,
+      resolution,
+    });
+  }
+
+  /** Tells the other tabs that this tab reconciled a temp entity. */
+  publishTempReconciled(
+    storeName: string,
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-temp-reconciled',
+      storeName,
+      tempId,
+      finalPayload,
+    });
+  }
+
+  /** Tells the other tabs that this tab discarded queued work of a store. */
+  publishWorkDiscarded(
+    storeName: string,
+    discardedWork: DiscardedOfflineWork[],
+    removedEntityKeys: string[],
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-work-discarded',
+      storeName,
+      discardedWork,
+      removedTempEntityKeys: removedEntityKeys,
+    });
+  }
+
+  /**
+   * Whether another tab of this session was seen. While `false`, this tab is
+   * the only one changing the queue, so it can skip the cross-tab safeguards.
+   */
+  hasOtherTabs(): boolean {
+    return this.#otherTabIds.size > 0;
   }
 
   canReplayEntry(args: {
@@ -1128,12 +1408,20 @@ class SessionOfflineCoordinator {
     file: Blob | File;
     source?: 'manual' | 'mutation';
     metadata?: ValidPayload;
+    /** Store whose queued mutation attaches the file. */
+    storeName?: string;
   }): Promise<void> {
     if (!this.#uploadsConfig) {
       throw new Error(
         `[tsdf] Offline uploads are not configured for session "${this.sessionKey}"`,
       );
     }
+
+    await this.#restoreStoredUploads();
+    // Saving while the previous file of this id is being removed could let
+    // the removal delete the new file. Waited here, before the check below,
+    // so nothing yields between the check and publishing the new record.
+    await this.#waitForUploadRemoval(args.id);
 
     // The queued or running transport marks the record as uploaded when it
     // finishes, so swapping the file under it would pair the new file with
@@ -1143,6 +1431,11 @@ class SessionOfflineCoordinator {
         `Cannot change upload "${args.id}" while it is queued or uploading`,
       );
     }
+
+    // A file staged again under a released id is a new upload.
+    this.#pendingUploadReleases.delete(args.id);
+    this.#releasedUploadRefs.delete(args.id);
+    if (args.source === 'mutation') this.#stagedMutationUploadIds.add(args.id);
 
     const existing = this.#uploads.get(args.id);
 
@@ -1158,6 +1451,7 @@ class SessionOfflineCoordinator {
       undefined,
       this.#getCurrentUploadOnlineSessionStartedAt(),
       args.metadata,
+      args.storeName,
     );
 
     await this.#saveUploadRecord(nextRecord);
@@ -1168,8 +1462,10 @@ class SessionOfflineCoordinator {
     file: Blob | File;
     metadata?: ValidPayload;
   }): Promise<void> {
-    // Read through storage: right after a restart the stored uploads may not
-    // be listed yet, and the replacement must keep the persisted metadata.
+    // Read through storage (waits for the stored uploads to be restored):
+    // right after a restart the replacement must keep the persisted metadata.
+    // Changing an upload that is queued or uploading is rejected by
+    // `saveUpload`.
     const existing = await this.#getUploadRecord(args.id);
 
     await this.saveUpload({
@@ -1177,6 +1473,7 @@ class SessionOfflineCoordinator {
       file: args.file,
       source: existing?.source ?? 'manual',
       metadata: args.metadata ?? existing?.metadata,
+      storeName: existing?.storeName,
     });
   }
 
@@ -1186,6 +1483,7 @@ class SessionOfflineCoordinator {
   }
 
   async deleteUpload(id: string): Promise<void> {
+    await this.#restoreStoredUploads();
     if (this.#referencedUploadIds.has(id)) {
       throw new Error(
         `Cannot delete upload "${id}" while it is still referenced`,
@@ -1194,12 +1492,88 @@ class SessionOfflineCoordinator {
     if (this.#uploadPromisesById.has(id)) {
       throw new Error(`Cannot delete upload "${id}" while it is uploading`);
     }
-    if (!this.#uploadsConfig) return;
+    this.#stagedMutationUploadIds.delete(id);
+    this.#releasedUploadRefs.delete(id);
+    await this.#removeUploads([id]);
+  }
 
-    this.#uploads.delete(id);
-    await this.#uploadsConfig.adapter.remove(this.sessionKey, id);
-    this.#syncUploadsState();
-    void this.#refreshUploadRetention();
+  /**
+   * Deletes the given staged uploads unless queued work still needs them.
+   *
+   * Store controllers call this after a queue entry or resolution record left
+   * the queue for good (replayed, discarded, superseded, cancelled), passing
+   * the uploads that work depended on. It must run after the store synced its
+   * remaining references: they are aggregated session-wide, so an upload is
+   * kept while a queue entry or resolution record of any store references it.
+   *
+   * Uploads no queued work referenced are never passed here: the app stages a
+   * file before it queues the mutation, so being unreferenced alone must not
+   * delete an upload. Those are left to `deleteUpload` and to the retention
+   * window.
+   */
+  async deleteUnreferencedUploads(uploadIds: readonly string[]): Promise<void> {
+    if (this.#disposed) return;
+
+    for (const id of uploadIds) this.#pendingUploadReleases.add(id);
+    await this.#releasePendingUploads();
+  }
+
+  /**
+   * Deletes the released uploads nothing references anymore. Runs again when
+   * the last store reports its references and when a released upload that was
+   * still being sent settles.
+   */
+  async #releasePendingUploads(): Promise<void> {
+    if (this.#pendingUploadReleases.size === 0) return;
+
+    // A released upload not restored from storage yet would be skipped below
+    // and then listed back with nothing left to delete it.
+    await this.#restoreStoredUploads();
+
+    const cannotRelease = (): boolean =>
+      this.#disposed ||
+      this.#pendingUploadReleases.size === 0 ||
+      // A store that has not reported its queue yet may reference the uploads.
+      this.#storeContributions.size !== this.#registrations.size;
+    if (cannotRelease()) return;
+
+    // Uploads another tab staged after this tab listed the stored ones are
+    // only in storage, e.g. when this tab discards work that tab queued.
+    const missingIds = [...this.#pendingUploadReleases].filter(
+      (id) => !this.#uploads.has(id) && !this.#uploadPromisesById.has(id),
+    );
+    if (missingIds.length > 0) {
+      try {
+        await Promise.all(missingIds.map((id) => this.#getUploadRecord(id)));
+      } catch (error) {
+        this.#onPersistentStorageError?.(error);
+      }
+      if (cannotRelease()) return;
+    }
+
+    const removableIds: string[] = [];
+    for (const id of this.#pendingUploadReleases) {
+      if (this.#uploadPromisesById.has(id)) continue;
+
+      this.#pendingUploadReleases.delete(id);
+      // An upload queued work references again is released again when that
+      // work leaves the queue.
+      const upload = this.#uploads.get(id);
+      if (upload && !this.#referencedUploadIds.has(id)) {
+        if (upload.state === 'uploaded' && upload.resolvedRef !== undefined) {
+          this.#releasedUploadRefs.set(id, upload.resolvedRef);
+        }
+        removableIds.push(id);
+      }
+    }
+
+    try {
+      await this.#removeUploads(removableIds);
+    } catch (error) {
+      // The work that needed these uploads is already gone, so a failed
+      // removal only leaves them to the retention window.
+      this.#onPersistentStorageError?.(error);
+    }
   }
 
   async resolveUploadIds(
@@ -1213,6 +1587,72 @@ class SessionOfflineCoordinator {
     );
 
     return Object.fromEntries(entries);
+  }
+
+  /**
+   * Resolves the dependency uploads of a replaying operation. A failure is
+   * returned with the id of the upload that caused it instead of thrown, and
+   * leaves that upload `pending`: replay classifies the failure first and
+   * calls `markUploadFailed` only when it gives up on the operation.
+   */
+  async resolveReplayUploadIds(
+    uploadIds: readonly string[],
+  ): Promise<
+    | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
+    | { failedUploadId: string; error: unknown }
+  > {
+    const failures: { failedUploadId: string; error: unknown }[] = [];
+
+    // Rethrowing settles `Promise.all` on the first failure, so it is reported
+    // without waiting for the uploads that are still running.
+    const entries = await Promise.all(
+      uploadIds.map(async (id) => {
+        try {
+          return [id, await this.#ensureUploadResolved(id, true)] as const;
+        } catch (error) {
+          failures.push({ failedUploadId: id, error });
+          throw error;
+        }
+      }),
+    ).catch(() => null);
+
+    return failures[0] ?? { refs: Object.fromEntries(entries ?? []) };
+  }
+
+  /**
+   * Marks the dependency uploads of an operation as `failed` after replay
+   * moved it to manual resolution. Uploads still being sent are marked if
+   * they fail too. Uploads that are not waiting on a failure (restarted or
+   * uploaded meanwhile) are left untouched.
+   *
+   * Never rejects: the state only drives the upload UI, so a storage error is
+   * reported instead of interrupting the replay.
+   */
+  async markUploadsFailed(ids: readonly string[]): Promise<void> {
+    const reportError = (error: unknown) =>
+      this.#onPersistentStorageError?.(error);
+
+    const settledIds: string[] = [];
+    for (const id of ids) {
+      const inFlight = this.#uploadPromisesById.get(id);
+      if (!inFlight) {
+        settledIds.push(id);
+        continue;
+      }
+
+      void inFlight.catch(() => this.#markUploadFailed(id)).catch(reportError);
+    }
+
+    await Promise.all(
+      settledIds.map((id) => this.#markUploadFailed(id).catch(reportError)),
+    );
+  }
+
+  async #markUploadFailed(id: string): Promise<void> {
+    const record = this.#uploads.get(id);
+    if (record?.state !== 'pending' || !record.lastError) return;
+
+    await this.#updateUploadState({ id, state: 'failed' });
   }
 
   isLeader(): boolean {
@@ -1489,6 +1929,22 @@ class SessionOfflineCoordinator {
       ? (options.classified ?? this.#classifiedNetworkActive)
       : false;
 
+    const currentStatus = this.store.state.status;
+    // Every `configure` call (each status read through the session, each
+    // fetch) re-primes the network state; when nothing changes, writing,
+    // persisting and broadcasting the status again would only re-render
+    // every status subscriber.
+    if (
+      currentStatus.network.enabled === nextEnabled &&
+      currentStatus.network.active === nextActive &&
+      !(nextActive && options.recordFailureAt) &&
+      (options.recoveryCheckAt === undefined ||
+        options.recoveryCheckAt === currentStatus.lastRecoveryCheckAt)
+    ) {
+      this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
+      return;
+    }
+
     this.#updateStatus((current) => ({
       ...current,
       network: { enabled: nextEnabled, active: nextActive },
@@ -1640,6 +2096,46 @@ class SessionOfflineCoordinator {
     }
   }
 
+  /**
+   * Lists the stored uploads into memory, once per coordinator. Every upload
+   * operation that reads or changes a record waits for it first: the in-memory
+   * map is only authoritative after the stored records are in it, and a list
+   * result applied over newer changes would drop saved uploads and bring
+   * deleted ones back.
+   */
+  #restoreStoredUploads(): Promise<void> | undefined {
+    if (!this.#uploadsConfig) return undefined;
+
+    return (this.#storedUploadsRestore ??= this.#listStoredUploads(
+      this.#uploadsConfig,
+    ));
+  }
+
+  async #listStoredUploads(
+    uploadsConfig: OfflineSessionUploadsConfig,
+  ): Promise<void> {
+    const removedWhileListing = new Set<string>();
+    this.#uploadsRemovedWhileListing = removedWhileListing;
+    try {
+      const uploads = await uploadsConfig.adapter.list(this.sessionKey);
+      // Upload operations wait for this list, so nothing should have changed
+      // the map meanwhile; if a record got in anyway, it was persisted after
+      // the listed one and wins. Records another tab deleted during the list
+      // were read before the removal and must not come back.
+      this.#uploads = new Map([
+        ...uploads
+          .filter((upload) => !removedWhileListing.has(upload.id))
+          .map((upload) => [upload.id, upload] as const),
+        ...this.#uploads,
+      ]);
+      this.#syncUploadsState();
+    } catch (error) {
+      this.#onPersistentStorageError?.(error);
+    } finally {
+      this.#uploadsRemovedWhileListing = null;
+    }
+  }
+
   async #getUploadRecord(
     id: string,
   ): Promise<OfflineStoredUploadRecord | null> {
@@ -1647,6 +2143,12 @@ class SessionOfflineCoordinator {
     if (existing) return existing;
     if (!this.#uploadsConfig) return null;
 
+    await this.#restoreStoredUploads();
+    const restored = this.#uploads.get(id);
+    if (restored) return restored;
+
+    // A removal in flight could still let the load find the removed record.
+    await this.#waitForUploadRemoval(id);
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
     // A save during the load already persisted a newer record; keep it.
     const current = this.#uploads.get(id);
@@ -1659,6 +2161,14 @@ class SessionOfflineCoordinator {
     return loaded;
   }
 
+  async #waitForUploadRemoval(id: string): Promise<void> {
+    let removal = this.#uploadRemovals.get(id);
+    while (removal) {
+      await removal;
+      removal = this.#uploadRemovals.get(id);
+    }
+  }
+
   async #saveUploadRecord(record: OfflineStoredUploadRecord): Promise<void> {
     if (!this.#uploadsConfig) {
       throw new Error(
@@ -1666,6 +2176,12 @@ class SessionOfflineCoordinator {
       );
     }
 
+    // Saving while the previous file of this id is being removed could let
+    // the removal delete the new file. Only yields when a removal is in
+    // flight, so callers that checked the upload state just before still
+    // publish the record before anything else runs.
+    const removal = this.#uploadRemovals.get(record.id);
+    if (removal) await removal;
     this.#uploads.set(record.id, record);
     await this.#uploadsConfig.adapter.save(this.sessionKey, record.id, record);
     this.#syncUploadsState();
@@ -1799,11 +2315,13 @@ class SessionOfflineCoordinator {
       for (const id of expiredIdSet) {
         this.#uploads.delete(id);
       }
-      await Promise.all(
-        expiredIds.map((id) =>
-          uploadsConfig.adapter.remove(this.sessionKey, id),
-        ),
-      );
+      try {
+        await Promise.all(
+          expiredIds.map((id) => this.#removeStoredUpload(uploadsConfig, id)),
+        );
+      } finally {
+        this.#publishUploadsRemoved(expiredIds);
+      }
       didChange = true;
     }
 
@@ -1859,7 +2377,7 @@ class SessionOfflineCoordinator {
       lastError?: { message: string };
     },
   ): OfflineStoredUploadRecord {
-    return {
+    const nextRecord: OfflineStoredUploadRecord = {
       ...current,
       state: args.state,
       updatedAt: Date.now(),
@@ -1869,6 +2387,11 @@ class SessionOfflineCoordinator {
       ...(args.progress !== undefined ? { progress: args.progress } : {}),
       ...(args.lastError !== undefined ? { lastError: args.lastError } : {}),
     };
+
+    // A successful upload no longer reports the failure of earlier attempts.
+    if (args.state === 'uploaded') delete nextRecord.lastError;
+
+    return nextRecord;
   }
 
   async #updateUploadState(args: {
@@ -1894,9 +2417,18 @@ class SessionOfflineCoordinator {
     return nextRecord;
   }
 
-  async #ensureUploadResolved(id: string): Promise<ValidPayload> {
+  async #ensureUploadResolved(
+    id: string,
+    /**
+     * Replay decides what a transport failure means after classifying it, so
+     * the upload keeps waiting (`pending`) instead of becoming `failed` here.
+     */
+    forReplay = false,
+  ): Promise<ValidPayload> {
     const existingRecord = await this.#getUploadRecord(id);
     if (!existingRecord) {
+      const releasedRef = this.#releasedUploadRefs.get(id);
+      if (releasedRef !== undefined) return releasedRef;
       throw new Error(`Unknown offline upload "${id}"`);
     }
     if (
@@ -1919,6 +2451,8 @@ class SessionOfflineCoordinator {
       .resultifyAdd(async () => {
         const queuedRecord = await this.#getUploadRecord(id);
         if (!queuedRecord) {
+          const releasedRef = this.#releasedUploadRefs.get(id);
+          if (releasedRef !== undefined) return releasedRef;
           throw new Error(`Unknown offline upload "${id}"`);
         }
         if (
@@ -1970,7 +2504,7 @@ class SessionOfflineCoordinator {
         } catch (error) {
           await this.#updateUploadState({
             id,
-            state: 'failed',
+            state: forReplay ? 'pending' : 'failed',
             lastError: {
               message: error instanceof Error ? error.message : 'Upload failed',
             },
@@ -1984,6 +2518,9 @@ class SessionOfflineCoordinator {
       })
       .finally(() => {
         this.#uploadPromisesById.delete(id);
+        if (this.#pendingUploadReleases.has(id)) {
+          void this.#releasePendingUploads();
+        }
       });
 
     this.#uploadPromisesById.set(id, uploadPromise);
@@ -1991,61 +2528,157 @@ class SessionOfflineCoordinator {
   }
 
   async #cleanupUnusedMutationUploads(): Promise<void> {
-    const uploadsConfig = this.#uploadsConfig;
-    if (!uploadsConfig) return;
-
-    // Only uploads a store created in this runtime referenced, and no longer
-    // does, are removed here. Uploads of other stores (lazily created ones, or
-    // ones only another deploy has) are left to the retention cleanup. So are
-    // the rare files no record references anymore that no store referenced in
-    // this runtime (e.g. the tab closed right after a replay removed their
-    // entry, before this cleanup ran).
-    const removableIds = [...this.#uploads.values()]
-      .filter((upload) => upload.source === 'mutation')
-      .map((upload) => upload.id)
-      .filter(
-        (id) =>
-          !this.#referencedUploadIds.has(id) &&
-          !this.#uploadPromisesById.has(id) &&
-          this.#uploadOwnerStores.has(id),
-      );
-
-    if (removableIds.length === 0) return;
-
-    for (const id of removableIds) {
-      this.#uploads.delete(id);
-      this.#uploadOwnerStores.delete(id);
-    }
-    await Promise.all(
-      removableIds.map((id) =>
-        uploadsConfig.adapter.remove(this.sessionKey, id),
-      ),
+    await this.#removeUploads(
+      [...this.#uploads.values()]
+        // Only files of stores created in this tab: the queue of a store that
+        // isn't created yet (code-split screens, the app started on another
+        // screen) is not loaded, so its files look unused.
+        .filter(
+          (upload) =>
+            upload.source === 'mutation' &&
+            (upload.storeName !== undefined
+              ? this.#registrations.has(upload.storeName)
+              : // Records persisted before `storeName` existed: mutation upload
+                // ids start with the id of the queue entry, `${storeName}:…`.
+                [...this.#registrations.keys()].some((storeName) =>
+                  upload.id.startsWith(`${storeName}:`),
+                )),
+        )
+        .map((upload) => upload.id)
+        .filter(
+          (id) =>
+            !this.#referencedUploadIds.has(id) &&
+            !this.#uploadPromisesById.has(id) &&
+            !this.#stagedMutationUploadIds.has(id),
+        ),
     );
+  }
+
+  async #removeUploads(ids: string[]): Promise<void> {
+    const uploadsConfig = this.#uploadsConfig;
+    if (!uploadsConfig || ids.length === 0) return;
+
+    try {
+      await Promise.all(
+        ids.map((id) => {
+          this.#uploads.delete(id);
+          return this.#removeStoredUpload(uploadsConfig, id);
+        }),
+      );
+    } finally {
+      this.#publishUploadsRemoved(ids);
+    }
     this.#syncUploadsState();
     void this.#refreshUploadRetention();
   }
 
-  #refreshAggregates(): void {
+  /** Tells the other tabs that this tab deleted these stored uploads. */
+  #publishUploadsRemoved(ids: readonly string[]): void {
+    // A tab opened later lists the stored uploads, so it has nothing to drop.
+    if (this.#disposed || ids.length === 0 || !this.hasOtherTabs()) return;
+
+    const releasedRefs: Array<[string, ValidPayload]> = [];
+    for (const id of ids) {
+      const ref = this.#releasedUploadRefs.get(id);
+      if (ref !== undefined) releasedRefs.push([id, ref]);
+    }
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-uploads-removed',
+      ids: [...ids],
+      releasedRefs,
+    });
+  }
+
+  #applyRemoteUploadsRemoved(
+    ids: readonly string[],
+    releasedRefs: ReadonlyArray<readonly [string, ValidPayload]>,
+  ): void {
+    const removedIds = new Set(ids);
+    for (const id of removedIds) {
+      // An explicitly deleted upload carries no ref, so the id stops
+      // resolving here too.
+      this.#releasedUploadRefs.delete(id);
+      this.#pendingUploadReleases.delete(id);
+      this.#uploads.delete(id);
+      this.#uploadsRemovedWhileListing?.add(id);
+    }
+    for (const [id, ref] of releasedRefs) this.#releasedUploadRefs.set(id, ref);
+
+    // The sender already published its uploads list. Rebuilding it from this
+    // tab's records and publishing it would replace that list everywhere with
+    // upload states this tab never received.
+    const { uploads } = this.store.state;
+    if (uploads.some((upload) => removedIds.has(upload.id))) {
+      this.store.setPartialState(
+        { uploads: uploads.filter((upload) => !removedIds.has(upload.id)) },
+        { action: 'offline-session-uploads' },
+      );
+    }
+  }
+
+  /**
+   * Removes an upload from the adapter, tracking the removal so a save or
+   * load of the same id waits for it.
+   */
+  #removeStoredUpload(
+    uploadsConfig: OfflineSessionUploadsConfig,
+    id: string,
+  ): Promise<void> {
+    const removal = uploadsConfig.adapter.remove(this.sessionKey, id);
+    const settled = removal.then(
+      () => {},
+      () => {},
+    );
+    this.#uploadRemovals.set(id, settled);
+    void settled.then(() => {
+      if (this.#uploadRemovals.get(id) === settled) {
+        this.#uploadRemovals.delete(id);
+      }
+    });
+    return removal;
+  }
+
+  /**
+   * The session-wide lists: this tab's own stores, plus what other tabs
+   * reported for the stores this tab has not attached.
+   */
+  #buildItemLists(): SessionStoreItems {
     const allEntities: InternalGlobalOfflineEntity[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
-    const referencedUploadIds = new Set<string>();
-    const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
     let hasQueuedMutations = false;
-    for (const [storeName, contribution] of this.#storeContributions) {
+    for (const contribution of this.#storeContributions.values()) {
       if (contribution.replayHead !== null) hasQueuedMutations = true;
       allEntities.push(...contribution.entities);
       allResolutions.push(...contribution.resolutions);
+    }
+    for (const [storeName, items] of this.#remoteStoreItems) {
+      if (this.#storeContributions.has(storeName)) continue;
+      if (items.hasQueuedMutations) hasQueuedMutations = true;
+      allEntities.push(...items.entities);
+      allResolutions.push(...items.resolutions);
+    }
+
+    return {
+      entities: dedupeById(allEntities),
+      resolutions: dedupeById(allResolutions),
+      hasQueuedMutations,
+    };
+  }
+
+  #refreshAggregates(publish = true): void {
+    const referencedUploadIds = new Set<string>();
+    const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    for (const contribution of this.#storeContributions.values()) {
       for (const uploadId of contribution.referencedUploadIds) {
         referencedUploadIds.add(uploadId);
-        this.#uploadOwnerStores.set(uploadId, storeName);
       }
       const existing =
         nextProtectedKeysByAdapter.get(contribution.adapter) ?? [];
       existing.push(...contribution.protectedKeys);
       nextProtectedKeysByAdapter.set(contribution.adapter, existing);
     }
-    const entities = dedupeById(allEntities);
-    const resolutions = dedupeById(allResolutions);
+    const { entities, resolutions, hasQueuedMutations } =
+      this.#buildItemLists();
     for (const [adapter, keys] of nextProtectedKeysByAdapter) {
       nextProtectedKeysByAdapter.set(adapter, [...new Set(keys)].sort());
     }
@@ -2053,10 +2686,15 @@ class SessionOfflineCoordinator {
     const nextProtectedKeys = [
       ...new Set([...nextProtectedKeysByAdapter.values()].flat()),
     ].sort();
-    const adaptersToSync = new Set<StorageAdapter>([
-      ...this.#protectedKeysByAdapter.keys(),
-      ...nextProtectedKeysByAdapter.keys(),
-    ]);
+    // The tab that made a change already updated the stored protection. This
+    // tab only knows its own stores, so syncing here would drop the
+    // protection of stores attached only in other tabs.
+    const adaptersToSync = publish
+      ? new Set<StorageAdapter>([
+          ...this.#protectedKeysByAdapter.keys(),
+          ...nextProtectedKeysByAdapter.keys(),
+        ])
+      : new Set<StorageAdapter>();
 
     const debugLogger = this.#debugLogger;
     const sessionKey = this.sessionKey;
@@ -2152,8 +2790,11 @@ class SessionOfflineCoordinator {
           });
       }
     }
-    this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
+    if (publish) this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
     this.#referencedUploadIds = referencedUploadIds;
+    for (const id of this.#stagedMutationUploadIds) {
+      if (referencedUploadIds.has(id)) this.#stagedMutationUploadIds.delete(id);
+    }
 
     if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
       this.#protectedKeys = nextProtectedKeys;
@@ -2165,13 +2806,19 @@ class SessionOfflineCoordinator {
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
-    this.#publishSnapshot();
+    if (publish) this.#publishSnapshot();
+    // Another tab's changes arrive one record at a time (e.g. a superseded
+    // queue entry is removed before its replacement is saved), so an upload
+    // can look unused in between. The tab that made the change cleans up.
     if (
+      publish &&
       this.#uploadsConfig &&
-      this.#uploads.size > 0 &&
       this.#storeContributions.size === this.#registrations.size
     ) {
-      void this.#cleanupUnusedMutationUploads();
+      if (this.#uploads.size > 0) void this.#cleanupUnusedMutationUploads();
+      // Released uploads may only be in storage (staged by another tab), so
+      // this doesn't depend on the in-memory records.
+      void this.#releasePendingUploads();
     }
   }
 
@@ -2212,36 +2859,93 @@ class SessionOfflineCoordinator {
   #publishSnapshot(): void {
     if (this.#disposed) return;
     const status = this.store.state.status;
+    const contributions = [...this.#storeContributions.values()];
     this.#browserTabs.coordinator.publish({
       kind: 'offline-session-snapshot',
       status,
-      entities: this.store.state.entities,
-      resolutions: this.store.state.resolutions,
+      storeNames: [...this.#storeContributions.keys()],
+      entities: contributions.flatMap((contribution) => contribution.entities),
+      resolutions: contributions.flatMap(
+        (contribution) => contribution.resolutions,
+      ),
       uploads: this.store.state.uploads,
-      hasQueuedMutations: this.store.state.hasQueuedMutations,
+      queuedStoreNames: [...this.#storeContributions]
+        .filter(([, contribution]) => contribution.replayHead !== null)
+        .map(([storeName]) => storeName),
     });
   }
 
   #applyRemoteSnapshot(message: SessionSnapshotMessage): void {
-    if (message.sentAt < this.#lastRemoteSnapshotAt) return;
+    // Each tab only reports its own stores, so their items always apply,
+    // while the session-wide status and uploads follow the newest snapshot.
+    for (const storeName of message.storeNames) {
+      this.#remoteStoreItems.set(storeName, {
+        entities: message.entities.filter(
+          (entity) => entity.storeName === storeName,
+        ),
+        resolutions: message.resolutions.filter(
+          (resolution) => resolution.storeName === storeName,
+        ),
+        hasQueuedMutations: message.queuedStoreNames.includes(storeName),
+      });
+    }
+
+    if (message.sentAt < this.#lastRemoteSnapshotAt) {
+      this.store.setPartialState(this.#buildItemLists(), {
+        action: 'offline-session-remote',
+      });
+      void this.#persistSessionSnapshot();
+      return;
+    }
     this.#lastRemoteSnapshotAt = message.sentAt;
+    const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
+    const wasReplayBlocked = this.isReplayBlocked();
+
+    // This tab's own detection wins over another tab saying the network is
+    // back: tabs do not get the browser's online event at the same instant,
+    // and replaying on another tab's word would send requests that fail.
+    // Detected means offline without a classified request failure, so this
+    // tab's own `getIsOffline` check put it there; that check is not called
+    // again here, since it may be an async probe and would run on every
+    // snapshot of every tab.
+    const isDetectedOffline =
+      this.#isNetworkEnabled() &&
+      ((this.store.state.status.network.active &&
+        !this.#classifiedNetworkActive) ||
+        !this.#browserReportsOnline());
 
     this.store.setState(
       {
-        status: this.#restampHydratedStatus(message.status, {
-          isLeader: this.isLeader(),
-          updatedAt: Date.now(),
-        }),
-        entities: message.entities,
-        resolutions: message.resolutions,
+        status: this.#restampHydratedStatus(
+          isDetectedOffline
+            ? {
+                ...message.status,
+                network: { ...message.status.network, active: true },
+              }
+            : message.status,
+          { isLeader: this.isLeader(), updatedAt: Date.now() },
+        ),
+        // Stores attached in this tab keep their own records: this tab's
+        // queue already follows every tab's changes, while the other tab's
+        // snapshot may have been taken before it saw this tab's latest one.
+        // The snapshot only fills in stores this tab has not loaded.
+        ...this.#buildItemLists(),
         uploads: message.uploads,
-        hasQueuedMutations: message.hasQueuedMutations,
       },
       { action: 'offline-session-remote' },
     );
-    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    // A detected offline state stays this tab's own: classifying it would
+    // run the network recovery probe for it, which only checks request
+    // failures, not the app's connectivity check.
+    if (!isDetectedOffline) {
+      this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    }
     void this.#persistSessionSnapshot();
     this.#refreshLeadership();
+    // Another tab can report the recovery before this tab detects it. Without
+    // this, the tab's own detection would then find nothing left to change
+    // and its queued work would never be replayed.
+    this.#handleConnectivityChange(wasEffectivelyOffline, wasReplayBlocked);
   }
 
   #shouldPersistSessionSnapshot(): boolean {
@@ -2882,22 +3586,55 @@ export function useOfflineStoreEntities(args: {
 }
 
 /**
- * React hook returning offline status for a session or inactive scope.
+ * React hook returning the offline state of one item of a store, or `null`
+ * when the item has no offline work. It reads the item through the keyed
+ * lookup shared by all readers and keeps the previous result while the state
+ * is unchanged, so a component re-renders only when its own item changes.
  */
-export function useOfflineStoreStatus(args: {
+export function useOfflineStoreItemState(
+  sessionKey: string | false,
+  inactiveScope: string,
+  storeName: string | undefined,
+  itemKey: string | null,
+): ItemOfflineState | null {
+  const coordinator = useSessionOfflineCoordinator(
+    resolveOfflineSessionScope(sessionKey, inactiveScope),
+    false,
+  );
+  const itemStateSelector = useCallback(
+    (state: SessionStoreState) =>
+      storeName === undefined || itemKey === null
+        ? null
+        : toItemOfflineState(
+            getOfflineStoreEntityLookup(state.entities, storeName).get(itemKey),
+          ),
+    [itemKey, storeName],
+  );
+
+  return coordinator.store.useSelector(itemStateSelector, {
+    equalityFn: deepEqual,
+  });
+}
+
+/**
+ * React hook returning whether a session or inactive scope is in offline mode.
+ * Only this flag is selected, so the other status changes (e.g. `updatedAt`)
+ * don't re-render the store hooks using it.
+ */
+export function useOfflineStoreIsOfflineMode(args: {
   sessionKey: string | false;
   inactiveScope: string;
-}): GlobalOfflineStatus {
+}): boolean {
   const coordinator = useSessionOfflineCoordinator(
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
     false,
   );
-  const statusSelector = useCallback(
-    (state: SessionStoreState) => state.status,
-    [],
-  );
 
-  return coordinator.store.useSelector(statusSelector);
+  return coordinator.store.useSelector(selectIsOfflineMode);
+}
+
+function selectIsOfflineMode(state: SessionStoreState): boolean {
+  return state.status.isOfflineMode;
 }
 
 /**

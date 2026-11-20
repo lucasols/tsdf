@@ -1016,7 +1016,6 @@ export function createDocumentStore<
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
-    const wasLoadedBeforeFetch = currentStatus === 'success';
 
     store.setPartialState(
       {
@@ -1039,8 +1038,12 @@ export function createDocumentStore<
 
       if (!result.ok) {
         if (result.offline) {
+          // The offline error is only exposed when there is no cached data to
+          // return. Checking the data instead of the status before the fetch
+          // also covers a document that was showing cached data together
+          // with the error of a previous failed refresh.
           store.setPartialState(
-            wasLoadedBeforeFetch
+            store.state.data !== null
               ? { error: null, status: 'success' }
               : { error: offlineConnectivityError, status: 'error' },
             { action: 'fetch-error-offline' },

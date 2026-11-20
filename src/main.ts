@@ -137,8 +137,12 @@ export type {
   DocumentOfflineOperationDefinition,
   OfflineConflictResolutionAction,
   OfflineEntityMutationKind,
+  OfflineFailureClassification,
+  OfflineFailureContext,
+  OfflineFailurePhase,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  ItemOfflineState,
   OfflineMutationInput,
   OfflineOperationKind,
   OfflineRuntimeConfig,
@@ -178,6 +182,9 @@ export type {
 export { defaultOfflineRuntimeConfig } from './persistentStorage/offline/types';
 
 export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
+
+export { isOfflineStoreError } from './persistentStorage/offline/offlineStoreError.typeGuards';
+export type { OfflineStoreError } from './persistentStorage/offline/fetchRuntime';
 
 export {
   getGlobalOfflineEntities,

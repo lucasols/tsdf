@@ -10,10 +10,13 @@ import {
 } from 'runcheck';
 import type { OfflineResolutionRecord } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/main';
+import type { OfflineSessionConfig } from '../../src/persistentStorage/offline/types';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import type { StoreManager } from '../../src/storeManager';
+import { createStoreManager } from '../../src/storeManager';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import type { FilterOperator } from '../mocks/serverTableMock';
+import { normalizeError } from '../mocks/testEnvUtils';
 import { pick } from '../utils/genericTestUtils';
 
 export const docSchema: PersistentStorageSchema<{ value: number }> = rc_object({
@@ -221,3 +224,27 @@ export function getGlobalOfflineStatusSummary(sessionKey: string) {
 function normalizeEntityKey(value: string) {
   return value.startsWith('"') ? value.slice(1) : value;
 }
+
+export function createManagedOfflineSession(args: {
+  getSessionKey: () => string | false;
+  config: OfflineSessionConfig;
+}) {
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: args.getSessionKey,
+    offlineSession: args.config,
+  });
+
+  return { storeManager, offlineSession: storeManager };
+}
+
+export const offlineStorageUsersQuery = { tableId: 'users' } as const;
+
+export type OfflineStorageUserRow = { id: number; name: string };
+
+export const offlineStorageUsersTable: { users: OfflineStorageUserRow[] } = {
+  users: [
+    { id: 1, name: 'Ada' },
+    { id: 2, name: 'Grace' },
+  ],
+};

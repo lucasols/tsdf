@@ -1151,8 +1151,9 @@ test('list-query temp-create conflicts promote dependent edits into blocked reso
   env.addTimelineComments('beforeNextAction', [
     'go online and let the temp create stop at conflict detection',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOnline();
+    await Promise.resolve();
   });
   await waitForMicrotaskCondition(
     () => env.apiStore.getOfflineResolutions().length === 2,

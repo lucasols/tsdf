@@ -149,7 +149,7 @@ store.useDocument({ disabled: true });
 
 - `data` - The selected data (or `null` if not loaded)
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'`
-- `error` - The `StoreError` if the fetch failed, otherwise `null`
+- `error` - The `StoreError` if the fetch failed, otherwise `null`. While [offline](./offline.md#reading-while-offline), it is only set when there is no cached data to return; check it with `isOfflineStoreError(error)`
 - `isLoading` - Shorthand for `status === 'loading'`
 - `pendingSync` - `true` while local offline changes for this document still need to sync to the server
 
@@ -204,7 +204,7 @@ because the required refresh must be scheduled immediately.
 
 - `data` - The selected data (or `null`)
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'` | `'deleted'`
-- `error` - The `StoreError` if the fetch failed
+- `error` - The `StoreError` if the fetch failed. While [offline](./offline.md#reading-while-offline), it is only set when there is no cached data to return; check it with `isOfflineStoreError(error)`
 - `isLoading` - Shorthand for `status === 'loading'`
 - `payload` - The resolved payload
 - `itemStateKey` - The internal key for this item
@@ -280,7 +280,7 @@ changes on every keystroke.
 - `isDerived` - Whether the result is currently coming from `derivedQueries` instead of an exact cached/fetched query
 - `isLoading` - Shorthand for `status === 'loading'`
 - `isLoadingMore` - Shorthand for `status === 'loadingMore'`
-- `error` - The `StoreError` if the fetch failed
+- `error` - The `StoreError` if the fetch failed. While [offline](./offline.md#reading-while-offline), it is only set when there is no cached data to return; check it with `isOfflineStoreError(error)`
 - `payload` - The resolved payload
 - `queryKey` - The internal key for this query
 - `pendingSync` - `true` while local offline changes for this query still need to sync to the server
@@ -328,6 +328,81 @@ Behavior:
 
 - `items` - Visible pending items (or selected items)
 - `deletedItems` - Payloads for pending deletes
+
+## useItemOfflineState
+
+**Stores**: [Collection Store](./collection-store.md), [List Query Store](./list-query-store.md)
+
+Returns the offline sync state of one item, or `null` when the item has nothing
+queued and no manual resolution waiting. It does not fetch anything. Use it for
+per-row sync badges:
+
+```tsx
+const Row = memo(function Row({ itemPayload }: { itemPayload: UserPayload }) {
+  const offlineState = store.useItemOfflineState(itemPayload);
+
+  if (!offlineState) return null;
+  if (offlineState.requiresResolution)
+    return <Badge>Needs your attention</Badge>;
+  if (offlineState.syncState === 'syncing') return <Badge>Syncing</Badge>;
+  return <Badge>Waiting to sync</Badge>;
+});
+```
+
+Behavior:
+
+- The component re-renders only when the state of its own item changes, not
+  when other items of the store are queued, replayed, or resolved
+- A falsy payload (`null`, `undefined`, `false`) returns `null`
+- Stores without offline support always return `null`
+- `store.getItemOfflineState(itemPayload)` reads the same state without
+  subscribing, for event handlers
+
+### Return value
+
+`null`, or an `ItemOfflineState`:
+
+- `syncState` - `'pending'` (waiting to be sent), `'syncing'` (being sent),
+  `'needs-confirmation'` (a send failed and it is not known whether it reached
+  the server, so it is re-checked or retried) or `'resolution-required'`. With
+  several mutations queued for the item this is the most urgent state among
+  them (`'needs-confirmation'` > `'syncing'` > `'pending'`): the item is
+  `'syncing'` while any of its mutations is being sent
+- `pendingMutations` - Number of queued mutations of the item still waiting to
+  sync
+- `requiresResolution` - `true` while the item waits for a manual resolution
+  (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
+- `isUnsentCreation` - `true` while the item was created offline (a
+  `tempEntity` / `tempEntities` operation) and the server has not confirmed it
+  yet, so it is still tracked under its temporary payload. Creations queued
+  without a temp entity (e.g. with a client-generated id) report `false`
+
+### Items created offline
+
+An item created offline is tracked under its temporary payload until the server
+confirms it. After that the temporary payload returns `null`, and the final
+payload reports the mutations that are still queued for the item (for example
+an edit made right after creating it) with `isUnsentCreation: false`.
+
+```ts
+function onDeleteClick(itemPayload: UserPayload) {
+  const offlineState = store.getItemOfflineState(itemPayload);
+
+  // A creation that was not sent yet only exists locally, so deleting it
+  // only discards local work: no need to ask before deleting for everyone.
+  const isLocalOnly =
+    offlineState?.isUnsentCreation && offlineState.syncState === 'pending';
+
+  if (isLocalOnly || confirmDeleteForEveryone()) {
+    deleteUser(itemPayload);
+  }
+}
+```
+
+`isUnsentCreation` stays `true` while the creation itself is being sent, until
+the server result is reconciled. The server may already have the item while
+`syncState` is `'syncing'` or `'needs-confirmation'`, which is why the example
+also checks for `'pending'`.
 
 ## useMultipleItems
 
