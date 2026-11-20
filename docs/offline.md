@@ -143,6 +143,8 @@ Optional replay behavior:
 - `accumulation` - Merges newer queued inputs into an existing queued mutation.
 - `supersedes` - Prunes older queued work for the same entity.
 
+Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up. Keep an operation defined until its queued work is likely gone: records of an operation you remove for good stay in storage until the session's storage is cleared with `clearSessionStorage`.
+
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
 
 ## Conflict Resolution

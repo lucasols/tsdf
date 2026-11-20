@@ -531,6 +531,10 @@ export function createOfflineStoreController<
     sessionConfig.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
+  // Uploads of persisted records whose operation this deploy doesn't define
+  // (queued by a newer deploy). The records stay in storage untouched, so their
+  // uploads must not be cleaned up.
+  let unknownOperationUploadIds: string[] = [];
   const countedReplayFailures = new Map<string, number>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
@@ -811,6 +815,7 @@ export function createOfflineStoreController<
     resolvedEntityRefBySerializedRef.clear();
     queueEntries.clear();
     resolutions.clear();
+    unknownOperationUploadIds = [];
     nextQueueOrder = 0;
     hydratedSessionKey = null;
     hydratedPromise = null;
@@ -1098,7 +1103,23 @@ export function createOfflineStoreController<
 
       queueEntries.clear();
       resolutions.clear();
+      const loadedUnknownOperationUploadIds: string[] = [];
+      // Records of an operation this deploy doesn't define were written by a
+      // newer deploy (or belong to an operation the app removed). They stay
+      // in storage for a deploy that can send or resolve them, and this tab
+      // neither lists nor replays them.
+      const skipUnknownOperation = (
+        record: OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      ): boolean => {
+        if (operations[record.operation]) return false;
+        loadedUnknownOperationUploadIds.push(
+          ...Object.values(record.attachedUploadIds ?? {}),
+          ...(record.dependencyUploadIds ?? []),
+        );
+        return true;
+      };
       for (const entry of loadedQueueEntries.values()) {
+        if (skipUnknownOperation(entry)) continue;
         queueEntries.set(entry.id, entry);
       }
       for (const resolution of loadedResolutionEntries.values()) {
@@ -1107,13 +1128,11 @@ export function createOfflineStoreController<
           void current.resolutionNamespace.remove(resolution.id);
           continue;
         }
-        const operation = operations[resolution.operation];
-        if (!operation) {
-          void current.resolutionNamespace.remove(resolution.id);
-          continue;
-        }
+        if (skipUnknownOperation(resolution)) continue;
         resolutions.set(resolution.id, resolution);
       }
+      unknownOperationUploadIds = loadedUnknownOperationUploadIds;
+      // Unknown entries keep their place in the queue order.
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
@@ -1548,12 +1567,15 @@ export function createOfflineStoreController<
     const derivedResolutions =
       buildDerivedResolutionRecords(dependencySnapshot);
     const referencedUploadIds = [
-      ...new Set(
-        [...queueEntries.values(), ...resolutions.values()].flatMap((entry) => [
-          ...Object.values(entry.attachedUploadIds ?? {}),
-          ...(entry.dependencyUploadIds ?? []),
-        ]),
-      ),
+      ...new Set([
+        ...[...queueEntries.values(), ...resolutions.values()].flatMap(
+          (entry) => [
+            ...Object.values(entry.attachedUploadIds ?? {}),
+            ...(entry.dependencyUploadIds ?? []),
+          ],
+        ),
+        ...unknownOperationUploadIds,
+      ]),
     ].sort((left, right) => left.localeCompare(right));
     const protectedKeys = storeAdapter.getProtectedCacheKeys(
       entities.map((entity) => ({

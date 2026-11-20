@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   clearSessionStorage,
+  type DocumentOfflineOperationDefinition,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
@@ -33,16 +34,19 @@ import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
   type CreateListQueryUserOperations,
   deleteItemInputSchema,
+  type UpdateValueConflictOperations,
   type UpdateValueOperations,
   userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
 import {
   collectionCreateInputSchema,
+  docConflictSchema,
   docMutationInputSchema,
   docSchema,
   getGlobalOfflineStatusSummary,
   listQueryQueryPayloadSchema,
+  summarizeResolution,
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -135,6 +139,101 @@ function createOfflineDocumentEnv({
   envRef.current = env;
 
   return env;
+}
+
+/**
+ * The app after a deploy that added the `updateValue` operation. Queuing
+ * `value: 3` ends in a conflict when it is replayed.
+ */
+function createNewerDeployDocumentEnv({
+  sessionKey,
+  storeName,
+  onExecute,
+}: {
+  sessionKey: string;
+  storeName: string;
+  onExecute?: (input: { value: number }) => void;
+}) {
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              kind: 'update',
+              execute: async ({ input }) => {
+                onExecute?.(input);
+                await env.serverMock.delayedSetData(input.value);
+                return input;
+              },
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: ({ input }) =>
+                  input.value === 3 ? { reason: 'server-changed' } : false,
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  return env;
+}
+
+type OlderDeployOperations = {
+  legacyUpdateValue: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { value: number } }
+  >;
+};
+
+/**
+ * The same store in a tab still running the deploy from before `updateValue`
+ * existed: it only knows `legacyUpdateValue`.
+ */
+function createOlderDeployDocumentEnv({
+  sessionKey,
+  storeName,
+}: {
+  sessionKey: string;
+  storeName: string;
+}) {
+  return createDocumentStoreTestEnv<number, OlderDeployOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          legacyUpdateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: ({ input }) => Promise.resolve(input),
+          },
+        },
+      },
+    },
+  });
 }
 
 function createOfflinePartialListQueryEnv({
@@ -601,6 +700,122 @@ test('local-sync offline persistence replays queued data when a new browser sess
   );
 
   hook.unmount();
+});
+
+test('an older deploy keeps edits queued for an operation only a newer deploy knows, and the newer deploy sends them', async () => {
+  const sessionKey = 'offline-unknown-operation-entry-session';
+  const storeName = 'offline-unknown-operation-entry-doc';
+  const sentByNewerDeploy: { value: number }[] = [];
+
+  // The user edits offline in the newer deploy.
+  network.setOffline();
+  const newerEnv = createNewerDeployDocumentEnv({ sessionKey, storeName });
+  await resolveAfterAllTimers(
+    newerEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        newerEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await newerEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // The connection comes back while only a tab of the older deploy is open
+  // (e.g. a tab that was not reloaded after the deploy).
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const olderEnv = createOlderDeployDocumentEnv({ sessionKey, storeName });
+  const olderHook = renderHook(() => olderEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  // The older deploy can't send an operation it doesn't define, so it doesn't
+  // list it either. Before, its replay deleted the edit from storage.
+  expect(olderEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  olderHook.unmount();
+
+  // The user reloads into the newer deploy: the edit is still queued and is
+  // sent once.
+  resetSessionForTests();
+  const reloadedEnv = createNewerDeployDocumentEnv({
+    sessionKey,
+    storeName,
+    onExecute: (input) => {
+      sentByNewerDeploy.push(input);
+    },
+  });
+  const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  expect(sentByNewerDeploy).toMatchInlineSnapshot(`
+    - value: 2
+  `);
+  expect(reloadedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  reloadedHook.unmount();
+});
+
+test('an older deploy keeps conflicts of an operation only a newer deploy knows', async () => {
+  const sessionKey = 'offline-unknown-operation-resolution-session';
+  const storeName = 'offline-unknown-operation-resolution-doc';
+
+  // In the newer deploy, an offline edit ends in a conflict when it is sent.
+  network.setOffline();
+  const newerEnv = createNewerDeployDocumentEnv({ sessionKey, storeName });
+  await resolveAfterAllTimers(
+    newerEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        newerEnv.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: async () => {
+        await newerEnv.serverMock.delayedSetData(3);
+        return 3;
+      },
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    }),
+  );
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(newerEnv.apiStore.getOfflineResolutions()).toHaveLength(1);
+
+  // A tab of the older deploy opens the store. It can't resolve a conflict of
+  // an operation it doesn't define, so it doesn't list it. Before, it deleted
+  // the conflict from storage while loading it.
+  resetSessionForTests();
+  const olderEnv = createOlderDeployDocumentEnv({ sessionKey, storeName });
+  const olderHook = renderHook(() => olderEnv.apiStore.useDocument());
+  await flushAllTimers();
+  expect(olderEnv.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  olderHook.unmount();
+
+  // Back in the newer deploy, the user can still resolve the conflict.
+  resetSessionForTests();
+  const reloadedEnv = createNewerDeployDocumentEnv({ sessionKey, storeName });
+  const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  const [resolution] = reloadedEnv.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected the conflict to still be queued');
+  expect(summarizeResolution(resolution)).toMatchInlineSnapshot(`
+    input: 'value: 3'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
+    reason: 'server-changed'
+  `);
+
+  reloadedHook.unmount();
 });
 
 test('local-sync restart keeps offline temp rows visible for partial-resource list queries', async () => {
