@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { ValidPayload } from '../../src/main';
+import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { getOpfsDirTree } from '../utils/persistentStorageOptimizationTestUtils';
 import type {
   UpdateValueConflictOperations,
   UpdateValueOperations,
@@ -156,10 +159,13 @@ function setDocumentHidden(hidden: boolean) {
  * Every tab reads the same `document.hidden`, so a tab opened with
  * `focused: false` only starts in the background; focus changes after that go
  * through `blurWindow` and `closeTabAndFocusRemaining`.
+ *
+ * With `uploads: true` the tab stores offline file uploads in OPFS, shared by
+ * every tab like in a real browser (install it with `createMockBrowserOpfs`).
  */
 async function openTab(
   name: string,
-  options: { focused: boolean; storeIds?: string[] },
+  options: { focused: boolean; storeIds?: string[]; uploads?: boolean },
 ) {
   setDocumentHidden(!options.focused);
   vi.resetModules();
@@ -167,16 +173,28 @@ async function openTab(
     { createStoreManager },
     { createDocumentStoreTestEnv },
     sessionModule,
+    { opfsOfflineUploadAdapter },
   ] = await Promise.all([
     import('../../src/storeManager'),
     import('../mocks/documentStoreTestEnv'),
     import('../../src/persistentStorage/offline/sessionCoordinator'),
+    import('../../src/persistentStorage/opfsOfflineUploadAdapter'),
   ]);
 
-  const storeManager = createStoreManager({
+  const storeManager = createStoreManager<ValidPayload>({
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
-    offlineSession: { network: network.config },
+    offlineSession: {
+      network: network.config,
+      ...(options.uploads
+        ? {
+            uploads: {
+              adapter: opfsOfflineUploadAdapter,
+              upload: ({ id }) => Promise.resolve(`server:${id}`),
+            },
+          }
+        : {}),
+    },
   });
 
   function createDocEnv(storeId: string) {
@@ -245,6 +263,25 @@ async function openTab(
         offline: { operation: 'updateValue', input: { value } },
       });
       await advanceTime(10);
+    },
+    /** Queues an offline edit with an attached file, like a form with a file input. */
+    async queueEditWithFile(value: number, storeId = 'doc') {
+      const mutation = getEnv(storeId).apiStore.performMutation({
+        mutation: async () => {
+          await getEnv(storeId).serverMock.delayedSetData(value);
+          return value;
+        },
+        offline: { operation: 'updateValue', input: { value } },
+        upload: {
+          avatar: new File(['avatar'], 'avatar.txt', {
+            type: 'text/plain',
+            lastModified: 1,
+          }),
+        },
+      });
+      // Saving the file to OPFS takes a few timer ticks
+      await advanceTime(100);
+      await mutation;
     },
     close() {
       for (const env of envs.values()) env.apiStore.dispose();
@@ -639,4 +676,38 @@ test('disposing a store does not bring back offline items another tab reported e
       leader: '✅'
       resolutions: []
   `);
+});
+
+test('the file attached to an edit queued in another tab is kept when the edit ends in a conflict', async () => {
+  const opfs = createMockBrowserOpfs();
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true, uploads: true });
+  const tabB = await openTab('B', { focused: false, uploads: true });
+  await blurWindow();
+
+  // While offline the user submits an edit with an attached file in tab B,
+  // then switches to tab A, which leads.
+  await tabB.queueEditWithFile(-1);
+  setDocumentHidden(false);
+  expect(getOpfsDirTree(opfs)).toContain('binary.blob');
+
+  // On reconnect tab A replays tab B's edit and the server rejects it with a
+  // conflict, which keeps the edit and its file for the user to retry.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: ['doc: resolution-required']
+      leader: '✅'
+      resolutions: ['doc: conflict']
+
+    tab B:
+      entities: ['doc: resolution-required']
+      leader: '❌'
+      resolutions: ['doc: conflict']
+  `);
+
+  // Tab B, which saved the file, must not delete it while it applies tab A's
+  // changes one at a time: retrying the conflict needs the file.
+  expect(getOpfsDirTree(opfs)).toContain('binary.blob');
 });

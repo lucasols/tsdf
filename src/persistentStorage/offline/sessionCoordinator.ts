@@ -2190,7 +2190,11 @@ class SessionOfflineCoordinator {
     );
     void this.#persistSessionSnapshot();
     if (publish) this.#publishSnapshot();
+    // Another tab's changes arrive one record at a time (e.g. a conflict's
+    // queue entry is removed before its resolution is saved), so an upload
+    // can look unused in between. The tab that made the change cleans up.
     if (
+      publish &&
       this.#uploadsConfig &&
       this.#uploads.size > 0 &&
       this.#storeContributions.size === this.#registrations.size
@@ -2277,8 +2281,10 @@ class SessionOfflineCoordinator {
     // This tab's own detection wins over another tab saying the network is
     // back: tabs do not get the browser's online event at the same instant,
     // and replaying on another tab's word would send requests that fail.
+    // Reads the browser state instead of calling `getIsOffline`, which may be
+    // an async probe and would run again on every snapshot of every tab.
     const isDetectedOffline =
-      this.#isNetworkEnabled() && this.#getCurrentOfflineState() === true;
+      this.#isNetworkEnabled() && !this.#browserReportsOnline();
 
     this.store.setState(
       {
