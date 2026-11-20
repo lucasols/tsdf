@@ -2118,10 +2118,15 @@ class SessionOfflineCoordinator {
     const nextProtectedKeys = [
       ...new Set([...nextProtectedKeysByAdapter.values()].flat()),
     ].sort();
-    const adaptersToSync = new Set<StorageAdapter>([
-      ...this.#protectedKeysByAdapter.keys(),
-      ...nextProtectedKeysByAdapter.keys(),
-    ]);
+    // The tab that made a change already updated the stored protection. This
+    // tab only knows its own stores, so syncing here would drop the
+    // protection of stores attached only in other tabs.
+    const adaptersToSync = publish
+      ? new Set<StorageAdapter>([
+          ...this.#protectedKeysByAdapter.keys(),
+          ...nextProtectedKeysByAdapter.keys(),
+        ])
+      : new Set<StorageAdapter>();
 
     const debugLogger = this.#debugLogger;
     const sessionKey = this.sessionKey;
@@ -2217,7 +2222,7 @@ class SessionOfflineCoordinator {
           });
       }
     }
-    this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
+    if (publish) this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
     this.#referencedUploadIds = referencedUploadIds;
 
     if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
