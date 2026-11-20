@@ -252,21 +252,30 @@ const DISPOSABLE_ENTRY_PREFIXES = [
  * runs once no store uses `'local-sync'` and never removes offline-protected
  * entries.
  *
- * Queued offline mutations and pending resolutions are never deleted: when
- * the store still has any, all of its entries are kept as they are (the cached
- * data backs that queued work) and their count is returned instead.
+ * Also removes the data of stores the app declared as removed
+ * (`removedStores`), which nothing reads anymore either.
+ *
+ * Returns how many queued offline mutations and pending resolutions the store
+ * had. With `keepUnsentOfflineWork`, a store that still has any is left
+ * untouched (the cached data backs that queued work); otherwise they are
+ * removed with everything else.
  *
  * Must run inside the managed `localStorage` lock, so a tab still running the
- * previous adapter cannot queue work between the check and the removal.
+ * previous version cannot queue work between the check and the removal.
  */
-function removeStoreLeftoversFromLocalStorage(storageKey: string): number {
+export function removeStoreLeftoversFromLocalStorage(
+  storageKey: string,
+  keepUnsentOfflineWork: boolean,
+): number {
   let unsentRecordsCount = 0;
   for (const entryPrefix of UNSENT_OFFLINE_WORK_ENTRY_PREFIXES) {
     unsentRecordsCount += localPersistentStorage.listManifestEntries(
       `${storageKey}.${entryPrefix}.`,
     ).length;
   }
-  if (unsentRecordsCount > 0) return unsentRecordsCount;
+  if (keepUnsentOfflineWork && unsentRecordsCount > 0) {
+    return unsentRecordsCount;
+  }
 
   const singleManifestKey =
     localPersistentStorage.getManifestKeyForSingle(storageKey);
@@ -288,7 +297,7 @@ function removeStoreLeftoversFromLocalStorage(storageKey: string): number {
     localPersistentStorage.remove(queryStorageKey);
   }
 
-  return 0;
+  return unsentRecordsCount;
 }
 
 /**
@@ -325,7 +334,7 @@ function createLocalStorageLeftoversCheck(
 
     scheduleIdleCleanup(() => {
       runLocalStorageMutation(() =>
-        removeStoreLeftoversFromLocalStorage(storageKey),
+        removeStoreLeftoversFromLocalStorage(storageKey, true),
       )
         .then((unsentRecordsCount) => {
           if (unsentRecordsCount === 0) return;
