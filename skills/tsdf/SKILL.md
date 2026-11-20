@@ -215,7 +215,7 @@ Docs: `docs/persistent-storage.md`.
 Offline support is layered on top of persistent storage and consists of:
 
 1. Shared `offlineSession` on `createStoreManager(...)` (controls network awareness, mutation queueing policy, uploads).
-2. Per-store `persistentStorage.offline.operations` — typed operation definitions used for queued mutations. Queued work of an operation the running deploy doesn't define is kept for a newer deploy and pauses that store's replay; list operations deleted for good in `persistentStorage.offline.removedOperations` to delete their queued work instead.
+2. Per-store `persistentStorage.offline.operations` — typed operation definitions used for queued mutations.
 
 ```ts
 type UserOps = DefineListQueryOfflineOperations<

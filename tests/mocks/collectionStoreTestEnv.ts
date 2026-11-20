@@ -278,8 +278,6 @@ export function createCollectionStoreTestEnv<
           ? {
               operations:
                 persistentStorageWithResolvedAdapter.offline.operations,
-              removedOperations:
-                persistentStorageWithResolvedAdapter.offline.removedOperations,
             }
           : undefined,
       })

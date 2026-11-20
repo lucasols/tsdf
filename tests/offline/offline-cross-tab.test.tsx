@@ -460,15 +460,13 @@ async function closeTabAndFocusRemaining(closing: Tab) {
 }
 
 type UpdateValueV2Operations = {
-  updateValue: UpdateValueOperations['updateValue'];
   updateValueV2: UpdateValueOperations['updateValue'];
 };
 
 /**
- * Opens a tab running a newer deploy of the app, which added the document
- * store's offline operation `updateValueV2` (its edits use it) and still
- * defines `updateValue`. The app does not set `getAppVersion`, so this tab
- * shares the offline session with older tabs.
+ * Opens a tab running a newer deploy of the app, where the document store's
+ * offline operation was renamed to `updateValueV2`. The app does not set
+ * `getAppVersion`, so this tab shares the offline session with older tabs.
  */
 async function openNewVersionTab(name: string) {
   setDocumentHidden(true);
@@ -499,15 +497,6 @@ async function openNewVersionTab(name: string) {
       schema: docSchema,
       offline: {
         operations: {
-          updateValue: {
-            inputSchema: docMutationInputSchema,
-            kind: 'update',
-            execute: async ({ input }) => {
-              serverCalls.push(`tab ${name} sent doc = ${input.value}`);
-              await env.serverMock.delayedSetData(input.value);
-              return input;
-            },
-          },
           updateValueV2: {
             inputSchema: docMutationInputSchema,
             kind: 'update',
@@ -1161,38 +1150,6 @@ test('an older tab does not delete edits queued for an operation only a newer de
       leader: '✅'
       resolutions: []
   `);
-});
-
-test('an older leader tab does not send its later edits ahead of an edit only a newer deploy tab can send', async () => {
-  network.setOffline();
-  const oldTab = await openTab('A', { focused: true });
-  const newTab = await openNewVersionTab('B');
-  await blurWindow();
-
-  // Offline, the user edits the document in the newer deploy's tab (5) and
-  // then in the older deploy's tab (7). The older tab learns of the first
-  // edit from the newer tab's message, not from storage.
-  await newTab.queueEdit(5);
-  await oldTab.queueEdit(7);
-
-  // On reconnect the older tab leads but cannot send the first edit, so it
-  // must not send the later one ahead of it either: the newer tab would then
-  // send 5 on top, overwriting the user's latest edit.
-  network.goOnline();
-  await advanceTime(3_000);
-  expect(serverCalls).toMatchInlineSnapshot(`[]`);
-
-  // Once the older tab is closed, the newer tab leads and sends both edits
-  // in the order the user made them.
-  await closeTabAndFocusRemaining(oldTab);
-  network.goOffline();
-  await advanceTime(100);
-  network.goOnline();
-  await advanceTime(3_000);
-
-  expect(serverCalls).toMatchInlineSnapshot(
-    `['tab B sent doc = 5 (v2)', 'tab B sent doc = 7']`,
-  );
 });
 
 test('disposing a store does not bring back offline items another tab reported earlier', async () => {

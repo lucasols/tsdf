@@ -237,14 +237,3 @@ export function createManagedOfflineSession(args: {
 
   return { storeManager, offlineSession: storeManager };
 }
-
-export const offlineStorageUsersQuery = { tableId: 'users' } as const;
-
-export type OfflineStorageUserRow = { id: number; name: string };
-
-export const offlineStorageUsersTable: { users: OfflineStorageUserRow[] } = {
-  users: [
-    { id: 1, name: 'Ada' },
-    { id: 2, name: 'Grace' },
-  ],
-};

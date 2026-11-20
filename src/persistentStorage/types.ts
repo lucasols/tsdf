@@ -414,18 +414,6 @@ type PublicStoreOfflineConfig<
 > = {
   /** Store-local offline operation definitions. Optional when only session-level offline controls are used. */
   operations?: TOperations;
-  /**
-   * Names of offline operations deleted from the app for good.
-   *
-   * Queued mutations and resolutions of an operation the running deploy
-   * doesn't define are kept for a newer deploy, and they pause this store's
-   * replay until one sends them. Listing the operation here deletes them (with
-   * their attached files, and the queued work of the items its creations would
-   * have made) instead, reporting the number of records dropped through
-   * `onPersistentStorageError`. A name that is still defined in `operations`
-   * is ignored.
-   */
-  removedOperations?: readonly string[];
 };
 
 type PublicStoreOfflineConfigField<

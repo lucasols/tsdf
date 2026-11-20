@@ -1257,7 +1257,6 @@ export function createCollectionStore<
           __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
             offlineOperationsForRuntime,
           ),
-          resolvedOfflineConfig.removedOperations,
         )
       : null;
 

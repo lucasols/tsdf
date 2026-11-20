@@ -1,7 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_number, rc_object } from 'runcheck';
 import { expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../src/main';
 import {
@@ -1378,41 +1378,31 @@ function createUploadsStoreManager(sessionKey: string) {
   });
 }
 
-type DocumentValueInput = { value: number; draftUploadId?: string };
-
 type DocumentValueOperation = DocumentOfflineOperationDefinition<
   { value: number },
-  { input: DocumentValueInput }
+  { input: { value: number } }
 >;
 
 /**
  * A document store defining `operationNames`. Each replay is logged in `sent`
- * with the content of its attached `avatar` file. An edit can also depend on
- * a file the app saved itself (`draftUploadId`).
+ * with the content of its attached `avatar` file.
  */
 function createRecordingDocumentEnv({
   storeManager,
   storeName,
   operationNames,
-  removedOperations,
   sent,
 }: {
   storeManager: ReturnType<typeof createUploadsStoreManager>;
   storeName: string;
   operationNames: readonly string[];
-  removedOperations?: readonly string[];
   sent: string[];
 }) {
   const operations: Record<string, DocumentValueOperation> = {};
   for (const operationName of operationNames) {
     operations[operationName] = {
-      inputSchema: rc_object({
-        value: rc_number,
-        draftUploadId: rc_string.optionalKey(),
-      }),
+      inputSchema: rc_object({ value: rc_number }),
       kind: 'update',
-      dependsOnUploads: ({ input }) =>
-        input.draftUploadId === undefined ? [] : [input.draftUploadId],
       execute: async (ctx) => {
         const avatar = ctx.uploads.filesById.avatar;
         sent.push(
@@ -1433,7 +1423,7 @@ function createRecordingDocumentEnv({
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { operations, removedOperations },
+      offline: { operations },
     },
   });
 }
@@ -1443,14 +1433,11 @@ function queueOfflineEdit(
   operation: string,
   value: number,
   avatarContent?: string,
-  draftUploadId?: string,
 ) {
-  const input: DocumentValueInput =
-    draftUploadId === undefined ? { value } : { value, draftUploadId };
   return resolveAfterAllTimers(
     env.apiStore.performMutation({
       mutation: () => Promise.resolve(value),
-      offline: { operation, input },
+      offline: { operation, input: { value } },
       upload:
         avatarContent === undefined
           ? undefined
@@ -1536,135 +1523,4 @@ test('an older deploy keeps the attached file of an edit queued for an operation
   );
 
   reloadedHook.unmount();
-});
-
-test('attached files of edits queued for an operation listed in removedOperations are deleted with them', async () => {
-  const mockBrowserOpfs = createMockBrowserOpfs();
-  const sessionKey = 'offline-removed-operation-upload-session';
-  const storeName = 'offline-removed-operation-upload-doc';
-  const sent: string[] = [];
-
-  // The user attaches a file to an offline edit made with `oldUpdateValue`.
-  // The edit also depends on a draft photo the app staged for it.
-  network.setOffline();
-  const olderStoreManager = createUploadsStoreManager(sessionKey);
-  const olderEnv = createRecordingDocumentEnv({
-    storeManager: olderStoreManager,
-    storeName,
-    operationNames: ['oldUpdateValue'],
-    sent,
-  });
-  (
-    await resolveAfterAllTimers(
-      olderStoreManager.saveOfflineUpload({
-        id: 'draft-photo',
-        file: new File(['draft'], 'draft.txt', {
-          type: 'text/plain',
-          lastModified: 1,
-        }),
-      }),
-    )
-  ).unwrap();
-  await queueOfflineEdit(
-    olderEnv,
-    'oldUpdateValue',
-    2,
-    'old photo',
-    'draft-photo',
-  );
-  await flushAllTimers();
-  expect(olderStoreManager.getOfflineUploads()).toHaveLength(2);
-
-  // The next deploy deletes `oldUpdateValue` for good and lists it in
-  // `removedOperations`. Opening the store deletes the edit, and its attached
-  // file with it: no deploy could send it anymore. The draft photo staged for
-  // it is released too, like when queued work is discarded, since nothing
-  // queued depends on it anymore.
-  resetSessionForTests();
-  act(() => {
-    network.goOnline();
-  });
-  const newerStoreManager = createUploadsStoreManager(sessionKey);
-  const newerEnv = createRecordingDocumentEnv({
-    storeManager: newerStoreManager,
-    storeName,
-    operationNames: ['updateValue'],
-    removedOperations: ['oldUpdateValue'],
-    sent,
-  });
-  const newerHook = renderHook(() => newerEnv.apiStore.useDocument());
-  await advanceTime(5_000);
-
-  expect(sent).toMatchInlineSnapshot(`[]`);
-  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
-
-  newerHook.unmount();
-});
-
-test('attached files of a store the app has not created yet after a restart survive offline edits in other stores', async () => {
-  createMockBrowserOpfs();
-  const sessionKey = 'offline-lazy-store-upload-session';
-  const otherStoreName = 'offline-lazy-store-upload-doc';
-  // Its id starts with the other store's id followed by a number, so the
-  // files of each store can't be told apart by their ids.
-  const lazyStoreName = `${otherStoreName}:2026`;
-  const sent: string[] = [];
-
-  // The user attaches a file to an offline edit of a store that lives in a
-  // lazily loaded part of the app.
-  network.setOffline();
-  const firstEnv = createRecordingDocumentEnv({
-    storeManager: createUploadsStoreManager(sessionKey),
-    storeName: lazyStoreName,
-    operationNames: ['updateValue'],
-    sent,
-  });
-  await queueOfflineEdit(firstEnv, 'updateValue', 2, 'lazy photo');
-  await flushAllTimers();
-
-  // After a restart, while online, only another store is created at first.
-  // Then the connection drops and the user edits it offline, which refreshes
-  // the session's offline state.
-  resetSessionForTests();
-  act(() => {
-    network.goOnline();
-  });
-  const restartedStoreManager = createUploadsStoreManager(sessionKey);
-  const otherEnv = createRecordingDocumentEnv({
-    storeManager: restartedStoreManager,
-    storeName: otherStoreName,
-    operationNames: ['updateValue'],
-    sent,
-  });
-  const otherHook = renderHook(() => otherEnv.apiStore.useDocument());
-  await advanceTime(5_000);
-  act(() => {
-    network.setOffline();
-  });
-  await queueOfflineEdit(otherEnv, 'updateValue', 3);
-  await advanceTime(5_000);
-
-  // The file still belongs to the edit queued in the store not created yet.
-  expect(restartedStoreManager.getOfflineUploads()).toHaveLength(1);
-
-  // The user opens the lazily loaded part of the app and the connection comes
-  // back: the edit is sent with its file.
-  const lazyEnv = createRecordingDocumentEnv({
-    storeManager: restartedStoreManager,
-    storeName: lazyStoreName,
-    operationNames: ['updateValue'],
-    sent,
-  });
-  const lazyHook = renderHook(() => lazyEnv.apiStore.useDocument());
-  act(() => {
-    network.goOnline();
-  });
-  await flushAllTimers();
-
-  expect(sent).toMatchInlineSnapshot(
-    `['updateValue(3)', 'updateValue(2) with avatar "lazy photo"']`,
-  );
-
-  otherHook.unmount();
-  lazyHook.unmount();
 });
