@@ -2459,7 +2459,9 @@ test('a file attached to a queued mutation is released once the mutation has bee
 
   // The attached file stays available until replay succeeded: the entity is
   // updated by `onSuccessExecute` (value 200) before the consumed upload is
-  // dropped and the hook reports it as missing.
+  // dropped and the hook reports it as missing. The last render is the
+  // store's recovery revalidation after replay, which replaces the client-only
+  // `onSuccessExecute` marker with the server value (2).
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> docValue: 2 ⋅ status: success ⋅ url: blob:staged-1 ⋅ fileName: avatar.png
@@ -2469,6 +2471,7 @@ test('a file attached to a queued mutation is released once the mutation has bee
     -> docValue: 2 ⋅ status: success ⋅ url: blob:staged-1 ⋅ fileName: avatar.png
     -> docValue: 200 ⋅ status: success ⋅ url: blob:staged-1 ⋅ fileName: avatar.png
     -> docValue: 200 ⋅ status: missing ⋅ url: null ⋅ fileName: null
+    -> docValue: 2 ⋅ status: missing ⋅ url: null ⋅ fileName: null
     "
   `);
   expect(objectUrls.events).toMatchInlineSnapshot(
