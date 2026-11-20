@@ -936,6 +936,106 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('refreshing the first page of a cached list that lost a row does not save the rows after it as complete', async () => {
+    const storeName = 'lq-evicted-row-in-cached-suffix';
+    const projectsQuery = { tableId: 'projects' };
+    const serverData = {
+      users: Array.from({ length: 7 }, (_, index) => ({
+        id: index + 1,
+        name: `User ${index + 1}`,
+      })),
+      projects: [
+        { id: 1, name: 'Project 1' },
+        { id: 2, name: 'Project 2' },
+      ],
+    };
+    // The item budget fits the two project rows and five of the user rows.
+    const maxItemBytes = sumPersistedEntryBytes(
+      ...serverData.projects.map((row) =>
+        getLocalListItemEntrySizeBytes(rawItemPayload('projects', row.id), row),
+      ),
+      ...[1, 2, 3, 4, 6].map((id) =>
+        getLocalListItemEntrySizeBytes(rawItemPayload('users', id), {
+          id,
+          name: `User ${id}`,
+        }),
+      ),
+    );
+
+    function startNextSession() {
+      return createEnv({
+        storeName,
+        sessionKey: 'sess1',
+        maxItemBytes,
+        serverData: structuredClone(serverData),
+        defaultQuerySize: 2,
+        offsetPagination: { maxInvalidationLimit: 100 },
+      });
+    }
+
+    // Three pages of the users list (six of its seven rows) are loaded and
+    // cached.
+    let session = startNextSession();
+    session.apiStore.scheduleListQueryFetch('highPriority', usersListQuery, 2);
+    await flushAllTimers();
+    session.apiStore.loadMore(usersListQuery);
+    await flushAllTimers();
+    session.apiStore.loadMore(usersListQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await advanceTime(60_000);
+
+    // In a new session every row except "User 5" is opened, which refreshes
+    // its recency.
+    session = startNextSession();
+    for (const id of [1, 2, 3, 4, 6]) {
+      const userDetails = renderHook(() =>
+        session.apiStore.useItem(rawItemPayload('users', id)),
+      );
+      await flushAllTimers();
+      userDetails.unmount();
+    }
+    // Wait for the localStorage touch throttle so the read recency is stored.
+    await advanceTime(SYNC_STORAGE_TOUCH_THROTTLE_MS + 100);
+
+    // Loading the projects list pushes the items over maxItemBytes: "User 5"
+    // is evicted and the users query is rewritten without it, flagged as
+    // missing rows.
+    const projectsList = renderHook(() =>
+      session.apiStore.useListQuery(projectsQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    projectsList.unmount();
+
+    expect(
+      persistentStore
+        .scope(storeName, 'sess1')
+        .listQuery.readQueryEntry(usersListQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '✅'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||6']
+      missingItems: '✅'
+      payload: { tableId: 'users' }
+    `);
+
+    // A cold start refreshes the first page of the users list.
+    session = startNextSession();
+    session.apiStore.scheduleListQueryFetch('highPriority', usersListQuery, 2);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The cached rows after the refreshed page are not kept: where "User 5"
+    // was in them is unknown, so saving them would store a list with a hole
+    // that a later start restores as the complete first rows.
+    expect(
+      getStoredQueryItemKeys(storeName, 'sess1', usersListQuery),
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+  });
+
   test('a cached list with a row the schema no longer accepts shows the remaining rows as still loading, then the full list', async () => {
     const storeName = 'lq-rejected-row';
     const sessionKey = 'sess1';

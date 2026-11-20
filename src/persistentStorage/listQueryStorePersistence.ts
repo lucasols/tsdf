@@ -1626,16 +1626,31 @@ export function setupListQueryPersistence<
     return snapshot ? parseHydratedQuerySnapshot(snapshot) : undefined;
   }
 
-  function filterRetainableHydratedSuffix(
+  /**
+   * Returns the cached rows that can follow a refreshed first page. Stops at
+   * the first row that can't be restored: keeping the rows after it would
+   * save a list with a hole that is later restored as a complete one. The
+   * query still has more pages, so the rows left out are loaded again.
+   */
+  function getRetainableHydratedSuffix(
+    previousPersistedQuery: ParsedPersistedListQueryData<QueryPayload>,
     suffixItemKeys: readonly string[],
   ): string[] {
-    return suffixItemKeys.filter((itemKey) => {
+    // Rows were already dropped from this list: where they were is unknown.
+    if (previousPersistedQuery.missingItems) return [];
+
+    const retainable: string[] = [];
+    for (const itemKey of suffixItemKeys) {
       const hydratedItem = readHydratedItem(itemKey);
-      return (
-        hydratedItem?.item != null &&
-        !shouldIgnoreItem(hydratedItem.itemQuery.payload)
-      );
-    });
+      if (
+        hydratedItem?.item == null ||
+        shouldIgnoreItem(hydratedItem.itemQuery.payload)
+      ) {
+        break;
+      }
+      retainable.push(itemKey);
+    }
+    return retainable;
   }
 
   async function hydrateMissingAsyncItems(itemKeys: readonly string[]) {
@@ -3150,7 +3165,10 @@ export function setupListQueryPersistence<
               filteredItems.length,
             );
             await hydrateMissingAsyncItems(suffixItemKeys);
-            const cachedSuffix = filterRetainableHydratedSuffix(suffixItemKeys);
+            const cachedSuffix = getRetainableHydratedSuffix(
+              previousPersistedQuery,
+              suffixItemKeys,
+            );
             queryItemsToPersist = [...filteredItems, ...cachedSuffix];
           }
         }
@@ -3476,7 +3494,10 @@ export function setupListQueryPersistence<
             filteredItems.length,
           );
           await hydrateMissingAsyncItems(suffixItemKeys);
-          const cachedSuffix = filterRetainableHydratedSuffix(suffixItemKeys);
+          const cachedSuffix = getRetainableHydratedSuffix(
+            previousPersistedQuery,
+            suffixItemKeys,
+          );
           queryItemsToPersist = [...filteredItems, ...cachedSuffix];
         }
       }

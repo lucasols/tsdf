@@ -475,6 +475,125 @@ describe('opfs: list query store persistence', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('refreshing the first page of a paginated list that lost a later row keeps only the cached rows up to that gap', async () => {
+    const storeName = 'lq-opfs-evicted-row-in-cached-suffix';
+    const projectsQuery = { tableId: 'projects' };
+    const serverData = {
+      users: Array.from({ length: 7 }, (_, index) => ({
+        id: index + 1,
+        name: `User ${index + 1}`,
+      })),
+      projects: [
+        { id: 1, name: 'Project 1' },
+        { id: 2, name: 'Project 2' },
+      ],
+    };
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey: 'sess1',
+    });
+    // The item budget fits the two project rows and four of the user rows.
+    const maxItemBytes = sumPersistedEntryBytes(
+      ...serverData.projects.map((row) =>
+        getAsyncListItemEntrySizeBytes(`projects||${row.id}`, row),
+      ),
+      ...[2, 3, 4, 6].map((id) =>
+        getAsyncListItemEntrySizeBytes(`users||${id}`, {
+          id,
+          name: `User ${id}`,
+        }),
+      ),
+    );
+
+    function startNextSession() {
+      return createEnv({
+        storeName,
+        sessionKey: 'sess1',
+        maxItemBytes,
+        serverData: structuredClone(serverData),
+        defaultQuerySize: 2,
+        offsetPagination: { maxInvalidationLimit: 100 },
+      });
+    }
+
+    // Three pages of the users list (six of its seven rows) are loaded and
+    // cached.
+    let session = startNextSession();
+    session.apiStore.scheduleListQueryFetch('highPriority', usersListQuery, 2);
+    await flushAllTimers();
+    session.apiStore.loadMore(usersListQuery);
+    await flushAllTimers();
+    session.apiStore.loadMore(usersListQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // In a later session (read recency is tracked in 6h buckets) every row
+    // except "User 1" and "User 5" is opened, which refreshes its recency.
+    await advanceTime(7 * 60 * 60 * 1000);
+    session = startNextSession();
+    for (const id of [2, 3, 4, 6]) {
+      const userDetails = renderHook(() =>
+        session.apiStore.useItem(`users||${id}`),
+      );
+      await flushAllTimers();
+      userDetails.unmount();
+    }
+    await advanceTime(60_000);
+
+    // Loading the projects list pushes the items over maxItemBytes: the two
+    // least recently read user rows are evicted.
+    const projectsList = renderHook(() =>
+      session.apiStore.useListQuery(projectsQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    projectsList.unmount();
+
+    expect(
+      listQueryScope
+        .listStoredItemKeys()
+        .filter((key) => key.includes('users'))
+        .sort(),
+    ).toMatchInlineSnapshot(
+      `['"users||2', '"users||3', '"users||4', '"users||6']`,
+    );
+
+    // A cold start mounts the users list: it is missing rows, so it is
+    // fetched again, starting from its first page.
+    session = startNextSession();
+    const usersList = mountUsersList(session);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    usersList.unmount();
+
+    // The refetch covers as many rows as were restored (four), so the
+    // refreshed rows are User 1-4 and the cached list still has more pages.
+    expect(
+      session.serverTable.getRequestHistory('list', { includeTime: false }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 4, offset: 0 }
+        returned_items: 4
+    `);
+
+    // The refreshed rows are persisted together with the cached rows that
+    // follow them, but only up to the first cached row that is gone
+    // ("User 5"): keeping "User 6" after the gap would save a list with a
+    // hole that a later start restores as the complete first rows.
+    expect(
+      getParsedOpfsFileData(
+        `tsdf/sess1/${storeName}/lq.%7BtableId%3A%22users%22%7D.p.json`,
+      ),
+    ).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||3', '"users||4']`,
+    );
+  });
+
   test('persisted list item maxItemBytes policy is enforced on cold startup before the store mounts', async () => {
     const storeName = 'lq-opfs-cold-policy-max-items';
     const sessionKey = 'sess1';
