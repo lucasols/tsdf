@@ -207,6 +207,7 @@ Behavior:
 | ------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
 | `useListQuery(payload, options?)`           | Fetch and subscribe to a list query        | See [Hooks - useListQuery](./hooks.md#uselistquery)                     |
 | `usePendingOfflineItems(options?)`          | Read queued offline items without fetching | See [Hooks - usePendingOfflineItems](./hooks.md#usependingofflineitems) |
+| `useItemOfflineState(payload)`              | Read the offline sync state of one item    | See [Hooks - useItemOfflineState](./hooks.md#useitemofflinestate)       |
 | `useMultipleListQueries(queries, options?)` | Fetch multiple list queries                | See [Hooks - useMultipleListQueries](./hooks.md#usemultiplelistqueries) |
 | `useItem(payload, options?)`                | Fetch and subscribe to a single item       | See [Hooks - useItem](./hooks.md#useitem)                               |
 | `useMultipleItems(items, options?)`         | Fetch multiple individual items            | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems)             |
@@ -242,6 +243,7 @@ Behavior:
 | Method                                                | Description                                                       |
 | ----------------------------------------------------- | ----------------------------------------------------------------- |
 | `getOfflineEntities()` / `useOfflineEntities()`       | Read offline entities scoped to this store                        |
+| `getItemOfflineState(payload)`                        | Read the offline sync state of one item, `null` if nothing queued |
 | `getOfflineResolutions()` / `useOfflineResolutions()` | Read manual conflict/retry resolutions scoped to this store       |
 | `parseOfflineResolutionConflict(resolution)`          | Narrow a persisted resolution to this store's operation types     |
 | `resolveOfflineResolution(id, operation, action)`     | Resolve, retry, discard, requeue, or commit an offline resolution |

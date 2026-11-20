@@ -23,7 +23,6 @@ import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
-  pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -640,18 +639,8 @@ test('a staged file stays renderable until its queued mutation swaps the entity 
     `['create blob:staged-1 (avatar.png)', 'revoke blob:staged-1']`,
   );
 
-  // A manually staged upload is kept as `uploaded` after being consumed; the
-  // app deletes it once it no longer needs the local file.
-  expect(
-    storeManager
-      .getOfflineUploads()
-      .map((upload) => pick(upload, ['id', 'state', 'resolvedRef'])),
-  ).toMatchInlineSnapshot(
-    `- { id: 'avatar-1', resolvedRef: 'server:avatar-1', state: 'uploaded' }`,
-  );
-  (
-    await resolveAfterAllTimers(storeManager.deleteOfflineUpload('avatar-1'))
-  ).unwrap();
+  // The staged upload was deleted once its only queued mutation replayed, which
+  // happened after the entity already pointed to the server ref.
   expect(storeManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
 
   avatarHook.unmount();

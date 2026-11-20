@@ -133,9 +133,7 @@ export function setupDocumentPersistence<
   let syncHydrationMissKnown = false;
 
   function isOfflineNetworkActive(): boolean {
-    return isOfflineNetworkModeActiveSync(
-      config.offline?.session.getConfig().network,
-    );
+    return isOfflineNetworkModeActiveSync(config.offline?.session.getConfig());
   }
 
   function readSyncHydratedDocumentData(): State | null {

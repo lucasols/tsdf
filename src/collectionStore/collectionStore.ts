@@ -42,12 +42,12 @@ import {
 import {
   recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
+  useOfflineStoreItemState,
   useOfflineStoreResolutions,
 } from '../persistentStorage/offline/sessionCoordinator';
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
-  OfflineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import {
   offlineItemEntityRefSchema,
@@ -55,6 +55,7 @@ import {
   type AnyOfflineOperationDefinition,
   type CollectionOfflineEntityRef,
   type GlobalOfflineEntity,
+  type ItemOfflineState,
   type OfflineMutationInput,
   type OfflineResolutionActionForOperation,
   type OfflineResolutionRecord,
@@ -740,6 +741,17 @@ export type CollectionStore<
   getOfflineEntities: () => GlobalOfflineEntity[];
   /** React hook subscribing to this store's offline entity metadata. */
   useOfflineEntities: () => readonly GlobalOfflineEntity[];
+  /**
+   * React hook returning the offline sync state of one item, or `null` when
+   * the item has nothing queued and no manual resolution waiting. The
+   * component re-renders only when that item's own state changes, so it is
+   * suited for per-item sync badges.
+   */
+  useItemOfflineState: (
+    itemPayload: ItemPayload | false | null | undefined,
+  ) => ItemOfflineState | null;
+  /** Non-reactive version of `useItemOfflineState`, for event handlers. */
+  getItemOfflineState: (itemPayload: ItemPayload) => ItemOfflineState | null;
   /** React hook subscribing to manual offline resolutions for this store. */
   useOfflineResolutions: () => readonly OfflineResolutionRecord[];
   /** Returns manual offline resolutions for this store. */
@@ -2444,20 +2456,15 @@ export function createCollectionStore<
       : [payloadToUse];
     const affectedItemEntries = getItemsKeyArray(payloadToUse);
 
-    if (offline && offlineController && !offlineController.canQueueMutation()) {
-      return Result.err(
-        toStoreMutationError(
-          new OfflineSessionUnavailableError(),
-          errorNormalizer,
-        ),
-      );
-    }
-
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
     const directMutation = async () =>
       unwrapTSDFResult(await mutation(payloadToUse));
+    const runOnlineMutation = async () => ({
+      kind: 'online' as const,
+      data: await directMutation(),
+    });
 
     // Whether the server accepted the mutation, even if `onSuccess` threw
     let accepted = false;
@@ -2465,22 +2472,23 @@ export function createCollectionStore<
       () => startMutation(payloadToUse),
       offline
         ? () =>
-            runHybridOfflineMutation(
-              // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
-              __LEGIT_CAST__<
-                OfflineAwareMutationController<
-                  Exclude<TOfflineOperations, null>
-                > | null,
-                unknown
-              >(offlineController),
-              offline,
-              upload,
-              directMutation,
-            )
-        : async () => ({
-            kind: 'online' as const,
-            data: await directMutation(),
-          }),
+            // Without an active offline session (no session key, or the
+            // session gate is closed) it runs as a plain online mutation
+            offlineController?.canQueueMutation()
+              ? runHybridOfflineMutation(
+                  // WORKAROUND: The controller also supports session-only offline configs with no operation map, but this branch is only reachable when a concrete offline mutation input is present.
+                  __LEGIT_CAST__<
+                    OfflineAwareMutationController<
+                      Exclude<TOfflineOperations, null>
+                    > | null,
+                    unknown
+                  >(offlineController),
+                  offline,
+                  upload,
+                  directMutation,
+                )
+              : runOnlineMutation()
+        : runOnlineMutation,
       (exception, rollbacks) => {
         const error = toStoreMutationError(exception, errorNormalizer);
 
@@ -3003,6 +3011,17 @@ export function createCollectionStore<
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       }),
+    useItemOfflineState: (itemPayload) =>
+      useOfflineStoreItemState(
+        getSessionKeyForRuntime(),
+        id,
+        resolvedPersistentStorageConfig ? id : undefined,
+        itemPayload === false || itemPayload == null
+          ? null
+          : getItemKey(itemPayload),
+      ),
+    getItemOfflineState: (itemPayload) =>
+      offlineController?.getItemOfflineState(getItemKey(itemPayload)) ?? null,
     useOfflineResolutions: () =>
       useOfflineStoreResolutions({
         sessionKey: getSessionKeyForRuntime(),
