@@ -54,6 +54,8 @@ import {
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
   type OfflineResolutionActionForOperation,
+  type OfflineResolutionGenericAction,
+  type OfflineResolutionGenericActionFailure,
   type OfflineResolutionRecordForStore,
   type OfflineEntityRef,
   type OfflineSession,
@@ -110,8 +112,16 @@ type OfflineStoreAdapter = {
    * A queued mutation for these entities was discarded. Its optimistic
    * changes are still applied to the store and no baseline exists to roll
    * them back to, so the store refetches the entities from the server.
+   * `payload` is the item payload the operation referenced, if any: the
+   * store may have no state left to read it from (an item deleted locally).
+   * `hasPendingResolutions` is `true` while other changes of the store still
+   * wait for a manual resolution: a broad refetch (e.g. of lists) would
+   * replace them, so the store should limit itself to the discarded entities.
    */
-  revalidateDiscardedEntities?: (entityRefs: OfflineEntityRef[]) => void;
+  revalidateDiscardedEntities?: (
+    entities: (OfflineEntityRef & { payload: ValidPayload | undefined })[],
+    hasPendingResolutions: boolean,
+  ) => void;
 };
 
 type ActiveSessionState = {
@@ -460,6 +470,15 @@ export type OfflineStoreController<
     operationName: TName,
     resolution: OfflineResolutionActionForOperation<TOperations, TName>,
   ) => Promise<void>;
+  /**
+   * Applies a generic `retry` / `discard` action without the caller knowing
+   * the operation. Returns why the action was not applied, or `undefined` when
+   * it was applied.
+   */
+  resolveOfflineResolutionWithGenericAction: (
+    resolutionId: string,
+    action: OfflineResolutionGenericAction,
+  ) => Promise<OfflineResolutionGenericActionFailure | undefined>;
   prepareForFetch: () => Promise<void>;
   getSessionStatus: () => { isOfflineMode: boolean } | null;
   shouldTreatFetchAsOffline: () => boolean;
@@ -602,23 +621,30 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Whether mutations queued earlier for the entities of this mutation are
-   * still waiting to reach the server (queued, replaying or unconfirmed).
+   * Whether mutations queued earlier for the entities this mutation affects
+   * or depends on (`dependsOn`) are still waiting to reach the server
+   * (queued, replaying or unconfirmed).
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
     if (queueEntries.size === 0) return false;
 
-    const entityRefs =
-      prepared.entityRefs ??
-      resolveNormalizedRefs(
-        getOperationRawEntityRefs(
-          prepared.operation,
-          prepared.operationName,
-          prepared.validatedInput,
-        ),
-      );
+    const entityRefs = [
+      ...(prepared.entityRefs ??
+        resolveNormalizedRefs(
+          getOperationRawEntityRefs(
+            prepared.operation,
+            prepared.operationName,
+            prepared.validatedInput,
+          ),
+        )),
+      ...(prepared.operation.dependsOn
+        ? resolveNormalizedRefs(
+            prepared.operation.dependsOn({ input: prepared.validatedInput }),
+          )
+        : []),
+    ];
 
     for (const entry of queueEntries.values()) {
       for (const queuedEntityRef of entry.entityRefs) {
@@ -1525,6 +1551,13 @@ export function createOfflineStoreController<
     );
     const nextReplayEntry = getSortedEntries()[0] ?? null;
 
+    // Before publishing to the session: publishing can make the store
+    // recover and revalidate, which must already see the store's current
+    // entities (e.g. a creation that is no longer local-only).
+    storeAdapter.syncEntityOverlays?.({
+      sessionKey: sessionState.sessionKey,
+      entities,
+    });
     sessionState.session.syncStoreData(storeName, {
       adapter,
       entities,
@@ -1540,10 +1573,6 @@ export function createOfflineStoreController<
               queueOrder: getQueueOrder(nextReplayEntry),
               createdAt: nextReplayEntry.createdAt,
             },
-    });
-    storeAdapter.syncEntityOverlays?.({
-      sessionKey: sessionState.sessionKey,
-      entities,
     });
 
     void syncEntityNamespace(sessionState, entities);
@@ -2464,7 +2493,7 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
-      storeAdapter.revalidateDiscardedEntities?.(args.resolution.entityRefs);
+      revalidateDiscardedWork([args.resolution], new Set());
       return;
     }
 
@@ -2505,6 +2534,59 @@ export function createOfflineStoreController<
     rollbackTempCreatePendingEntity(args.resolution);
 
     refreshDerivedState(args.current);
+
+    // The temp entities were removed, but descendants may also have changed
+    // entities that exist on the server (e.g. moved an item into the
+    // discarded one): those are refetched.
+    const discardedWork = [
+      ...descendantQueueEntries.values(),
+      ...descendantResolutions.values(),
+    ];
+    const removedTempEntityKeys = new Set(parentEntityKeys);
+    for (const workItem of discardedWork) {
+      for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
+        removedTempEntityKeys.add(entityKey);
+      }
+    }
+    revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
+  }
+
+  /**
+   * Refetches the entities discarded queued work referenced (its optimistic
+   * changes cannot be rolled back locally), except the removed temp entities.
+   */
+  function revalidateDiscardedWork(
+    discardedWork: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'entityRefs'
+    >[],
+    removedTempEntityKeys: ReadonlySet<string>,
+  ): void {
+    const entities: (OfflineEntityRef & {
+      payload: ValidPayload | undefined;
+    })[] = [];
+    const seenEntityKeys = new Set<string>();
+
+    for (const workItem of discardedWork) {
+      for (const ref of workItem.entityRefs) {
+        if (removedTempEntityKeys.has(ref.entityKey)) continue;
+        if (seenEntityKeys.has(ref.entityKey)) continue;
+        seenEntityKeys.add(ref.entityKey);
+
+        entities.push({
+          ...ref,
+          payload: getPayloadForEntityRef({
+            operationName: workItem.operation,
+            input: workItem.input,
+            entityKey: ref.entityKey,
+          }),
+        });
+      }
+    }
+
+    if (entities.length === 0) return;
+
+    storeAdapter.revalidateDiscardedEntities?.(entities, resolutions.size > 0);
   }
 
   function collectRetryResolutionChain(args: {
@@ -2851,32 +2933,46 @@ export function createOfflineStoreController<
           existingInput: existingEntry.input,
           incomingInput: validatedInput,
         });
-        const validatedMergedInput = validateWithSchema(
-          operation.inputSchema,
-          mergedInput,
-        );
+        const latestEntry = queueEntries.get(existingEntry.id);
 
-        if (validatedMergedInput === null) {
-          throw new Error(
-            `Invalid accumulated offline operation input for "${operationName}"`,
+        // While an async merge ran, the replay may have picked the entry up
+        // or already sent it: merging into it would drop the incoming input
+        // or send the existing one again, so the mutation is queued on its
+        // own instead.
+        if (latestEntry === existingEntry) {
+          const validatedMergedInput = validateWithSchema(
+            operation.inputSchema,
+            mergedInput,
           );
+
+          if (validatedMergedInput === null) {
+            throw new Error(
+              `Invalid accumulated offline operation input for "${operationName}"`,
+            );
+          }
+
+          const nextEntry = {
+            ...existingEntry,
+            input: validatedMergedInput,
+            updatedAt: now,
+          };
+          workingQueue.set(nextEntry.id, nextEntry);
+
+          return {
+            operationName,
+            validatedInput,
+            tempIds,
+            pendingEntities,
+            nextEntry,
+            removedEntries: [existingEntry],
+          };
         }
 
-        const nextEntry = {
-          ...existingEntry,
-          input: validatedMergedInput,
-          updatedAt: now,
-        };
-        workingQueue.set(nextEntry.id, nextEntry);
-
-        return {
-          operationName,
-          validatedInput,
-          tempIds,
-          pendingEntities,
-          nextEntry,
-          removedEntries: [existingEntry],
-        };
+        if (latestEntry) {
+          workingQueue.set(latestEntry.id, latestEntry);
+        } else {
+          workingQueue.delete(existingEntry.id);
+        }
       }
     }
 
@@ -3594,6 +3690,33 @@ export function createOfflineStoreController<
     throw new Error('Invalid offline resolution action');
   }
 
+  async function resolveOfflineResolutionWithGenericAction(
+    resolutionId: string,
+    action: OfflineResolutionGenericAction,
+  ): Promise<OfflineResolutionGenericActionFailure | undefined> {
+    await hydrateIfNeeded();
+
+    const resolutionRecord = ensureActiveSession()
+      ? resolutions.get(resolutionId)
+      : undefined;
+    if (!resolutionRecord) return 'resolution-not-found';
+
+    // Reported before the blocked state because it never changes for a record,
+    // while a blocked record becomes actionable once its parents are resolved.
+    if (action === 'retry' && resolutionRecord.kind !== 'retry-exhausted') {
+      return 'retry-not-supported';
+    }
+
+    if (isPersistedResolutionBlocked(resolutionRecord)) {
+      return 'resolution-blocked';
+    }
+
+    await resolveOfflineResolution(resolutionId, resolutionRecord.operation, {
+      action,
+    });
+    return undefined;
+  }
+
   async function evaluateOfflineFetchError(
     error: unknown,
     operationName?: string,
@@ -3650,6 +3773,7 @@ export function createOfflineStoreController<
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,
+    resolveOfflineResolutionWithGenericAction,
     prepareForFetch,
     getSessionStatus,
     shouldTreatFetchAsOffline,

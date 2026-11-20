@@ -17,6 +17,8 @@ import type {
   OfflineOperationUploadsContext,
   OfflineSessionUploadsConfig,
   OfflineUpload,
+  ReplaceOfflineUploadArgs,
+  SaveOfflineUploadArgs,
 } from '../offlineUploadTypes';
 import type { PersistentStorageSchema } from '../types';
 import type { SchemaValidationError } from '../validateWithSchema';
@@ -546,12 +548,9 @@ export type OfflineSession<TUploadRef extends ValidPayload = ValidPayload> = {
     ids: readonly string[],
   ) => Promise<Record<string, TUploadRef>>;
   /** Saves a session-scoped upload locally for later dependency resolution or ref usage. */
-  saveOfflineUpload: (args: { id: string; file: Blob | File }) => Promise<void>;
-  /** Replaces a previously stored session-scoped upload. */
-  replaceOfflineUpload: (args: {
-    id: string;
-    file: Blob | File;
-  }) => Promise<void>;
+  saveOfflineUpload: (args: SaveOfflineUploadArgs) => Promise<void>;
+  /** Replaces a previously stored session-scoped upload, keeping its metadata unless new metadata is passed. */
+  replaceOfflineUpload: (args: ReplaceOfflineUploadArgs) => Promise<void>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<File | null>;
   /** Deletes a stored upload when it is no longer referenced. */
@@ -1807,6 +1806,89 @@ export class OfflineResolutionConflictParseError extends Error {
     this.kind = args.kind;
     this.rawValue = args.rawValue;
     this.validationError = args.validationError;
+  }
+}
+
+/**
+ * Generic resolution actions that `storeManager.resolveOfflineResolution(...)`
+ * can apply to any resolution of the session without operation-specific input.
+ *
+ * - `retry` - Requeues a `retry-exhausted` record (and its retryable
+ *   descendants) for another replay attempt.
+ * - `discard` - Drops the record, its queued mutation, and its dependents.
+ */
+export type OfflineResolutionGenericAction = 'retry' | 'discard';
+
+/**
+ * Failure code returned by `storeManager.resolveOfflineResolution(...)`.
+ *
+ * - `offline-not-configured` - The manager was created without `offlineSession`.
+ * - `resolution-not-found` - No resolution with this id exists in the active
+ *   session, e.g. it was already resolved or the session is logged out. Also
+ *   returned when another tab created the record after this tab's store
+ *   loaded its resolutions.
+ * - `store-not-registered` - The store that owns the resolution was not created
+ *   with this manager (yet), so the action cannot be applied from here.
+ * - `retry-not-supported` - `retry` was requested for a `conflict` record;
+ *   conflicts are resolved with `discard` or with the owning store's
+ *   `requeue` / `commit` actions.
+ * - `resolution-blocked` - The resolution is blocked by parent resolutions
+ *   (`blockedByResolutionIds`) that must be resolved first.
+ * - `action-failed` - The owning store failed while applying the action; the
+ *   original error is available in `cause`.
+ */
+export type OfflineResolutionActionErrorCode =
+  | 'offline-not-configured'
+  | 'resolution-not-found'
+  | 'store-not-registered'
+  | 'retry-not-supported'
+  | 'resolution-blocked'
+  | 'action-failed';
+
+/** Failure codes produced by the owning store while applying a generic action. */
+export type OfflineResolutionGenericActionFailure = Extract<
+  OfflineResolutionActionErrorCode,
+  'resolution-not-found' | 'retry-not-supported' | 'resolution-blocked'
+>;
+
+const offlineResolutionActionErrorMessages: Record<
+  OfflineResolutionActionErrorCode,
+  string
+> = {
+  'offline-not-configured': 'Offline is not configured for this manager',
+  'resolution-not-found': 'Offline resolution not found in the active session',
+  'store-not-registered':
+    'The store that owns this offline resolution is not registered in this manager',
+  'retry-not-supported':
+    'Only retry-exhausted offline resolutions can be retried',
+  'resolution-blocked':
+    'Cannot resolve a blocked offline resolution before its blocking dependencies are cleared',
+  'action-failed': 'Failed to apply the offline resolution action',
+};
+
+/** Error returned when a manager-level offline resolution action is not applied. */
+export class OfflineResolutionActionError extends Error {
+  /** Reason the action was not applied. */
+  code: OfflineResolutionActionErrorCode;
+  /** Resolution id the action was requested for. */
+  resolutionId: string;
+  /** Store that owns the resolution, when the resolution was found. */
+  storeName?: string;
+
+  constructor(
+    code: OfflineResolutionActionErrorCode,
+    resolutionId: string,
+    storeName?: string,
+    cause?: Error,
+  ) {
+    super(
+      `[tsdf] ${offlineResolutionActionErrorMessages[code]}${cause ? `: ${cause.message}` : ''}`,
+      cause && { cause },
+    );
+    this.name = 'OfflineResolutionActionError';
+    this.code = code;
+    this.resolutionId = resolutionId;
+    this.storeName = storeName;
   }
 }
 

@@ -35,9 +35,10 @@ export function createStoreFocusLifecycle(
   onReconnectRevalidate: () => void,
   onWindowFocusReevaluateDelayedRTU: () => void,
   /**
-   * Whether the manager's offline session is in offline mode. Revalidations
-   * are dropped while it is: they could only fail, and recovering from
-   * offline mode revalidates the store anyway (`onOfflineRecovery`).
+   * Whether the manager's offline session is in offline mode (re-checking
+   * connectivity while it is). Revalidations are dropped while it is: they
+   * could only fail, and recovering from offline mode revalidates the store
+   * anyway (`onOfflineRecovery`).
    */
   getIsOfflineMode: () => boolean,
   debug: FocusLifecycleDebugOptions | undefined,

@@ -1,12 +1,20 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import type {
+  CollectionOfflineOperationDefinition,
+  DocumentOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import {
   FetchError,
   TEST_INITIAL_TIME,
@@ -3095,24 +3103,392 @@ test('an edit made right after reconnecting is sent after the edits still waitin
   hook.unmount();
 });
 
-test('discarding a failed offline edit of a collection item puts that item back to the server value', async () => {
+test('an item created right after reconnecting on top of an offline creation is sent once that creation reached the server', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-online-dependent-create-session';
+
+  type FolderOperations = {
+    createFolder: CollectionOfflineOperationDefinition<
+      { value: { name: string; parentId?: string } },
+      string,
+      { name: string },
+      unknown,
+      { id: string }
+    >;
+    createSubfolder: CollectionOfflineOperationDefinition<
+      { value: { name: string; parentId?: string } },
+      string,
+      { name: string; parentId: string },
+      unknown,
+      { id: string }
+    >;
+  };
+
+  const folderSchema = rc_object({
+    value: rc_object({ name: rc_string, parentId: rc_string.optionalKey() }),
+  });
+
+  const env = createCollectionStoreTestEnv<
+    { name: string; parentId?: string },
+    FolderOperations
+  >(
+    {},
+    {
+      id: 'offline-online-dependent-create-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: folderSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createFolder: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: async ({ input }) => {
+                // Replaying over the connection that just came back is slow.
+                await env.serverTable.delayedSetItem(
+                  'folders||1',
+                  { name: input.name },
+                  { durationMs: 3000 },
+                );
+                return { id: 'folders||1' };
+              },
+            },
+            createSubfolder: {
+              inputSchema: rc_object({ name: rc_string, parentId: rc_string }),
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              dependsOn: ({ input }) => [input.parentId],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name, parentId: input.parentId },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: async ({ input }) => {
+                await env.serverTable.delayedSetItem('folders||2', input);
+                return { id: 'folders||2' };
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Create a folder offline: it only exists locally, under a temp id.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createFolder', input: { name: 'Docs' } },
+    });
+  });
+
+  // Back online: the folder creation starts replaying, and the user creates
+  // a subfolder in it before that replay reaches the server.
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(500);
+
+  const sendSubfolderDirectly = vi.fn(() =>
+    Promise.reject(new Error('the parent folder does not exist yet')),
+  );
+  let subfolderResult:
+    | Awaited<ReturnType<typeof env.apiStore.performMutation>>
+    | undefined;
+  await act(async () => {
+    subfolderResult = await env.apiStore.performMutation(null, {
+      mutation: sendSubfolderDirectly,
+      offline: {
+        operation: 'createSubfolder',
+        input: { name: 'Invoices', parentId: 'temp:Docs' },
+      },
+    });
+  });
+  await flushAllTimers();
+
+  // Sent on its own, the subfolder would reference a folder the server does
+  // not have yet: it is queued behind the folder creation instead, and
+  // replayed with the folder's server id.
+  expect(sendSubfolderDirectly).not.toHaveBeenCalled();
+  expect(subfolderResult?.ok).toBe(true);
+  expect(env.serverTable.getAll()).toMatchInlineSnapshot(`
+    folders||1: { name: 'Docs' }
+    folders||2: { name: 'Invoices', parentId: 'folders||1' }
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+});
+
+test('lists are revalidated after replaying an offline creation that references no entity', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-entityless-create-session';
+
+  type EntitylessCreateOperations = {
+    createUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { name: string },
+      unknown
+    >;
+  };
+
+  // The server assigns the id and the app shows no optimistic row, so the
+  // operation references no entity: only the revalidation after the replay
+  // can bring the new row into the list.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    EntitylessCreateOperations
+  >(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: 'offline-entityless-create-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: () => [],
+              execute: async ({ input }) => {
+                await env.serverTable.addItemWithAutoGeneratedKey(
+                  'users',
+                  (id) => ({ id, name: input.name }),
+                );
+              },
+              // Nothing to sync locally: the list revalidation shows the row.
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    );
+    env.trackItemUI('users', query.items.join(', '));
+  });
+  await flushAllTimers();
+
+  // Create Grace offline: the creation waits in the queue.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createUser', input: { name: 'Grace' } },
+    });
+  });
+
+  // Back online: the list must only be revalidated once the creation reached
+  // the server, otherwise it would be fetched without Grace and never again.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the creation is replayed, then the list revalidated',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users      |
+    0     | Ada        | [users] ui-initialized
+    3.01s | Ada        | offline:createUser queued
+    .     | Ada        | -- back online: the creation is replayed, then the list revalidated
+    .     | Ada        | offline:createUser replay-started
+    .     | Ada        | [users||2] >add-item-started (value: {"id":2,"name":"Grace"})
+    3.85s | Ada        | [users||2] <add-item-persisted (value: {"id":2,"name":"Grace"})
+    4.21s | Ada        | offline:createUser replay-finished
+    4.22s | Ada        | 🔴 >list-fetch-started
+    5.02s | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Ada, Grace | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('an offline creation that references no entity and waits for a decision delays the list revalidation until it is handled', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-entityless-conflict-session';
+
+  type EntitylessCreateOperations = {
+    createUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { name: string },
+      { reason: string }
+    >;
+  };
+
+  // The server assigns the id, so the operation references no entity. On
+  // replay the app detects a conflict, so the creation waits for the user.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    EntitylessCreateOperations
+  >(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: 'offline-entityless-conflict-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: () => [],
+              execute: async ({ input }) => {
+                await env.serverTable.addItemWithAutoGeneratedKey(
+                  'users',
+                  (id) => ({ id, name: input.name }),
+                );
+              },
+              onSuccessExecute: () => {},
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () => ({ reason: 'needs-review' }),
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    );
+    env.trackItemUI('users', query.items.join(', '));
+  });
+  await flushAllTimers();
+
+  // Create Grace offline: the creation waits in the queue.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createUser', input: { name: 'Grace' } },
+    });
+  });
+
+  // Back online: the replay stops at the conflict. The store still has a
+  // change waiting for a decision, so its list is not revalidated yet.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the creation waits for a decision, no list revalidation',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected a pending resolution');
+
+  // The user handles the conflict through the app's own API, which creates
+  // Grace on the server, then commits it: only now the list is revalidated
+  // and shows the new row.
+  env.serverTable.setItem('users||2', { id: 2, name: 'Grace' });
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'createUser', {
+      action: 'commit',
+    });
+  });
+  env.addTimelineComments('afterLastAction', [
+    'Grace created through the app API, then the resolution was committed',
+  ]);
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users      |
+    0     | Ada        | [users] ui-initialized
+    3.01s | Ada        | offline:createUser queued
+    .     | Ada        | -- back online: the creation waits for a decision, no list revalidation
+    .     | Ada        | offline:createUser resolution-required
+    .     | Ada        | [users||2] server-data-changed (value: {"id":2,"name":"Grace"})
+    .     | Ada        | -- Grace created through the app API, then the resolution was committed
+    3.02s | Ada        | 🔴 >list-fetch-started
+    3.82s | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Ada, Grace | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('discarding failed offline changes of collection items puts those items back to the server values', async () => {
   network.setOffline();
   const sessionKey = 'offline-discard-collection-item-session';
 
-  type RejectedRenameOperations = {
+  type RejectedChangeOperations = {
     patchUserName: CollectionOfflineOperationDefinition<
       { value: { name: string } },
       string,
       { itemId: string; name: string },
       unknown
     >;
+    deleteUser: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string },
+      unknown
+    >;
   };
 
-  // The server rejects every rename, so they end up waiting for the user to
+  // The server rejects every change, so they end up waiting for the user to
   // decide what to do with them.
   const env = createCollectionStoreTestEnv<
     { name: string },
-    RejectedRenameOperations
+    RejectedChangeOperations
   >(
     { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
     {
@@ -3143,91 +3519,569 @@ test('discarding a failed offline edit of a collection item puts that item back 
               },
               onSuccessExecute: () => {},
             },
+            deleteUser: {
+              inputSchema: deleteItemInputSchema,
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('delete rejected');
+              },
+              onSuccessExecute: () => {},
+            },
           },
         },
       },
     },
   );
 
-  function renameOffline(itemId: string, name: string) {
-    return env.apiStore.performMutation(itemId, {
-      optimisticUpdate: () => {
-        env.apiStore.updateItemState(itemId, () => ({ value: { name } }));
-      },
-      mutation: () => Promise.reject(new Error('unreachable while offline')),
-      offline: { operation: 'patchUserName', input: { itemId, name } },
-    });
-  }
-
   const hook = renderHook(() => {
     const ada = env.apiStore.useItem('users||1');
     const grace = env.apiStore.useItem('users||2');
 
-    env.trackItemUI('ada', ada.data?.value.name ?? '-');
-    env.trackItemUI('grace', grace.data?.value.name ?? '-');
+    env.trackItemUI('ada', ada.data?.value.name ?? `- ${ada.status}`);
+    env.trackItemUI('grace', grace.data?.value.name ?? `- ${grace.status}`);
   });
   await flushAllTimers();
 
-  env.addTimelineComments('beforeNextAction', ['offline: rename both users']);
+  env.addTimelineComments('beforeNextAction', [
+    'offline: rename Ada and delete Grace',
+  ]);
   await act(async () => {
-    await renameOffline('users||1', 'Ada renamed');
-    await renameOffline('users||2', 'Grace renamed');
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', () => ({
+          value: { name: 'Ada renamed' },
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada renamed' },
+      },
+    });
+    await env.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||2');
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+    });
   });
 
   env.addTimelineComments('beforeNextAction', [
-    'back online: the server rejects both renames until they need a resolution',
+    'back online: the server rejects both changes until they need a resolution',
   ]);
   act(() => {
     network.goOnline();
   });
-  // 3 attempts per rename, 5s apart: 30s covers both.
+  // 3 attempts per change, 5s apart: 30s covers both.
   await advanceTime(30_000);
   await flushAllTimers();
 
-  const adaResolution = env.apiStore
+  const renameResolution = env.apiStore
     .getOfflineResolutions()
-    .find((resolution) => resolution.entityRefs[0]?.entityKey.includes('1'));
-  if (!adaResolution) throw new Error('Expected a resolution for Ada');
-  expect(env.apiStore.getOfflineResolutions()).toHaveLength(2);
+    .find((resolution) => resolution.operation === 'patchUserName');
+  const deleteResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'deleteUser');
+  if (!renameResolution || !deleteResolution) {
+    throw new Error('Expected both changes to be waiting for a resolution');
+  }
 
-  // Discard only Ada's rename: Ada is refetched and shows the server name.
-  // Grace's rename is still waiting for a decision, so her item is untouched.
+  // Discard only Grace's delete. The delete removed her item locally, so
+  // there is nothing left in the store to invalidate: the store fetches her
+  // item again and she shows up with the server value. Ada's rename is still
+  // waiting for a decision, so her item is untouched.
   env.addTimelineComments('beforeNextAction', [
-    'discard the rename of Ada: only Ada is refetched',
+    'discard the delete of Grace: only Grace is refetched',
   ]);
   await act(async () => {
     await env.apiStore.resolveOfflineResolution(
-      adaResolution.id,
+      deleteResolution.id,
+      'deleteUser',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  // Discard the rename: Ada is refetched and shows the server name.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the rename of Ada: Ada is refetched',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      renameResolution.id,
       'patchUserName',
       { action: 'discard' },
     );
   });
   await flushAllTimers();
 
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time   | ada         | grace         |
-    0      | Ada         | Grace         | [ada, grace] ui-initialized
-    1.01s  | Ada         | Grace         | -- offline: rename both users
-    .      | Ada renamed | Grace         | [ada] ui-changed
-    .      | Ada renamed | Grace         | offline:patchUserName queued
-    .      | Ada renamed | Grace renamed | [grace] ui-changed
-    .      | Ada renamed | Grace renamed | offline:patchUserName queued
-    .      | Ada renamed | Grace renamed | -- back online: the server rejects both renames until they need a resolution
-    .      | Ada renamed | Grace renamed | offline:patchUserName replay-started
-    6.01s  | Ada renamed | Grace renamed | offline:patchUserName replay-started
-    11.01s | Ada renamed | Grace renamed | offline:patchUserName replay-started
-    .      | Ada renamed | Grace renamed | offline:patchUserName resolution-required
-    .      | Ada renamed | Grace renamed | offline:patchUserName replay-started
-    16.01s | Ada renamed | Grace renamed | offline:patchUserName replay-started
-    21.01s | Ada renamed | Grace renamed | offline:patchUserName replay-started
-    .      | Ada renamed | Grace renamed | offline:patchUserName resolution-required
-    31.02s | Ada renamed | Grace renamed | -- discard the rename of Ada: only Ada is refetched
-    .      | Ada renamed | Grace renamed | 🔴 [users||1] >fetch-started
-    31.82s | Ada renamed | Grace renamed | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
-    .      | Ada         | Grace renamed | [ada] ui-changed
+    time   | ada         | grace     |
+    0      | Ada         | Grace     | [ada, grace] ui-initialized
+    1.01s  | Ada         | Grace     | -- offline: rename Ada and delete Grace
+    .      | Ada renamed | Grace     | [ada] ui-changed
+    .      | Ada renamed | Grace     | offline:patchUserName queued
+    .      | Ada renamed | - deleted | [grace] ui-changed
+    .      | Ada renamed | - deleted | offline:deleteUser queued
+    .      | Ada renamed | - deleted | -- back online: the server rejects both changes until they need a resolution
+    .      | Ada renamed | - deleted | offline:patchUserName replay-started
+    6.01s  | Ada renamed | - deleted | offline:patchUserName replay-started
+    11.01s | Ada renamed | - deleted | offline:patchUserName replay-started
+    .      | Ada renamed | - deleted | offline:patchUserName resolution-required
+    .      | Ada renamed | - deleted | offline:deleteUser replay-started
+    16.01s | Ada renamed | - deleted | offline:deleteUser replay-started
+    21.01s | Ada renamed | - deleted | offline:deleteUser replay-started
+    .      | Ada renamed | - deleted | offline:deleteUser resolution-required
+    31.02s | Ada renamed | - deleted | -- discard the delete of Grace: only Grace is refetched
+    .      | Ada renamed | - loading | [grace] ui-changed
+    .      | Ada renamed | - loading | 🔴 [users||2] >fetch-started
+    31.82s | Ada renamed | - loading | 🔴 [users||2] <fetch-finished (value: {"name":"Grace"})
+    .      | Ada renamed | Grace     | [grace] ui-changed
+    32.83s | Ada renamed | Grace     | -- discard the rename of Ada: Ada is refetched
+    .      | Ada renamed | Grace     | 🟠 [users||1] >fetch-started
+    .      | Ada renamed | Grace     | 🟡 [users||2] >fetch-started
+    33.63s | Ada renamed | Grace     | 🟠 [users||1] <fetch-finished (value: {"name":"Ada"})
+    .      | Ada         | Grace     | [ada] ui-changed
+    .      | Ada         | Grace     | 🟡 [users||2] <fetch-finished (value: {"name":"Grace"})
     "
   `);
 
   hook.unmount();
+});
+
+test('discarding a failed offline creation puts existing items changed on top of it back to the server values', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-create-dependents-session';
+
+  type TeamUser = { name: string; teamId?: string };
+  type TeamOperations = {
+    createTeam: CollectionOfflineOperationDefinition<
+      { value: TeamUser },
+      string,
+      { name: string },
+      unknown,
+      { id: string }
+    >;
+    moveUserToTeam: CollectionOfflineOperationDefinition<
+      { value: TeamUser },
+      string,
+      { itemId: string; teamId: string },
+      unknown
+    >;
+    patchUserName: CollectionOfflineOperationDefinition<
+      { value: TeamUser },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+
+  // The server rejects the team creation and the rename, so they end up
+  // waiting for the user to decide what to do with them.
+  const env = createCollectionStoreTestEnv<TeamUser, TeamOperations>(
+    { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
+    {
+      id: 'offline-discard-create-dependents-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: rc_object({
+          value: rc_object({
+            name: rc_string,
+            teamId: rc_string.optionalKey(),
+          }),
+        }),
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createTeam: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: () => {
+                throw new Error('team creation rejected');
+              },
+            },
+            moveUserToTeam: {
+              inputSchema: rc_object({ itemId: rc_string, teamId: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              dependsOn: ({ input }) => [input.teamId],
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  teamId: input.teamId,
+                });
+              },
+              onSuccessExecute: () => {},
+            },
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('rename rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const ada = env.apiStore.useItem('users||1');
+    const grace = env.apiStore.useItem('users||2');
+
+    env.trackItemUI(
+      'ada',
+      `${ada.data?.value.name} in ${ada.data?.value.teamId ?? 'no team'}`,
+    );
+    env.trackItemUI('grace', grace.data?.value.name ?? `- ${grace.status}`);
+  });
+  await flushAllTimers();
+
+  env.addTimelineComments('beforeNextAction', [
+    'offline: create a team, move Ada into it and rename Grace',
+  ]);
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createTeam', input: { name: 'Core' } },
+    });
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (user) => ({
+          value: { ...user.value, teamId: 'temp:Core' },
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'moveUserToTeam',
+        input: { itemId: 'users||1', teamId: 'temp:Core' },
+      },
+    });
+    await env.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||2', () => ({
+          value: { name: 'Grace renamed' },
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||2', name: 'Grace renamed' },
+      },
+    });
+  });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the team and the rename until they need a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  // 3 attempts per change, 5s apart: 30s covers both.
+  await advanceTime(30_000);
+  await flushAllTimers();
+
+  const teamResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'createTeam');
+  if (!teamResolution) {
+    throw new Error('Expected the team creation to wait for a resolution');
+  }
+
+  // Discarding the team also discards the move of Ada, which was made on top
+  // of it: Ada is refetched and leaves the team that never existed. Grace's
+  // rename is still waiting for a decision, so her item is untouched.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the team creation: the move of Ada is discarded with it',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      teamResolution.id,
+      'createTeam',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(
+    env.apiStore
+      .getOfflineResolutions()
+      .map((resolution) => resolution.operation),
+  ).toMatchInlineSnapshot(`['patchUserName']`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ada              | grace         |
+    0      | Ada in no team   | Grace         | [ada, grace] ui-initialized
+    1.01s  | Ada in no team   | Grace         | -- offline: create a team, move Ada into it and rename Grace
+    .      | Ada in no team   | Grace         | offline:createTeam queued
+    .      | Ada in temp:Core | Grace         | [ada] ui-changed
+    .      | Ada in temp:Core | Grace         | offline:moveUserToTeam queued
+    .      | Ada in temp:Core | Grace renamed | [grace] ui-changed
+    .      | Ada in temp:Core | Grace renamed | offline:patchUserName queued
+    .      | Ada in temp:Core | Grace renamed | -- back online: the server rejects the team and the rename until they need a resolution
+    .      | Ada in temp:Core | Grace renamed | offline:createTeam replay-started
+    6.01s  | Ada in temp:Core | Grace renamed | offline:createTeam replay-started
+    11.01s | Ada in temp:Core | Grace renamed | offline:createTeam replay-started
+    .      | Ada in temp:Core | Grace renamed | offline:createTeam resolution-required
+    .      | Ada in temp:Core | Grace renamed | offline:moveUserToTeam resolution-required
+    .      | Ada in temp:Core | Grace renamed | offline:patchUserName replay-started
+    16.01s | Ada in temp:Core | Grace renamed | offline:patchUserName replay-started
+    21.01s | Ada in temp:Core | Grace renamed | offline:patchUserName replay-started
+    .      | Ada in temp:Core | Grace renamed | offline:patchUserName resolution-required
+    31.02s | Ada in temp:Core | Grace renamed | -- discard the team creation: the move of Ada is discarded with it
+    .      | Ada in temp:Core | Grace renamed | 🔴 [users||1] >fetch-started
+    31.82s | Ada in temp:Core | Grace renamed | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
+    .      | Ada in no team   | Grace renamed | [ada] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('an offline creation that keeps its client-generated id shows the server value once replayed', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-client-id-create-session';
+
+  type CreateWithClientIdOperations = {
+    createUser: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string },
+      unknown,
+      { id: string }
+    >;
+  };
+
+  // The app generates the item id on the client, so the server keeps it:
+  // reconciling the creation does not move the item to another key. The
+  // server normalizes the name it receives.
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    CreateWithClientIdOperations
+  >(
+    {},
+    {
+      id: 'offline-client-id-create-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: userPatchSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [input.itemId],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (_result, tempId) => ({
+                  finalPayload: tempId,
+                }),
+              },
+              execute: async ({ input }) => {
+                await env.serverTable.delayedSetItem(input.itemId, {
+                  name: input.name.trim(),
+                });
+                return { id: input.itemId };
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Create the user offline: the screen shows the local value right away.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'createUser',
+        input: { itemId: 'users||client-1', name: '  Ada  ' },
+      },
+    });
+  });
+
+  const hook = renderHook(() => {
+    const user = env.apiStore.useItem('users||client-1');
+
+    env.trackItemUI('user', `"${user.data?.value.name ?? '-'}"`);
+  });
+  await flushAllTimers();
+
+  // Back online: the creation is replayed. With nothing left to sync, the
+  // store revalidates the now confirmed item, which shows the server value.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the creation is replayed and the item revalidated',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | user      |
+    0     | -         | offline:createUser queued
+    .     | "  Ada  " | [user] ui-initialized
+    1.01s | "  Ada  " | -- back online: the creation is replayed and the item revalidated
+    .     | "  Ada  " | offline:createUser replay-started
+    2.21s | "  Ada  " | [users||client-1] server-data-changed (value: {"name":"Ada"})
+    .     | "  Ada  " | offline:createUser replay-finished
+    2.22s | "  Ada  " | 🔴 [users||client-1] >fetch-started
+    3.02s | "  Ada  " | 🔴 [users||client-1] <fetch-finished (value: {"name":"Ada"})
+    .     | "Ada"     | [user] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('an addition made while a queued addition starts replaying is not lost', async () => {
+  network.setOffline();
+
+  const sessionKey = 'offline-accumulation-during-replay-session';
+  const storeName = 'offline-accumulation-during-replay-store';
+  type CounterOperations = {
+    setValue: DocumentOfflineOperationDefinition<
+      { value: number },
+      { input: { value: number } }
+    >;
+    addToValue: DocumentOfflineOperationDefinition<
+      { value: number },
+      { input: { value: number } }
+    >;
+  };
+  const env = createDocumentStoreTestEnv<number, CounterOperations>(0, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          setValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }) => {
+              await env.serverMock.delayedSetData(input.value, {
+                durationMs: 1000,
+              });
+              return input;
+            },
+          },
+          addToValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            // Additions waiting in the queue are combined into one. Merging
+            // is async (e.g. it reads app data first), so the replay can
+            // pick the queued addition up while it runs.
+            accumulation: {
+              mergeInput: async ({ existingInput, incomingInput }) => {
+                await sleep(200);
+                return { value: existingInput.value + incomingInput.value };
+              },
+            },
+            execute: async ({ input }) => {
+              await sleep(1000);
+              env.serverMock.setData(env.serverMock.current + input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  function addToValue(value: number) {
+    return env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value += value;
+        });
+      },
+      mutation: async () => {
+        await sleep(1000);
+        env.serverMock.setData(env.serverMock.current + value);
+        return env.serverMock.current;
+      },
+      offline: { operation: 'addToValue', input: { value } },
+    });
+  }
+
+  // Offline: the value is set to 100, then 10 is added.
+  await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 100;
+      });
+    },
+    mutation: async () => {
+      await env.serverMock.delayedSetData(100);
+      return 100;
+    },
+    offline: { operation: 'setValue', input: { value: 100 } },
+  });
+  await addToValue(10);
+
+  // Back online: the queue replays the set first.
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(900);
+
+  // Right before the set finishes, the user adds 20. It joins the queue
+  // behind the queued addition and starts merging into it, but the replay
+  // picks that addition up (and sends it) while the merge runs.
+  let lateAddition: ReturnType<typeof addToValue> | undefined;
+  act(() => {
+    lateAddition = addToValue(20);
+  });
+  await flushAllTimers();
+  expect((await lateAddition)?.ok).toBe(true);
+
+  // Every addition reached the server exactly once: 100 + 10 + 20.
+  expect(env.serverMock.current).toBe(130);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
