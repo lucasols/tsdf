@@ -304,7 +304,7 @@ describe('async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:list-query-expiration"]
@@ -410,7 +410,7 @@ describe('async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:lq-startup-max-queries"]
@@ -764,22 +764,23 @@ describe('async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.811s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.811s | 📁 dir-open-or-create 🆕 tsdf (root directory)
+      1.812s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.813s | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.852s | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.854s | 📁 dir-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest
+      1.854s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.855s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.856s | 📁 dir-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest
              |    └ (store directory)
-      1.855s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
+      1.857s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
              |    └ (query data)
-      1.858s | ✍️ #1 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
+      1.86s  | ✍️ #1 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
              |    └ (query data) | 0.00 kb -> 0.00 kb
-      1.86s  | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq._i.r.json
+      1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq._i.r.json
              |    └ (queries index)
-      1.863s | ✍️ #2 tsdf/sess1/lq-empty-query-manifest/lq._i.r.json
+      1.865s | ✍️ #2 tsdf/sess1/lq-empty-query-manifest/lq._i.r.json
              |    └ (queries index) | 0.00 kb -> 0.40 kb
-      1.865s | end
+      1.867s | end
       "
     `);
     expect(
@@ -787,7 +788,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         {filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}:
-          a: 1735689613953
+          a: 1735689613955
           p:
             filters:
               - { field: 'name', op: 'eq', value: 'Missing user' }
@@ -1290,7 +1291,7 @@ describe('async storage efficiency: list-query', () => {
     expect(cleanupOperations).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:lq-shared-item-cleanup"]
