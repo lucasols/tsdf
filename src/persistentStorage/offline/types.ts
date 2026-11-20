@@ -1156,6 +1156,13 @@ export type OfflineTempEntityConfig<
    * queries when the queued mutation is discarded. A mutation that runs
    * online right away is never queued, so it creates no pending entity.
    *
+   * Queries that are only in persistent storage (after a restart, before a
+   * screen reads them) are loaded first, so the entity also reaches them. A
+   * filter only matches the queries the app session already knows, so
+   * prefer query payloads. The function form also runs again when the
+   * mutation is replayed, to load the queries the final entity is placed in;
+   * it should only depend on its arguments.
+   *
    * Without this option the pending entity is only added to the queries
    * matched by `optimisticListUpdates`.
    */
@@ -1217,6 +1224,9 @@ export type OfflineTempEntitiesConfig<
    *
    * In list-query stores each returned entry can also declare `addToQueries`
    * and `loadedFields`, with the same behavior as the `tempEntity` options.
+   * This builder never runs again at replay, so a declared query that is only
+   * in persistent storage when the mutation is replayed gets the final
+   * entities on its next fetch.
    */
   buildPendingEntities: (
     input: TInput,

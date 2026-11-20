@@ -206,12 +206,12 @@ createUser: {
 ```
 
 - The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
-- `queries` follows `addItemToState`: queries that are not in the store are skipped.
+- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function only matches the queries the app session already knows, so prefer query payloads.
 - The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
-- When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. Discarding the queued mutation removes the row from its lists.
+- When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. The declared queries that are only in persistent storage are loaded first: the function form of `addToQueries` runs again for this, so it should only depend on its arguments. Discarding the queued mutation removes the row from its lists.
 - While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
 
-With `tempEntities`, each entry returned by `buildPendingEntities` declares its own `addToQueries`.
+With `tempEntities`, each entry returned by `buildPendingEntities` declares its own `addToQueries`. The builder does not run again at replay, so a declared query that is only in persistent storage when the mutation is replayed gets the final entities on its next fetch.
 
 With [partial resources](./partial-resources.md), the pending entity has no loaded-fields metadata, so only `inferFields` can vouch for it. Declare `loadedFields` (for example `'*'`) when the pending entity should count as loaded for hooks that read those fields: it cannot be fetched from the server before the mutation is replayed. The entity keeps the same loaded fields when it is reconciled to its final payload, so a `finalData` returned by the reconcile hook must hold at least those fields; omit `finalData` to keep the pending entity's data instead.
 

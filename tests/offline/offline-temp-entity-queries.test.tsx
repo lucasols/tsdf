@@ -580,6 +580,151 @@ describe('temp entities declared in list queries', () => {
     hook.unmount();
   });
 
+  test.each([
+    ['local storage', 'local-sync'],
+    ['async storage', opfsPersistentStorage],
+  ] as const)(
+    'a row created offline before its list is opened after a restart shows up in the list (%s)',
+    async (_, storageAdapter) => {
+      if (storageAdapter !== 'local-sync') {
+        createOpfsPersistentStorageTestStore();
+      }
+      const envOptions = {
+        sessionKey: 'temp-queries-unloaded-list-session',
+        storeName: 'temp-queries-unloaded-list-store',
+        testScenario: 'idle',
+        addToQueries: { queries: usersQuery, appendTo: 'start' },
+        storageAdapter,
+      } as const;
+
+      // The user sees the list online once, so it is saved to storage.
+      const first = createUsersEnv(envOptions);
+      const firstHook = renderHook(() =>
+        first.env.apiStore.useListQuery(usersQuery, {
+          itemSelector: (item) => item.name,
+        }),
+      );
+      await flushAllTimers();
+      expect(firstHook.result.current.items).toMatchInlineSnapshot(`
+        ['Ada', 'Grace']
+      `);
+      firstHook.unmount();
+      first.env.apiStore.dispose();
+
+      // The app restarts offline on a form screen: the saved list is not read
+      // from storage yet when the user creates a row.
+      network.setOffline();
+      resetSessionForTests();
+      const restarted = createUsersEnv(envOptions);
+      await flushAllTimers();
+      await act(async () => {
+        await resolveAfterAllTimers(
+          restarted.env.apiStore.performMutation('temp:Linus', {
+            mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+            offline: { operation: 'createUser', input: { name: 'Linus' } },
+          }),
+        );
+      });
+      await flushAllTimers();
+
+      // Going to the list shows the row created offline at its declared
+      // position, instead of a list without it until the next online fetch.
+      const hook = renderHook(() =>
+        restarted.env.apiStore.useListQuery(usersQuery, {
+          itemSelector: (item) => item.name,
+        }),
+      );
+      await flushAllTimers();
+      expect({
+        items: hook.result.current.items,
+        pendingSync: hook.result.current.pendingSync,
+      }).toMatchInlineSnapshot(`
+        items: ['Linus', 'Ada', 'Grace']
+        pendingSync: '✅'
+      `);
+
+      hook.unmount();
+    },
+  );
+
+  test.each([
+    ['local storage', 'local-sync'],
+    ['async storage', opfsPersistentStorage],
+  ] as const)(
+    'a row saved while its list is not open after a restart is in the list when it is opened offline (%s)',
+    async (_, storageAdapter) => {
+      if (storageAdapter !== 'local-sync') {
+        createOpfsPersistentStorageTestStore();
+      }
+      const envOptions = {
+        sessionKey: 'temp-queries-unloaded-list-replay-session',
+        storeName: 'temp-queries-unloaded-list-replay-store',
+        testScenario: 'idle',
+        addToQueries: { queries: usersQuery, appendTo: 'start' },
+        storageAdapter,
+        nextUserIdRef: { current: 3 },
+      } as const;
+
+      // The user opens the list online, then creates a row offline: it is
+      // queued and shown at the top of the list.
+      const first = createUsersEnv(envOptions);
+      const firstHook = renderHook(() =>
+        first.env.apiStore.useListQuery(usersQuery, {
+          itemSelector: (item) => item.name,
+        }),
+      );
+      await flushAllTimers();
+      act(() => {
+        network.setOffline();
+      });
+      await act(async () => {
+        await resolveAfterAllTimers(
+          first.env.apiStore.performMutation('temp:Linus', {
+            mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+            offline: { operation: 'createUser', input: { name: 'Linus' } },
+          }),
+        );
+      });
+      await flushAllTimers();
+      expect(firstHook.result.current.items).toMatchInlineSnapshot(`
+        ['Linus', 'Ada', 'Grace']
+      `);
+      firstHook.unmount();
+      first.env.apiStore.dispose();
+
+      // The app restarts on another screen and goes online: the create is
+      // saved while the list is still only in storage.
+      resetSessionForTests();
+      const restarted = createUsersEnv(envOptions);
+      await flushAllTimers();
+      act(() => {
+        network.goOnline();
+      });
+      await flushAllTimers();
+      expect(restarted.env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+        `[]`,
+      );
+
+      // Back offline, the user opens the list: the saved row took the place of
+      // the pending one, instead of missing until the next online fetch.
+      act(() => {
+        network.goOffline();
+      });
+      await flushAllTimers();
+      const hook = renderHook(() =>
+        restarted.env.apiStore.useListQuery(usersQuery, {
+          itemSelector: (item) => item.name,
+        }),
+      );
+      await flushAllTimers();
+      expect(hook.result.current.items).toMatchInlineSnapshot(`
+        ['Linus', 'Ada', 'Grace']
+      `);
+
+      hook.unmount();
+    },
+  );
+
   test('a declared row keeps its position while its create is pending, even if the list is refetched in the meantime', async () => {
     network.setOffline();
     const { env, createUser } = createUsersEnv({

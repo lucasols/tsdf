@@ -2286,10 +2286,11 @@ export function createListQueryStore<
             reconciliation.finalData,
           );
         },
-        loadTempEntities: (tempIds) =>
-          loadOfflineTempItems(
+        loadTempEntities: (tempIds, addToQueries) =>
+          loadOfflineTempEntities(
             // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when loading queued temp entities.
             __LEGIT_CAST__<ItemPayload[], ValidPayload[]>(tempIds),
+            addToQueries,
           ),
         applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
           // The replaying tab only knows the query memberships it loaded, so
@@ -2545,20 +2546,37 @@ export function createListQueryStore<
   }
 
   /**
-   * Loads offline temp items that are only in persistent storage, so their
-   * reconciliation reads their data and loaded fields from memory.
+   * Loads offline temp items, and the queries they are declared into, that are
+   * only in persistent storage: the queries then receive the pending items,
+   * and reconciliation reads the items' data and loaded fields from memory.
+   * Returns `undefined` when there is nothing to load.
    */
-  async function loadOfflineTempItems(
+  function loadOfflineTempEntities(
     tempPayloads: ItemPayload[],
-  ): Promise<void> {
-    if (!persistence) return;
+    addToQueries: ListQueryAddItemToQueries<QueryPayload, ValidPayload>[],
+  ): Promise<unknown> | undefined {
+    if (!persistence) return undefined;
     const unloadedItemKeys = filterAndMap(tempPayloads, (tempPayload) => {
       const itemKey = getItemKey(tempPayload);
       return store.state.items[itemKey] === undefined ? itemKey : false;
     });
-    if (unloadedItemKeys.length > 0) {
-      await persistence.preloadItems(unloadedItemKeys);
+    const unloadedQueries = new Map<string, QueryPayload>();
+    for (const { queries } of addToQueries) {
+      for (const { key, payload } of getQueriesKeyArray(queries)) {
+        if (store.state.queries[key] === undefined) {
+          unloadedQueries.set(key, payload);
+        }
+      }
     }
+    if (unloadedItemKeys.length === 0 && unloadedQueries.size === 0) {
+      return undefined;
+    }
+
+    return Promise.all([
+      unloadedItemKeys.length > 0 && persistence.preloadItems(unloadedItemKeys),
+      unloadedQueries.size > 0 &&
+        preloadQueryFromPersistentStorage([...unloadedQueries.values()]),
+    ]);
   }
 
   /**
