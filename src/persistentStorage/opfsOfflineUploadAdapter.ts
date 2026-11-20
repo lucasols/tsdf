@@ -75,6 +75,7 @@ const storedUploadMetadataRecordSchema = rc_object({
   g: rc_number.optionalKey(),
   l: rc_number,
   d: validPayloadSchema.optionalKey(),
+  s: rc_string.optionalKey(),
 });
 
 type PersistedUploadMetadataRecord<
@@ -102,6 +103,7 @@ function serializeStoredUploadMetadataRecord<
       : {}),
     l: record.lastModified,
     ...(record.metadata !== undefined ? { d: record.metadata } : {}),
+    ...(record.storeName !== undefined ? { s: record.storeName } : {}),
   });
 }
 
@@ -143,6 +145,7 @@ function parseStoredUploadMetadataRecord<
       : {}),
     lastModified: compactRecord.l,
     ...(compactRecord.d !== undefined ? { metadata: compactRecord.d } : {}),
+    ...(compactRecord.s !== undefined ? { storeName: compactRecord.s } : {}),
   };
 }
 

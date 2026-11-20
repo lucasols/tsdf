@@ -3307,6 +3307,7 @@ export function createOfflineStoreController<
               id: storedUploadId,
               file,
               source: 'mutation',
+              storeName,
             });
           }),
         );
