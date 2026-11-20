@@ -114,6 +114,10 @@ const storeManager = createStoreManager({
 
 Manager offline methods are safe to call even when no offline session is configured. In that case they return empty/default state, and upload helpers and `resolveOfflineResolution(...)` return `Result.err(...)` where applicable.
 
+To detect outages and network failures the browser does not report, pass `offlineSession.healthCheck: { check, timeoutMs? }`. `check({ sessionKey, signal })` answers `'up'`, `'outage'` or `'unreachable'`, and the session uses it both to classify failed requests and as the recovery check of the active offline mode. Concurrent callers share one in-flight call. `'up'` for a failed request leaves the session online: the failure is handled by that request (its error, or the replay retry budget and then a `retry-exhausted` resolution). See [Health Check](./offline.md#health-check).
+
+To turn the whole offline layer on and off at runtime (feature flag, per-workspace setting) without recreating the manager, pass `offlineSession.enabled: () => boolean`. While it returns `false` the session never enters offline mode and mutations with an `offline` descriptor run as plain online mutations; work already queued is kept and replayed after the gate reopens. See [Session gate](./offline.md#session-gate).
+
 ## Offline Status APIs
 
 Read session-wide offline state:
@@ -135,7 +139,7 @@ Synchronous equivalents:
 
 Runtime controls:
 
-- `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`
+- `setOfflineRuntimeConfig(update)` returns a `Result<void, Error>`. Every update, even an empty `{}`, also re-reads the `offlineSession.enabled` gate right away
 - `resetOfflineRuntimeConfig()` restores the static `offlineSession` controls
 
 Resolution actions:
@@ -172,11 +176,15 @@ Upload methods:
 - `replaceOfflineUpload({ id, file, metadata? })` keeps the saved metadata unless new `metadata` is passed
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
-- `resolveOfflineUpload(id)`
-- `resolveOfflineUploads(ids)`
+- `resolveOfflineUpload(id)` uploads the staged file if needed and returns its final ref
+- `resolveOfflineUploads(ids)` does the same for several ids and fails as a whole with the first transport error
 - `useOfflineUploads()`
 
+When the `upload` transport fails, `resolveOfflineUpload(s)` returns `Result.err(error)` with the transport error and the upload becomes `failed` (`lastError` set). The session failure classifiers are not consulted and nothing is retried automatically; calling the method again runs the upload again, and `lastError` is cleared once it succeeds. Uploads that run as a dependency of a replayed offline operation are classified and retried by the session instead. See [Offline: Upload failure handling](./offline.md#upload-failure-handling).
+
 `metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
+
+Staged uploads are deleted automatically when the last queued mutation or resolution record that depends on them leaves the queue (replayed, discarded, superseded or cancelled). `deleteOfflineUpload(id)` is only needed for uploads no queued mutation used, which otherwise expire after a week online, and it returns an error while queued work still references the upload. See [Offline: Upload lifecycle](./offline.md#upload-lifecycle).
 
 The ref type returned by `resolveOfflineUpload(s)` and exposed as `OfflineUpload.resolvedRef` is inferred from the `upload` transport of `offlineSession.uploads`, as long as the manager is not annotated with the plain `StoreManager` type. `StoreManagerUploadRef<typeof storeManager>` extracts it, for example to type the upload refs of offline operations. `offlineSession.uploads.resolvedRefSchema` optionally validates refs restored from storage or received from other tabs; a ref that fails it is dropped and its upload goes back to `pending`. See [Offline: Upload refs](./offline.md#upload-refs).
 

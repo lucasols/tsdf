@@ -318,9 +318,7 @@ export function setupCollectionPersistence<
   let maintenanceManifestKey: string | null = null;
 
   function isOfflineNetworkActive(): boolean {
-    return isOfflineNetworkModeActiveSync(
-      config.offline?.session.getConfig().network,
-    );
+    return isOfflineNetworkModeActiveSync(config.offline?.session.getConfig());
   }
 
   function clearSaveTimer(): void {

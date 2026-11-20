@@ -11,7 +11,12 @@ import { createStoreManager } from '../../src/storeManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  pick,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { resetSessionForTests } from '../utils/resetSessionForTests';
 import {
@@ -459,8 +464,9 @@ test('a global offline view sees the same blocked temp item as the store after r
   env.addTimelineComments('beforeNextAction', [
     'go back online and let replay exhaust every retry for the temp create',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOnline();
+    await Promise.resolve();
   });
   await waitForMicrotaskCondition(
     () => createUserExecute.mock.calls.length === 1,
@@ -564,9 +570,11 @@ test('a global offline view sees the same blocked temp item as the store after r
   globalHook.unmount();
 });
 
-test('offline mutations fail fast when no session key is available', async () => {
+test('offline-enabled mutations run as plain online mutations when no session key is available', async () => {
   network.setOffline();
+  // No account is loaded yet, so there is no offline session to queue into.
   const sessionKey: string | false = false;
+  const replayedInputs: { value: number }[] = [];
 
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => sessionKey,
@@ -585,6 +593,7 @@ test('offline mutations fail fast when no session key is available', async () =>
             inputSchema: docMutationInputSchema,
             kind: 'update',
             execute: async ({ input }: UpdateValueExecuteContext) => {
+              replayedInputs.push(input);
               await env.serverMock.delayedSetData(input.value);
               return input;
             },
@@ -601,39 +610,66 @@ test('offline mutations fail fast when no session key is available', async () =>
 
   await Promise.resolve();
 
-  const mutationResult = await env.apiStore.performMutation({
+  // -- Success path --
+  const directMutation = vi.fn(async () => {
+    await env.serverMock.delayedSetData(2);
+    return 2;
+  });
+  const successResult = await resolveAfterAllTimers(
+    env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+
+  // The mutation ran against the server instead of failing as unavailable,
+  // and keeps the offline-enabled result shape.
+  expect({
+    ok: successResult.ok,
+    value: successResult.ok ? successResult.value : null,
+  }).toMatchInlineSnapshot(`
+    ok: '✅'
+    value: { data: 2, kind: 'online' }
+  `);
+  expect(directMutation).toHaveBeenCalledTimes(1);
+  expect(env.store.state.data).toMatchInlineSnapshot(`
+    value: 2
+  `);
+
+  // -- Failure path --
+  const failedResult = await env.apiStore.performMutation({
     optimisticUpdate: () => {
       env.apiStore.updateState((draft) => {
-        draft.value = 2;
+        draft.value = 3;
       });
     },
-    mutation: async () => {
-      await env.serverMock.delayedSetData(2);
-      return 2;
-    },
-    offline: { operation: 'updateValue', input: { value: 2 } },
+    mutation: () => Promise.reject(new Error('request failed')),
+    offline: { operation: 'updateValue', input: { value: 3 } },
   });
 
-  expect(mutationResult.ok).toBe(false);
-
-  expect(mutationResult.error).toMatchInlineSnapshot(
-    `
-      Error#:
-        message: 'Offline session unavailable'
+  // The original error reaches the caller and the optimistic update is
+  // rolled back, like in any online mutation.
+  expect({ error: failedResult.ok ? null : failedResult.error })
+    .toMatchInlineSnapshot(`
+      error{Error}:
+        message: 'request failed'
         name: 'StoreMutationError'
         kind: 'error'
-        code: 460
-        id: 'offline-session-unavailable'
+        code: 500
+        id: 'fetch-error'
         cause:
-          Error#:
-            message: 'Offline session unavailable'
-            name: 'OfflineSessionUnavailableError'
-            code: 460
-            id: 'offline-session-unavailable'
-    `,
-  );
+          Error#: { message: 'request failed', name: 'Error' }
+    `);
   expect(env.store.state.data).toMatchInlineSnapshot(`
-    value: 1
+    value: 2
   `);
+
+  // Without a session nothing can be queued or replayed.
+  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
