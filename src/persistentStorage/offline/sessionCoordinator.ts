@@ -237,8 +237,6 @@ export function recheckIsSessionInOfflineMode(
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
-/** Start of a queue entry id after its `<storeName>:` prefix. */
-const ENTRY_ID_TIMESTAMP_REGEX = /^\d+:/;
 
 export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
@@ -676,6 +674,8 @@ class SessionOfflineCoordinator {
   #uploadsConfig: OfflineSessionUploadsConfig | undefined;
   #uploads = new Map<string, OfflineStoredUploadRecord>();
   #referencedUploadIds = new Set<string>();
+  /** Store that referenced each upload in this runtime, by upload id. */
+  readonly #uploadOwnerStores = new Map<string, string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1019,6 +1019,11 @@ class SessionOfflineCoordinator {
     return () => {
       this.#registrations.delete(registration.storeName);
       this.#storeContributions.delete(registration.storeName);
+      for (const [uploadId, storeName] of this.#uploadOwnerStores) {
+        if (storeName === registration.storeName) {
+          this.#uploadOwnerStores.delete(uploadId);
+        }
+      }
       this.#refreshAggregates();
       this.#notifyGreenCycle();
       if (this.#registrations.size === 0) {
@@ -1989,20 +1994,9 @@ class SessionOfflineCoordinator {
     const uploadsConfig = this.#uploadsConfig;
     if (!uploadsConfig) return;
 
-    // Mutation upload ids start with the id of their queue entry:
-    // `<storeName>:<createdAt>:…`. Only stores created in this runtime report
-    // their references, so uploads of other stores (lazily created ones, or
-    // ones only another deploy has) are left to the retention cleanup. Store
-    // names can contain `:`, so the timestamp must follow the name.
-    const registeredStorePrefixes = [...this.#registrations.keys()].map(
-      (storeName) => `${storeName}:`,
-    );
-    const isOwnedByRegisteredStore = (id: string): boolean =>
-      registeredStorePrefixes.some(
-        (prefix) =>
-          id.startsWith(prefix) &&
-          ENTRY_ID_TIMESTAMP_REGEX.test(id.slice(prefix.length)),
-      );
+    // Only uploads a store created in this runtime referenced, and no longer
+    // does, are removed here. Uploads of other stores (lazily created ones, or
+    // ones only another deploy has) are left to the retention cleanup.
     const removableIds = [...this.#uploads.values()]
       .filter((upload) => upload.source === 'mutation')
       .map((upload) => upload.id)
@@ -2010,13 +2004,14 @@ class SessionOfflineCoordinator {
         (id) =>
           !this.#referencedUploadIds.has(id) &&
           !this.#uploadPromisesById.has(id) &&
-          isOwnedByRegisteredStore(id),
+          this.#uploadOwnerStores.has(id),
       );
 
     if (removableIds.length === 0) return;
 
     for (const id of removableIds) {
       this.#uploads.delete(id);
+      this.#uploadOwnerStores.delete(id);
     }
     await Promise.all(
       removableIds.map((id) =>
@@ -2033,12 +2028,13 @@ class SessionOfflineCoordinator {
     const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
     let hasQueuedMutations = false;
-    for (const contribution of this.#storeContributions.values()) {
+    for (const [storeName, contribution] of this.#storeContributions) {
       if (contribution.replayHead !== null) hasQueuedMutations = true;
       allEntities.push(...contribution.entities);
       allResolutions.push(...contribution.resolutions);
       for (const uploadId of contribution.referencedUploadIds) {
         referencedUploadIds.add(uploadId);
+        this.#uploadOwnerStores.set(uploadId, storeName);
       }
       const existing =
         nextProtectedKeysByAdapter.get(contribution.adapter) ?? [];

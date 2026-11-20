@@ -146,17 +146,23 @@ function createOfflineDocumentEnv({
 }
 
 /**
- * The app after a deploy that added the `updateValue` operation. Queuing
- * `value: 3` ends in a conflict when it is replayed.
+ * A document store with an `updateValue` operation whose replay of `value: 3`
+ * ends in a conflict. In the deploy tests, it is the app after the deploy that
+ * added `updateValue`.
  */
-function createNewerDeployDocumentEnv({
+function createConflictingDocumentEnv({
   sessionKey,
   storeName,
   onExecute,
+  adapter = 'local-sync',
+  startedLongBeforeTestTime = false,
 }: {
   sessionKey: string;
   storeName: string;
   onExecute?: (input: { value: number }) => void;
+  adapter?: 'local-sync' | typeof opfsPersistentStorage;
+  /** The app ran days before `TEST_INITIAL_TIME`. */
+  startedLongBeforeTestTime?: boolean;
 }) {
   const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
     1,
@@ -169,8 +175,9 @@ function createNewerDeployDocumentEnv({
         offlineSession: { network: network.config },
       }),
       testScenario: 'loaded',
+      __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: startedLongBeforeTestTime,
       persistentStorage: {
-        adapter: 'local-sync',
+        adapter,
         schema: docSchema,
         offline: {
           operations: {
@@ -767,6 +774,78 @@ test('local-sync offline edits are still sent when the app is reopened more than
   hook.unmount();
 });
 
+test('opfs conflicts left unresolved for more than two weeks can still be resolved', async () => {
+  createOpfsPersistentStorageTestStore();
+  const sessionKey = 'offline-opfs-old-conflict-session';
+  const storeName = 'offline-opfs-old-conflict-doc';
+
+  // Fifteen days ago, longer than the async cache max age, an offline edit
+  // ended in a conflict when the connection came back, and the user left it
+  // unresolved.
+  vi.setSystemTime(TEST_INITIAL_TIME - 15 * 24 * 60 * 60 * 1000);
+  network.setOffline();
+  const firstEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    adapter: opfsPersistentStorage,
+    startedLongBeforeTestTime: true,
+  });
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(3);
+        return 3;
+      },
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    }),
+  );
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(firstEnv.apiStore.getOfflineResolutions()).toHaveLength(1);
+
+  // Today the user opens the app online, which runs the storage cleanup.
+  resetSessionForTests();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+  const restartedEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    adapter: opfsPersistentStorage,
+  });
+  const restartedHook = renderHook(() => restartedEnv.apiStore.useDocument());
+  await flushAllTimers();
+  restartedHook.unmount();
+
+  // The conflict is unsent work, not cached data: it doesn't expire, so it is
+  // still there when the app is opened again.
+  resetSessionForTests();
+  const reopenedEnv = createConflictingDocumentEnv({
+    sessionKey,
+    storeName,
+    adapter: opfsPersistentStorage,
+  });
+  const reopenedHook = renderHook(() => reopenedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  const [resolution] = reopenedEnv.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected the conflict to be kept');
+  expect(summarizeResolution(resolution)).toMatchInlineSnapshot(`
+    input: 'value: 3'
+    kind: 'conflict'
+    on: 'document:document'
+    op: 'updateValue'
+    reason: 'server-changed'
+  `);
+
+  reopenedHook.unmount();
+});
+
 test('an older deploy keeps edits queued for an operation only a newer deploy knows, and the newer deploy sends them', async () => {
   const sessionKey = 'offline-unknown-operation-entry-session';
   const storeName = 'offline-unknown-operation-entry-doc';
@@ -774,7 +853,7 @@ test('an older deploy keeps edits queued for an operation only a newer deploy kn
 
   // The user edits offline in the newer deploy.
   network.setOffline();
-  const newerEnv = createNewerDeployDocumentEnv({ sessionKey, storeName });
+  const newerEnv = createConflictingDocumentEnv({ sessionKey, storeName });
   await resolveAfterAllTimers(
     newerEnv.apiStore.performMutation({
       optimisticUpdate: () => {
@@ -809,7 +888,7 @@ test('an older deploy keeps edits queued for an operation only a newer deploy kn
   // The user reloads into the newer deploy: the edit is still queued and is
   // sent once.
   resetSessionForTests();
-  const reloadedEnv = createNewerDeployDocumentEnv({
+  const reloadedEnv = createConflictingDocumentEnv({
     sessionKey,
     storeName,
     onExecute: (input) => {
@@ -833,7 +912,7 @@ test('an older deploy keeps conflicts of an operation only a newer deploy knows'
 
   // In the newer deploy, an offline edit ends in a conflict when it is sent.
   network.setOffline();
-  const newerEnv = createNewerDeployDocumentEnv({ sessionKey, storeName });
+  const newerEnv = createConflictingDocumentEnv({ sessionKey, storeName });
   await resolveAfterAllTimers(
     newerEnv.apiStore.performMutation({
       optimisticUpdate: () => {
@@ -866,7 +945,7 @@ test('an older deploy keeps conflicts of an operation only a newer deploy knows'
 
   // Back in the newer deploy, the user can still resolve the conflict.
   resetSessionForTests();
-  const reloadedEnv = createNewerDeployDocumentEnv({ sessionKey, storeName });
+  const reloadedEnv = createConflictingDocumentEnv({ sessionKey, storeName });
   const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
   await flushAllTimers();
 

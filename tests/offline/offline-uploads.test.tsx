@@ -2165,9 +2165,9 @@ test('attached files of a store the app has not created yet after a restart surv
   createMockBrowserOpfs();
   const sessionKey = 'offline-lazy-store-upload-session';
   const otherStoreName = 'offline-lazy-store-upload-doc';
-  // Its id starts with the other store's id, so the files of each store must
-  // not be told apart only by that prefix.
-  const lazyStoreName = `${otherStoreName}:archive`;
+  // Its id starts with the other store's id followed by a number, so the
+  // files of each store can't be told apart by their ids.
+  const lazyStoreName = `${otherStoreName}:2026`;
   const sent: string[] = [];
 
   // The user attaches a file to an offline edit of a store that lives in a
