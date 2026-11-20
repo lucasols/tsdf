@@ -50,6 +50,8 @@ import {
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
   type OfflineResolutionActionForOperation,
+  type OfflineResolutionGenericAction,
+  type OfflineResolutionGenericActionFailure,
   type OfflineResolutionRecordForStore,
   type OfflineEntityRef,
   type OfflineSession,
@@ -449,6 +451,15 @@ export type OfflineStoreController<
     operationName: TName,
     resolution: OfflineResolutionActionForOperation<TOperations, TName>,
   ) => Promise<void>;
+  /**
+   * Applies a generic `retry` / `discard` action without the caller knowing
+   * the operation. Returns why the action was not applied, or `undefined` when
+   * it was applied.
+   */
+  resolveOfflineResolutionWithGenericAction: (
+    resolutionId: string,
+    action: OfflineResolutionGenericAction,
+  ) => Promise<OfflineResolutionGenericActionFailure | undefined>;
   prepareForFetch: () => Promise<void>;
   getSessionStatus: () => { isOfflineMode: boolean } | null;
   shouldTreatFetchAsOffline: () => boolean;
@@ -3600,6 +3611,33 @@ export function createOfflineStoreController<
     throw new Error('Invalid offline resolution action');
   }
 
+  async function resolveOfflineResolutionWithGenericAction(
+    resolutionId: string,
+    action: OfflineResolutionGenericAction,
+  ): Promise<OfflineResolutionGenericActionFailure | undefined> {
+    await hydrateIfNeeded();
+
+    const resolutionRecord = ensureActiveSession()
+      ? resolutions.get(resolutionId)
+      : undefined;
+    if (!resolutionRecord) return 'resolution-not-found';
+
+    // Reported before the blocked state because it never changes for a record,
+    // while a blocked record becomes actionable once its parents are resolved.
+    if (action === 'retry' && resolutionRecord.kind !== 'retry-exhausted') {
+      return 'retry-not-supported';
+    }
+
+    if (isPersistedResolutionBlocked(resolutionRecord)) {
+      return 'resolution-blocked';
+    }
+
+    await resolveOfflineResolution(resolutionId, resolutionRecord.operation, {
+      action,
+    });
+    return undefined;
+  }
+
   async function evaluateOfflineFetchError(
     error: unknown,
     operationName?: string,
@@ -3655,6 +3693,7 @@ export function createOfflineStoreController<
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,
+    resolveOfflineResolutionWithGenericAction,
     prepareForFetch,
     getSessionStatus,
     shouldTreatFetchAsOffline,
