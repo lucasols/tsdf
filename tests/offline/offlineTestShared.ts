@@ -1,3 +1,4 @@
+import { act } from 'react';
 import {
   rc_array,
   rc_discriminated_union,
@@ -10,6 +11,7 @@ import {
 import type { OfflineResolutionRecord } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/main';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import type { StoreManager } from '../../src/storeManager';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import type { FilterOperator } from '../mocks/serverTableMock';
 import { pick } from '../utils/genericTestUtils';
@@ -147,6 +149,32 @@ export function summarizeResolution(resolution: OfflineResolutionRecord) {
           ),
         }
       : {}),
+  };
+}
+
+/**
+ * Applies a generic resolution action through the store manager the way a
+ * session-wide UI would on a button click (inside `act`, since the action
+ * re-renders offline hooks) and returns a compact summary of the result for
+ * test snapshots: `'ok'` when the action was applied, otherwise the error
+ * details a UI would branch on. The resolution id is left out because it is
+ * not deterministic.
+ */
+export async function resolveOfflineResolutionThroughManager(
+  storeManager: StoreManager,
+  resolutionId: string,
+  action: 'retry' | 'discard',
+): Promise<'ok' | { error: string; message: string; storeName?: string }> {
+  const result = await act(() =>
+    storeManager.resolveOfflineResolution(resolutionId, action),
+  );
+  if (result.ok) return 'ok';
+
+  const { code, message, storeName } = result.error;
+  return {
+    error: code,
+    message,
+    ...(storeName === undefined ? {} : { storeName }),
   };
 }
 

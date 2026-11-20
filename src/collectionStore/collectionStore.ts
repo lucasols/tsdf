@@ -2914,6 +2914,8 @@ export function createCollectionStore<
     id,
     reset,
     onTransportReconnect,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {
