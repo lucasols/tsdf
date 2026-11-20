@@ -1127,14 +1127,11 @@ export function createOfflineStoreController<
           }
         });
       },
-      onRemoteWorkDiscarded: (discardedWork, removedTempEntityKeys) => {
+      onRemoteWorkDiscarded: (discardedWork, removedEntityKeys) => {
         // Sent after the removals of the discarded records, so this tab's
         // remaining resolutions already exclude them
         applyRecordChangeFromAnotherTab(() => {
-          revalidateDiscardedWork(
-            discardedWork,
-            new Set(removedTempEntityKeys),
-          );
+          revalidateDiscardedWork(discardedWork, new Set(removedEntityKeys));
         });
       },
       onRemoteTempReconciled: (tempId, finalPayload) => {
@@ -2738,17 +2735,7 @@ export function createOfflineStoreController<
       await removeResolution(resolution.id, args.current, true);
     }
 
-    for (const queueEntry of descendantQueueEntries.values()) {
-      rollbackTempCreatePendingEntity(queueEntry);
-    }
-    for (const resolution of descendantResolutions.values()) {
-      rollbackTempCreatePendingEntity(resolution);
-    }
-    rollbackTempCreatePendingEntity(args.resolution);
-
-    refreshDerivedState(args.current);
-
-    // The temp entities were removed, but descendants may also have changed
+    // The temp entities are removed, but descendants may also have changed
     // entities that exist on the server (e.g. moved an item into the
     // discarded one): those are refetched. Items created on top of the temp
     // entities with a client-generated id are removed instead.
@@ -2756,17 +2743,22 @@ export function createOfflineStoreController<
       ...descendantQueueEntries.values(),
       ...descendantResolutions.values(),
     ];
-    const removedTempEntityKeys = new Set(parentEntityKeys);
+    const removedEntityKeys = new Set(parentEntityKeys);
     for (const workItem of discardedWork) {
+      rollbackTempCreatePendingEntity(workItem);
+      rollbackClientIdCreatedItems(workItem, removedEntityKeys);
       for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
-        removedTempEntityKeys.add(entityKey);
+        removedEntityKeys.add(entityKey);
       }
-      rollbackClientIdCreatedItems(workItem, removedTempEntityKeys);
     }
+    rollbackTempCreatePendingEntity(args.resolution);
+
+    refreshDerivedState(args.current);
+
     revalidateDiscardedWorkInEveryTab(
       args.current,
       discardedWork,
-      removedTempEntityKeys,
+      removedEntityKeys,
     );
   }
 
@@ -2780,9 +2772,9 @@ export function createOfflineStoreController<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
       'operation' | 'input' | 'entityRefs'
     >[],
-    removedTempEntityKeys: ReadonlySet<string>,
+    removedEntityKeys: ReadonlySet<string>,
   ): void {
-    revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
+    revalidateDiscardedWork(discardedWork, removedEntityKeys);
 
     if (!discardedWork.some((workItem) => workItem.entityRefs.length > 0)) {
       return;
@@ -2794,14 +2786,15 @@ export function createOfflineStoreController<
         input,
         entityRefs,
       })),
-      [...removedTempEntityKeys],
+      [...removedEntityKeys],
     );
   }
 
   /**
    * Refetches the entities discarded queued work referenced (its optimistic
-   * changes cannot be rolled back locally), except the removed temp entities
-   * and the entities other changes still wait for a decision on: a refetch
+   * changes cannot be rolled back locally), except the entities the discard
+   * removed (temp entities and items of discarded creations) and the
+   * entities other changes still wait for a decision on: a refetch
    * would replace those changes. The recovery revalidation refetches them
    * once the last one is handled.
    */
@@ -2810,12 +2803,12 @@ export function createOfflineStoreController<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
       'operation' | 'input' | 'entityRefs'
     >[],
-    removedTempEntityKeys: ReadonlySet<string>,
+    removedEntityKeys: ReadonlySet<string>,
   ): void {
     const entities: (OfflineEntityRef & {
       payload: ValidPayload | undefined;
     })[] = [];
-    const skippedEntityKeys = new Set(removedTempEntityKeys);
+    const skippedEntityKeys = new Set(removedEntityKeys);
     for (const resolution of resolutions.values()) {
       for (const ref of resolution.entityRefs) {
         skippedEntityKeys.add(ref.entityKey);
