@@ -143,7 +143,23 @@ Optional replay behavior:
 - `accumulation` - Merges newer queued inputs into an existing queued mutation.
 - `supersedes` - Prunes older queued work for the same entity.
 
-Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up. Keep an operation defined until its queued work is likely gone: records of an operation you remove for good stay in storage until the session's storage is cleared with `clearSessionStorage`.
+Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. Replaying the store's other queued work around them would send the user's edits out of order, so while such a mutation is queued, that deploy pauses the store's replay, and the later queued work of the other stores waits too (it still counts as queued mutations, so stores don't revalidate meanwhile). A deploy that defines the operation picks them up and sends everything in order.
+
+When you delete an operation for good, list its name in the store's `removedOperations` so its queued records don't keep the store's replay paused:
+
+```ts
+persistentStorage: {
+  // ...
+  offline: {
+    operations: { renameUser },
+    // Deleted from `operations`: its queued mutations, resolutions and their
+    // uploads are deleted when the store loads its offline data
+    removedOperations: ['legacyRenameUser'],
+  },
+},
+```
+
+The number of records dropped is reported through the manager's `onPersistentStorageError`. Only list an operation once no deploy still running in your users' tabs defines it; a name that is still defined in `operations` is ignored.
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
 

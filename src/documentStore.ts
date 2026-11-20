@@ -828,6 +828,7 @@ export function createDocumentStore<
           __LEGIT_CAST__<ResolvedOfflineOperations, unknown>(
             offlineOperationsForRuntime,
           ),
+          resolvedOfflineConfig.removedOperations,
         )
       : null;
 

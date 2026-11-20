@@ -513,6 +513,7 @@ export function createOfflineStoreController<
   storeAdapter: OfflineStoreAdapter,
   offlineSession: OfflineSession,
   operations: TOperations,
+  removedOperations: readonly string[] | undefined,
 ): OfflineStoreController<TOperations> {
   const sessionConfig = offlineSession.getConfig();
   const appVersion = getOfflineSessionAppVersion(offlineSession);
@@ -537,6 +538,11 @@ export function createOfflineStoreController<
   // their entities stays protected.
   let unknownOperationUploadIds: string[] = [];
   let unknownOperationEntityRefs: OfflineEntityRef[] = [];
+  // The earliest of those records in the queue. Replaying anything of this
+  // store while it is waiting would reorder the user's edits, so the store's
+  // replay (and, through its replay head, the later work of other stores)
+  // waits for a deploy that can send it.
+  let earliestUnknownQueueEntry: OfflineQueueEntry | null = null;
   const countedReplayFailures = new Map<string, number>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
@@ -819,6 +825,7 @@ export function createOfflineStoreController<
     resolutions.clear();
     unknownOperationUploadIds = [];
     unknownOperationEntityRefs = [];
+    earliestUnknownQueueEntry = null;
     nextQueueOrder = 0;
     hydratedSessionKey = null;
     hydratedPromise = null;
@@ -1108,24 +1115,44 @@ export function createOfflineStoreController<
       resolutions.clear();
       const loadedUnknownOperationUploadIds: string[] = [];
       const loadedUnknownOperationEntityRefs: OfflineEntityRef[] = [];
+      let loadedEarliestUnknownQueueEntry: OfflineQueueEntry | null = null;
+      const removedQueueEntryIds: string[] = [];
+      const removedResolutionIds: string[] = [];
+      const removedUploadIds: string[] = [];
       // Records of an operation this deploy doesn't define were written by a
-      // newer deploy (or belong to an operation the app removed). They stay
+      // newer deploy, unless the app lists the operation as removed. They stay
       // in storage for a deploy that can send or resolve them, and this tab
-      // neither lists nor replays them.
-      const skipUnknownOperation = (
+      // neither lists nor replays them. Records of removed operations are
+      // deleted.
+      const skipUndefinedOperation = (
         record: OfflineQueueEntry | PersistedOfflineResolutionRecord,
-      ): boolean => {
-        if (operations[record.operation]) return false;
-        loadedUnknownOperationUploadIds.push(
+        removedRecordIds: string[],
+      ): 'known' | 'unknown' | 'removed' => {
+        if (operations[record.operation]) return 'known';
+        const uploadIds = [
           ...Object.values(record.attachedUploadIds ?? {}),
           ...(record.dependencyUploadIds ?? []),
-        );
+        ];
+        if (removedOperations?.includes(record.operation)) {
+          removedRecordIds.push(record.id);
+          removedUploadIds.push(...uploadIds);
+          return 'removed';
+        }
+        loadedUnknownOperationUploadIds.push(...uploadIds);
         loadedUnknownOperationEntityRefs.push(...record.entityRefs);
-        return true;
+        return 'unknown';
       };
       for (const entry of loadedQueueEntries.values()) {
-        if (skipUnknownOperation(entry)) continue;
-        queueEntries.set(entry.id, entry);
+        const kind = skipUndefinedOperation(entry, removedQueueEntryIds);
+        if (kind === 'known') {
+          queueEntries.set(entry.id, entry);
+        } else if (
+          kind === 'unknown' &&
+          (loadedEarliestUnknownQueueEntry === null ||
+            compareQueueEntries(entry, loadedEarliestUnknownQueueEntry) < 0)
+        ) {
+          loadedEarliestUnknownQueueEntry = entry;
+        }
       }
       for (const resolution of loadedResolutionEntries.values()) {
         const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
@@ -1133,20 +1160,57 @@ export function createOfflineStoreController<
           void current.resolutionNamespace.remove(resolution.id);
           continue;
         }
-        if (skipUnknownOperation(resolution)) continue;
+        if (
+          skipUndefinedOperation(resolution, removedResolutionIds) !== 'known'
+        )
+          continue;
         resolutions.set(resolution.id, resolution);
       }
       unknownOperationUploadIds = loadedUnknownOperationUploadIds;
       unknownOperationEntityRefs = loadedUnknownOperationEntityRefs;
+      earliestUnknownQueueEntry = loadedEarliestUnknownQueueEntry;
       // Unknown entries keep their place in the queue order.
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
+
+      if (removedQueueEntryIds.length > 0 || removedResolutionIds.length > 0) {
+        await deleteRemovedOperationRecords(
+          current,
+          removedQueueEntryIds,
+          removedResolutionIds,
+          removedUploadIds,
+        );
+      }
     })().finally(() => {
       hydratedPromise = null;
     });
 
     return hydratedPromise;
+  }
+
+  async function deleteRemovedOperationRecords(
+    current: ActiveSessionState,
+    queueEntryIds: string[],
+    resolutionIds: string[],
+    uploadIds: string[],
+  ): Promise<void> {
+    try {
+      await Promise.all([
+        ...queueEntryIds.map((id) => current.queueNamespace.remove(id)),
+        ...resolutionIds.map((id) => current.resolutionNamespace.remove(id)),
+      ]);
+      for (const uploadId of uploadIds) {
+        await current.session.deleteUpload(uploadId);
+      }
+    } catch (error) {
+      onPersistentStorageError?.(error);
+    }
+    onPersistentStorageError?.(
+      new Error(
+        `[tsdf] Store "${storeName}" still had ${queueEntryIds.length + resolutionIds.length} unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations. They were deleted: no deploy can replay them anymore.`,
+      ),
+    );
   }
 
   function parseConflictPayloadForOperation<
@@ -1590,7 +1654,13 @@ export function createOfflineStoreController<
       })),
       ...unknownOperationEntityRefs,
     ]);
-    const nextReplayEntry = getSortedEntries()[0] ?? null;
+    const nextKnownEntry = getSortedEntries()[0] ?? null;
+    const nextReplayEntry =
+      earliestUnknownQueueEntry !== null &&
+      (nextKnownEntry === null ||
+        compareQueueEntries(earliestUnknownQueueEntry, nextKnownEntry) < 0)
+        ? earliestUnknownQueueEntry
+        : nextKnownEntry;
 
     // Before publishing to the session: publishing can make the store
     // recover and revalidate, which must already see the store's current
@@ -3249,7 +3319,8 @@ export function createOfflineStoreController<
       current.session.getStatus().isOfflineMode ||
       current.session.isReplayBlocked() ||
       !current.session.isLeader() ||
-      queueEntries.size === 0
+      queueEntries.size === 0 ||
+      earliestUnknownQueueEntry !== null
     ) {
       return;
     }
@@ -3276,7 +3347,8 @@ export function createOfflineStoreController<
       if (
         current.session.getStatus().isOfflineMode ||
         current.session.isReplayBlocked() ||
-        !current.session.isLeader()
+        !current.session.isLeader() ||
+        earliestUnknownQueueEntry !== null
       ) {
         return;
       }

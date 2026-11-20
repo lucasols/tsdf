@@ -358,6 +358,8 @@ export function createListQueryStoreTestEnv<
           ? {
               operations:
                 persistentStorageWithResolvedAdapter.offline.operations,
+              removedOperations:
+                persistentStorageWithResolvedAdapter.offline.removedOperations,
             }
           : undefined,
       })

@@ -247,6 +247,82 @@ function createOlderDeployDocumentEnv({
   });
 }
 
+function createDeployStoreManager(
+  sessionKey: string,
+  onPersistentStorageError?: (error: unknown) => void,
+) {
+  return createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+    onPersistentStorageError,
+  });
+}
+
+type DocumentValueOperation = DocumentOfflineOperationDefinition<
+  { value: number },
+  { input: { value: number } }
+>;
+
+/**
+ * A document store of a deploy that defines `operationNames`. Each replay is
+ * logged in `sent` as `label.operation(value)`.
+ */
+function createDeployDocumentEnv({
+  storeManager,
+  storeName,
+  label,
+  operationNames,
+  removedOperations,
+  sent,
+}: {
+  storeManager: ReturnType<typeof createDeployStoreManager>;
+  storeName: string;
+  label: string;
+  operationNames: readonly string[];
+  removedOperations?: readonly string[];
+  sent: string[];
+}) {
+  const operations: Record<string, DocumentValueOperation> = {};
+  for (const operationName of operationNames) {
+    operations[operationName] = {
+      inputSchema: docMutationInputSchema,
+      kind: 'update',
+      execute: ({ input }) => {
+        sent.push(`${label}.${operationName}(${input.value})`);
+        return Promise.resolve(input);
+      },
+    };
+  }
+
+  return createDocumentStoreTestEnv<
+    number,
+    Record<string, DocumentValueOperation>
+  >(1, {
+    id: storeName,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations, removedOperations },
+    },
+  });
+}
+
+function queueOfflineValueEdit(
+  env: ReturnType<typeof createDeployDocumentEnv>,
+  operation: string,
+  value: number,
+) {
+  return resolveAfterAllTimers(
+    env.apiStore.performMutation({
+      mutation: () => Promise.resolve(value),
+      offline: { operation, input: { value } },
+    }),
+  );
+}
+
 function createOfflinePartialListQueryEnv({
   sessionKey,
   storeName,
@@ -960,6 +1036,167 @@ test('an older deploy keeps conflicts of an operation only a newer deploy knows'
   `);
 
   reloadedHook.unmount();
+});
+
+test('an older deploy pauses sync behind edits only a newer deploy can send, so the latest edit is the one kept', async () => {
+  const sessionKey = 'offline-unknown-operation-order-session';
+  const docStoreName = 'offline-unknown-operation-order-doc';
+  const otherStoreName = 'offline-unknown-operation-order-other';
+  const sent: string[] = [];
+
+  // In the newer deploy, which added `updateValue`, the user edits a document
+  // offline twice: first with the new operation, then with one both deploys
+  // know. Then they edit another store, also with an operation both know.
+  network.setOffline();
+  const newerStoreManager = createDeployStoreManager(sessionKey);
+  const newerDoc = createDeployDocumentEnv({
+    storeManager: newerStoreManager,
+    storeName: docStoreName,
+    label: 'doc',
+    operationNames: ['updateValue', 'legacyUpdateValue'],
+    sent,
+  });
+  const newerOther = createDeployDocumentEnv({
+    storeManager: newerStoreManager,
+    storeName: otherStoreName,
+    label: 'other',
+    operationNames: ['legacyUpdateValue'],
+    sent,
+  });
+  await queueOfflineValueEdit(newerDoc, 'updateValue', 5);
+  await queueOfflineValueEdit(newerDoc, 'legacyUpdateValue', 7);
+  await queueOfflineValueEdit(newerOther, 'legacyUpdateValue', 1);
+  await flushAllTimers();
+
+  // The connection comes back while only a tab of the older deploy, which
+  // doesn't define `updateValue`, is open.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const olderStoreManager = createDeployStoreManager(sessionKey);
+  const olderDoc = createDeployDocumentEnv({
+    storeManager: olderStoreManager,
+    storeName: docStoreName,
+    label: 'doc',
+    operationNames: ['legacyUpdateValue'],
+    sent,
+  });
+  const olderOther = createDeployDocumentEnv({
+    storeManager: olderStoreManager,
+    storeName: otherStoreName,
+    label: 'other',
+    operationNames: ['legacyUpdateValue'],
+    sent,
+  });
+  const olderDocHook = renderHook(() => olderDoc.apiStore.useDocument());
+  const olderOtherHook = renderHook(() => olderOther.apiStore.useDocument());
+  await flushAllTimers();
+
+  // Sending the edits it knows would put `7` on the server before `5`, and
+  // the newer deploy would later overwrite the user's latest edit with `5`.
+  // The document store waits instead, and so does the later edit of the
+  // other store, to keep the order the user made them in.
+  expect(sent).toMatchInlineSnapshot(`[]`);
+  olderDocHook.unmount();
+  olderOtherHook.unmount();
+
+  // The user reloads into the newer deploy: every edit is sent in order.
+  resetSessionForTests();
+  const reloadedStoreManager = createDeployStoreManager(sessionKey);
+  const reloadedDoc = createDeployDocumentEnv({
+    storeManager: reloadedStoreManager,
+    storeName: docStoreName,
+    label: 'doc',
+    operationNames: ['updateValue', 'legacyUpdateValue'],
+    sent,
+  });
+  const reloadedOther = createDeployDocumentEnv({
+    storeManager: reloadedStoreManager,
+    storeName: otherStoreName,
+    label: 'other',
+    operationNames: ['legacyUpdateValue'],
+    sent,
+  });
+  const reloadedDocHook = renderHook(() => reloadedDoc.apiStore.useDocument());
+  const reloadedOtherHook = renderHook(() =>
+    reloadedOther.apiStore.useDocument(),
+  );
+  await flushAllTimers();
+
+  expect(sent).toMatchInlineSnapshot(
+    `['doc.updateValue(5)', 'doc.legacyUpdateValue(7)', 'other.legacyUpdateValue(1)']`,
+  );
+
+  reloadedDocHook.unmount();
+  reloadedOtherHook.unmount();
+});
+
+test('queued edits of an operation listed in removedOperations are deleted and no longer hold back sync', async () => {
+  const sessionKey = 'offline-removed-operation-session';
+  const storeName = 'offline-removed-operation-doc';
+  const sent: string[] = [];
+  const reportedErrors: string[] = [];
+
+  // An older deploy still has `oldUpdateValue`. The user edits offline with
+  // it, then with `updateValue`.
+  network.setOffline();
+  const olderEnv = createDeployDocumentEnv({
+    storeManager: createDeployStoreManager(sessionKey),
+    storeName,
+    label: 'doc',
+    operationNames: ['oldUpdateValue', 'updateValue'],
+    sent,
+  });
+  await queueOfflineValueEdit(olderEnv, 'oldUpdateValue', 2);
+  await queueOfflineValueEdit(olderEnv, 'updateValue', 3);
+  await flushAllTimers();
+
+  // The next deploy deletes `oldUpdateValue` for good and lists it in
+  // `removedOperations`. The user opens it online.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const newerEnv = createDeployDocumentEnv({
+    storeManager: createDeployStoreManager(sessionKey, (error) => {
+      reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+    }),
+    storeName,
+    label: 'doc',
+    operationNames: ['updateValue'],
+    removedOperations: ['oldUpdateValue'],
+    sent,
+  });
+  const newerHook = renderHook(() => newerEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  // The edit of the removed operation can't be sent by any deploy anymore:
+  // it is dropped and reported, and the edit after it is sent.
+  expect(sent).toMatchInlineSnapshot(`['doc.updateValue(3)']`);
+  expect(reportedErrors).toMatchInlineSnapshot(
+    `- '[tsdf] Store "offline-removed-operation-doc" still had 1 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations. They were deleted: no deploy can replay them anymore.'`,
+  );
+  newerHook.unmount();
+
+  // It was deleted from storage, so it is not reported again.
+  resetSessionForTests();
+  reportedErrors.length = 0;
+  const reopenedEnv = createDeployDocumentEnv({
+    storeManager: createDeployStoreManager(sessionKey, (error) => {
+      reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+    }),
+    storeName,
+    label: 'doc',
+    operationNames: ['updateValue'],
+    removedOperations: ['oldUpdateValue'],
+    sent,
+  });
+  const reopenedHook = renderHook(() => reopenedEnv.apiStore.useDocument());
+  await flushAllTimers();
+  expect(reportedErrors).toMatchInlineSnapshot(`[]`);
+
+  reopenedHook.unmount();
 });
 
 test('local-sync restart keeps offline temp rows visible for partial-resource list queries', async () => {

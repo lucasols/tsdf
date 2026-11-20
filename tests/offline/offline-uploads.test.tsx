@@ -2027,11 +2027,13 @@ function createRecordingDocumentEnv({
   storeManager,
   storeName,
   operationNames,
+  removedOperations,
   sent,
 }: {
   storeManager: ReturnType<typeof createUploadsStoreManager>;
   storeName: string;
   operationNames: readonly string[];
+  removedOperations?: readonly string[];
   sent: string[];
 }) {
   const operations: Record<string, DocumentValueOperation> = {};
@@ -2059,7 +2061,7 @@ function createRecordingDocumentEnv({
     persistentStorage: {
       adapter: 'local-sync',
       schema: docSchema,
-      offline: { operations },
+      offline: { operations, removedOperations },
     },
   });
 }
@@ -2159,6 +2161,49 @@ test('an older deploy keeps the attached file of an edit queued for an operation
   );
 
   reloadedHook.unmount();
+});
+
+test('attached files of edits queued for an operation listed in removedOperations are deleted with them', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-removed-operation-upload-session';
+  const storeName = 'offline-removed-operation-upload-doc';
+  const sent: string[] = [];
+
+  // The user attaches a file to an offline edit made with `oldUpdateValue`.
+  network.setOffline();
+  const olderStoreManager = createUploadsStoreManager(sessionKey);
+  const olderEnv = createRecordingDocumentEnv({
+    storeManager: olderStoreManager,
+    storeName,
+    operationNames: ['oldUpdateValue'],
+    sent,
+  });
+  await queueOfflineEdit(olderEnv, 'oldUpdateValue', 2, 'old photo');
+  await flushAllTimers();
+  expect(olderStoreManager.getOfflineUploads()).toHaveLength(1);
+
+  // The next deploy deletes `oldUpdateValue` for good and lists it in
+  // `removedOperations`. Opening the store deletes the edit, and its file
+  // with it: no deploy could send it anymore.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const newerStoreManager = createUploadsStoreManager(sessionKey);
+  const newerEnv = createRecordingDocumentEnv({
+    storeManager: newerStoreManager,
+    storeName,
+    operationNames: ['updateValue'],
+    removedOperations: ['oldUpdateValue'],
+    sent,
+  });
+  const newerHook = renderHook(() => newerEnv.apiStore.useDocument());
+  await advanceTime(5_000);
+
+  expect(sent).toMatchInlineSnapshot(`[]`);
+  expect(newerStoreManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+
+  newerHook.unmount();
 });
 
 test('attached files of a store the app has not created yet after a restart survive offline edits in other stores', async () => {
