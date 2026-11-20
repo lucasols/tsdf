@@ -532,7 +532,7 @@ function Thumbnail({ file }: { file: FileRef }) {
 
 The hook returns an `OfflineUploadFile`, a union narrowed by `status`:
 
-- `status` — `idle` (falsy id), `loading`, `success`, `missing` (no upload with this id is staged in the active session) or `error` (the upload adapter failed to read the file)
+- `status` — `idle` (falsy id), `loading`, `success`, `missing` (no upload with this id is staged in the active session) or `error` (the upload adapter failed to read the file; the read is tried again once every component stops using the id, or right away when the id is staged again)
 - `url` — object URL of the staged file, managed by TSDF. Only set on `success`
 - `file` — the staged `File`, for reading its contents. Only set on `success`
 - `error` — the read failure. Only set on `error`
@@ -546,12 +546,13 @@ Caching and URL lifetime:
 - When the upload leaves the session (`deleteOfflineUpload`, retention expiry, or a mutation-attached file being consumed) the status becomes `missing` and the URL is revoked. Staging the same id again makes it available again.
 - Use `url` directly in render (`<img src>`, `<a href>`). Do not revoke it, do not keep it outside of render, and do not create extra object URLs from `file`.
 
-The file follows the upload record, not its upload state: it stays available while the upload is `pending`, `uploading` and `uploaded`. To move from the local file to the uploaded one without a gap, derive the id from the entity as in the example above:
+The file follows the upload record, not its upload state: it stays available while the upload is `pending`, `uploading` and `uploaded`. To move from the local file to the uploaded one without a gap, derive the id from the entity as in the example above, and write the server ref into the entity when the mutation replays:
 
-- Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). For a replayed mutation that happens after its `onSuccessExecute` ran, so the local file stays renderable until `onSuccessExecute` writes the server ref into the entity; from that render on the component passes a falsy id and renders the server file. Uploads no queued work declared stay until `deleteOfflineUpload` or retention removes them.
-- Files attached with `performMutation({ upload })` are removed once their mutation replayed, which happens after `onSuccessExecute` ran, so the entity already holds the server data when the hook reports `missing`.
+- Uploads staged with `saveOfflineUpload` are deleted once the last queued work that declares them leaves the queue (see [Upload lifecycle](#upload-lifecycle)). Files attached with `performMutation({ upload })` are removed once their mutation replayed. Uploads no queued work declared stay until `deleteOfflineUpload` or retention removes them.
+- A replayed mutation releases its uploads after its `onSuccessExecute` ran (and, for a temp entity create, after the result replaced the temp entity). When `onSuccessExecute` writes the server ref into the entity, the local file stays renderable until that render, and from then on the component passes a falsy id and renders the server file.
+- Otherwise the entity keeps the local ref until it is revalidated after replay, so the hook can report `missing` for a moment in between. The same happens for work `shouldSkipSync` drops, and in other tabs, whose entities keep the local ref until they refetch.
 
-A local ref paired with `missing` therefore means the staged file was deleted or expired, not that it is about to appear.
+Outside of these windows, a local ref paired with `missing` means the staged file was deleted or expired, not that it is about to appear.
 
 ### Upload failure handling
 

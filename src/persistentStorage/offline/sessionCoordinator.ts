@@ -2888,9 +2888,11 @@ class SessionOfflineCoordinator {
         }),
       );
     } finally {
+      // The ids already left `#uploads`, so publish that even when a storage
+      // removal failed.
+      this.#syncUploadsState();
       this.#publishUploadsRemoved(ids);
     }
-    this.#syncUploadsState();
     void this.#refreshUploadRetention();
   }
 
