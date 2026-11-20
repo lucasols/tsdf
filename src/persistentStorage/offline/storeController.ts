@@ -1173,6 +1173,35 @@ export function createOfflineStoreController<
                 .filter((entityRef) => entityRef.entityKind === 'item')
                 .map((entityRef) => entityRef.entityKey)
             : [];
+      // This deploy can't run the `dependsOn` of an operation it doesn't
+      // define, so such a record depends on a removed item when its input
+      // holds the item's temp id, the same match the temp id rewrite uses.
+      const removedTempIdByItemKey = new Map<string, ValidPayload>();
+      const rememberRemovedTempIds = (
+        record: OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      ) => {
+        for (const itemKey of getCreatedItemKeys(record)) {
+          const tempId = getTempIdForEntityRef({
+            entityRefs: record.entityRefs,
+            tempIds: record.tempIds,
+            entityKey: itemKey,
+          });
+          if (tempId !== undefined) removedTempIdByItemKey.set(itemKey, tempId);
+        }
+      };
+      const dependsOnRemovedItem = (
+        record: OfflineQueueEntry | PersistedOfflineResolutionRecord,
+        itemKey: string,
+      ): boolean => {
+        if (operations[record.operation]) {
+          return getDependencyBlockerEntityKeys(record).has(itemKey);
+        }
+        const tempId = removedTempIdByItemKey.get(itemKey);
+        return tempId !== undefined && payloadContains(record.input, tempId);
+      };
+      for (const record of [...removedEntries, ...removedResolutions]) {
+        rememberRemovedTempIds(record);
+      }
       const pendingRemovedItemKeys = [
         ...removedEntries,
         ...removedResolutions,
@@ -1192,12 +1221,13 @@ export function createOfflineStoreController<
             !record.entityRefs.some(
               (entityRef) => entityRef.entityKey === itemKey,
             ) &&
-            !getDependencyBlockerEntityKeys(record).has(itemKey)
+            !dependsOnRemovedItem(record, itemKey)
           ) {
             continue;
           }
           onRemove(record);
           removed.push(record);
+          rememberRemovedTempIds(record);
           for (const createdItemKey of getCreatedItemKeys(record)) {
             if (seenRemovedItemKeys.has(createdItemKey)) continue;
             seenRemovedItemKeys.add(createdItemKey);
@@ -2106,6 +2136,17 @@ export function createOfflineStoreController<
 
     return getDependencyBlockerEntityKeys(args.workItem).has(
       args.dependencySource.entityKey,
+    );
+  }
+
+  function payloadContains(value: unknown, payload: ValidPayload): boolean {
+    if (deepEqual(value, payload)) return true;
+    if (Array.isArray(value)) {
+      return value.some((item) => payloadContains(item, payload));
+    }
+    return (
+      isObject(value) &&
+      Object.values(value).some((item) => payloadContains(item, payload))
     );
   }
 

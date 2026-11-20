@@ -1,7 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
@@ -1510,6 +1510,136 @@ test('removing a create operation also deletes the queued edits of its items tha
       { patchUserName: createPatchUserNameOperation(sent) },
       ['createUser'],
     ),
+  });
+  const laterHook = renderHook(() =>
+    laterEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+
+  expect(sent).toMatchInlineSnapshot(`[]`);
+
+  laterHook.unmount();
+});
+
+type InviteUserOperation = ListQueryOfflineOperationDefinition<
+  OfflineStorageUserRow,
+  ListQueryParams,
+  string,
+  { name: string; invitedBy: string },
+  unknown,
+  OfflineStorageUserRow
+>;
+
+test('removing a create operation also deletes the creations that only depend on its items through dependsOn', async () => {
+  const sessionKey = 'offline-removed-create-unknown-dependent-session';
+  const storeName = 'offline-removed-create-unknown-dependent-users';
+  const sent: string[] = [];
+  const reportedErrors: string[] = [];
+
+  // `inviteUser` creates a new user invited by another one. It only refers to
+  // the inviter through `dependsOn`, not through its entity refs.
+  const inviteUser: InviteUserOperation = {
+    inputSchema: rc_object({ name: rc_string, invitedBy: rc_string }),
+    kind: 'create',
+    getEntityRefs: ({ input }) => [`temp:${input.name}`],
+    dependsOn: ({ input }) => [input.invitedBy],
+    tempEntity: {
+      buildPendingEntity: (input) => ({ id: -2, name: input.name }),
+      reconcileServerEntity: (result) => ({
+        finalPayload: `users||${result.id}`,
+        finalData: result,
+      }),
+    },
+    execute: ({ input }) => {
+      sent.push(`inviteUser(${input.name}, ${input.invitedBy})`);
+      return Promise.resolve({ id: 4, name: input.name });
+    },
+  };
+
+  // In a deploy with `createUser` and `inviteUser`, the user creates Linus
+  // offline, then invites Grace on Linus' behalf.
+  network.setOffline();
+  const olderEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    CreateListQueryUserOperations & { inviteUser: InviteUserOperation }
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      createUser: createCreateUserOperation(sent),
+      inviteUser,
+    }),
+  });
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
+    }),
+  );
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve({ id: 4, name: 'Grace' }),
+      offline: {
+        operation: 'inviteUser',
+        input: { name: 'Grace', invitedBy: 'temp:Linus' },
+      },
+    }),
+  );
+  await flushAllTimers();
+
+  // The next deploy deletes `createUser` for good and doesn't define
+  // `inviteUser` yet. The user opens it online.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const middleEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    PatchUserNameOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey, (error) => {
+      reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+    }),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage(
+      { patchUserName: createPatchUserNameOperation(sent) },
+      ['createUser'],
+    ),
+  });
+  const middleHook = renderHook(() =>
+    middleEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+
+  // Grace's invitation needs Linus, who will never exist. This deploy can't
+  // run `inviteUser.dependsOn`, but the invitation's input holds Linus' temp
+  // id, so it is deleted with his creation instead of pausing the sync
+  expect(reportedErrors).toMatchInlineSnapshot(
+    `- '[tsdf] Store "offline-removed-create-unknown-dependent-users" still had 2 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.'`,
+  );
+  middleHook.unmount();
+
+  // A later deploy brings `inviteUser` back. Nothing is left to send for an
+  // inviter the server doesn't have.
+  resetSessionForTests();
+  const laterEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    { inviteUser: InviteUserOperation }
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({ inviteUser }, [
+      'createUser',
+    ]),
   });
   const laterHook = renderHook(() =>
     laterEnv.apiStore.useListQuery(offlineStorageUsersQuery),
