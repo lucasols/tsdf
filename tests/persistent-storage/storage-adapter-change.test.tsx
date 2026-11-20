@@ -427,7 +427,7 @@ describe('store moves from local-sync to an async adapter', () => {
           └ oq.counter:1735689600000:4fzzzxjy (0.34 kb)"
     `);
     expect(persistentStorageErrors).toMatchInlineSnapshot(
-      `- "[tsdf] Store \\"counter\\" now uses an async persistentStorage adapter, but localStorage still holds 1 unsent offline record(s) (queued mutations or pending resolutions) it wrote through 'local-sync'. They were kept, but they are only replayed while the store uses 'local-sync'."`,
+      `- "[tsdf] Store \\"counter\\" now uses an async persistentStorage adapter, but localStorage still holds 1 unsent offline record(s) (queued mutations or pending resolutions) it wrote through 'local-sync'. They were kept, but they are only replayed while the store uses 'local-sync': roll the store back to 'local-sync' to replay them. This is reported on every page load until then."`,
     );
     // The moved store cannot see the queued edit: this is the stranded work
     // the report above is about. It has no cache in the new adapter and the

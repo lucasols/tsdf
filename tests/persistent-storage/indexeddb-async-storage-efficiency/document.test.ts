@@ -9,7 +9,6 @@ import {
   getIndexedDbStructureSnapshot,
   getParsedIndexedDbRecordData,
   startIndexedDbPersistentStorageOperationCapture,
-  startPersistentStorageOperationCapture,
 } from '../../utils/indexedDbPersistentStorageOptimizationTestUtils';
 import { createIndexedDbPersistentStorageTestStore } from '../../utils/indexedDbPersistentStorageTestStore';
 import { getLocalStorageTree } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -607,7 +606,6 @@ describe('indexeddb async storage efficiency: document', () => {
     previousEnv.apiStore.dispose();
     resetExpirationScanTracking();
 
-    const localStorageCapture = startPersistentStorageOperationCapture();
     const env = createDocumentEnv({
       storeName,
       sessionKey,
@@ -615,36 +613,8 @@ describe('indexeddb async storage efficiency: document', () => {
     });
     const hook = renderHook(() => env.apiStore.useDocument());
     // The leftovers cleanup is scheduled for idle time (2s timer fallback).
+    // Its exact localStorage reads are covered by the adapter-change suite.
     await advanceTime(2100);
-
-    // Startup pays a single manifest read to notice the leftovers. The idle
-    // cleanup then confirms no offline work is queued (`oq`, `oc`) and removes
-    // only this store's keys; the final key scan looks for list-query entries,
-    // which have no manifest.
-    expect(localStorageCapture.finish().timelineString).toMatchInlineSnapshot(`
-      "
-      time |
-      0    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-moved-from-local-sync.m
-           |    └ (namespace index) | 0.06 kb
-           ·
-      2s   | 📖 #2 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.oq.m
-           |    └ (namespace index)
-      .    | 📖 #3 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.oc.m
-           |    └ (namespace index)
-      .    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-moved-from-local-sync.m
-           |    └ (namespace index) | 0.06 kb
-      .    | 🗑️ #4 ✅->❌ tsdf.sess1.doc-moved-from-local-sync (entry data)
-      .    | 🗑️ #1 ✅->❌ tsdf._m.r.s:sess1.doc-moved-from-local-sync.m
-           |    └ (namespace index)
-      .    | 📖 #5 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.ci.m
-           |    └ (namespace index)
-      .    | 📖 #6 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.li.m
-           |    └ (items index)
-      .    | 📖 #7 ❌ tsdf._m.r.n:sess1.doc-moved-from-local-sync.oe.m
-           |    └ (namespace index)
-      .    | 🔑[0] #8 ✅ tsdf._m.g (global maintenance)
-      "
-    `);
 
     // Let the refetched document reach IndexedDB.
     await flushInvalidationPersistence();

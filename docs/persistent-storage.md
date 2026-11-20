@@ -199,12 +199,12 @@ Each adapter is a separate storage. A store only reads what was written through 
 
 Moving a store from `'local-sync'` to an async adapter:
 
-- The first time the store runs with the async adapter, TSDF removes everything that store left in `localStorage` (cached entries and their metadata) during browser idle time. Other stores and non-TSDF keys are not touched.
+- The first time the store runs with the async adapter, TSDF removes everything that store left in `localStorage` for the active session (cached entries and their metadata) during browser idle time. Other stores, other sessions and non-TSDF keys are not touched; entries a store left under another session key are only removed by the regular expiry while some store still uses `'local-sync'`.
 - Detecting this costs one `localStorage.getItem` of a missing key per store namespace at startup for stores that never used `localStorage`; the removal only runs when that read finds something.
 - Queued offline work is never deleted. Offline mutations and pending resolutions are stored through the store's adapter, so they do not follow the store to the new adapter and are only replayed while the store uses `'local-sync'`. When `localStorage` still holds any for the store, TSDF keeps all of that store's `localStorage` entries and reports an error through `onPersistentStorageError` on every page load. Let the offline queue drain before changing the adapter of an offline-enabled store, or roll the adapter back so the queue can replay; the leftovers are removed on the next load after the queue is empty.
 - A tab still running the previous app version keeps working: it serves its data from memory and writes its entries to `localStorage` again. They are removed the next time the new version starts.
 
-Moving a store from an async adapter to `'local-sync'`, or from one async adapter to another, does not clean the previous adapter: the store no longer references it, so its old entries stay there.
+Moving a store from an async adapter to `'local-sync'`, or from one async adapter to another, does not clean the previous adapter. Its old entries are still removed by that adapter's regular expiry while another store keeps using it; once no store uses that adapter anymore, they stay there.
 
 ## Example configuration
 
@@ -258,7 +258,7 @@ const settingsStore = createDocumentStore<Settings>({
   - `opfsPersistentStorage`: ~2 weeks old entries
   - `indexedDbPersistentStorage`: ~2 weeks old entries
 - Entries referenced by queued offline mutations are protected from expiry until that queued work is replayed or discarded.
-- Expiry only covers the adapter a store currently uses. See [Changing a store's adapter](#changing-a-stores-adapter) for what happens to the previous one.
+- Expiry runs for an adapter only while at least one store uses it, and then covers every entry in that adapter, including ones left by stores that moved elsewhere. See [Changing a store's adapter](#changing-a-stores-adapter).
 
 ## Preload APIs
 

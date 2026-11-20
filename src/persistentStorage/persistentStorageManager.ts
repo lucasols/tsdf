@@ -247,8 +247,10 @@ const DISPOSABLE_ENTRY_PREFIXES = [
 
 /**
  * Removes what a store left in `localStorage` before it moved to an async
- * adapter. Nothing reads, refreshes or releases those entries anymore, so
- * without this they would stay there for good.
+ * adapter. Nothing reads, refreshes or releases those entries anymore: without
+ * this, they would only go away through the global expiry sweep, which never
+ * runs once no store uses `'local-sync'` and never removes offline-protected
+ * entries.
  *
  * Queued offline mutations and pending resolutions are never deleted: when
  * the store still has any, all of its entries are kept as they are (the cached
@@ -330,7 +332,7 @@ function createLocalStorageLeftoversCheck(
 
           onPersistentStorageError?.(
             new Error(
-              `[tsdf] Store "${storeName}" now uses an async persistentStorage adapter, but localStorage still holds ${unsentRecordsCount} unsent offline record(s) (queued mutations or pending resolutions) it wrote through 'local-sync'. They were kept, but they are only replayed while the store uses 'local-sync'.`,
+              `[tsdf] Store "${storeName}" now uses an async persistentStorage adapter, but localStorage still holds ${unsentRecordsCount} unsent offline record(s) (queued mutations or pending resolutions) it wrote through 'local-sync'. They were kept, but they are only replayed while the store uses 'local-sync': roll the store back to 'local-sync' to replay them. This is reported on every page load until then.`,
             ),
           );
         })
