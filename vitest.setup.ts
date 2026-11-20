@@ -50,10 +50,44 @@ console.error = (...args) => {
   if (!skipOriginal) originalConsoleError(...args);
 };
 
+/**
+ * Every test runs in the same process, so a store a test leaves undisposed
+ * would keep its `BroadcastChannel` open and act as a still-open tab in later
+ * tests. Close every channel a test opened once it ends, like a page unload.
+ */
+const openBroadcastChannels = new Set<BroadcastChannel>();
+
+class TestScopedBroadcastChannel extends BroadcastChannel {
+  constructor(name: string) {
+    super(name);
+    openBroadcastChannels.add(this);
+  }
+
+  override close(): void {
+    openBroadcastChannels.delete(this);
+    super.close();
+  }
+}
+
+globalThis.BroadcastChannel = TestScopedBroadcastChannel;
+
+type LockCallback<T> = (lock: { name: string }) => T | Promise<T>;
+
+// Single tab: every lock is available right away. Supports both
+// `request(name, callback)` and `request(name, options, callback)`.
 const defaultNavigatorLocks = {
   request: vi.fn(
-    async <T>(_name: string, callback: () => T | Promise<T>) =>
-      await callback(),
+    async <T>(
+      name: string,
+      optionsOrCallback: LockCallback<T> | { ifAvailable?: boolean },
+      callback?: LockCallback<T>,
+    ) => {
+      const run =
+        typeof optionsOrCallback === 'function' ? optionsOrCallback : callback;
+      if (!run) throw new Error('navigator.locks.request needs a callback');
+
+      return await run({ name });
+    },
   ),
 };
 
@@ -69,6 +103,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetSessionOfflineCoordinatorRegistryForTests();
+  for (const channel of openBroadcastChannels) channel.close();
   Object.defineProperty(globalThis.navigator, 'locks', {
     value: defaultNavigatorLocks,
     writable: true,

@@ -182,6 +182,10 @@ type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
     items: ItemPayload[];
     status: 'success' | 'error' | 'skipped';
   };
+  /**
+   * Emitted when an offline temp item is reconciled to its final payload, in
+   * every tab of the session, not only the one that sent the creation.
+   */
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
@@ -2256,64 +2260,21 @@ export function createListQueryStore<
           );
         },
         reconcileTempEntity: ({ tempId, reconciliation }) => {
-          const tempPayload =
-            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
-          const tempItemKey = getItemKey(tempPayload);
-          const currentItem = getItemState(tempPayload);
-          const finalData =
-            reconciliation.finalData !== undefined
-              ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the list-query store.
-                __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
-              : (currentItem ?? undefined);
-          if (finalData === undefined) return;
-
-          const finalPayload =
-            // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(
-              reconciliation.finalPayload,
-            );
-          const finalItemKey = getItemKey(finalPayload);
-          const queryMemberships = Object.entries(store.state.queries)
-            .map(([queryKey, query]) => ({
-              queryKey,
-              index: query.items.indexOf(tempItemKey),
-            }))
-            .filter(({ index }) => index !== -1);
-
-          deleteItemState(tempPayload);
-          addItemToState(finalPayload, finalData);
-
-          storeEvents.emit('tempEntityReconciled', {
-            tempId: tempPayload,
-            finalPayload,
-          });
-
-          if (queryMemberships.length === 0) return;
-
-          store.produceState(
-            (draft) => {
-              for (const { queryKey, index } of queryMemberships) {
-                const query = notNullish(draft.queries[queryKey]);
-                const existingIndex = query.items.indexOf(finalItemKey);
-                if (existingIndex !== -1) {
-                  query.items.splice(existingIndex, 1);
-                }
-
-                query.items.splice(
-                  Math.min(index, query.items.length),
-                  0,
-                  finalItemKey,
-                );
-              }
-            },
-            { action: 'offline-reconcile-temp-item' },
+          reconcileOfflineTempItem(
+            tempId,
+            reconciliation.finalPayload,
+            reconciliation.finalData,
           );
-
-          touchQueries(queryMemberships.map(({ queryKey }) => queryKey));
-          for (const { queryKey } of queryMemberships) {
-            publishQuerySnapshot(queryKey);
-          }
+        },
+        applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
+          // The replaying tab only knows the query memberships it loaded, so
+          // this tab moves its own memberships of the temp item to the final
+          // one. The server data arrives next through the item snapshot.
+          const reconciled = runWithoutBroadcast(() =>
+            reconcileOfflineTempItem(tempId, finalPayload, undefined),
+          );
+          // The temp item is already gone here: listeners are still told
+          if (!reconciled) emitTempItemReconciled(tempId, finalPayload);
         },
         captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)
@@ -2544,6 +2505,82 @@ export function createListQueryStore<
         itemsPendingFullInvalidation.delete(itemKey);
       }
     }
+  }
+
+  function emitTempItemReconciled(
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ): void {
+    storeEvents.emit('tempEntityReconciled', {
+      // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when notifying listeners.
+      tempId: __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+      // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+      finalPayload: __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayload),
+    });
+  }
+
+  /**
+   * Replaces an offline temp item with its final one, in place in every query
+   * that lists it. Returns `false` when there is no data for the final item.
+   */
+  function reconcileOfflineTempItem(
+    tempId: ValidPayload,
+    finalPayloadValue: ValidPayload,
+    finalDataValue: unknown,
+  ): boolean {
+    const tempPayload =
+      // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
+      __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
+    const tempItemKey = getItemKey(tempPayload);
+    const currentItem = getItemState(tempPayload);
+    const finalData =
+      finalDataValue !== undefined
+        ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the list-query store.
+          __LEGIT_CAST__<ItemState, unknown>(finalDataValue)
+        : (currentItem ?? undefined);
+    if (finalData === undefined) return false;
+
+    const finalPayload =
+      // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+      __LEGIT_CAST__<ItemPayload, ValidPayload>(finalPayloadValue);
+    const finalItemKey = getItemKey(finalPayload);
+    const queryMemberships = Object.entries(store.state.queries)
+      .map(([queryKey, query]) => ({
+        queryKey,
+        index: query.items.indexOf(tempItemKey),
+      }))
+      .filter(({ index }) => index !== -1);
+
+    deleteItemState(tempPayload);
+    addItemToState(finalPayload, finalData);
+    emitTempItemReconciled(tempId, finalPayloadValue);
+
+    if (queryMemberships.length === 0) return true;
+
+    store.produceState(
+      (draft) => {
+        for (const { queryKey, index } of queryMemberships) {
+          const query = notNullish(draft.queries[queryKey]);
+          const existingIndex = query.items.indexOf(finalItemKey);
+          if (existingIndex !== -1) {
+            query.items.splice(existingIndex, 1);
+          }
+
+          query.items.splice(
+            Math.min(index, query.items.length),
+            0,
+            finalItemKey,
+          );
+        }
+      },
+      { action: 'offline-reconcile-temp-item' },
+    );
+
+    touchQueries(queryMemberships.map(({ queryKey }) => queryKey));
+    for (const { queryKey } of queryMemberships) {
+      publishQuerySnapshot(queryKey);
+    }
+    return true;
   }
 
   function cleanupItemStateMetadata(itemKey: string): void {
