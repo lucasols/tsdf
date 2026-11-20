@@ -109,7 +109,7 @@ A mutation is also queued while online when older mutations for the same entitie
 
 ## Revalidation After Recovering
 
-While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations are ignored, and cached data stays visible.
+While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations only re-check connectivity (`network.getIsOffline`) instead of refetching, and cached data stays visible. When the re-check finds the connection back, the session leaves offline mode and the stores revalidate as described below.
 
 Each store attached to the manager revalidates by itself once it recovers, without the app having to invalidate anything:
 

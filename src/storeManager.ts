@@ -13,6 +13,7 @@ import {
 import {
   createDefaultStatus,
   createOfflineSession,
+  recheckIsSessionInOfflineMode,
   subscribeToOfflineRecovery,
 } from './persistentStorage/offline/sessionCoordinator';
 import type {
@@ -150,8 +151,8 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   resetAll: (ignoreStores: string[]) => void;
   /**
    * Signals a shared real-time transport reconnect to all registered stores.
-   * Ignored while the offline session is in offline mode: each store is
-   * revalidated when it recovers (the session is back online, its queued
+   * While the offline session is in offline mode it only re-checks
+   * connectivity instead: each store is revalidated when it recovers (the session is back online, its queued
    * mutations finished replaying and the store has nothing left waiting for
    * a manual resolution).
    */
@@ -410,6 +411,10 @@ export function createStoreManager<
       }
     },
     onTransportReconnect: () => {
+      // Re-checked once for all stores: leaving offline mode revalidates
+      // every recovered store, and staying offline holds the revalidations.
+      if (recheckIsSessionInOfflineMode(storeManager.getSessionKey())) return;
+
       for (const registeredStore of [...registry.stores.values()]) {
         registeredStore.onTransportReconnect();
       }

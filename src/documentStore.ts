@@ -44,7 +44,7 @@ import {
 } from './persistentStorage/offline/mutationRuntime';
 import { isOfflineResolutionRecordForStore } from './persistentStorage/offline/offlineResolution.typeGuards';
 import {
-  isSessionInOfflineMode,
+  recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from './persistentStorage/offline/sessionCoordinator';
@@ -1131,7 +1131,7 @@ export function createDocumentStore<
   }
 
   function getIsOfflineMode(): boolean {
-    return isSessionInOfflineMode(storeManager.getSessionKey());
+    return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
   const focusLifecycle = createStoreFocusLifecycle(

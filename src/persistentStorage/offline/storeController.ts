@@ -2912,32 +2912,46 @@ export function createOfflineStoreController<
           existingInput: existingEntry.input,
           incomingInput: validatedInput,
         });
-        const validatedMergedInput = validateWithSchema(
-          operation.inputSchema,
-          mergedInput,
-        );
+        const latestEntry = queueEntries.get(existingEntry.id);
 
-        if (validatedMergedInput === null) {
-          throw new Error(
-            `Invalid accumulated offline operation input for "${operationName}"`,
+        // While an async merge ran, the replay may have picked the entry up
+        // or already sent it: merging into it would drop the incoming input
+        // or send the existing one again, so the mutation is queued on its
+        // own instead.
+        if (latestEntry === existingEntry) {
+          const validatedMergedInput = validateWithSchema(
+            operation.inputSchema,
+            mergedInput,
           );
+
+          if (validatedMergedInput === null) {
+            throw new Error(
+              `Invalid accumulated offline operation input for "${operationName}"`,
+            );
+          }
+
+          const nextEntry = {
+            ...existingEntry,
+            input: validatedMergedInput,
+            updatedAt: now,
+          };
+          workingQueue.set(nextEntry.id, nextEntry);
+
+          return {
+            operationName,
+            validatedInput,
+            tempIds,
+            pendingEntities,
+            nextEntry,
+            removedEntries: [existingEntry],
+          };
         }
 
-        const nextEntry = {
-          ...existingEntry,
-          input: validatedMergedInput,
-          updatedAt: now,
-        };
-        workingQueue.set(nextEntry.id, nextEntry);
-
-        return {
-          operationName,
-          validatedInput,
-          tempIds,
-          pendingEntities,
-          nextEntry,
-          removedEntries: [existingEntry],
-        };
+        if (latestEntry) {
+          workingQueue.set(latestEntry.id, latestEntry);
+        } else {
+          workingQueue.delete(existingEntry.id);
+        }
       }
     }
 

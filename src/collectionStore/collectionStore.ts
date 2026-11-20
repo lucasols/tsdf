@@ -39,7 +39,7 @@ import {
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
-  isSessionInOfflineMode,
+  recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from '../persistentStorage/offline/sessionCoordinator';
@@ -2687,7 +2687,7 @@ export function createCollectionStore<
   }
 
   function getIsOfflineMode(): boolean {
-    return isSessionInOfflineMode(storeManager.getSessionKey());
+    return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
   }
 
   const focusLifecycle = createStoreFocusLifecycle(

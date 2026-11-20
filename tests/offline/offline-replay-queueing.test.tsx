@@ -1,9 +1,11 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
   CollectionOfflineOperationDefinition,
+  DocumentOfflineOperationDefinition,
   ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
@@ -3845,4 +3847,118 @@ test('an offline creation that keeps its client-generated id shows the server va
   `);
 
   hook.unmount();
+});
+
+test('an addition made while a queued addition starts replaying is not lost', async () => {
+  network.setOffline();
+
+  const sessionKey = 'offline-accumulation-during-replay-session';
+  const storeName = 'offline-accumulation-during-replay-store';
+  type CounterOperations = {
+    setValue: DocumentOfflineOperationDefinition<
+      { value: number },
+      { input: { value: number } }
+    >;
+    addToValue: DocumentOfflineOperationDefinition<
+      { value: number },
+      { input: { value: number } }
+    >;
+  };
+  const env = createDocumentStoreTestEnv<number, CounterOperations>(0, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: { network: network.config },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          setValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }) => {
+              await env.serverMock.delayedSetData(input.value, {
+                durationMs: 1000,
+              });
+              return input;
+            },
+          },
+          addToValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            // Additions waiting in the queue are combined into one. Merging
+            // is async (e.g. it reads app data first), so the replay can
+            // pick the queued addition up while it runs.
+            accumulation: {
+              mergeInput: async ({ existingInput, incomingInput }) => {
+                await sleep(200);
+                return { value: existingInput.value + incomingInput.value };
+              },
+            },
+            execute: async ({ input }) => {
+              await sleep(1000);
+              env.serverMock.setData(env.serverMock.current + input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  function addToValue(value: number) {
+    return env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value += value;
+        });
+      },
+      mutation: async () => {
+        await sleep(1000);
+        env.serverMock.setData(env.serverMock.current + value);
+        return env.serverMock.current;
+      },
+      offline: { operation: 'addToValue', input: { value } },
+    });
+  }
+
+  // Offline: the value is set to 100, then 10 is added.
+  await env.apiStore.performMutation({
+    optimisticUpdate: () => {
+      env.apiStore.updateState((draft) => {
+        draft.value = 100;
+      });
+    },
+    mutation: async () => {
+      await env.serverMock.delayedSetData(100);
+      return 100;
+    },
+    offline: { operation: 'setValue', input: { value: 100 } },
+  });
+  await addToValue(10);
+
+  // Back online: the queue replays the set first.
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(900);
+
+  // Right before the set finishes, the user adds 20. It joins the queue
+  // behind the queued addition and starts merging into it, but the replay
+  // picks that addition up (and sends it) while the merge runs.
+  let lateAddition: ReturnType<typeof addToValue> | undefined;
+  act(() => {
+    lateAddition = addToValue(20);
+  });
+  await flushAllTimers();
+  expect((await lateAddition)?.ok).toBe(true);
+
+  // Every addition reached the server exactly once: 100 + 10 + 20.
+  expect(env.serverMock.current).toBe(130);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });

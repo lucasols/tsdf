@@ -208,12 +208,25 @@ export function subscribeToOfflineRecovery(
 /**
  * Whether the session is in offline mode in this tab, without creating or
  * reconfiguring its coordinator (a session nothing tracks is online).
+ *
+ * While it is, also re-checks connectivity: callers ask on a hint that the
+ * connection may be back (a transport reconnect, a window focus), and some
+ * setups have nothing else that ends offline mode (a custom `getIsOffline`
+ * without browser events, a classified network failure without a recovery
+ * check). Leaving offline mode notifies the recovery listeners, which
+ * revalidate the stores, so callers skip their own revalidation either way.
  * @internal
  */
-export function isSessionInOfflineMode(sessionKey: string | false): boolean {
+export function recheckIsSessionInOfflineMode(
+  sessionKey: string | false,
+): boolean {
   if (sessionKey === false) return false;
 
-  return registry.get(sessionKey)?.getStatus().isOfflineMode ?? false;
+  const coordinator = registry.get(sessionKey);
+  if (!coordinator?.getStatus().isOfflineMode) return false;
+
+  void coordinator.refreshNetworkState();
+  return true;
 }
 
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
