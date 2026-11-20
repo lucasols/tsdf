@@ -234,24 +234,29 @@ test('forced offline mode keeps a reloaded app offline from boot and turning it 
   // - while forced: the cached value is shown as success, the mount refetch
   //   never reaches the server and the edit stays pending
   // - after turning it off: the status flips first, then the queued edit is
-  //   replayed and the pending sync clears
+  //   replayed, the pending sync clears and the store revalidates once (the
+  //   normal recovery revalidation after the queue drained)
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                                     |
-    0     | "value:1 success | offline:on forced:on"               | ui-initialized
-    10ms  | "value:1 refetching | offline:on forced:on"            | ui-changed
-    .     | "value:1 success | offline:on forced:on"               | ui-changed
-    12s   | "value:1 success | offline:on forced:on"               | -- the user edits the document while forced offline
-    .     | "value:2 success | offline:on forced:on"               | ui-changed
-    .     | "value:2 success pendingSync | offline:on forced:on"   | ui-changed
-    .     | "value:2 success pendingSync | offline:on forced:on"   | offline:updateValue queued
-    72s   | "value:2 success pendingSync | offline:on forced:on"   | -- a browser "online" event and a full minute went by without any replay
-    .     | "value:2 success pendingSync | offline:on forced:on"   | -- forced offline is turned off
-    .     | "value:2 success pendingSync | offline:off forced:off" | ui-changed
-    .     | "value:2 success pendingSync | offline:off forced:off" | offline:updateValue replay-started
-    73.2s | "value:2 success pendingSync | offline:off forced:off" | server-data-changed (value: 2)
-    .     | "value:2 success pendingSync | offline:off forced:off" | offline:updateValue replay-finished
-    .     | "value:2 success | offline:off forced:off"             | ui-changed
+    time   | ui                                                     |
+    0      | "value:1 success | offline:on forced:on"               | ui-initialized
+    10ms   | "value:1 refetching | offline:on forced:on"            | ui-changed
+    .      | "value:1 success | offline:on forced:on"               | ui-changed
+    12s    | "value:1 success | offline:on forced:on"               | -- the user edits the document while forced offline
+    .      | "value:2 success | offline:on forced:on"               | ui-changed
+    .      | "value:2 success pendingSync | offline:on forced:on"   | ui-changed
+    .      | "value:2 success pendingSync | offline:on forced:on"   | offline:updateValue queued
+    72s    | "value:2 success pendingSync | offline:on forced:on"   | -- a browser "online" event and a full minute went by without any replay
+    .      | "value:2 success pendingSync | offline:on forced:on"   | -- forced offline is turned off
+    .      | "value:2 success pendingSync | offline:off forced:off" | ui-changed
+    .      | "value:2 success pendingSync | offline:off forced:off" | offline:updateValue replay-started
+    73.2s  | "value:2 success pendingSync | offline:off forced:off" | server-data-changed (value: 2)
+    .      | "value:2 success pendingSync | offline:off forced:off" | offline:updateValue replay-finished
+    .      | "value:2 success | offline:off forced:off"             | ui-changed
+    73.21s | "value:2 refetching | offline:off forced:off"          | ui-changed
+    .      | "value:2 refetching | offline:off forced:off"          | 🔴 >fetch-started
+    74.01s | "value:2 refetching | offline:off forced:off"          | 🔴 <fetch-finished (value: 2)
+    .      | "value:2 success | offline:off forced:off"             | ui-changed
     "
   `);
 
