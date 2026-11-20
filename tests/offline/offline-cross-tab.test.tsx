@@ -3,7 +3,10 @@ import { createSharedServerMockState } from '../mocks/serverMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import type { UpdateValueConflictOperations } from './offlineReplayTestShared';
+import type {
+  UpdateValueConflictOperations,
+  UpdateValueOperations,
+} from './offlineReplayTestShared';
 import {
   docConflictSchema,
   docMutationInputSchema,
@@ -221,11 +224,88 @@ async function closeTabAndFocusRemaining(closing: Tab) {
   await advanceTime(10);
 }
 
+type UpdateValueV2Operations = {
+  updateValueV2: UpdateValueOperations['updateValue'];
+};
+
+/**
+ * Opens a tab running a newer deploy of the app, where the document store's
+ * offline operation was renamed to `updateValueV2`. The app does not set
+ * `getAppVersion`, so this tab shares the offline session with older tabs.
+ */
+async function openNewVersionTab(name: string) {
+  setDocumentHidden(true);
+  vi.resetModules();
+  const [
+    { createStoreManager },
+    { createDocumentStoreTestEnv },
+    sessionModule,
+  ] = await Promise.all([
+    import('../../src/storeManager'),
+    import('../mocks/documentStoreTestEnv'),
+    import('../../src/persistentStorage/offline/sessionCoordinator'),
+  ]);
+
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+  });
+  const env = createDocumentStoreTestEnv<number, UpdateValueV2Operations>(1, {
+    id: 'doc',
+    getSessionKey: () => sessionKey,
+    storeManager,
+    sharedServerState: sharedServer,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValueV2: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }) => {
+              serverCalls.push(`tab ${name} sent doc = ${input.value} (v2)`);
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const tab = {
+    name,
+    storeManager,
+    async queueEdit(value: number) {
+      await env.apiStore.performMutation({
+        mutation: async () => {
+          await env.serverMock.delayedSetData(value);
+          return value;
+        },
+        offline: { operation: 'updateValueV2', input: { value } },
+      });
+      await advanceTime(10);
+    },
+    close() {
+      env.apiStore.dispose();
+      sessionModule.__resetSessionOfflineCoordinatorRegistryForTests();
+      const index = openTabs.indexOf(tab);
+      if (index >= 0) openTabs.splice(index, 1);
+    },
+  };
+  openTabs.push(tab);
+  await advanceTime(50);
+  return tab;
+}
+
 /**
  * What each tab shows: whether it leads offline replay, and the session-wide
  * resolution and entity lists an app-wide offline panel renders.
  */
-function describeTabs(...tabs: Tab[]) {
+function describeTabs(...tabs: Array<Pick<Tab, 'name' | 'storeManager'>>) {
   return Object.fromEntries(
     tabs.map((tab) => [
       `tab ${tab.name}`,
@@ -423,6 +503,67 @@ test('offline items of a store open only in another tab stay listed in every tab
     tab B:
       entities: []
       leader: '❌'
+      resolutions: []
+  `);
+});
+
+test('an older tab does not delete edits queued for an operation only a newer deploy knows', async () => {
+  network.setOffline();
+  const oldTab = await openTab('A', { focused: true });
+  const newTab = await openNewVersionTab('B');
+  await blurWindow();
+
+  // A tab running the new deploy queues an edit for the renamed operation,
+  // while the tab still running the old deploy leads.
+  await newTab.queueEdit(5);
+
+  // On reconnect the old leader cannot replay the unknown operation; it must
+  // leave the edit in storage instead of dropping it.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(`[]`);
+
+  // The user closes the old tab; the new tab leads and sends the edit after
+  // the next network recovery.
+  await closeTabAndFocusRemaining(oldTab);
+  network.goOffline();
+  await advanceTime(100);
+  network.goOnline();
+  await advanceTime(3_000);
+
+  expect(serverCalls).toMatchInlineSnapshot(`['tab B sent doc = 5 (v2)']`);
+  expect(describeTabs(newTab)).toMatchInlineSnapshot(`
+    tab B:
+      entities: []
+      leader: '✅'
+      resolutions: []
+  `);
+});
+
+test('disposing a store does not bring back offline items another tab reported earlier', async () => {
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  await blurWindow();
+
+  // The user edits in tab A while offline, closes it, and tab B sends the edit
+  // once the network is back.
+  await tabA.queueEdit(2);
+  await closeTabAndFocusRemaining(tabA);
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(`['tab B sent doc = 2']`);
+
+  // Tab B then disposes the store (e.g. the user navigates away from the
+  // screen that owns it). Tab A's old report of the pending edit must not
+  // reappear in the session-wide lists.
+  tabB.getEnv().apiStore.dispose();
+  await advanceTime(10);
+
+  expect(describeTabs(tabB)).toMatchInlineSnapshot(`
+    tab B:
+      entities: []
+      leader: '✅'
       resolutions: []
   `);
 });

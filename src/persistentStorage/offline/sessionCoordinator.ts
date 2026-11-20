@@ -920,6 +920,9 @@ class SessionOfflineCoordinator {
     return () => {
       this.#registrations.delete(registration.storeName);
       this.#storeContributions.delete(registration.storeName);
+      // Another tab's report for this store is older than this tab's own data,
+      // so it must not take over the session-wide lists.
+      this.#remoteStoreItems.delete(registration.storeName);
       this.#refreshAggregates();
       this.#notifyGreenCycle();
       if (this.#registrations.size === 0) {

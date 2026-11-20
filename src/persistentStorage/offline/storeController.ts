@@ -1011,6 +1011,7 @@ export function createOfflineStoreController<
         current,
         loadedQueueEntries,
         loadedResolutionEntries,
+        false,
       );
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
@@ -1045,25 +1046,32 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Replaces the in-memory queue and resolutions with the loaded records.
+   *
+   * At hydration, resolutions this version of the app cannot handle are
+   * removed from storage. On a reload they are only left out of memory: they
+   * were written by another tab, possibly running a newer deploy, so this tab
+   * must not delete them, nor replay queue entries for operations it lacks.
+   */
   function applyPersistedRecords(
     current: ActiveSessionState,
     loadedQueueEntries: Map<string, OfflineQueueEntry>,
     loadedResolutionEntries: Map<string, PersistedOfflineResolutionRecord>,
+    isReload: boolean,
   ): void {
     queueEntries.clear();
     resolutions.clear();
     for (const entry of loadedQueueEntries.values()) {
+      if (isReload && !operations[entry.operation]) continue;
       queueEntries.set(entry.id, entry);
     }
     for (const resolution of loadedResolutionEntries.values()) {
-      const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
-      if (!parsed.ok) {
-        void current.resolutionNamespace.remove(resolution.id);
-        continue;
-      }
-      const operation = operations[resolution.operation];
-      if (!operation) {
-        void current.resolutionNamespace.remove(resolution.id);
+      const isSupported =
+        rc_parse(resolution, offlineResolutionRecordSchema).ok &&
+        operations[resolution.operation] !== undefined;
+      if (!isSupported) {
+        if (!isReload) void current.resolutionNamespace.remove(resolution.id);
         continue;
       }
       resolutions.set(resolution.id, resolution);
@@ -1107,7 +1115,12 @@ export function createOfflineStoreController<
       await loadPersistedRecords(current);
     if (!isActiveSessionState(current)) return;
 
-    applyPersistedRecords(current, loadedQueueEntries, loadedResolutionEntries);
+    applyPersistedRecords(
+      current,
+      loadedQueueEntries,
+      loadedResolutionEntries,
+      true,
+    );
     refreshDerivedState(current, true);
   }
 
