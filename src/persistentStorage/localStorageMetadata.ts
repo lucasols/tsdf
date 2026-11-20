@@ -1,9 +1,11 @@
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
+  rc_array,
   rc_number,
   rc_object,
   rc_parse,
   rc_parse_json,
+  rc_string,
   rc_unknown,
   type RcType,
 } from 'runcheck';
@@ -36,6 +38,8 @@ import {
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
+/** Ids of `removedStores` whose persisted data was already removed. */
+const REMOVED_STORES_CLEANUP_KEY = `${METADATA_KEY_PREFIX}rs`;
 const MANIFEST_KEY_PREFIX = `${METADATA_KEY_PREFIX}r.`;
 const MANIFEST_KEY_SUFFIX = '.m';
 const SINGLE_MANIFEST_KEY_PREFIX = `${MANIFEST_KEY_PREFIX}s:`;
@@ -473,6 +477,38 @@ const managedLocalStorageGlobalMaintenanceSchema = rc_object({
   lca: rc_number.orNull(),
 });
 
+const removedStoresCleanupSchema = rc_array(rc_string);
+
+/**
+ * Reads the ids of removed stores whose data was already removed. Throws when
+ * `localStorage` is unavailable.
+ */
+export function readRemovedStoresCleanupMarker(): Set<string> {
+  return new Set(
+    readParsedMetadataJson(
+      REMOVED_STORES_CLEANUP_KEY,
+      removedStoresCleanupSchema,
+      directManagedLocalStorageIo,
+    ),
+  );
+}
+
+export function writeRemovedStoresCleanupMarker(
+  storeNames: readonly string[],
+): void {
+  try {
+    writeMetadataJson(
+      REMOVED_STORES_CLEANUP_KEY,
+      storeNames,
+      directManagedLocalStorageIo,
+    );
+  } catch (error) {
+    // losing this marker only makes the next startup check the removed
+    // stores again; a full localStorage must not break the cleanup
+    if (!isQuotaExceededError(error)) throw error;
+  }
+}
+
 function readCompactListQueryEntry(
   payloadKey: string,
   io: ManagedLocalStorageIo,
@@ -634,6 +670,7 @@ function isManagedLocalStorageManifestKey(key: string): boolean {
 type TsdfLocalStorageKeyClassification =
   | { kind: 'global-maintenance' }
   | { kind: 'async-global-maintenance' }
+  | { kind: 'removed-stores-cleanup' }
   | { kind: 'manifest'; manifestLocation: ManagedLocalStorageManifestLocation }
   | { kind: 'compact-list-query' }
   | { kind: 'manifest-backed-payload' }
@@ -649,6 +686,10 @@ function classifyTsdfLocalStorageKey(
 
   if (key === ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY) {
     return { kind: 'async-global-maintenance' };
+  }
+
+  if (key === REMOVED_STORES_CLEANUP_KEY) {
+    return { kind: 'removed-stores-cleanup' };
   }
 
   const manifestLocation = parseManagedLocalStorageManifestKey(key);
@@ -1382,6 +1423,36 @@ function manifestBelongsToSession(
   );
 }
 
+/**
+ * Returns the store owning a manifest key, as its `tsdf.<sessionKey>.<storeId>`
+ * storage key and store id. Store ids never contain `.`, so both are read from
+ * the end of the key, which keeps session keys containing `.` intact. Offline
+ * runtime manifests (session status) have no owning store.
+ */
+export function parseManagedLocalStorageManifestOwner(
+  manifestKey: string,
+): { storageKey: string; storeName: string } | null {
+  const location = parseManagedLocalStorageManifestKey(manifestKey);
+  if (location === null) return null;
+
+  let storageKey = location.kind === 'single' ? location.payloadKey : null;
+  if (location.kind === 'namespace') {
+    const namespaceRoot = location.storagePrefix.endsWith('.')
+      ? location.storagePrefix.slice(0, -1)
+      : location.storagePrefix;
+    storageKey = namespaceRoot.slice(0, namespaceRoot.lastIndexOf('.'));
+  }
+  if (storageKey === null || isOfflineRelatedPayloadKey(storageKey)) {
+    return null;
+  }
+
+  const storeNameStart = storageKey.lastIndexOf('.') + 1;
+  // `tsdf.` plus a non-empty session key must come before the store id
+  if (storeNameStart <= 'tsdf.'.length + 1) return null;
+
+  return { storageKey, storeName: storageKey.slice(storeNameStart) };
+}
+
 function getSessionKeyFromStorageIdentity(identity: string): string | null {
   if (!identity.startsWith('tsdf.')) return null;
 
@@ -1611,6 +1682,15 @@ async function runGlobalTsdfLocalStorageCleanup(
                 managedLocalStorageGlobalMaintenanceSchema,
                 io,
               ) === null
+            ) {
+              removeMetadataJson(key, io);
+            }
+            break;
+          }
+          case 'removed-stores-cleanup': {
+            if (
+              readParsedMetadataJson(key, removedStoresCleanupSchema, io) ===
+              null
             ) {
               removeMetadataJson(key, io);
             }

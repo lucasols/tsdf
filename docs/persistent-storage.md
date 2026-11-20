@@ -22,6 +22,7 @@ Exported from `tsdf`:
 | `StorageAdapter`                                                                                             | `'local-sync'` or a managed async storage adapter                |
 | `DocumentPersistentStorageConfig` / `CollectionPersistentStorageConfig` / `ListQueryPersistentStorageConfig` | Store-level persistence config types                             |
 | `createStoreManager(options)`                                                                                | Creates the shared store manager used by all stores              |
+| `RemovedStore`                                                                                               | A deleted store listed in the manager's `removedStores`          |
 | `PersistentStoragePreloadResult<Payload>`                                                                    | Return shape for preload methods                                 |
 | `localPersistentStorage`                                                                                     | Built-in localStorage helper used by the `'local-sync'` adapter  |
 | `clearSessionStorage(sessionKey, adapter)`                                                                   | Clears all TSDF entries for one session/adapter                  |
@@ -171,8 +172,8 @@ Use `createAsyncStorageAdapter(driver)` only when the built-in OPFS and IndexedD
 A driver is responsible for storing raw records by logical namespace:
 
 ```ts
-import { createAsyncStorageAdapter } from 'tsdf/async-storage';
 import type { AsyncStorageDriver } from 'tsdf';
+import { createAsyncStorageAdapter } from 'tsdf/async-storage';
 
 const driver: AsyncStorageDriver = {
   get: (scope, key) => customStore.get(scope, key),
@@ -205,6 +206,33 @@ Moving a store from `'local-sync'` to an async adapter:
 - A tab still running the previous app version keeps working: it serves its data from memory and writes its entries to `localStorage` again. They are removed the next time the new version starts.
 
 Moving a store from an async adapter to `'local-sync'`, or from one async adapter to another, does not clean the previous adapter. Its old entries are still removed by that adapter's regular expiry while another store keeps using it; once no store uses that adapter anymore, they stay there.
+
+### Deleting a store
+
+Deleting a store from the app leaves its persisted data behind: nothing reads it anymore, regular expiry only covers it while another store keeps using the same adapter, and it never removes list queries or offline data. Declare deleted stores in the store manager so TSDF removes their data:
+
+```ts
+import { createStoreManager } from 'tsdf';
+import { indexedDbPersistentStorage } from 'tsdf/indexed-db-storage';
+
+const storeManager = createStoreManager({
+  // ...
+  removedStores: [
+    { id: 'legacy-settings', adapter: 'local-sync' },
+    { id: 'old-feed', adapter: indexedDbPersistentStorage },
+  ],
+});
+```
+
+- Each entry names the deleted store's `id` and the `adapter` it persisted with. Add one entry per adapter when the store used more than one. Naming the adapter lets TSDF clean it even when no remaining store uses it, without bundling or opening adapters the app does not import.
+- Once, during browser idle time after startup, TSDF removes everything each listed store persisted with that adapter, in every session: cached entries and their metadata, offline entity records, and any queued offline mutations or pending resolutions. Other stores and non-TSDF keys are not touched.
+- Unsent offline work can no longer be replayed once its store is deleted, so it is removed too, and the number of records dropped is reported once per store through the manager's `onPersistentStorageError`.
+- TSDF then records the cleaned ids in a small `localStorage` marker. Every later startup reads that marker once during idle time and stops there; apps without `removedStores` pay nothing. Entries can be dropped from `removedStores` once every user has run a version that includes them.
+- A store attached to the manager cannot use an id listed in `removedStores`: creating it throws, since the cleanup would remove its data.
+- Custom async adapters are supported when created with `createAsyncStorageAdapter`; for other adapters TSDF cannot list what a store stored, so it reports an error through `onPersistentStorageError` instead.
+- The cleanup runs once per id. A tab still running the previous app version can write the deleted store's entries again after the cleanup; those are only removed by the adapter's regular expiry while another store keeps using it.
+- In `localStorage`, a store is found through its metadata entries, so a list-query store whose every cached query was empty (and that cached no items) is not found; those small query entries stay.
+- Offline uploads belong to the session, not to a store, and are not removed.
 
 ## Example configuration
 
@@ -306,4 +334,4 @@ When the selected adapter does not support async preload, preload methods report
 - `clearAllSessionStorage(sessionKey)`:
   remove TSDF entries for one session across the built-in `local-sync`, OPFS, and IndexedDB adapters.
 
-Use these on logout, user switch, or explicit privacy actions.
+Use these on logout, user switch, or explicit privacy actions. They clear every store of the session, so do not use them to clean up after a deleted store: declare it in `removedStores` instead (see [Deleting a store](#deleting-a-store)).

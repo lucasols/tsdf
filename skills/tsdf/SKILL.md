@@ -204,6 +204,8 @@ Loaded data must pass `storageSchema`, then `convertFromStorage(...)`, then `sto
 
 Changing a store's `adapter` starts it with an empty cache; nothing is migrated. Moving from `'local-sync'` to an async adapter auto-removes the store's old `localStorage` entries, except while it still has queued offline work there (kept and reported through `onPersistentStorageError`, replayed only under `'local-sync'`).
 
+Deleting a store leaves its data behind: list it in `createStoreManager({ removedStores: [{ id, adapter }] })` and TSDF removes its data once, in every session, including unsent offline work (reported through `onPersistentStorageError`). A listed id cannot be used by an attached store.
+
 Utilities: `clearSessionStorage(sessionKey, adapter)`, `clearAllSessionStorage(sessionKey)`.
 
 Docs: `docs/persistent-storage.md`.

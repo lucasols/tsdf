@@ -1918,6 +1918,32 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
   }
 
+  /**
+   * Removes every namespace of the given stores, in every session. Returns how
+   * many queued offline mutations and pending resolutions each store had.
+   */
+  async removeStores(
+    storeNames: ReadonlySet<string>,
+  ): Promise<Map<string, number>> {
+    const unsentRecordsByStore = new Map<string, number>();
+    const scopes = (await this.#listDiscoveredScopes()).filter((scope) =>
+      storeNames.has(scope.storeName),
+    );
+
+    for (const scope of scopes) {
+      if (scope.kind === 'offline.queue' || scope.kind === 'offline.conflict') {
+        const unsentRecords = (await this.listManagedKeys(scope)).length;
+        unsentRecordsByStore.set(
+          scope.storeName,
+          (unsentRecordsByStore.get(scope.storeName) ?? 0) + unsentRecords,
+        );
+      }
+      await this.clearManagedNamespace(scope);
+    }
+
+    return unsentRecordsByStore;
+  }
+
   async clearManagedNamespace(
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
@@ -3375,6 +3401,22 @@ export function createAsyncStorageAdapter(
   driver: AsyncStorageDriver,
 ): AsyncStorageAdapter {
   return new ManagedAsyncStorageAdapter(driver);
+}
+
+/**
+ * Removes every namespace of the given stores, in every session. Returns how
+ * many queued offline mutations and pending resolutions each store had, or
+ * `null` when the adapter was not created with `createAsyncStorageAdapter`
+ * (TSDF cannot list the namespaces of other adapters).
+ */
+export async function removeStoresFromAsyncStorage(
+  adapter: AsyncStorageAdapter,
+  storeNames: ReadonlySet<string>,
+): Promise<Map<string, number> | null> {
+  const managedAdapter = managedAsyncStorageAdapters.get(adapter);
+  if (managedAdapter === undefined) return null;
+
+  return managedAdapter.removeStores(storeNames);
 }
 
 /**

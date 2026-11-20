@@ -34,6 +34,11 @@ import type {
   ReplaceOfflineUploadArgs,
   SaveOfflineUploadArgs,
 } from './persistentStorage/offlineUploadTypes';
+import { assertValidPersistentStoreName } from './persistentStorage/persistentStorageManager';
+import {
+  scheduleRemovedStoresCleanup,
+  type RemovedStore,
+} from './persistentStorage/removedStoresCleanup';
 import type { PersistentStorageErrorHandler } from './persistentStorage/types';
 import type { BrowserTabsPriorityTimings } from './utils/browserTabsPriority';
 import {
@@ -197,6 +202,7 @@ type RegisteredStore = {
 
 type StoreManagerRegistry = {
   appVersion: string | undefined;
+  removedStoreIds: ReadonlySet<string>;
   browserTabsPresence: BrowserTabsPresencePriority | undefined;
   nextStoreRegistrationId: number;
   stores: Map<number, RegisteredStore>;
@@ -331,6 +337,31 @@ export type CreateStoreManagerOptions<
   logger?: TSDFLoggerOptions;
   /** Optional shared offline session config for every attached store. */
   offlineSession?: OfflineSessionConfig<TUploadRef>;
+  /**
+   * Stores deleted from the app whose persisted data should be removed.
+   *
+   * Once, during idle time after startup, TSDF removes everything each listed
+   * store persisted with its adapter, in every session: cached data, offline
+   * entity records, and any queued offline mutations or pending resolutions,
+   * which no store can replay anymore. Unsent records it deletes are reported
+   * once through `onPersistentStorageError`. Later startups only read a small
+   * marker listing the ids already cleaned, so entries can be removed from
+   * this list once every user has run a version that includes them.
+   *
+   * A listed id cannot be used by a store attached to this manager.
+   *
+   * @example
+   * ```ts
+   * createStoreManager({
+   *   // ...
+   *   removedStores: [
+   *     { id: 'legacy-settings', adapter: 'local-sync' },
+   *     { id: 'old-feed', adapter: indexedDbPersistentStorage },
+   *   ],
+   * });
+   * ```
+   */
+  removedStores?: readonly RemovedStore[];
 };
 
 export function createStoreManager<
@@ -341,8 +372,13 @@ export function createStoreManager<
     ? resolveTSDFLogger(options.debugLogger)
     : undefined;
   const logger = resolveTSDFLogger(options.logger ?? true);
+  const removedStores = options.removedStores ?? [];
+  if (import.meta.env.DEV) {
+    for (const { id } of removedStores) assertValidPersistentStoreName(id);
+  }
   const registry: StoreManagerRegistry = {
     appVersion,
+    removedStoreIds: new Set(removedStores.map(({ id }) => id)),
     browserTabsPresence: undefined,
     nextStoreRegistrationId: 0,
     stores: new Map(),
@@ -509,6 +545,7 @@ export function createStoreManager<
 
   storeManagerRegistry.set(storeManager, registry);
   storeManagerOfflineSessionRegistry.set(storeManager, resolvedOfflineSession);
+  scheduleRemovedStoresCleanup(removedStores, options.onPersistentStorageError);
 
   return storeManager;
 }
@@ -528,6 +565,12 @@ export function registerStoreWithManager(
   store: RegisteredStore,
 ): () => void {
   const registry = getRegistryOrThrow(storeManager);
+
+  if (registry.removedStoreIds.has(store.id)) {
+    throw new Error(
+      `[tsdf] Store id "${store.id}" is listed in the storeManager's removedStores, which removes its persisted data. Remove it from removedStores to use the id again.`,
+    );
+  }
 
   let hasDuplicateId = false;
   for (const registeredStore of registry.stores.values()) {
