@@ -540,6 +540,10 @@ export function createOfflineStoreController<
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
+  // Queue entries another tab wrote. Another tab may be merging into them at
+  // the same moment, so this tab never accumulates into them: both merges
+  // would save the same entry id and one tab's input would be lost.
+  const entryIdsFromAnotherTab = new Set<string>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -743,6 +747,7 @@ export function createOfflineStoreController<
     if (!replayScheduled) releaseHeldReplayLock();
     resolvedEntityRefBySerializedRef.clear();
     queueEntries.clear();
+    entryIdsFromAnotherTab.clear();
     resolutions.clear();
     nextQueueOrder = 0;
     hydratedSessionKey = null;
@@ -1006,10 +1011,12 @@ export function createOfflineStoreController<
             if (!operations[entry.operation]) return;
 
             queueEntries.set(entryId, entry);
+            entryIdsFromAnotherTab.add(entryId);
             return;
           }
 
           queueEntries.delete(entryId);
+          entryIdsFromAnotherTab.delete(entryId);
           countedReplayFailures.delete(entryId);
           if (queueEntries.size === 0) clearReplayRetryTimer();
         });
@@ -1070,6 +1077,7 @@ export function createOfflineStoreController<
       if (!isActiveSessionState(current)) return;
 
       queueEntries.clear();
+      entryIdsFromAnotherTab.clear();
       resolutions.clear();
       for (const entry of loadedQueueEntries.values()) {
         queueEntries.set(entry.id, entry);
@@ -1696,6 +1704,7 @@ export function createOfflineStoreController<
       if (entry.operation !== args.operationName) continue;
       if (entry.syncState !== 'pending') continue;
       if (entry.attempts > 0) continue;
+      if (entryIdsFromAnotherTab.has(entry.id)) continue;
       if (entry.tempIds && entry.tempIds.length > 0) continue;
       if (normalizeEntityRefs(entry.entityRefs) !== normalizedEntityRefs) {
         continue;
@@ -2300,6 +2309,7 @@ export function createOfflineStoreController<
     if (!session) return;
     if (isActiveSessionState(session)) {
       queueEntries.delete(entryId);
+      entryIdsFromAnotherTab.delete(entryId);
       countedReplayFailures.delete(entryId);
       if (queueEntries.size === 0) {
         clearReplayRetryTimer();

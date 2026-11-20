@@ -1,7 +1,10 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
-import { rc_string } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { ValidPayload } from '../../src/main';
+import type {
+  DocumentOfflineOperationDefinition,
+  ValidPayload,
+} from '../../src/main';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
@@ -119,6 +122,8 @@ function createSharedLockManager() {
   return { request };
 }
 
+const addToValueInputSchema = rc_object({ amount: rc_number });
+
 const sessionKey = 'cross-tab-session';
 let network = createOfflineNetworkMock();
 let serverCalls: string[] = [];
@@ -168,6 +173,17 @@ function setDocumentHidden(hidden: boolean) {
     configurable: true,
   });
 }
+
+/**
+ * Adds to the document value, like a "+1" button. Several additions queued
+ * offline are merged into one request.
+ */
+type AddToValueOperations = {
+  addToValue: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { amount: number } }
+  >;
+};
 
 /**
  * Opens a simulated browser tab: a fresh module graph, so the offline session
@@ -227,7 +243,7 @@ async function openTab(
   function createDocEnv(storeId: string) {
     const env = createDocumentStoreTestEnv<
       number,
-      UpdateValueConflictOperations
+      UpdateValueConflictOperations & AddToValueOperations
     >(1, {
       id: storeId,
       getSessionKey: () => sessionKey,
@@ -254,6 +270,24 @@ async function openTab(
                 // Negative values simulate an edit the server rejects.
                 detectConflict: ({ input }) =>
                   input.value < 0 ? { reason: 'server-changed' } : null,
+              },
+            },
+            addToValue: {
+              inputSchema: addToValueInputSchema,
+              kind: 'update',
+              accumulation: {
+                mergeInput: ({ existingInput, incomingInput }) => ({
+                  amount: existingInput.amount + incomingInput.amount,
+                }),
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(
+                  `tab ${name} sent ${storeId} += ${input.amount}`,
+                );
+                await env.serverMock.delayedSetData(
+                  env.serverMock.current + input.amount,
+                );
+                return input;
               },
             },
           },
@@ -288,6 +322,18 @@ async function openTab(
           return value;
         },
         offline: { operation: 'updateValue', input: { value } },
+      });
+      await advanceTime(10);
+    },
+    /** Queues an offline "+amount" click, merged with the ones still queued. */
+    async queueAddition(amount: number, storeId = 'doc') {
+      await getEnv(storeId).apiStore.performMutation({
+        mutation: async () => {
+          const { serverMock } = getEnv(storeId);
+          await serverMock.delayedSetData(serverMock.current + amount);
+          return amount;
+        },
+        offline: { operation: 'addToValue', input: { amount } },
       });
       await advanceTime(10);
     },
@@ -1135,6 +1181,38 @@ test('a user created offline stays in the list of its tab when a tab on another 
   expect(tabB.getListRows()).toMatchInlineSnapshot(
     `['Grace (id 1)', 'Ada (id 2)']`,
   );
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: []
+      leader: '✅'
+      resolutions: []
+
+    tab B:
+      entities: []
+      leader: '❌'
+      resolutions: []
+  `);
+});
+
+test('"+1" clicks queued at the same moment in two tabs all reach the server', async () => {
+  network.setOffline();
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  await blurWindow();
+
+  // An earlier offline click in tab A, already known to tab B.
+  await tabA.queueAddition(1);
+
+  // Both tabs queue a click before either hears about the other's (e.g. an
+  // app reacting to the same realtime event in every open tab). Each tab
+  // would merge its click into the queued "+1".
+  await Promise.all([tabA.queueAddition(2), tabB.queueAddition(3)]);
+
+  network.goOnline();
+  await advanceTime(5_000);
+
+  // The server started at 1 and every click (1 + 2 + 3) is applied once.
+  expect(tabA.getEnv().serverMock.current).toBe(7);
   expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
     tab A:
       entities: []

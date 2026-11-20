@@ -235,11 +235,12 @@ Tabs of the same session share one offline queue. Every tab can queue mutations 
 - A mutation queued in any other tab is sent by the leading tab after the connection recovers, in the order the mutations were queued across tabs. No reload or tab switch is needed.
 - Every queued mutation is sent once. A cross-tab lock (Web Locks API) keeps two tabs from replaying a store's queue at the same time, and a tab drops an entry as soon as another tab reports it as sent, so it does not send it again when it leads later. Where the Web Locks API is unavailable (pages served over plain `http` other than `localhost`), this guarantee does not hold and TSDF logs a warning. It also only holds between tabs running the same app version (`getAppVersion`) and the same TSDF release: tabs on different versions do not see each other's messages, so after a deploy an old tab and a new tab can both send the same queued mutation.
 - When the leading tab sends a temp-entity creation queued in another tab, every tab with the store emits `tempEntityReconciled`, so a view that follows the temp id can switch to the final one in any tab.
-- When the leading tab is closed or hidden, a visible tab takes over. When the previous tab was replaying or just did, the new one waits up to a second before it starts, so it first learns what that tab already sent.
+- When the leading tab is closed or hidden, a visible tab takes over. When the previous tab was replaying or just did, the new one first waits for the mutation that tab is sending to finish, then up to a second more, so it learns what that tab already sent before it starts.
 
 Things to keep in mind:
 
 - A tab can only replay the operations of stores it has created. Create the stores of a session in every tab (the usual module-level setup) so the leading tab can replay all of them.
+- `accumulation` only merges into mutations queued in the same tab. Mutations queued in different tabs are sent as separate requests.
 - Leadership follows visibility. If every remaining tab is hidden, queued work waits until one of them becomes visible.
 - While offline, each tab shows its own optimistic changes. Tabs converge once the queue is replayed and the data is fetched again.
 - Tabs coordinate through browser messages, which cannot give a strict guarantee when a tab is closed or frozen in the middle of a hand-off. For mutations that must never run twice (for example payments), also make the server endpoint idempotent.
