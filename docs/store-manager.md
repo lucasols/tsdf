@@ -52,6 +52,7 @@ Options:
 | `debugLogger`                 | No       | Enables verbose development-only browser-tab sync, focus revalidation, and persistent-storage debug logs. Pass `true` or a logger function.                        |
 | `logger`                      | No       | Enables low-volume production-safe logs such as persistent-storage quota cleanup. Defaults to console logging; pass `false` to disable or a function to customize. |
 | `offlineSession`              | No       | Shared offline config used by stores with `persistentStorage.offline`.                                                                                             |
+| `removedStores`               | No       | Stores deleted from the app whose persisted data TSDF removes once, in every session. See [Deleting a store](./persistent-storage.md#deleting-a-store).            |
 
 The session key is used by browser-tab sync, persistent storage, and offline state. Stores with the same `id` but different session keys are isolated.
 

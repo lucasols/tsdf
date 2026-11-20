@@ -358,7 +358,9 @@ export type CollectionStoreOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
-   * revalidation. Set to `0` to disable this cooldown. */
+   * revalidation. Recovering from offline mode waits one cooldown for a
+   * reconnect before revalidating, so the two share one revalidation. Set to
+   * `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   /** Called when an already-loaded item is invalidated. */
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
@@ -1181,6 +1183,10 @@ export function createCollectionStore<
               rebindOfflineOverlays(itemKeyRewrites);
             },
             revalidateDiscardedEntities: (entities) => {
+              // Discarding the last change of a realtime store schedules its
+              // recovery revalidation for the end of the reconnect cooldown:
+              // run it now with this refetch instead of fetching twice.
+              focusLifecycle.flushPendingReconnectRevalidate();
               for (const { entityKey, payload } of entities) {
                 const item = store.state[entityKey];
                 if (item) {

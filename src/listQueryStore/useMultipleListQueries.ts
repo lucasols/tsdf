@@ -967,6 +967,14 @@ export function useMultipleListQueries<
         if (
           queryConfig &&
           readFallbackQueryState &&
+          // The persisted fallback only stands in for a query the store has
+          // not loaded yet (e.g. the first render, before hydration). Once
+          // the store holds the loaded query, a `loading` result means its
+          // items lack requested fields: storage cannot know more than the
+          // store, and its copy of the query lists only the rows it can
+          // restore — possibly none — which would show up as a shorter or
+          // empty `success` list.
+          !store.state.queries[queryConfig.key]?.wasLoaded &&
           !(
             derivedQueries &&
             (isOfflineMode || stickyDerivedQueryKeys.has(queryConfig.key))
@@ -1068,6 +1076,7 @@ export function useMultipleListQueries<
     offlineEntitiesByKey,
     selectVisibleItems,
     stickyDerivedQueryKeys,
+    store,
   ]);
   const autoFetchSignals = store.useSelector(
     useCallback(
