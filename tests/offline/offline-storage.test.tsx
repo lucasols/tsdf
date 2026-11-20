@@ -1,16 +1,18 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   clearSessionStorage,
+  type CollectionOfflineOperationDefinition,
   type DocumentOfflineOperationDefinition,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
@@ -20,6 +22,7 @@ import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
+  pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -1154,6 +1157,117 @@ test('async OPFS idle offline boot hydrates pending offline items from storage w
 
   hook.unmount();
 }, 10_000);
+
+test('async OPFS restart saves an item created offline with its pending data when the server sends none, also on another screen', async () => {
+  createOpfsPersistentStorageTestStore();
+  const sessionKey = 'offline-opfs-keep-pending-data-session';
+
+  type CreateNoteOperations = {
+    createNote: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { name: string },
+      unknown,
+      { id: string }
+    >;
+  };
+
+  function createNotesEnv() {
+    const env = createCollectionStoreTestEnv<
+      { name: string },
+      CreateNoteOperations
+    >(
+      {},
+      {
+        id: 'offline-opfs-keep-pending-data-store',
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        persistentStorage: {
+          // Items are only read from OPFS when a screen needs them
+          adapter: opfsPersistentStorage,
+          schema: rc_object({ value: rc_object({ name: rc_string }) }),
+          payloadSchema: rc_string,
+          offline: {
+            operations: {
+              createNote: {
+                inputSchema: collectionCreateInputSchema,
+                kind: 'create',
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({
+                    value: { name: input.name },
+                  }),
+                  // The server only returns the new id: the saved note keeps
+                  // the data of the pending one
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: result.id,
+                  }),
+                },
+                execute: async ({ input }) => {
+                  await env.serverTable.delayedSetItem('notes||1', {
+                    name: input.name,
+                  });
+                  return { id: 'notes||1' };
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+    return env;
+  }
+
+  // Create a note offline.
+  network.setOffline();
+  const first = createNotesEnv();
+  // OPFS writes settle on timers, so they are flushed while the create is
+  // queued
+  await act(async () => {
+    await resolveAfterAllTimers(
+      first.apiStore.performMutation(null, {
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'createNote', input: { name: 'Groceries' } },
+      }),
+    );
+  });
+  await flushAllTimers();
+  first.apiStore.dispose();
+
+  // Restart the app on a screen that shows no note, so the pending note is
+  // never read back from storage before its create is saved.
+  resetSessionForTests();
+  const restarted = createNotesEnv();
+  await flushAllTimers();
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+  expect(restarted.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  // Back offline, the user opens the saved note: it holds the pending note's
+  // data under its server id, instead of being missing until it is fetched.
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+  const hook = renderHook(() =>
+    restarted.apiStore.useItem('notes||1', {
+      selector: (item) => item?.value.name ?? null,
+    }),
+  );
+  await flushAllTimers();
+  expect(pick(hook.result.current, ['status', 'data'])).toMatchInlineSnapshot(`
+    data: 'Groceries'
+    status: 'success'
+  `);
+
+  hook.unmount();
+});
 
 test('the default OPFS offline persistence keeps the raw file paths and JSON payloads transparent', async () => {
   const sessionKey = 'offline-opfs-format-session';
