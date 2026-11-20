@@ -32,6 +32,7 @@ import { startIndexedDbPersistentStorageOperationCapture } from '../../utils/ind
 import {
   createIndexedDbPersistentStorageTestStore,
   getCurrentIndexedDbPersistentStorageTestStore,
+  hasIndexedDbTestStoreCallsWaitingForFlushWrites,
   resetCurrentIndexedDbPersistentStorageTestStore,
 } from '../../utils/indexedDbPersistentStorageTestStore';
 import * as byteBudgetTestUtils from '../persistentStorageByteBudgetTestUtils';
@@ -152,6 +153,33 @@ async function waitForCapturedOperationsToSettle(
   }
 }
 
+/**
+ * The test store holds every namespace call back in `flushWrites()`, behind
+ * real task ticks, before it reaches the adapter. A call still held back when
+ * a test ends resumes during the next test: the previous test's store then
+ * writes through its own adapter there, and the timers of that write move the
+ * next test's fake clock. So a test is only over once no call is held back
+ * and the work it released has run.
+ */
+async function settleTestStoreCallsBeforeTeardown(): Promise<void> {
+  for (let pass = 0; pass < 100; pass++) {
+    await flushAllTimers();
+
+    if (
+      !hasIndexedDbTestStoreCallsWaitingForFlushWrites() &&
+      vi.getTimerCount() === 0
+    ) {
+      return;
+    }
+
+    await waitForRealTaskTick();
+  }
+
+  throw new Error(
+    'IndexedDB test store calls were still running when the test ended.',
+  );
+}
+
 function setupIndexedDbAsyncStorageEfficiencyTestSuite(): void {
   beforeAll(() => {
     vi.useFakeTimers();
@@ -175,7 +203,7 @@ function setupIndexedDbAsyncStorageEfficiencyTestSuite(): void {
     }
     cleanup();
     if (vi.isFakeTimers()) {
-      await flushAllTimers();
+      await settleTestStoreCallsBeforeTeardown();
     }
     localStorage.clear();
     __resetSessionOfflineCoordinatorRegistryForTests();

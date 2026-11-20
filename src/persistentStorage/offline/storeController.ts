@@ -178,7 +178,8 @@ const compactOfflineEntitySchema = rc_object({
   a: rc_number,
   u: rc_number,
   t: rc_unknown.optionalKey(),
-  v: rc_unknown.optionalKey(),
+  // Not `v`: local-sync reserves it for the entry version.
+  y: rc_unknown.optionalKey(),
 });
 const compactOfflineQueueEntrySchema = rc_object({
   d: rc_string,
@@ -579,6 +580,28 @@ export function createOfflineStoreController<
   const hasCancelledWithOperations = Object.values(operations).some(
     (operation) => operation.cancelledWith !== undefined,
   );
+  // Uploads of stored records whose operation this deploy doesn't define
+  // (written by a newer deploy), by record. This tab ignores those records
+  // but leaves them in storage for a deploy that defines them, so their
+  // uploads must not be cleaned up either.
+  const unknownOperationUploadIds = new Map<string, string[]>();
+
+  function trackUnknownOperationUploads(
+    recordKey: string,
+    record: OfflineQueueEntry | PersistedOfflineResolutionRecord | null,
+  ): void {
+    const uploadIds = record
+      ? [
+          ...Object.values(record.attachedUploadIds ?? {}),
+          ...(record.dependencyUploadIds ?? []),
+        ]
+      : [];
+    if (uploadIds.length > 0) {
+      unknownOperationUploadIds.set(recordKey, uploadIds);
+    } else {
+      unknownOperationUploadIds.delete(recordKey);
+    }
+  }
   const countedReplayFailures = new Map<string, number>();
   // Queue entries another tab wrote. Another tab may be merging into them at
   // the same moment, so this tab never accumulates into them: both merges
@@ -630,6 +653,11 @@ export function createOfflineStoreController<
     removedEntriesApplied: OfflineQueueEntry[];
     touchedNextEntry: boolean;
   };
+
+  /** Reads the session gate (`offlineSession.enabled`). */
+  function isSessionEnabled(): boolean {
+    return sessionConfig.enabled?.() !== false;
+  }
 
   function getActiveMutationQueueingCause(
     current: ActiveSessionState,
@@ -881,6 +909,7 @@ export function createOfflineStoreController<
     queueEntries.clear();
     entryIdsFromAnotherTab.clear();
     resolutions.clear();
+    unknownOperationUploadIds.clear();
     nextQueueOrder = 0;
     hydratedSessionKey = null;
     hydratedPromise = null;
@@ -1071,7 +1100,7 @@ export function createOfflineStoreController<
                 a: entity.createdAt,
                 u: entity.updatedAt,
                 ...(entity.tempId !== undefined ? { t: entity.tempId } : {}),
-                ...(entity.payload !== undefined ? { v: entity.payload } : {}),
+                ...(entity.payload !== undefined ? { y: entity.payload } : {}),
               };
             },
             deserialize(raw) {
@@ -1112,11 +1141,11 @@ export function createOfflineStoreController<
                       ),
                     }
                   : {}),
-                ...(compactEntity.v !== undefined
+                ...(compactEntity.y !== undefined
                   ? {
                       // WORKAROUND: Derived item payloads are persisted as unknown JSON values and are narrowed back to ValidPayload when hydrating the internal entity cache.
                       payload: __LEGIT_CAST__<ValidPayload, unknown>(
-                        compactEntity.v,
+                        compactEntity.y,
                       ),
                     }
                   : {}),
@@ -1142,14 +1171,18 @@ export function createOfflineStoreController<
           if (entry) {
             nextQueueOrder = Math.max(nextQueueOrder, getQueueOrder(entry) + 1);
             // Queued by a tab running a newer deploy of the app: this tab
-            // cannot replay it, and must not drop it from storage either
-            if (!operations[entry.operation]) return;
+            // cannot replay it, and must not drop it (or its uploads) either
+            if (!operations[entry.operation]) {
+              trackUnknownOperationUploads(`q:${entryId}`, entry);
+              return;
+            }
 
             queueEntries.set(entryId, entry);
             entryIdsFromAnotherTab.add(entryId);
             return;
           }
 
+          trackUnknownOperationUploads(`q:${entryId}`, null);
           queueEntries.delete(entryId);
           entryIdsFromAnotherTab.delete(entryId);
           countedReplayFailures.delete(entryId);
@@ -1158,15 +1191,22 @@ export function createOfflineStoreController<
       },
       onRemoteResolutionChange: (resolutionId, resolution) => {
         applyRecordChangeFromAnotherTab(() => {
-          if (
-            resolution &&
-            rc_parse(resolution, offlineResolutionRecordSchema).ok &&
-            operations[resolution.operation]
-          ) {
-            resolutions.set(resolutionId, resolution);
+          const parsedResolution =
+            resolution && rc_parse(resolution, offlineResolutionRecordSchema).ok
+              ? resolution
+              : null;
+          if (parsedResolution && operations[parsedResolution.operation]) {
+            resolutions.set(resolutionId, parsedResolution);
           } else {
             resolutions.delete(resolutionId);
           }
+          // One a newer deploy wrote keeps its uploads
+          trackUnknownOperationUploads(
+            `r:${resolutionId}`,
+            parsedResolution && !operations[parsedResolution.operation]
+              ? parsedResolution
+              : null,
+          );
         });
       },
       onRemoteWorkDiscarded: (discardedWork, removedEntityKeys) => {
@@ -1221,30 +1261,34 @@ export function createOfflineStoreController<
       queueEntries.clear();
       entryIdsFromAnotherTab.clear();
       resolutions.clear();
+      unknownOperationUploadIds.clear();
+      // Records of an operation this deploy doesn't define were written by a
+      // newer deploy: they stay in storage, with their uploads, for a deploy
+      // that can send or resolve them, and this tab neither lists nor
+      // replays them.
       for (const entry of loadedQueueEntries.values()) {
-        queueEntries.set(entry.id, entry);
+        if (operations[entry.operation]) {
+          queueEntries.set(entry.id, entry);
+        } else {
+          trackUnknownOperationUploads(`q:${entry.id}`, entry);
+        }
       }
-      const droppedResolutions: PersistedOfflineResolutionRecord[] = [];
       for (const resolution of loadedResolutionEntries.values()) {
         const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
         if (!parsed.ok) {
           void current.resolutionNamespace.remove(resolution.id);
           continue;
         }
-        const operation = operations[resolution.operation];
-        if (!operation) {
-          void current.resolutionNamespace.remove(resolution.id);
-          droppedResolutions.push(resolution);
-          continue;
+        if (operations[resolution.operation]) {
+          resolutions.set(resolution.id, resolution);
+        } else {
+          trackUnknownOperationUploads(`r:${resolution.id}`, resolution);
         }
-        resolutions.set(resolution.id, resolution);
       }
+      // Skipped entries keep their place in the queue order
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
-      // The operation of these was removed from the app, so they will never
-      // replay and the uploads only they depended on have no consumer left.
-      void deleteOrphanedDependencyUploads(current, droppedResolutions);
     })().finally(() => {
       hydratedPromise = null;
     });
@@ -1723,12 +1767,15 @@ export function createOfflineStoreController<
     const derivedResolutions =
       buildDerivedResolutionRecords(dependencySnapshot);
     const referencedUploadIds = [
-      ...new Set(
-        [...queueEntries.values(), ...resolutions.values()].flatMap((entry) => [
-          ...Object.values(entry.attachedUploadIds ?? {}),
-          ...(entry.dependencyUploadIds ?? []),
-        ]),
-      ),
+      ...new Set([
+        ...[...queueEntries.values(), ...resolutions.values()].flatMap(
+          (entry) => [
+            ...Object.values(entry.attachedUploadIds ?? {}),
+            ...(entry.dependencyUploadIds ?? []),
+          ],
+        ),
+        ...[...unknownOperationUploadIds.values()].flat(),
+      ]),
     ].sort((left, right) => left.localeCompare(right));
     const protectedKeys = storeAdapter.getProtectedCacheKeys(
       entities.map((entity) => ({
@@ -4032,11 +4079,9 @@ export function createOfflineStoreController<
       }
 
       const operation = operations[nextEntry.operation];
-      if (!operation) {
-        await removeEntry(nextEntry.id, current);
-        void deleteOrphanedDependencyUploads(current, [nextEntry]);
-        continue;
-      }
+      // Entries of operations this deploy doesn't define are never loaded
+      // into the queue, and must not be deleted if one ever gets here
+      if (!operation) return;
 
       const shouldCheckSkipBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
@@ -4188,13 +4233,19 @@ export function createOfflineStoreController<
           error,
           failureCtx,
         );
+        // A session gate closed while the entry was in flight leaves the
+        // failure unclassified: the entry stays queued as it was, to be
+        // replayed once the gate reopens
+        const sessionEnabled = isSessionEnabled();
         const allowReplayRetry =
+          sessionEnabled &&
           classification === 'ignore' &&
           !current.session.getStatus().isOfflineMode
             ? await current.session.classifyRetriableFailure(error, failureCtx)
             : false;
 
         if (
+          !sessionEnabled ||
           classification !== 'ignore' ||
           current.session.getStatus().isOfflineMode
         ) {
@@ -4562,6 +4613,14 @@ export function createOfflineStoreController<
     const current = ensureActiveSession();
     if (!current) return false;
 
+    if (!isSessionEnabled()) {
+      // The fetch runs online: the closed gate is applied to the status too,
+      // for the fetches that read this without refreshing the network state
+      // first (`loadMore`)
+      void current.session.refreshNetworkState();
+      return false;
+    }
+
     return shouldTreatFutureOperationsAsOffline(current);
   }
 
@@ -4573,7 +4632,13 @@ export function createOfflineStoreController<
   }
 
   function canQueueMutation(): boolean {
-    return !isDisposed && getSessionKey() !== false;
+    if (isDisposed || getSessionKey() === false) return false;
+    if (isSessionEnabled()) return true;
+
+    // The mutation runs online: the closed gate is applied to the status
+    // too, as before a fetch, so it stops reporting offline mode
+    void ensureActiveSession()?.session.refreshNetworkState();
+    return false;
   }
 
   async function prepareForFetch(): Promise<void> {

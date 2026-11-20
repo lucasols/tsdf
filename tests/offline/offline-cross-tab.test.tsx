@@ -461,30 +461,56 @@ async function closeTabAndFocusRemaining(closing: Tab) {
 
 type UpdateValueV2Operations = {
   updateValueV2: UpdateValueOperations['updateValue'];
+  updateWithAttachmentV2: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { value: number; attachmentId: string } }
+  >;
 };
 
 /**
  * Opens a tab running a newer deploy of the app, where the document store's
- * offline operation was renamed to `updateValueV2`. The app does not set
+ * offline operations were renamed to `updateValueV2` and
+ * `updateWithAttachmentV2`. The app does not set
  * `getAppVersion`, so this tab shares the offline session with older tabs.
+ *
+ * With `uploads: true` the tab stores offline file uploads in OPFS, like
+ * `openTab`.
  */
-async function openNewVersionTab(name: string) {
+async function openNewVersionTab(
+  name: string,
+  options: { uploads?: boolean } = {},
+) {
   setDocumentHidden(true);
   vi.resetModules();
   const [
     { createStoreManager },
     { createDocumentStoreTestEnv },
     sessionModule,
+    { opfsOfflineUploadAdapter },
   ] = await Promise.all([
     import('../../src/storeManager'),
     import('../mocks/documentStoreTestEnv'),
     import('../../src/persistentStorage/offline/sessionCoordinator'),
+    import('../../src/persistentStorage/opfsOfflineUploadAdapter'),
   ]);
 
   const storeManager = createStoreManager({
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
-    offlineSession: { network: network.config },
+    offlineSession: {
+      network: network.config,
+      ...(options.uploads
+        ? {
+            uploads: {
+              adapter: opfsOfflineUploadAdapter,
+              upload: ({ id }) => {
+                serverCalls.push(`tab ${name} uploaded ${id}`);
+                return Promise.resolve(`server:${id}`);
+              },
+            },
+          }
+        : {}),
+    },
   });
   const env = createDocumentStoreTestEnv<number, UpdateValueV2Operations>(1, {
     id: 'doc',
@@ -506,6 +532,20 @@ async function openNewVersionTab(name: string) {
               return input;
             },
           },
+          updateWithAttachmentV2: {
+            inputSchema: updateWithAttachmentInputSchema,
+            kind: 'update',
+            dependsOnUploads: ({ input }) => [input.attachmentId],
+            execute: async ({ input, uploads }) => {
+              serverCalls.push(
+                `tab ${name} sent doc = ${input.value} with ${JSON.stringify(
+                  uploads.resolvedRefsById[input.attachmentId],
+                )} (v2)`,
+              );
+              await env.serverMock.delayedSetData(input.value);
+              return { value: input.value };
+            },
+          },
         },
       },
     },
@@ -521,6 +561,20 @@ async function openNewVersionTab(name: string) {
           return value;
         },
         offline: { operation: 'updateValueV2', input: { value } },
+      });
+      await advanceTime(10);
+    },
+    /** Queues an offline edit that uses a file staged in any tab. */
+    async queueEditWithStagedFile(value: number, attachmentId: string) {
+      await env.apiStore.performMutation({
+        mutation: async () => {
+          await env.serverMock.delayedSetData(value);
+          return value;
+        },
+        offline: {
+          operation: 'updateWithAttachmentV2',
+          input: { value, attachmentId },
+        },
       });
       await advanceTime(10);
     },
@@ -1149,6 +1203,47 @@ test('an older tab does not delete edits queued for an operation only a newer de
       entities: []
       leader: '✅'
       resolutions: []
+  `);
+});
+
+test('an older tab keeps a file that an edit only a newer deploy can send still needs', async () => {
+  const opfs = createMockBrowserOpfs();
+  network.setOffline();
+  const oldTab = await openTab('A', { focused: true, uploads: true });
+  const newTab = await openNewVersionTab('B', { uploads: true });
+  await blurWindow();
+
+  // Offline, the user picks a photo in the tab still running the old deploy
+  // and saves an edit with it. Later, in the tab running the new deploy, they
+  // save another edit with the same photo, through an operation the old
+  // deploy doesn't define. Both tabs were already open, so the old tab learns
+  // about the new edit from the new tab's message, not from storage.
+  await oldTab.stageFile('photo');
+  await oldTab.queueEditWithStagedFile(3, 'photo');
+  await newTab.queueEditWithStagedFile(5, 'photo');
+
+  // On reconnect the old tab leads: it sends its own edit and keeps the new
+  // deploy's edit, which it can't send. That edit still needs the photo, so
+  // the old tab must not delete it once its own edit no longer uses it.
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(
+    `['tab A uploaded photo', 'tab A sent doc = 3 with "server:photo"']`,
+  );
+  expect(getOpfsDirTree(opfs)).toContain('binary.blob');
+
+  // The user closes the old tab; the new tab leads and sends its edit with
+  // the photo after the next network recovery.
+  await closeTabAndFocusRemaining(oldTab);
+  network.goOffline();
+  await advanceTime(100);
+  network.goOnline();
+  await advanceTime(3_000);
+
+  expect(serverCalls).toMatchInlineSnapshot(`
+    - 'tab A uploaded photo'
+    - 'tab A sent doc = 3 with "server:photo"'
+    - 'tab B sent doc = 5 with "server:photo" (v2)'
   `);
 });
 

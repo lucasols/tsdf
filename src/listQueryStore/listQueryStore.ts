@@ -1653,9 +1653,7 @@ export function createListQueryStore<
       (offlineController?.shouldTreatFetchAsOffline() ?? false) ||
       resolvedOfflineConfig?.session.getOfflineStatus().isOfflineMode ===
         true ||
-      isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
-      )
+      isOfflineNetworkModeActiveSync(resolvedOfflineConfig?.session.getConfig())
     );
   }
 
@@ -3161,9 +3159,7 @@ export function createListQueryStore<
 
     return (
       isSessionOfflineMode ||
-      isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
-      )
+      isOfflineNetworkModeActiveSync(resolvedOfflineConfig?.session.getConfig())
     );
   }
 

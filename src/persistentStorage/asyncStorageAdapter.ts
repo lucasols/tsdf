@@ -2777,7 +2777,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             now,
             protectedRefs:
               protectedRefsBySession.get(scope.sessionKey) ?? undefined,
-            skipExpiration: offlineSessions.has(scope.sessionKey),
+            // Queued mutations and resolutions are unsent work: they are read
+            // without touching their access time, so they never expire.
+            skipExpiration:
+              offlineSessions.has(scope.sessionKey) ||
+              scope.kind === 'offline.queue' ||
+              scope.kind === 'offline.conflict',
             scope,
           }),
         ),

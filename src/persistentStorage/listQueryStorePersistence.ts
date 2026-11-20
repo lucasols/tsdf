@@ -623,9 +623,7 @@ export function setupListQueryPersistence<
   const pendingLocalQueryReconciliationSessions = new Set<string>();
 
   function isOfflineNetworkActive(): boolean {
-    return isOfflineNetworkModeActiveSync(
-      config.offline?.session.getConfig().network,
-    );
+    return isOfflineNetworkModeActiveSync(config.offline?.session.getConfig());
   }
 
   function clearSaveTimer(): void {

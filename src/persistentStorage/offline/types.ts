@@ -29,6 +29,15 @@ export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
 export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
 /** High-level classification used by outage detection. */
 export type OfflineFailureClassification = 'outage' | 'network' | 'ignore';
+/**
+ * Answer of `offlineSession.healthCheck.check`:
+ *
+ * - `'up'` - the backend answered and is healthy. A request that failed
+ *   anyway failed for a reason of its own
+ * - `'outage'` - the backend was reached but is down
+ * - `'unreachable'` - the backend could not be reached from this device
+ */
+export type OfflineHealthCheckResult = 'up' | 'outage' | 'unreachable';
 /** Kinds of entities participating in offline conflict/sync tracking. */
 export type OfflineEntityKind = 'document' | 'item' | 'query';
 /** Lifecycle declared per offline operation definition. */
@@ -210,20 +219,93 @@ export type OfflineNetworkModeConfig = {
   /**
    * Probe whether classified network recovery has completed.
    * Return `true` when the session should leave network offline mode.
+   *
+   * When omitted, `healthCheck` is used if the session has one. Without
+   * either, a classified network failure only lasts until the next fetch or
+   * mutation re-reads the browser connectivity.
    */
   recoveryCheck?: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
   /** Optional probe config to tune classified network recovery behavior. */
   recoveryProbe?: OfflineRecoveryProbeConfig;
 };
 
-/** Server outage detection and recovery configuration. */
-export type OfflineOutageModeConfig = {
+type OfflineOutageModeBaseConfig = {
   /** Enable outage mode logic and confirmation retry flow. */
   enabled: boolean;
-  /** Probe the remote service to confirm outage recovery. */
-  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
   /** Optional probe config to tune recovery behavior. */
   recoveryProbe?: OfflineRecoveryProbeConfig;
+};
+
+/** Server outage detection and recovery configuration. */
+export type OfflineOutageModeConfig = OfflineOutageModeBaseConfig & {
+  /** Probe the remote service to confirm outage recovery. */
+  recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+};
+
+/**
+ * Server outage detection and recovery configuration of a session with a
+ * `healthCheck`, which is the default outage recovery check.
+ */
+type OfflineHealthCheckedOutageModeConfig = OfflineOutageModeBaseConfig & {
+  /**
+   * Optional outage-specific recovery probe. When provided it is used
+   * instead of `healthCheck` to confirm outage recovery.
+   */
+  recoveryCheck?: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+};
+
+/** Context passed to `offlineSession.healthCheck.check`. */
+export type OfflineHealthCheckContext = {
+  /** Session key the check is running for. */
+  sessionKey: string;
+  /**
+   * Aborted when the session stops waiting for this check (`timeoutMs`
+   * elapsed). Pass it to the health request so it is cancelled too.
+   */
+  signal: AbortSignal;
+};
+
+/**
+ * Single health check used by the offline session for both failure
+ * classification and recovery checks.
+ */
+export type OfflineHealthCheckConfig = {
+  /**
+   * Asks the backend how it is doing, usually by calling a health endpoint:
+   *
+   * - `'up'` - the backend answered and is healthy
+   * - `'outage'` - the backend was reached but is down
+   * - `'unreachable'` - the backend could not be reached from this device
+   *
+   * `'up'` for a failed request means the failure is specific to that
+   * request, even when the endpoint it called is down (for example an upload
+   * endpoint answering 503 while the API health check passes). The session
+   * stays online and the request's own failure handling applies: a fetch or
+   * direct mutation fails with its error, and a replayed mutation goes
+   * through `classifyRetryableFailure` and the `replayRetry` budget, ending
+   * in a `retry-exhausted` resolution. To pause the session for such a
+   * service instead, make this check cover it or return `'outage'` for its
+   * failures from `classifyFailure`.
+   *
+   * Calls are deduplicated: while a check is in flight every failure and
+   * recovery tick that needs an answer waits for that same call, so a burst of
+   * failing requests costs a single health request. A finished answer is never
+   * reused: the next failure or recovery tick starts a new check.
+   *
+   * A check that throws, rejects or takes longer than `timeoutMs` gives no
+   * answer and changes nothing: a failure being classified is treated as
+   * specific to its request, and a recovery check as "not recovered yet".
+   */
+  check: (
+    ctx: OfflineHealthCheckContext,
+  ) => Promise<OfflineHealthCheckResult> | OfflineHealthCheckResult;
+  /**
+   * How long the session waits for `check`, in milliseconds, before giving up
+   * on it and aborting `ctx.signal`. Must be a finite number below
+   * `2_147_483_647` (the `setTimeout` limit); there is no "no timeout" value.
+   * @default 10_000
+   */
+  timeoutMs?: number;
 };
 
 /** Fixed replay retry policy for healthy online replay failures. Omitted fields use built-in defaults. */
@@ -240,59 +322,132 @@ export type OfflineReplayRetryConfig = {
   intervalMs?: number;
 };
 
+type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
+  {
+    /**
+     * Gate for the whole offline session, e.g. a feature flag or a
+     * per-workspace setting. While it returns `false` the session behaves as if
+     * no offline session existed: it never enters offline mode (network
+     * detection and `classifyFailure` are skipped), fetches always go to the
+     * network and mutations with an `offline` descriptor run as plain online
+     * mutations instead of being queued.
+     *
+     * Mutations already queued when the gate closes are kept in persistent
+     * storage untouched (and stay visible through the offline entities /
+     * resolutions) and are replayed after the gate reopens while online.
+     *
+     * It is read before every fetch and every mutation with an `offline`
+     * descriptor, on browser online/offline events, before each recovery
+     * check and before replaying queued mutations, so it must be synchronous
+     * and cheap. A flip is picked up by the next of those; call
+     * `storeManager.setOfflineRuntimeConfig({})` to apply it right away.
+     *
+     * The tabs of a session key share its offline status and replay, so it
+     * must return the same value in every tab of that session key (to gate
+     * per workspace, include the workspace in the session key).
+     * @default () => true
+     */
+    enabled?: () => boolean;
+    /**
+     * Classify a remote failure as `outage`, `network`, or `ignore`.
+     * `outage` activates outage recovery behavior.
+     * `network` activates network offline handling for future operations only
+     * when `network.enabled` is true. Existing offline recovery may keep using
+     * classifications until already-active work finishes recovering.
+     *
+     * Return `'unknown'` when the error alone does not tell: the session then
+     * asks `healthCheck` (and ignores the failure when there is none). Any
+     * other answer is final, including `'ignore'`, and `healthCheck` is not
+     * called for that failure.
+     *
+     * Not called while no classification could change anything: the session
+     * gate is closed, or both modes are disabled and neither is still active.
+     *
+     * Failures of the `uploads.upload` transport during replay are classified
+     * here too, with `ctx.uploadId` set: `outage` / `network` keep the upload
+     * `pending` and the dependent operation queued until the session recovers.
+     */
+    classifyFailure?: (
+      error: unknown,
+      ctx: OfflineFailureContext,
+    ) =>
+      | Promise<OfflineFailureClassification | 'unknown'>
+      | OfflineFailureClassification
+      | 'unknown';
+    /**
+     * Optional replay-only classifier for ambiguous sync failures that stayed
+     * online (`classifyFailure(...) === 'ignore'`, or `healthCheck` answered
+     * `'up'`).
+     *
+     * Return `true` only when automatically re-sending the replayed mutation is
+     * known to be safe. Return `false` to avoid auto-replay retries; in that
+     * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
+     * conflict checks can run before the mutation is promoted to manual
+     * resolution.
+     *
+     * When `ctx.uploadId` is set the failure came from a dependency upload and
+     * the mutation was not sent: return `true` to run the upload again on the
+     * `replayRetry` cadence, or `false` for a permanent failure (file rejected),
+     * which moves the operation to manual resolution right away.
+     */
+    classifyRetryableFailure?: (
+      error: unknown,
+      ctx: OfflineFailureContext,
+    ) => Promise<boolean> | boolean;
+    /** Network detection strategy and browser integration. */
+    network?: OfflineNetworkModeConfig;
+    /** Fixed retry policy for healthy online replay failures. */
+    replayRetry?: OfflineReplayRetryConfig;
+    /**
+     * Root policy controlling whether offline-enabled mutations may enter the
+     * durable offline queue for each active offline cause.
+     * @default undefined
+     */
+    mutationQueueing?: OfflineMutationQueueingConfig;
+    /** Optional upload transport/storage config shared by the whole session. */
+    uploads?: OfflineSessionUploadsConfig<TUploadRef>;
+  };
+
 /** Shared offline/session policy reused by every store in the same session. */
 export type OfflineSessionConfig<
   TUploadRef extends ValidPayload = ValidPayload,
-> = {
-  /**
-   * Classify a remote failure as `outage`, `network`, or `ignore`.
-   * `outage` activates outage recovery behavior.
-   * `network` activates network offline handling for future operations only
-   * when `network.enabled` is true. Existing offline recovery may keep using
-   * classifications until already-active work finishes recovering.
-   *
-   * Failures of the `uploads.upload` transport during replay are classified
-   * here too, with `ctx.uploadId` set: `outage` / `network` keep the upload
-   * `pending` and the dependent operation queued until the session recovers.
-   */
-  classifyFailure?: (
-    error: unknown,
-    ctx: OfflineFailureContext,
-  ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
-  /**
-   * Optional replay-only classifier for ambiguous sync failures that stayed
-   * online (`classifyFailure(...) === 'ignore'`).
-   *
-   * Return `true` only when automatically re-sending the replayed mutation is
-   * known to be safe. Return `false` to avoid auto-replay retries; in that
-   * case the entry still enters `needs-confirmation` so `shouldSkipSync` /
-   * conflict checks can run before the mutation is promoted to manual
-   * resolution.
-   *
-   * When `ctx.uploadId` is set the failure came from a dependency upload and
-   * the mutation was not sent: return `true` to run the upload again on the
-   * `replayRetry` cadence, or `false` for a permanent failure (file rejected),
-   * which moves the operation to manual resolution right away.
-   */
-  classifyRetryableFailure?: (
-    error: unknown,
-    ctx: OfflineFailureContext,
-  ) => Promise<boolean> | boolean;
-  /** Network detection strategy and browser integration. */
-  network?: OfflineNetworkModeConfig;
-  /** Outage detection and recovery strategy for remote failures. */
-  outage?: OfflineOutageModeConfig;
-  /** Fixed retry policy for healthy online replay failures. */
-  replayRetry?: OfflineReplayRetryConfig;
-  /**
-   * Root policy controlling whether offline-enabled mutations may enter the
-   * durable offline queue for each active offline cause.
-   * @default undefined
-   */
-  mutationQueueing?: OfflineMutationQueueingConfig;
-  /** Optional upload transport/storage config shared by the whole session. */
-  uploads?: OfflineSessionUploadsConfig<TUploadRef>;
-};
+> = OfflineSessionBaseConfig<TUploadRef> &
+  (
+    | {
+        healthCheck?: undefined;
+        /** Outage detection and recovery strategy for remote failures. */
+        outage?: OfflineOutageModeConfig;
+      }
+    | {
+        /**
+         * Single health check answering both "this request failed: is it the
+         * network, an outage, or just this request?" and "are we back?".
+         *
+         * - Failure classification: a failed fetch, mutation or queued
+         *   mutation replay that `classifyFailure` did not settle (it is not
+         *   configured, or returned `'unknown'`) runs the check, unless the
+         *   session is already in offline mode. `'unreachable'` activates
+         *   network mode, `'outage'` activates outage mode (each only when
+         *   that mode is enabled) and `'up'` leaves the failure to its
+         *   request: the session stays online and the request's own failure
+         *   handling applies.
+         * - Recovery: while a mode is active because of a failure, its
+         *   recovery probe runs the check on the mode's `recoveryProbe`
+         *   cadence, unless the mode has its own `recoveryCheck`. `'up'` ends
+         *   the offline mode, `'outage'` and `'unreachable'` keep it or
+         *   switch to the matching mode.
+         *
+         * Never called on the success path, while the session gate is closed,
+         * or while both modes are disabled and neither is still active.
+         */
+        healthCheck: OfflineHealthCheckConfig;
+        /**
+         * Outage detection and recovery strategy for remote failures.
+         * `recoveryCheck` is optional here: `healthCheck` is the default.
+         */
+        outage?: OfflineHealthCheckedOutageModeConfig;
+      }
+  );
 
 /** Per-session offline status snapshot shared across tabs. */
 export type GlobalOfflineStatus = {

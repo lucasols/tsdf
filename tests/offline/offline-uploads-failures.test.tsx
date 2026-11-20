@@ -71,7 +71,7 @@ function createUploadFailureTestEnv({
   sessionKey: string;
   storeId: string;
   /** Session classifiers and modes under test (the uploads config is added here). */
-  offlineSession: Omit<OfflineSessionConfig<string>, 'uploads'>;
+  offlineSession: OfflineSessionConfig<string>;
   /** Outcome of each transport call, in order. Calls past the end succeed. */
   uploadAttempts: Array<UploadTransportError | 'success'>;
 }) {
