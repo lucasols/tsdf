@@ -1182,6 +1182,10 @@ export function createCollectionStore<
               rebindOfflineOverlays(itemKeyRewrites);
             },
             revalidateDiscardedEntities: (entities) => {
+              // Discarding the last change of a realtime store schedules its
+              // recovery revalidation for the end of the reconnect cooldown:
+              // run it now with this refetch instead of fetching twice.
+              focusLifecycle.flushPendingReconnectRevalidate();
               for (const { entityKey, payload } of entities) {
                 const item = store.state[entityKey];
                 if (item) {

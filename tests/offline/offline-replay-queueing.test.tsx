@@ -3243,6 +3243,130 @@ test('an item created right after reconnecting on top of an offline creation is 
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
 
+test('deleting a folder right after reconnecting is sent after the offline subfolder creation that depends on it', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-online-delete-dependency-session';
+
+  type FolderOperations = {
+    createSubfolder: CollectionOfflineOperationDefinition<
+      { value: { name: string; parentId?: string } },
+      string,
+      { name: string; parentId: string },
+      unknown,
+      { id: string }
+    >;
+    deleteFolder: CollectionOfflineOperationDefinition<
+      { value: { name: string; parentId?: string } },
+      string,
+      { itemId: string }
+    >;
+  };
+
+  const folderSchema = rc_object({
+    value: rc_object({ name: rc_string, parentId: rc_string.optionalKey() }),
+  });
+
+  // The server keeps the order the mutations reach it in.
+  const serverOrder: string[] = [];
+
+  const env = createCollectionStoreTestEnv<
+    { name: string; parentId?: string },
+    FolderOperations
+  >(
+    { 'folders||1': { name: 'Docs' } },
+    {
+      id: 'offline-online-delete-dependency-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: folderSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createSubfolder: {
+              inputSchema: rc_object({ name: rc_string, parentId: rc_string }),
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              dependsOn: ({ input }) => [input.parentId],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name, parentId: input.parentId },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: async ({ input }) => {
+                // Replaying over the connection that just came back is slow.
+                await env.serverTable.delayedSetItem('folders||2', input, {
+                  durationMs: 3000,
+                });
+                serverOrder.push(`create subfolder ${input.name}`);
+                return { id: 'folders||2' };
+              },
+            },
+            deleteFolder: {
+              inputSchema: deleteItemInputSchema,
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: ({ input }) => {
+                serverOrder.push(`delete ${input.itemId}`);
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.deleteItemState(input.itemId);
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Offline: create a subfolder inside the existing Docs folder.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'createSubfolder',
+        input: { name: 'Invoices', parentId: 'folders||1' },
+      },
+    });
+  });
+
+  // Back online: the subfolder creation starts replaying, and the user
+  // deletes the Docs folder before that replay reaches the server.
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(500);
+
+  const sendDeleteDirectly = vi.fn(() => {
+    serverOrder.push('delete folders||1 (sent directly)');
+    return Promise.resolve();
+  });
+  await act(async () => {
+    await env.apiStore.performMutation('folders||1', {
+      mutation: sendDeleteDirectly,
+      offline: { operation: 'deleteFolder', input: { itemId: 'folders||1' } },
+    });
+  });
+  await flushAllTimers();
+
+  // Sent on its own, the delete would reach the server first and the
+  // subfolder creation would then fail for a missing parent: it is queued
+  // behind the creation instead, keeping the order the user made them.
+  expect(sendDeleteDirectly).not.toHaveBeenCalled();
+  expect(serverOrder).toMatchInlineSnapshot(
+    `['create subfolder Invoices', 'delete folders||1']`,
+  );
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+});
+
 test('lists are revalidated after replaying an offline creation that references no entity', async () => {
   network.setOffline();
   const sessionKey = 'offline-entityless-create-session';
@@ -3612,6 +3736,121 @@ test('discarding one of two failed offline changes of a document keeps the other
     .      | "value:3" | -- discard the change to 3: the document is refetched
     .      | "value:3" | 🟠 >fetch-started
     31.81s | "value:3" | 🟠 <fetch-finished (value: 1)
+    .      | "value:1" | ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('discarding the last failed offline change of a realtime document refetches it once', async () => {
+  const sessionKey = 'offline-discard-realtime-document-session';
+
+  // The server rejects the change on every replay attempt, so it ends up
+  // waiting for the user to decide what to do with it.
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        network: network.config,
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    }),
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: () => {
+              throw new Error('update rejected');
+            },
+            onSuccessExecute: () => {},
+          },
+        },
+      },
+    },
+  });
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(`value:${doc.data?.value ?? 'null'}`);
+  });
+  // Let the mount revalidation finish while online.
+  await advanceTime(1_000);
+
+  env.addTimelineComments('beforeNextAction', [
+    'offline: change the value to 2',
+  ]);
+  await act(async () => {
+    network.goOffline();
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+  });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the change until it needs a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  // 3 attempts, 5s apart.
+  await advanceTime(15_000);
+  await flushAllTimers();
+
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) {
+    throw new Error('Expected the change to be waiting for a resolution');
+  }
+
+  // Discarding the last change makes the store recover. A realtime store
+  // waits one reconnect cooldown before its recovery revalidation, but the
+  // discard already refetches the document right away: that refetch is the
+  // recovery revalidation, so the document is not fetched a second time when
+  // the cooldown ends.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the change: the document is refetched once',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(resolution.id, 'updateValue', {
+      action: 'discard',
+    });
+  });
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui        |
+    0      | "value:1" | ui-initialized
+    1s     | "value:1" | -- offline: change the value to 2
+    .      | "value:2" | ui-changed
+    .      | "value:2" | offline:updateValue queued
+    .      | "value:2" | -- back online: the server rejects the change until it needs a resolution
+    .      | "value:2" | offline:updateValue replay-started
+    6s     | "value:2" | offline:updateValue replay-started
+    11s    | "value:2" | offline:updateValue replay-started
+    .      | "value:2" | offline:updateValue resolution-required
+    16.01s | "value:2" | -- discard the change: the document is refetched once
+    .      | "value:2" | 🔴 >fetch-started
+    16.81s | "value:2" | 🔴 <fetch-finished (value: 1)
     .      | "value:1" | ui-changed
     "
   `);

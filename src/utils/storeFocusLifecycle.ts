@@ -13,6 +13,13 @@ type StoreFocusLifecycle = {
    * dropped while offline, see below.
    */
   onOfflineRecovery: () => void;
+  /**
+   * Runs now a reconnect or recovery revalidation that is waiting for the
+   * cooldown to end, for callers about to refetch the store anyway: both
+   * fetches then collapse into one instead of refetching again when the
+   * cooldown ends.
+   */
+  flushPendingReconnectRevalidate: () => void;
   reset: () => void;
   dispose: () => void;
 };
@@ -235,7 +242,19 @@ export function createStoreFocusLifecycle(
     scheduleTrailingTransportReconnectRevalidate();
   }
 
+  function flushPendingReconnectRevalidate(): void {
+    if (reconnectCooldownTimeoutId === null) return;
+
+    flushTransportReconnectRevalidate();
+  }
+
   reset();
 
-  return { onTransportReconnect, onOfflineRecovery, reset, dispose };
+  return {
+    onTransportReconnect,
+    onOfflineRecovery,
+    flushPendingReconnectRevalidate,
+    reset,
+    dispose,
+  };
 }

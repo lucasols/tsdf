@@ -619,23 +619,26 @@ export function createOfflineStoreController<
 
   /**
    * Whether mutations queued earlier for the entities this mutation affects
-   * or depends on (`dependsOn`) are still waiting to reach the server
-   * (queued, replaying or unconfirmed).
+   * or depends on (`dependsOn`), or that depend on an entity this mutation
+   * affects, are still waiting to reach the server (queued, replaying or
+   * unconfirmed).
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
     if (queueEntries.size === 0) return false;
 
+    const affectedEntityRefs =
+      prepared.entityRefs ??
+      resolveNormalizedRefs(
+        getOperationRawEntityRefs(
+          prepared.operation,
+          prepared.operationName,
+          prepared.validatedInput,
+        ),
+      );
     const entityRefs = [
-      ...(prepared.entityRefs ??
-        resolveNormalizedRefs(
-          getOperationRawEntityRefs(
-            prepared.operation,
-            prepared.operationName,
-            prepared.validatedInput,
-          ),
-        )),
+      ...affectedEntityRefs,
       ...(prepared.operation.dependsOn
         ? resolveNormalizedRefs(
             prepared.operation.dependsOn({ input: prepared.validatedInput }),
@@ -652,6 +655,18 @@ export function createOfflineStoreController<
         ) {
           return true;
         }
+      }
+
+      // A queued mutation that depends on an entity this one changes (e.g. a
+      // queued child creation and an online delete of its parent) must reach
+      // the server first.
+      const queuedDependencyKeys = getDependencyBlockerEntityKeys(entry);
+      if (
+        affectedEntityRefs.some((entityRef) =>
+          queuedDependencyKeys.has(entityRef.entityKey),
+        )
+      ) {
+        return true;
       }
     }
 

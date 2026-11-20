@@ -2331,6 +2331,10 @@ export function createListQueryStore<
           rebindOfflineOverlays(itemKeyRewrites);
         },
         revalidateDiscardedEntities: (entities, hasPendingResolutions) => {
+          // Discarding the last change of a realtime store schedules its
+          // recovery revalidation for the end of the reconnect cooldown: run
+          // it now with this refetch instead of fetching twice.
+          focusLifecycle.flushPendingReconnectRevalidate();
           invalidateQueryAndItems({
             itemPayload: filterAndMap(
               entities,

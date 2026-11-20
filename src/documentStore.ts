@@ -765,6 +765,10 @@ export function createDocumentStore<
               { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
             ],
             revalidateDiscardedEntities: () => {
+              // Discarding the last change of a realtime store schedules its
+              // recovery revalidation for the end of the reconnect cooldown:
+              // run it now with this refetch instead of fetching twice.
+              focusLifecycle.flushPendingReconnectRevalidate();
               invalidateData('highPriority');
             },
             getProtectedCacheKeys: () => {
