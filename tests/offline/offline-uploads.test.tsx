@@ -4139,6 +4139,96 @@ test('requeueing a conflict deletes the staged uploads the replacement no longer
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
 
+test('requeueing a conflict sends the replacement with the files attached directly to the original mutation', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  network.setOffline();
+  const storeManager = createUploadCleanupStoreManager(
+    'offline-direct-upload-requeue-session',
+  );
+  const replayedFiles: Array<{ value: number; avatar: string | null }> = [];
+
+  const env = createDocumentStoreTestEnv<
+    number,
+    {
+      updateValue: DocumentOfflineOperationDefinition<
+        { value: number },
+        { input: { value: number }; conflict: { reason: string } }
+      >;
+    }
+  >(1, {
+    id: 'offline-direct-upload-requeue-doc',
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: rc_object({ value: rc_number }),
+            kind: 'update',
+            execute: async (ctx) => {
+              const file = ctx.uploads.filesById.avatar;
+              replayedFiles.push({
+                value: ctx.input.value,
+                avatar: file ? await file.text() : null,
+              });
+              return ctx.input;
+            },
+            onSuccessExecute: () => {},
+            conflictHandling: {
+              schema: docConflictSchema,
+              detectConflict: ({ input }) =>
+                input.value === 2 ? { reason: 'server-changed' } : false,
+            },
+          },
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  // --- Setup: a mutation with an attached file stops on a conflict ---
+  await resolveWithin(
+    env.apiStore.performMutation({
+      optimisticUpdate: () => {},
+      mutation: () => Promise.resolve({ value: 2 }),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+      upload: {
+        avatar: new File(['avatar body'], 'avatar.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+      },
+    }),
+  );
+  await reconnect();
+
+  const [conflict] = env.apiStore.getOfflineResolutions();
+  if (!conflict || conflict.kind !== 'conflict') {
+    throw new Error('Expected the replay to stop on a conflict');
+  }
+  // The conflict is detected before `execute`, so nothing was sent yet.
+  expect(replayedFiles).toMatchInlineSnapshot(`[]`);
+
+  // --- Action: the user resends the change with adjusted input ---
+  await resolveWithin(
+    env.apiStore.resolveOfflineResolution(conflict.id, 'updateValue', {
+      action: 'requeue',
+      input: { value: 3 },
+    }),
+  );
+  await flushAllTimers();
+
+  // The replacement is sent with the file the user attached originally.
+  expect(replayedFiles).toMatchInlineSnapshot(
+    `- { avatar: 'avatar body', value: 3 }`,
+  );
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  // Once replayed, nothing needs the attached file anymore.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
 test('committing a conflict without replaying it deletes the staged uploads it depended on', async () => {
   const mockBrowserOpfs = createMockBrowserOpfs();
   network.setOffline();

@@ -539,6 +539,8 @@ export function createOfflineStoreController<
     operation: TName;
     input: unknown;
     upload?: OfflineMutationUploadsInput;
+    /** Already stored direct uploads reused instead of `upload` (requeue). */
+    attachedUploadIds?: OfflineAttachedUploadIds;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -552,6 +554,7 @@ export function createOfflineStoreController<
     validatedInput: unknown;
     dependencyUploadIds: string[];
     upload?: OfflineMutationUploadsInput;
+    attachedUploadIds?: OfflineAttachedUploadIds;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -2762,6 +2765,7 @@ export function createOfflineStoreController<
         input: validatedInput,
       }),
       upload: args.upload,
+      attachedUploadIds: args.attachedUploadIds,
       tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
@@ -2825,6 +2829,7 @@ export function createOfflineStoreController<
         validatedInput,
         dependencyUploadIds,
         upload,
+        attachedUploadIds,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
       },
@@ -2854,7 +2859,10 @@ export function createOfflineStoreController<
         `Offline operation "${operationName}" cannot configure onSuccessExecute when tempEntity or tempEntities is present`,
       );
     }
-    if (operation.accumulation && upload !== undefined) {
+    if (
+      operation.accumulation &&
+      (upload !== undefined || attachedUploadIds !== undefined)
+    ) {
       throw new Error(
         `Offline operation "${operationName}" cannot configure direct uploads together with accumulation`,
       );
@@ -3059,6 +3067,7 @@ export function createOfflineStoreController<
       queueOrder,
       entityRefs,
       attachedUploads: upload,
+      attachedUploadIds,
       dependencyUploadIds:
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
       tempIds,
@@ -3510,7 +3519,9 @@ export function createOfflineStoreController<
         // `execute` never ran when a dependency upload failed, so there is
         // nothing to confirm with the server: a failure that is not retried
         // automatically skips `needs-confirmation` and goes straight to manual
-        // resolution.
+        // resolution. A retried one still waits in `needs-confirmation`, which
+        // drives the retry schedule, so the next attempt runs the skip and
+        // conflict checks before uploading again.
         const uploadWillNotBeRetried =
           failedUploadId !== undefined && !allowReplayRetry;
 
@@ -3751,6 +3762,9 @@ export function createOfflineStoreController<
       const preparedMutation = prepareMutationWithSession(current, {
         operation: operationName,
         input: resolutionAction?.input,
+        // The replacement is sent with the files attached to the original
+        // mutation, which stay stored under their ids.
+        attachedUploadIds: resolutionRecord.attachedUploadIds,
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
