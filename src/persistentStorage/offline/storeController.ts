@@ -1002,17 +1002,8 @@ export function createOfflineStoreController<
     if (hydratedPromise) return hydratedPromise;
 
     hydratedPromise = (async () => {
-      const [loadedQueueEntries, loadedResolutionEntries] =
-        await loadPersistedRecords(current);
+      if (!(await loadAndApplyPersistedRecords(current, false))) return;
 
-      if (!isActiveSessionState(current)) return;
-
-      applyPersistedRecords(
-        current,
-        loadedQueueEntries,
-        loadedResolutionEntries,
-        false,
-      );
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
     })().finally(() => {
@@ -1024,25 +1015,32 @@ export function createOfflineStoreController<
 
   /**
    * Reads the persisted queue and resolutions once no write of this tab is in
-   * flight, so the result never misses a change this tab already made in
-   * memory.
+   * flight and applies them in memory, so the result never misses a change
+   * this tab already made in memory. Returns false when the session changed
+   * while loading.
    */
-  async function loadPersistedRecords(
+  async function loadAndApplyPersistedRecords(
     current: ActiveSessionState,
-  ): Promise<
-    [
-      Map<string, OfflineQueueEntry>,
-      Map<string, PersistedOfflineResolutionRecord>,
-    ]
-  > {
+    isReload: boolean,
+  ): Promise<boolean> {
     while (true) {
       await Promise.all(pendingStorageWrites);
       const writesBeforeLoad = startedStorageWrites;
-      const loaded = await Promise.all([
+      const [loadedQueueEntries, loadedResolutionEntries] = await Promise.all([
         loadNamespaceRecords(current.queueNamespace),
         loadNamespaceRecords(current.resolutionNamespace),
       ]);
-      if (startedStorageWrites === writesBeforeLoad) return loaded;
+      if (!isActiveSessionState(current)) return false;
+      // Checked right before applying, so no write can start in between.
+      if (startedStorageWrites !== writesBeforeLoad) continue;
+
+      applyPersistedRecords(
+        current,
+        loadedQueueEntries,
+        loadedResolutionEntries,
+        isReload,
+      );
+      return true;
     }
   }
 
@@ -1111,16 +1109,8 @@ export function createOfflineStoreController<
     const current = ensureActiveSession();
     if (!current || hydratedSessionKey !== current.sessionKey) return;
 
-    const [loadedQueueEntries, loadedResolutionEntries] =
-      await loadPersistedRecords(current);
-    if (!isActiveSessionState(current)) return;
+    if (!(await loadAndApplyPersistedRecords(current, true))) return;
 
-    applyPersistedRecords(
-      current,
-      loadedQueueEntries,
-      loadedResolutionEntries,
-      true,
-    );
     refreshDerivedState(current, true);
   }
 
