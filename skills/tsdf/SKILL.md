@@ -236,6 +236,8 @@ Recovery: while offline, `onTransportReconnect()` and focus revalidations only r
 
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
 
+Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
+
 Docs: `docs/offline.md`.
 
 ## Real-time updates
