@@ -44,10 +44,16 @@ export type BrowserTabsPriority = {
   noteLocalFocusState: () => void;
   getPriorityRank: () => number;
   getCoalescingWindowMs: (baseCoalescingWindowMs: number) => number;
+  /**
+   * Records a remote tab's status. The first status from a tab is answered
+   * with the local status, since a newly opened tab otherwise never learns
+   * about the tabs that were already open. Returns whether the remote tab was
+   * new.
+   */
   onTabStatusMessage: (
     remoteTabId: string,
     message: BrowserTabsTabStatusMessage,
-  ) => void;
+  ) => boolean;
   noteRemoteFetchStart: (
     targetKey: string,
     remoteTabId: string,
@@ -258,15 +264,15 @@ export function createBrowserTabsPriority(
   function onTabStatusMessage(
     remoteTabId: string,
     message: BrowserTabsTabStatusMessage,
-  ): void {
-    if (!getIsEnabled()) return;
+  ): boolean {
+    if (!getIsEnabled()) return false;
 
     const previousPresence = knownTabs.get(remoteTabId);
     if (
       previousPresence &&
       message.lastPresenceAt < previousPresence.lastPresenceAt
     ) {
-      return;
+      return false;
     }
 
     knownTabs.set(remoteTabId, {
@@ -278,6 +284,11 @@ export function createBrowserTabsPriority(
     if (import.meta.env.DEV) {
       reportLeaderChange('remote-status');
     }
+
+    if (previousPresence) return false;
+
+    publishLocalStatus();
+    return true;
   }
 
   function noteRemoteFetchStart(

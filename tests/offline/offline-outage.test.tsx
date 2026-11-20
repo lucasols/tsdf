@@ -476,18 +476,20 @@ test('stale async outage classifications are ignored after a newer failure settl
       return Promise.resolve('ignore' as const);
     });
 
+  // Both stores belong to the same app, so they share one store manager.
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      classifyFailure,
+      outage: { enabled: true, recoveryCheck },
+    },
+  });
   const createOfflineEnv = (storeName: string) =>
     createDocumentStoreTestEnv(1, {
       id: storeName,
       getSessionKey: () => sessionKey,
-      storeManager: createStoreManager({
-        errorNormalizer: normalizeError,
-        getSessionKey: () => sessionKey,
-        offlineSession: {
-          classifyFailure,
-          outage: { enabled: true, recoveryCheck },
-        },
-      }),
+      storeManager,
       persistentStorage: {
         adapter: 'local-sync',
         schema: docSchema,

@@ -1791,9 +1791,8 @@ export type OfflineResolutionGenericAction = 'retry' | 'discard';
  *
  * - `offline-not-configured` - The manager was created without `offlineSession`.
  * - `resolution-not-found` - No resolution with this id exists in the active
- *   session, e.g. it was already resolved or the session is logged out. Also
- *   returned when another tab created the record after this tab's store
- *   loaded its resolutions.
+ *   session, e.g. it was already resolved (possibly from another tab) or the
+ *   session is logged out.
  * - `store-not-registered` - The store that owns the resolution was not created
  *   with this manager (yet), so the action cannot be applied from here.
  * - `retry-not-supported` - `retry` was requested for a `conflict` record;

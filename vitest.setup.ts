@@ -50,6 +50,27 @@ console.error = (...args) => {
   if (!skipOriginal) originalConsoleError(...args);
 };
 
+/**
+ * Every test runs in the same process, so a store a test leaves undisposed
+ * would keep its `BroadcastChannel` open and act as a still-open tab in later
+ * tests. Close every channel a test opened once it ends, like a page unload.
+ */
+const openBroadcastChannels = new Set<BroadcastChannel>();
+
+class TestScopedBroadcastChannel extends BroadcastChannel {
+  constructor(name: string) {
+    super(name);
+    openBroadcastChannels.add(this);
+  }
+
+  override close(): void {
+    openBroadcastChannels.delete(this);
+    super.close();
+  }
+}
+
+globalThis.BroadcastChannel = TestScopedBroadcastChannel;
+
 const defaultNavigatorLocks = {
   request: vi.fn(
     async <T>(_name: string, callback: () => T | Promise<T>) =>
@@ -69,6 +90,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetSessionOfflineCoordinatorRegistryForTests();
+  for (const channel of openBroadcastChannels) channel.close();
   Object.defineProperty(globalThis.navigator, 'locks', {
     value: defaultNavigatorLocks,
     writable: true,

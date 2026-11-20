@@ -518,6 +518,11 @@ export function createOfflineStoreController<
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
+  /** Queue and resolution writes still in flight, so a reload can wait for them. */
+  const pendingStorageWrites = new Set<Promise<void>>();
+  let startedStorageWrites = 0;
+  let reloadRequested = false;
+  let reloadTask: Promise<void> | null = null;
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
@@ -971,6 +976,7 @@ export function createOfflineStoreController<
       onOfflineCycle: () => {
         resetReplayRetryState();
       },
+      onRemoteDataChange: scheduleReloadFromStorage,
     });
 
     activeSession = {
@@ -996,32 +1002,16 @@ export function createOfflineStoreController<
     if (hydratedPromise) return hydratedPromise;
 
     hydratedPromise = (async () => {
-      const [loadedQueueEntries, loadedResolutionEntries] = await Promise.all([
-        loadNamespaceRecords(current.queueNamespace),
-        loadNamespaceRecords(current.resolutionNamespace),
-      ]);
+      const [loadedQueueEntries, loadedResolutionEntries] =
+        await loadPersistedRecords(current);
 
       if (!isActiveSessionState(current)) return;
 
-      queueEntries.clear();
-      resolutions.clear();
-      for (const entry of loadedQueueEntries.values()) {
-        queueEntries.set(entry.id, entry);
-      }
-      for (const resolution of loadedResolutionEntries.values()) {
-        const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
-        if (!parsed.ok) {
-          void current.resolutionNamespace.remove(resolution.id);
-          continue;
-        }
-        const operation = operations[resolution.operation];
-        if (!operation) {
-          void current.resolutionNamespace.remove(resolution.id);
-          continue;
-        }
-        resolutions.set(resolution.id, resolution);
-      }
-      nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
+      applyPersistedRecords(
+        current,
+        loadedQueueEntries,
+        loadedResolutionEntries,
+      );
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
     })().finally(() => {
@@ -1029,6 +1019,115 @@ export function createOfflineStoreController<
     });
 
     return hydratedPromise;
+  }
+
+  /**
+   * Reads the persisted queue and resolutions once no write of this tab is in
+   * flight, so the result never misses a change this tab already made in
+   * memory.
+   */
+  async function loadPersistedRecords(
+    current: ActiveSessionState,
+  ): Promise<
+    [
+      Map<string, OfflineQueueEntry>,
+      Map<string, PersistedOfflineResolutionRecord>,
+    ]
+  > {
+    while (true) {
+      await Promise.all(pendingStorageWrites);
+      const writesBeforeLoad = startedStorageWrites;
+      const loaded = await Promise.all([
+        loadNamespaceRecords(current.queueNamespace),
+        loadNamespaceRecords(current.resolutionNamespace),
+      ]);
+      if (startedStorageWrites === writesBeforeLoad) return loaded;
+    }
+  }
+
+  function applyPersistedRecords(
+    current: ActiveSessionState,
+    loadedQueueEntries: Map<string, OfflineQueueEntry>,
+    loadedResolutionEntries: Map<string, PersistedOfflineResolutionRecord>,
+  ): void {
+    queueEntries.clear();
+    resolutions.clear();
+    for (const entry of loadedQueueEntries.values()) {
+      queueEntries.set(entry.id, entry);
+    }
+    for (const resolution of loadedResolutionEntries.values()) {
+      const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
+      if (!parsed.ok) {
+        void current.resolutionNamespace.remove(resolution.id);
+        continue;
+      }
+      const operation = operations[resolution.operation];
+      if (!operation) {
+        void current.resolutionNamespace.remove(resolution.id);
+        continue;
+      }
+      resolutions.set(resolution.id, resolution);
+    }
+    for (const entryId of countedReplayFailures.keys()) {
+      if (!queueEntries.has(entryId)) countedReplayFailures.delete(entryId);
+    }
+    if (queueEntries.size === 0) clearReplayRetryTimer();
+    nextQueueOrder = Math.max(
+      nextQueueOrder,
+      getNextQueueOrder(loadedQueueEntries.values()),
+    );
+  }
+
+  /**
+   * Another tab changed this store's persisted queue or resolutions: reload
+   * them, after any replay in progress, then replay what is now queued.
+   * Requests made while a reload runs are coalesced into one more reload.
+   */
+  function scheduleReloadFromStorage(): void {
+    reloadRequested = true;
+    if (reloadTask) return;
+
+    reloadTask = (async () => {
+      while (reloadRequested) {
+        reloadRequested = false;
+        await replayQueue.resultifyAdd(reloadFromStorage);
+      }
+    })().finally(() => {
+      reloadTask = null;
+    });
+    void reloadTask.then(() => ensureReplayScheduled());
+  }
+
+  async function reloadFromStorage(): Promise<void> {
+    await hydrateIfNeeded();
+    const current = ensureActiveSession();
+    if (!current || hydratedSessionKey !== current.sessionKey) return;
+
+    const [loadedQueueEntries, loadedResolutionEntries] =
+      await loadPersistedRecords(current);
+    if (!isActiveSessionState(current)) return;
+
+    applyPersistedRecords(current, loadedQueueEntries, loadedResolutionEntries);
+    refreshDerivedState(current, true);
+  }
+
+  /** Runs a queue or resolution write and tells the other tabs once it lands. */
+  async function trackStorageWrite(
+    current: ActiveSessionState,
+    write: Promise<void>,
+  ): Promise<void> {
+    startedStorageWrites += 1;
+    const settled = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    pendingStorageWrites.add(settled);
+    try {
+      await write;
+    } finally {
+      pendingStorageWrites.delete(settled);
+      current.session.notifyStoreDataChanged(storeName);
+    }
   }
 
   function parseConflictPayloadForOperation<
@@ -1338,7 +1437,15 @@ export function createOfflineStoreController<
     );
   }
 
-  function refreshDerivedState(current?: ActiveSessionState): void {
+  /**
+   * Recomputes the store's entities and session contribution. `skipEntityPersist`
+   * skips rewriting the derived entity namespace, for reloads of data another tab
+   * already persisted.
+   */
+  function refreshDerivedState(
+    current?: ActiveSessionState,
+    skipEntityPersist?: boolean,
+  ): void {
     const session = current ?? ensureActiveSession();
     if (!session || !isActiveSessionState(session)) return;
     const sessionState = session;
@@ -1491,7 +1598,7 @@ export function createOfflineStoreController<
       entities,
     });
 
-    void syncEntityNamespace(sessionState, entities);
+    if (!skipEntityPersist) void syncEntityNamespace(sessionState, entities);
   }
 
   async function syncEntityNamespace(
@@ -2009,11 +2116,7 @@ export function createOfflineStoreController<
       if (!rewrite) continue;
 
       const rewrittenResolution = { ...resolution, ...rewrite };
-      resolutions.set(rewrittenResolution.id, rewrittenResolution);
-      await args.current.resolutionNamespace.save(
-        rewrittenResolution.id,
-        rewrittenResolution,
-      );
+      await persistResolution(rewrittenResolution, args.current, true);
       entityRefRewrites.push({
         previousEntityRefs: resolution.entityRefs,
         nextEntityRefs: rewrittenResolution.entityRefs,
@@ -2149,7 +2252,10 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       queueEntries.set(entry.id, entry);
     }
-    await session.queueNamespace.save(entry.id, entry);
+    await trackStorageWrite(
+      session,
+      session.queueNamespace.save(entry.id, entry),
+    );
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2185,7 +2291,7 @@ export function createOfflineStoreController<
         clearReplayRetryTimer();
       }
     }
-    await session.queueNamespace.remove(entryId);
+    await trackStorageWrite(session, session.queueNamespace.remove(entryId));
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2201,7 +2307,10 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       resolutions.set(resolution.id, resolution);
     }
-    await session.resolutionNamespace.save(resolution.id, resolution);
+    await trackStorageWrite(
+      session,
+      session.resolutionNamespace.save(resolution.id, resolution),
+    );
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2217,7 +2326,10 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       resolutions.delete(resolutionId);
     }
-    await session.resolutionNamespace.remove(resolutionId);
+    await trackStorageWrite(
+      session,
+      session.resolutionNamespace.remove(resolutionId),
+    );
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }

@@ -83,13 +83,22 @@ type SessionStoreState = {
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
+  /** The stores open in the sending tab, which `entities` and `resolutions` cover. */
+  storeNames: string[];
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
 };
 
+/** Sent once a tab finished writing these stores' offline queue or resolutions. */
+type SessionStoreDataChangedMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-store-data-changed';
+  storeNames: string[];
+};
+
 type OfflineSessionMessage =
   | SessionSnapshotMessage
+  | SessionStoreDataChangedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -108,10 +117,17 @@ type SessionStoreContribution = {
   replayHead: SessionReplayHead | null;
 };
 
+type SessionStoreItems = Pick<
+  SessionStoreContribution,
+  'entities' | 'resolutions'
+>;
+
 type SessionRegistration = {
   storeName: string;
   onGreenCycle?: () => void;
   onOfflineCycle?: () => void;
+  /** Another tab changed this store's persisted offline queue or resolutions. */
+  onRemoteDataChange?: () => void;
 };
 
 type SessionCoordinatorOptions = {
@@ -582,6 +598,9 @@ class SessionOfflineCoordinator {
 
   readonly #registrations = new Map<string, SessionRegistration>();
   readonly #storeContributions = new Map<string, SessionStoreContribution>();
+  /** Latest entities and resolutions other tabs reported, by store. */
+  readonly #remoteStoreItems = new Map<string, SessionStoreItems>();
+  readonly #pendingChangedStoreNames = new Set<string>();
   readonly #adapters = new Set<StorageAdapter>();
   #sessionHandle: PersistentStorageHandle<PersistedLocalSessionSnapshot>;
   readonly #browserTabs;
@@ -688,11 +707,18 @@ class SessionOfflineCoordinator {
         () => this.sessionKey,
         (message) => {
           if (message.kind === 'tab-status') {
-            this.#browserTabs.priority.onTabStatusMessage(
+            const isNewTab = this.#browserTabs.priority.onTabStatusMessage(
               message.tabId,
               message,
             );
             this.#refreshLeadership();
+            if (isNewTab) this.#publishSnapshot();
+            return;
+          }
+          if (message.kind === 'offline-store-data-changed') {
+            for (const storeName of message.storeNames) {
+              this.#registrations.get(storeName)?.onRemoteDataChange?.();
+            }
             return;
           }
           this.#applyRemoteSnapshot(message);
@@ -917,6 +943,29 @@ class SessionOfflineCoordinator {
     if (replayHeadChanged) {
       this.#notifyGreenCycle();
     }
+  }
+
+  /**
+   * Tells the other tabs that this tab finished writing `storeName`'s offline
+   * queue or resolutions, so they reload them. Writes made in the same tick are
+   * announced in one message.
+   */
+  notifyStoreDataChanged(storeName: string): void {
+    if (this.#disposed) return;
+
+    const isFirstInTick = this.#pendingChangedStoreNames.size === 0;
+    this.#pendingChangedStoreNames.add(storeName);
+    if (!isFirstInTick) return;
+
+    void Promise.resolve().then(() => {
+      if (this.#disposed) return;
+      const storeNames = [...this.#pendingChangedStoreNames];
+      this.#pendingChangedStoreNames.clear();
+      this.#browserTabs.coordinator.publish({
+        kind: 'offline-store-data-changed',
+        storeNames,
+      });
+    });
   }
 
   canReplayEntry(args: {
@@ -1853,14 +1902,33 @@ class SessionOfflineCoordinator {
     void this.#refreshUploadRetention();
   }
 
-  #refreshAggregates(): void {
+  /**
+   * The session-wide lists: this tab's own stores, plus what other tabs
+   * reported for stores this tab has not loaded.
+   */
+  #buildItemLists(): SessionStoreItems {
     const allEntities: InternalGlobalOfflineEntity[] = [];
     const allResolutions: OfflineResolutionRecord[] = [];
-    const referencedUploadIds = new Set<string>();
-    const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
     for (const contribution of this.#storeContributions.values()) {
       allEntities.push(...contribution.entities);
       allResolutions.push(...contribution.resolutions);
+    }
+    for (const [storeName, items] of this.#remoteStoreItems) {
+      if (this.#storeContributions.has(storeName)) continue;
+      allEntities.push(...items.entities);
+      allResolutions.push(...items.resolutions);
+    }
+
+    return {
+      entities: dedupeById(allEntities),
+      resolutions: dedupeById(allResolutions),
+    };
+  }
+
+  #refreshAggregates(): void {
+    const referencedUploadIds = new Set<string>();
+    const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    for (const contribution of this.#storeContributions.values()) {
       for (const uploadId of contribution.referencedUploadIds) {
         referencedUploadIds.add(uploadId);
       }
@@ -1869,8 +1937,7 @@ class SessionOfflineCoordinator {
       existing.push(...contribution.protectedKeys);
       nextProtectedKeysByAdapter.set(contribution.adapter, existing);
     }
-    const entities = dedupeById(allEntities);
-    const resolutions = dedupeById(allResolutions);
+    const { entities, resolutions } = this.#buildItemLists();
     for (const [adapter, keys] of nextProtectedKeysByAdapter) {
       nextProtectedKeysByAdapter.set(adapter, [...new Set(keys)].sort());
     }
@@ -2037,28 +2104,48 @@ class SessionOfflineCoordinator {
   #publishSnapshot(): void {
     if (this.#disposed) return;
     const status = this.store.state.status;
+    const contributions = [...this.#storeContributions.values()];
+    // Only this tab's own stores: another tab's report for a store this tab
+    // has not loaded may be stale and is not echoed back.
     this.#browserTabs.coordinator.publish({
       kind: 'offline-session-snapshot',
       status,
-      entities: this.store.state.entities,
-      resolutions: this.store.state.resolutions,
+      storeNames: [...this.#storeContributions.keys()],
+      entities: contributions.flatMap((contribution) => contribution.entities),
+      resolutions: contributions.flatMap(
+        (contribution) => contribution.resolutions,
+      ),
       uploads: this.store.state.uploads,
     });
   }
 
   #applyRemoteSnapshot(message: SessionSnapshotMessage): void {
-    if (message.sentAt < this.#lastRemoteSnapshotAt) return;
-    this.#lastRemoteSnapshotAt = message.sentAt;
+    for (const storeName of message.storeNames) {
+      this.#remoteStoreItems.set(storeName, {
+        entities: message.entities.filter(
+          (entity) => entity.storeName === storeName,
+        ),
+        resolutions: message.resolutions.filter(
+          (resolution) => resolution.storeName === storeName,
+        ),
+      });
+    }
+
+    // Each tab reports its own stores, so store items always apply, while the
+    // session-wide status and uploads follow the newest snapshot.
+    const isNewest = message.sentAt >= this.#lastRemoteSnapshotAt;
+    if (isNewest) this.#lastRemoteSnapshotAt = message.sentAt;
 
     this.store.setState(
       {
-        status: this.#restampHydratedStatus(message.status, {
-          isLeader: this.isLeader(),
-          updatedAt: Date.now(),
-        }),
-        entities: message.entities,
-        resolutions: message.resolutions,
-        uploads: message.uploads,
+        status: isNewest
+          ? this.#restampHydratedStatus(message.status, {
+              isLeader: this.isLeader(),
+              updatedAt: Date.now(),
+            })
+          : this.store.state.status,
+        ...this.#buildItemLists(),
+        uploads: isNewest ? message.uploads : this.store.state.uploads,
       },
       { action: 'offline-session-remote' },
     );
