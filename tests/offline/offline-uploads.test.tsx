@@ -2938,6 +2938,211 @@ test('discarding the resolution of a rejected dependency upload removes the oper
   unmount();
 });
 
+type TwoAttachmentsOperations = {
+  saveAttachments: DocumentOfflineOperationDefinition<
+    { value: number },
+    { input: { attachmentIds: string[]; value: number } }
+  >;
+};
+
+/**
+ * Document whose `saveAttachments` mutation depends on two staged uploads,
+ * `photo` (a 200ms request) and `video` (a 5s request), with a scripted
+ * outcome for each file. No session classifier recognizes the transport
+ * errors, so a failed upload is a permanent failure.
+ */
+function createTwoAttachmentsUploadEnv({
+  sessionKey,
+  videoOutcome,
+}: {
+  sessionKey: string;
+  /** What the server answers once the slow `video` upload finishes. */
+  videoOutcome: 'rejected' | 'success';
+}) {
+  const requests: string[] = [];
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        concurrency: 2,
+        upload: async ({ id }) => {
+          const isVideo = id === 'video';
+          await new Promise((resolve) =>
+            setTimeout(resolve, isVideo ? 5_000 : 200),
+          );
+
+          if (!isVideo || videoOutcome === 'rejected') {
+            requests.push(`upload ${id} -> rejected`);
+            throw new UploadTransportError(
+              'rejected-file',
+              `${id} type not accepted`,
+            );
+          }
+
+          requests.push(`upload ${id} -> server:${id}`);
+          return `server:${id}`;
+        },
+      },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, TwoAttachmentsOperations>(1, {
+    id: `${sessionKey}-doc`,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          saveAttachments: {
+            inputSchema: rc_object({
+              attachmentIds: rc_array(rc_string),
+              value: rc_number,
+            }),
+            kind: 'update',
+            dependsOnUploads: ({ input }) => input.attachmentIds,
+            execute: ({ input }) => {
+              requests.push('execute saveAttachments');
+              return Promise.resolve({ value: input.value });
+            },
+          },
+        },
+      },
+    },
+  });
+
+  function getUploads() {
+    return storeManager
+      .getOfflineUploads()
+      .map((upload) => pick(upload, ['id', 'state', 'lastError']));
+  }
+
+  /** Stages both files offline and queues the mutation that needs them. */
+  async function queueMutationWithBothFiles() {
+    for (const id of ['photo', 'video']) {
+      (
+        await resolveWithin(
+          storeManager.saveOfflineUpload({
+            id,
+            file: new File([`${id} bytes`], `${id}.bin`, { lastModified: 1 }),
+          }),
+        )
+      ).unwrap();
+    }
+    await resolveWithin(
+      env.apiStore.performMutation({
+        mutation: () => Promise.resolve({ value: 2 }),
+        offline: {
+          operation: 'saveAttachments',
+          input: { attachmentIds: ['photo', 'video'], value: 2 },
+        },
+      }),
+    );
+  }
+
+  return { env, requests, getUploads, queueMutationWithBothFiles };
+}
+
+test('when several dependency uploads of an operation are rejected, every rejected upload ends up failed, including the ones that finish after the operation moved to manual resolution', async () => {
+  createMockBrowserOpfs();
+  network.setOffline();
+  const { env, requests, getUploads, queueMutationWithBothFiles } =
+    createTwoAttachmentsUploadEnv({
+      sessionKey: 'two-rejected-uploads-session',
+      videoOutcome: 'rejected',
+    });
+  await flushAllTimers();
+
+  await queueMutationWithBothFiles();
+
+  // --- Action: reconnect; the photo is rejected first ---
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(1_000);
+
+  // The operation is already waiting for a manual resolution while the video
+  // is still being sent.
+  expect(requests).toMatchInlineSnapshot(`['upload photo -> rejected']`);
+  expect(
+    env.apiStore.getOfflineResolutions().map((resolution) => resolution.kind),
+  ).toMatchInlineSnapshot(`['retry-exhausted']`);
+  expect(getUploads()).toMatchInlineSnapshot(`
+    - id: 'photo'
+      lastError: { message: 'photo type not accepted' }
+      state: 'failed'
+    - { id: 'video', state: 'uploading' }
+  `);
+
+  // --- The video is rejected too ---
+  await advanceTime(5_000);
+
+  // Nothing will retry the video on its own (the operation waits for the
+  // user), so it must show as failed, not as waiting to be uploaded.
+  expect(requests).toMatchInlineSnapshot(
+    `['upload photo -> rejected', 'upload video -> rejected']`,
+  );
+  expect(getUploads()).toMatchInlineSnapshot(`
+    - id: 'photo'
+      lastError: { message: 'photo type not accepted' }
+      state: 'failed'
+    - id: 'video'
+      lastError: { message: 'video type not accepted' }
+      state: 'failed'
+  `);
+});
+
+test('discarding an operation while one of its dependency uploads is still being sent deletes that upload once it finishes', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  network.setOffline();
+  const { env, requests, getUploads, queueMutationWithBothFiles } =
+    createTwoAttachmentsUploadEnv({
+      sessionKey: 'discard-during-upload-session',
+      videoOutcome: 'success',
+    });
+  await flushAllTimers();
+
+  await queueMutationWithBothFiles();
+
+  // --- Setup: the photo is rejected while the video is still being sent ---
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(1_000);
+
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  if (!resolution) throw new Error('Expected a resolution');
+
+  // --- Action: the user discards the operation before the video finishes ---
+  await resolveWithin(
+    env.apiStore.resolveOfflineResolution(resolution.id, 'saveAttachments', {
+      action: 'discard',
+    }),
+  );
+
+  // The photo is deleted right away; the video is kept while it is sent.
+  expect(getUploads()).toMatchInlineSnapshot(
+    `- { id: 'video', state: 'uploading' }`,
+  );
+
+  // --- The video upload finishes ---
+  await advanceTime(5_000);
+
+  // The operation that needed the video is gone, so the file is deleted
+  // instead of waiting for the one-week retention.
+  expect(requests).toMatchInlineSnapshot(
+    `['upload photo -> rejected', 'upload video -> server:video']`,
+  );
+  expect(getUploads()).toMatchInlineSnapshot(`[]`);
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
 test('resolveOfflineUpload returns the transport error without touching the session mode and uploads again on the next call', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'upload-online-failure-session';

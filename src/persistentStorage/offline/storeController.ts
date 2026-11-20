@@ -3506,7 +3506,9 @@ export function createOfflineStoreController<
 
         if (retriesExhausted || uploadWillNotBeRetried) {
           if (failedUploadId !== undefined) {
-            await current.session.markUploadFailed(failedUploadId);
+            await current.session.markUploadsFailed(
+              entryToUse.dependencyUploadIds ?? [],
+            );
           }
           await persistManualResolutionChain({
             current,
@@ -3715,6 +3717,14 @@ export function createOfflineStoreController<
       });
 
       refreshDerivedState(current);
+      // Resolutions of operations the app no longer registers were dropped
+      // instead of requeued.
+      await deleteOrphanedDependencyUploads(
+        current,
+        nextEntries.flatMap((nextEntry) =>
+          nextEntry.entry ? [] : [nextEntry.resolution],
+        ),
+      );
       await ensureReplayScheduled();
       return;
     }

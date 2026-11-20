@@ -677,6 +677,13 @@ class SessionOfflineCoordinator {
   #referencedUploadIds = new Set<string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
+  /**
+   * Uploads released by work that left the queue but not deleted yet: a store
+   * had not reported its references, or the upload was still being sent.
+   */
+  #pendingUploadReleases = new Set<string>();
+  /** Adapter removals in flight, awaited before the same id is read or saved. */
+  #uploadRemovals = new Map<string, Promise<void>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   #uploadOnlineSessionStartedAt: number | null = null;
   #uploadOnlineSessionStabilizationTimer: ReturnType<typeof setTimeout> | null =
@@ -1129,6 +1136,9 @@ class SessionOfflineCoordinator {
       );
     }
 
+    // A file staged again under a released id is a new upload.
+    this.#pendingUploadReleases.delete(args.id);
+
     const existing = this.#uploads.get(args.id);
 
     const nextRecord = createStoredUploadRecord(
@@ -1182,12 +1192,7 @@ class SessionOfflineCoordinator {
     if (this.#uploadPromisesById.has(id)) {
       throw new Error(`Cannot delete upload "${id}" while it is uploading`);
     }
-    if (!this.#uploadsConfig) return;
-
-    this.#uploads.delete(id);
-    await this.#uploadsConfig.adapter.remove(this.sessionKey, id);
-    this.#syncUploadsState();
-    void this.#refreshUploadRetention();
+    await this.#removeUploads([id]);
   }
 
   /**
@@ -1205,23 +1210,41 @@ class SessionOfflineCoordinator {
    * window.
    */
   async deleteUnreferencedUploads(uploadIds: readonly string[]): Promise<void> {
+    if (this.#disposed) return;
+
+    for (const id of uploadIds) this.#pendingUploadReleases.add(id);
+    await this.#releasePendingUploads();
+  }
+
+  /**
+   * Deletes the released uploads nothing references anymore. Runs again when
+   * the last store reports its references and when a released upload that was
+   * still being sent settles.
+   */
+  async #releasePendingUploads(): Promise<void> {
     if (
       this.#disposed ||
+      this.#pendingUploadReleases.size === 0 ||
       // A store that has not reported its queue yet may reference the uploads.
       this.#storeContributions.size !== this.#registrations.size
     ) {
       return;
     }
 
+    const removableIds: string[] = [];
+    for (const id of this.#pendingUploadReleases) {
+      if (this.#uploadPromisesById.has(id)) continue;
+
+      this.#pendingUploadReleases.delete(id);
+      // An upload queued work references again is released again when that
+      // work leaves the queue.
+      if (this.#uploads.has(id) && !this.#referencedUploadIds.has(id)) {
+        removableIds.push(id);
+      }
+    }
+
     try {
-      await this.#removeUploads(
-        uploadIds.filter(
-          (id) =>
-            this.#uploads.has(id) &&
-            !this.#referencedUploadIds.has(id) &&
-            !this.#uploadPromisesById.has(id),
-        ),
-      );
+      await this.#removeUploads(removableIds);
     } catch (error) {
       // The work that needed these uploads is already gone, so a failed
       // removal only leaves them to the retention window.
@@ -1254,31 +1277,48 @@ class SessionOfflineCoordinator {
     | { failedUploadId?: undefined; refs: Record<string, ValidPayload> }
     | { failedUploadId: string; error: unknown }
   > {
-    const refs: Record<string, ValidPayload> = {};
     const failures: { failedUploadId: string; error: unknown }[] = [];
 
     // Rethrowing settles `Promise.all` on the first failure, so it is reported
     // without waiting for the uploads that are still running.
-    await Promise.all(
+    const entries = await Promise.all(
       uploadIds.map(async (id) => {
         try {
-          refs[id] = await this.#ensureUploadResolved(id, true);
+          return [id, await this.#ensureUploadResolved(id, true)] as const;
         } catch (error) {
           failures.push({ failedUploadId: id, error });
           throw error;
         }
       }),
-    ).catch(() => {});
+    ).catch(() => null);
 
-    return failures[0] ?? { refs };
+    return failures[0] ?? { refs: Object.fromEntries(entries ?? []) };
   }
 
   /**
-   * Marks a dependency upload as `failed` after replay moved the operation
-   * that depends on it to manual resolution. Uploads that are no longer
-   * waiting on a failure (restarted or uploaded meanwhile) are left untouched.
+   * Marks the dependency uploads of an operation as `failed` after replay
+   * moved it to manual resolution. Uploads still being sent are marked if
+   * they fail too. Uploads that are not waiting on a failure (restarted or
+   * uploaded meanwhile) are left untouched.
    */
-  async markUploadFailed(id: string): Promise<void> {
+  async markUploadsFailed(ids: readonly string[]): Promise<void> {
+    const settledIds: string[] = [];
+    for (const id of ids) {
+      const inFlight = this.#uploadPromisesById.get(id);
+      if (!inFlight) {
+        settledIds.push(id);
+        continue;
+      }
+
+      void inFlight
+        .catch(() => this.#markUploadFailed(id))
+        .catch((error: unknown) => this.#onPersistentStorageError?.(error));
+    }
+
+    await Promise.all(settledIds.map((id) => this.#markUploadFailed(id)));
+  }
+
+  async #markUploadFailed(id: string): Promise<void> {
     const record = this.#uploads.get(id);
     if (record?.state !== 'pending' || !record.lastError) return;
 
@@ -1754,6 +1794,8 @@ class SessionOfflineCoordinator {
     const restored = this.#uploads.get(id);
     if (restored) return restored;
 
+    // A removal in flight could still let the load find the removed record.
+    await this.#uploadRemovals.get(id);
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
     // A save during the load already persisted a newer record; keep it.
     const current = this.#uploads.get(id);
@@ -1773,6 +1815,9 @@ class SessionOfflineCoordinator {
       );
     }
 
+    // Saving while the previous file of this id is being removed could let
+    // the removal delete the new file.
+    await this.#uploadRemovals.get(record.id);
     this.#uploads.set(record.id, record);
     await this.#uploadsConfig.adapter.save(this.sessionKey, record.id, record);
     this.#syncUploadsState();
@@ -2103,6 +2148,9 @@ class SessionOfflineCoordinator {
       })
       .finally(() => {
         this.#uploadPromisesById.delete(id);
+        if (this.#pendingUploadReleases.has(id)) {
+          void this.#releasePendingUploads();
+        }
       });
 
     this.#uploadPromisesById.set(id, uploadPromise);
@@ -2126,11 +2174,22 @@ class SessionOfflineCoordinator {
     const uploadsConfig = this.#uploadsConfig;
     if (!uploadsConfig || ids.length === 0) return;
 
-    for (const id of ids) {
-      this.#uploads.delete(id);
-    }
     await Promise.all(
-      ids.map((id) => uploadsConfig.adapter.remove(this.sessionKey, id)),
+      ids.map((id) => {
+        this.#uploads.delete(id);
+        const removal = uploadsConfig.adapter.remove(this.sessionKey, id);
+        const settled = removal.then(
+          () => {},
+          () => {},
+        );
+        this.#uploadRemovals.set(id, settled);
+        void settled.then(() => {
+          if (this.#uploadRemovals.get(id) === settled) {
+            this.#uploadRemovals.delete(id);
+          }
+        });
+        return removal;
+      }),
     );
     this.#syncUploadsState();
     void this.#refreshUploadRetention();
@@ -2282,6 +2341,7 @@ class SessionOfflineCoordinator {
       this.#storeContributions.size === this.#registrations.size
     ) {
       void this.#cleanupUnusedMutationUploads();
+      void this.#releasePendingUploads();
     }
   }
 

@@ -160,9 +160,11 @@ export type OfflineFailureContext = {
   /**
    * Set when replaying `operationName` (`phase: 'sync'`) failed while
    * resolving one of its `dependsOnUploads` uploads: the id of that upload.
-   * The error is then the one thrown by the session `upload` transport, and
-   * the operation's `execute` was not called. `undefined` for every failure
-   * that did not come from a dependency upload.
+   * The operation's `execute` was not called. The error is usually the one
+   * thrown by the session `upload` transport, but it can also be a storage
+   * error reading or updating the staged upload, or the error for an upload
+   * that no longer exists. `undefined` for every failure that did not come
+   * from a dependency upload.
    */
   uploadId?: string;
 };
