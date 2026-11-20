@@ -160,7 +160,7 @@ Mounted data refetches right away, unmounted data on its next mount. Stores with
 All offline operations define:
 
 - `inputSchema` - Validates mutation input before it enters the queue and again when restored.
-- `kind` - `create`, `update`, or `delete`; TSDF derives each affected entity's lifecycle from this.
+- `kind` - `create`, `update`, or `delete`; TSDF derives each affected entity's lifecycle from this. Every item a `create` returns from `getEntityRefs` is treated as created by it (discarding a `create` without temp entity removes all of them), so return only the created items: change existing items in a separate `update` operation, and reference the items the creation needs with `dependsOn`.
 - `execute(ctx)` - Sends queued work to the server during replay.
 
 Collection and list-query operations also define:

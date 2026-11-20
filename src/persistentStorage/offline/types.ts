@@ -1129,7 +1129,16 @@ export type OfflineOperationDefinition<
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
-  /** Lifecycle classification for the queued operation. */
+  /**
+   * Lifecycle classification for the queued operation. TSDF derives the
+   * lifecycle of each entity the operation references (`getEntityRefs`) from
+   * it.
+   *
+   * Every item a `create` references is treated as created by it: discarding
+   * a `create` without temp entity removes all of them. Return only the
+   * created items, change existing items in a separate `update` operation, and
+   * reference the items the creation needs with `dependsOn`.
+   */
   kind: OfflineOperationKind;
   /**
    * Optional queue pruning for newer operations that supersede older queued work.
