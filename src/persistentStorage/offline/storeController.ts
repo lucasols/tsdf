@@ -3534,9 +3534,7 @@ export function createOfflineStoreController<
     await hydrateIfNeeded();
 
     const resolutionRecord = ensureActiveSession()
-      ? buildDerivedResolutionRecords().find(
-          (resolution) => resolution.id === resolutionId,
-        )
+      ? resolutions.get(resolutionId)
       : undefined;
     if (!resolutionRecord) return 'resolution-not-found';
 
@@ -3546,7 +3544,7 @@ export function createOfflineStoreController<
       return 'retry-not-supported';
     }
 
-    if (resolutionRecord.blockedResolutionCount > 0) {
+    if (isPersistedResolutionBlocked(resolutionRecord)) {
       return 'resolution-blocked';
     }
 
