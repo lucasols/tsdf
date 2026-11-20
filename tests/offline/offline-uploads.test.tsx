@@ -1790,7 +1790,9 @@ test('saving a new file over an upload that is still being sent is rejected, so 
     saveDuringUpload.ok ? 'saved' : saveDuringUpload.error.message,
   ).toMatchInlineSnapshot(`"Cannot save upload "avatar" while uploading"`);
 
-  await flushAllTimers();
+  // Let the first upload finish. A bounded advance keeps the 7-day retention
+  // cleanup of the uploaded file from running before the assertions.
+  await advanceTime(1_000);
   expect((await firstResolve).unwrap()).toBe('server:first.png');
 
   // The stored upload is still the file that was actually sent, so its ref

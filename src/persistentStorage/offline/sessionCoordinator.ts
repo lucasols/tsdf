@@ -1010,15 +1010,13 @@ class SessionOfflineCoordinator {
       );
     }
 
-    const existing = this.#uploads.get(args.id);
-    // The running transport marks the record as uploaded when it finishes, so
+    // The pending transport marks the record as uploaded when it finishes, so
     // swapping the file under it would pair the new file with the old ref.
-    if (
-      existing?.state === 'uploading' &&
-      this.#uploadPromisesById.has(args.id)
-    ) {
+    if (this.#uploadPromisesById.has(args.id)) {
       throw new Error(`Cannot save upload "${args.id}" while uploading`);
     }
+
+    const existing = this.#uploads.get(args.id);
 
     const nextRecord = createStoredUploadRecord(
       args.id,
@@ -1508,6 +1506,9 @@ class SessionOfflineCoordinator {
     if (!this.#uploadsConfig) return null;
 
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
+    // A save during the load already persisted a newer record; keep it.
+    const current = this.#uploads.get(id);
+    if (current) return current;
     if (loaded) {
       this.#uploads.set(id, loaded);
       this.#syncUploadsState();
