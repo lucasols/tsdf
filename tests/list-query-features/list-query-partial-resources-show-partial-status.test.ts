@@ -440,6 +440,83 @@ test('useListQuery: loadingFields exposes pending fields even when refetching is
   `);
 });
 
+test('useListQuery: a second hook requesting more fields is loading while the first hook stays on its loaded fields', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    partialResources: partialResourcesConfig,
+  });
+  const renders = createLoggerStore();
+
+  const { rerender } = renderHook(
+    ({ showMoreColumns }: { showMoreColumns: boolean }) => {
+      // The list as first shown, with a single column.
+      const idsOnly = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { fields: ['id'] },
+      );
+      // The same query read with more columns, mounted later — through both
+      // list hooks.
+      const moreColumns = env.apiStore.useListQuery(
+        showMoreColumns && { tableId: 'users' },
+        { fields: ['id', 'name'] },
+      );
+      const [moreColumnsMultiple] = env.apiStore.useMultipleListQueries(
+        showMoreColumns
+          ? [{ payload: { tableId: 'users' }, fields: ['id', 'name'] }]
+          : [],
+      );
+
+      renders.add({
+        idsOnly: `${idsOnly.status} ${JSON.stringify(idsOnly.items)}`,
+        moreColumns: `${moreColumns.status} (isLoading: ${moreColumns.isLoading}) ${JSON.stringify(moreColumns.items)}`,
+        moreColumnsMultiple: moreColumnsMultiple
+          ? `${moreColumnsMultiple.status} (isLoading: ${moreColumnsMultiple.isLoading}) ${JSON.stringify(moreColumnsMultiple.items)}`
+          : 'not requested',
+      });
+    },
+    { initialProps: { showMoreColumns: false } },
+  );
+
+  await flushAllTimers();
+
+  renders.addMark('More columns are shown');
+  act(() => {
+    rerender({ showMoreColumns: true });
+  });
+
+  await flushAllTimers();
+
+  // The wider hooks hide the rows behind `loading` until `name` arrives (they
+  // never report `success` without rows), and the ids-only list is not
+  // disturbed by their fetch.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ idsOnly: loading []
+    ⋅ moreColumns: idle (isLoading: false) []
+    ⋅ moreColumnsMultiple: not requested
+    └─
+    ┌─
+    ⋅ idsOnly: success [{"id":1}]
+    ⋅ moreColumns: idle (isLoading: false) []
+    ⋅ moreColumnsMultiple: not requested
+    └─
+
+    >>> More columns are shown
+
+    ┌─
+    ⋅ idsOnly: success [{"id":1}]
+    ⋅ moreColumns: loading (isLoading: true) []
+    ⋅ moreColumnsMultiple: loading (isLoading: true) []
+    └─
+    ┌─
+    ⋅ idsOnly: success [{"id":1}]
+    ⋅ moreColumns: success (isLoading: false) [{"id":1,"name":"User 1"}]
+    ⋅ moreColumnsMultiple: success (isLoading: false) [{"id":1,"name":"User 1"}]
+    └─
+    "
+  `);
+});
+
 test('useMultipleItems: per-query option overrides global showPartialAsRefetching', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     partialResources: partialResourcesConfig,

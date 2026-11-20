@@ -533,6 +533,111 @@ test('a realtime transport reconnect while offline keeps the cached list untouch
   hook.unmount();
 });
 
+test('coming back online and then reconnecting the realtime transport revalidates the list once', async () => {
+  const env = createRealtimeUsersEnv('offline-recovery-then-reconnect-session');
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+  env.serverTable.clearFetchHistory();
+
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(5_000);
+
+  env.serverTable.updateItem('users||1', { name: 'Ada (edited elsewhere)' });
+
+  // The usual order in a realtime app: the browser is back online first and
+  // the app's websocket reconnects a moment later.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(500);
+  // Recovering waits for the transport reconnect that usually follows it:
+  // nothing was refetched yet.
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(0);
+
+  renders.addMark('the realtime transport reconnects');
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  // Both are covered by a single revalidation, run right at the reconnect.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> back online
+
+    -> status: success ⋅ names: [Ada]
+
+    >>> the realtime transport reconnects
+
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada (edited elsewhere)]
+    "
+  `);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(1);
+
+  hook.unmount();
+});
+
+test('coming back online without a realtime transport reconnect revalidates the list once the reconnect cooldown ends', async () => {
+  const env = createRealtimeUsersEnv(
+    'offline-recovery-without-reconnect-session',
+  );
+  const renders = createLoggerStore();
+
+  const hook = renderUsersList(env, renders);
+  await flushAllTimers();
+  env.serverTable.clearFetchHistory();
+
+  act(() => {
+    network.goOffline();
+  });
+  await advanceTime(5_000);
+
+  env.serverTable.updateItem('users||1', { name: 'Ada (edited elsewhere)' });
+
+  // The transport was already back (or never dropped), so no reconnect
+  // follows the recovery.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  // The recovery waits for a transport reconnect during the 2s reconnect
+  // cooldown...
+  await advanceTime(1_900);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(0);
+
+  // ...and still revalidates once the cooldown ends without one.
+  renders.addMark('the reconnect cooldown ends');
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ names: []
+    -> status: success ⋅ names: [Ada]
+
+    >>> back online
+
+    -> status: success ⋅ names: [Ada]
+
+    >>> the reconnect cooldown ends
+
+    -> status: refetching ⋅ names: [Ada]
+    -> status: success ⋅ names: [Ada (edited elsewhere)]
+    "
+  `);
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(1);
+
+  hook.unmount();
+});
+
 test('a reconnect revalidation deferred by the cooldown does not run after the session goes offline', async () => {
   const env = createRealtimeUsersEnv('offline-reconnect-cooldown-session');
   const renders = createLoggerStore();
