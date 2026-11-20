@@ -44,6 +44,7 @@ import {
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type OfflineEntityMutationKind,
+  type OfflineFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
   type OfflineMutationInput,
@@ -565,6 +566,8 @@ export function createOfflineStoreController<
     operation: TName;
     input: unknown;
     upload?: OfflineMutationUploadsInput;
+    /** Already stored direct uploads reused instead of `upload` (requeue). */
+    attachedUploadIds?: OfflineAttachedUploadIds;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -578,6 +581,7 @@ export function createOfflineStoreController<
     validatedInput: unknown;
     dependencyUploadIds: string[];
     upload?: OfflineMutationUploadsInput;
+    attachedUploadIds?: OfflineAttachedUploadIds;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
   };
@@ -1185,6 +1189,7 @@ export function createOfflineStoreController<
       for (const entry of loadedQueueEntries.values()) {
         queueEntries.set(entry.id, entry);
       }
+      const droppedResolutions: PersistedOfflineResolutionRecord[] = [];
       for (const resolution of loadedResolutionEntries.values()) {
         const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
         if (!parsed.ok) {
@@ -1194,6 +1199,7 @@ export function createOfflineStoreController<
         const operation = operations[resolution.operation];
         if (!operation) {
           void current.resolutionNamespace.remove(resolution.id);
+          droppedResolutions.push(resolution);
           continue;
         }
         resolutions.set(resolution.id, resolution);
@@ -1201,6 +1207,9 @@ export function createOfflineStoreController<
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
+      // The operation of these was removed from the app, so they will never
+      // replay and the uploads only they depended on have no consumer left.
+      void deleteOrphanedDependencyUploads(current, droppedResolutions);
     })().finally(() => {
       hydratedPromise = null;
     });
@@ -2119,29 +2128,21 @@ export function createOfflineStoreController<
     current: ActiveSessionState;
     entry: Pick<
       OfflineQueueEntry | PersistedOfflineResolutionRecord,
-      | 'input'
-      | 'createdAt'
-      | 'updatedAt'
-      | 'attachedUploadIds'
-      | 'dependencyUploadIds'
+      'input' | 'createdAt' | 'updatedAt' | 'attachedUploadIds'
     >;
+    resolvedRefsById: Record<string, ValidPayload>;
   }) {
-    const [fileEntries, resolvedRefsById] = await Promise.all([
-      Promise.all(
-        Object.entries(args.entry.attachedUploadIds ?? {}).map(
-          async ([uploadId, storedUploadId]) => {
-            const file = await args.current.session.loadUpload(storedUploadId);
-            if (!file) {
-              throw new Error(`Missing offline upload "${storedUploadId}"`);
-            }
-            return [uploadId, file] as const;
-          },
-        ),
+    const fileEntries = await Promise.all(
+      Object.entries(args.entry.attachedUploadIds ?? {}).map(
+        async ([uploadId, storedUploadId]) => {
+          const file = await args.current.session.loadUpload(storedUploadId);
+          if (!file) {
+            throw new Error(`Missing offline upload "${storedUploadId}"`);
+          }
+          return [uploadId, file] as const;
+        },
       ),
-      args.current.session.resolveUploadIds(
-        args.entry.dependencyUploadIds ?? [],
-      ),
-    ]);
+    );
     const filesById: Record<string, File> = Object.fromEntries(fileEntries);
 
     return {
@@ -2150,7 +2151,7 @@ export function createOfflineStoreController<
         enqueuedAt: args.entry.createdAt,
         updatedAt: args.entry.updatedAt,
       }),
-      uploads: { filesById, resolvedRefsById },
+      uploads: { filesById, resolvedRefsById: args.resolvedRefsById },
     };
   }
 
@@ -2468,6 +2469,29 @@ export function createOfflineStoreController<
     }
   }
 
+  /**
+   * Deletes the staged uploads that work items depended on, after those items
+   * left the queue for good (replayed, discarded, superseded, cancelled).
+   *
+   * Call it after `refreshDerivedState`, which reports the references that
+   * remain: the session keeps every upload a queue entry or resolution record
+   * of any store still needs. Attached uploads need no call, the session drops
+   * them as soon as nothing references them.
+   */
+  async function deleteOrphanedDependencyUploads(
+    current: ActiveSessionState,
+    removedWorkItems: Pick<OfflineQueueEntry, 'dependencyUploadIds'>[],
+  ): Promise<void> {
+    if (!isActiveSessionState(current)) return;
+
+    const uploadIds = removedWorkItems.flatMap(
+      (workItem) => workItem.dependencyUploadIds ?? [],
+    );
+    if (uploadIds.length === 0) return;
+
+    await current.session.deleteUnreferencedUploads(uploadIds);
+  }
+
   function collectTempCreateDescendants(args: {
     parentEntityKey: string;
     parentEntryId?: string;
@@ -2625,6 +2649,11 @@ export function createOfflineStoreController<
     parentEntry: OfflineQueueEntry;
     parentResolution: PersistedOfflineResolutionRecord;
   }): Promise<void> {
+    // Replay will not upload these again on its own, so an upload left waiting
+    // on an earlier failure must not keep reporting an automatic retry.
+    await args.current.session.markUploadsFailed(
+      args.parentEntry.dependencyUploadIds ?? [],
+    );
     // The resolution is saved before the entry is removed: the other tabs
     // apply each change as it arrives, and in between they would see the
     // store with nothing left to replay or decide on, and revalidate it over
@@ -2663,6 +2692,7 @@ export function createOfflineStoreController<
         [args.resolution],
         new Set(),
       );
+      await deleteOrphanedDependencyUploads(args.current, [args.resolution]);
       return;
     }
 
@@ -2722,6 +2752,10 @@ export function createOfflineStoreController<
       discardedWork,
       removedTempEntityKeys,
     );
+    await deleteOrphanedDependencyUploads(args.current, [
+      args.resolution,
+      ...discardedWork,
+    ]);
   }
 
   /**
@@ -2920,6 +2954,7 @@ export function createOfflineStoreController<
         input: validatedInput,
       }),
       upload: args.upload,
+      attachedUploadIds: args.attachedUploadIds,
       tempIds: args.tempIds,
       entityRefs: args.entityRefs,
     };
@@ -2985,6 +3020,7 @@ export function createOfflineStoreController<
         validatedInput,
         dependencyUploadIds,
         upload,
+        attachedUploadIds,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
       },
@@ -3015,7 +3051,10 @@ export function createOfflineStoreController<
         `Offline operation "${operationName}" cannot configure onSuccessExecute when tempEntity or tempEntities is present`,
       );
     }
-    if (operation.accumulation && upload !== undefined) {
+    if (
+      operation.accumulation &&
+      (upload !== undefined || attachedUploadIds !== undefined)
+    ) {
       throw new Error(
         `Offline operation "${operationName}" cannot configure direct uploads together with accumulation`,
       );
@@ -3159,7 +3198,8 @@ export function createOfflineStoreController<
           );
         }
 
-        // The merged input may reference other uploads than the queued one
+        // The merged input can reference uploads neither entry declared on
+        // its own (e.g. files added by the incoming edit).
         const mergedDependencyUploadIds = getDependencyUploadIds({
           operationName,
           input: validatedMergedInput,
@@ -3223,6 +3263,7 @@ export function createOfflineStoreController<
       queueOrder,
       entityRefs,
       attachedUploads: upload,
+      attachedUploadIds,
       dependencyUploadIds:
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
       tempIds,
@@ -3402,6 +3443,14 @@ export function createOfflineStoreController<
     }
 
     refreshDerivedState(current);
+    // Superseded or cancelled entries will never replay, so the uploads only
+    // they depended on have no consumer left.
+    if (plannedMutation.removedEntries.length > 0) {
+      await deleteOrphanedDependencyUploads(
+        current,
+        plannedMutation.removedEntries,
+      );
+    }
     await ensureReplayScheduled();
   }
 
@@ -3562,6 +3611,7 @@ export function createOfflineStoreController<
       const operation = operations[nextEntry.operation];
       if (!operation) {
         await removeEntry(nextEntry.id, current);
+        void deleteOrphanedDependencyUploads(current, [nextEntry]);
         continue;
       }
 
@@ -3580,6 +3630,9 @@ export function createOfflineStoreController<
         lastAttemptAt: Date.now(),
       };
       await persistEntry(entryToUse, current);
+      // Set when the replay failed while resolving a dependency upload, which
+      // means `execute` was never called for this attempt.
+      let failedUploadId: string | undefined;
 
       try {
         const shouldPrepareReplayCheckCtx = Boolean(
@@ -3603,6 +3656,7 @@ export function createOfflineStoreController<
 
           if (shouldSkip) {
             await removeEntry(entryToUse.id, current);
+            void deleteOrphanedDependencyUploads(current, [entryToUse]);
             continue;
           }
         }
@@ -3648,13 +3702,27 @@ export function createOfflineStoreController<
           continue;
         }
 
+        const dependencyUploads = await current.session.resolveReplayUploadIds(
+          entryToUse.dependencyUploadIds ?? [],
+        );
+        if (dependencyUploads.failedUploadId !== undefined) {
+          failedUploadId = dependencyUploads.failedUploadId;
+          throw dependencyUploads.error;
+        }
+
         // WORKAROUND: The shared replay builder returns the runtime upload-ref
         // shape, and each operation rebinds that same value to its own
         // compile-time execute-context generic at the call boundary.
         const executeContext = __LEGIT_CAST__<
           Parameters<typeof operation.execute>[0],
           Awaited<ReturnType<typeof buildOperationExecuteContext>>
-        >(await buildOperationExecuteContext({ current, entry: entryToUse }));
+        >(
+          await buildOperationExecuteContext({
+            current,
+            entry: entryToUse,
+            resolvedRefsById: dependencyUploads.refs,
+          }),
+        );
         const result = await operation.execute(executeContext);
 
         if (entryToUse.tempIds) {
@@ -3680,23 +3748,27 @@ export function createOfflineStoreController<
         }
 
         refreshDerivedState(current);
+        // The replayed entry consumed its uploads. Not awaited, so removing
+        // the files does not hold back the next queued entry.
+        void deleteOrphanedDependencyUploads(current, [entryToUse]);
       } catch (error) {
         const lastError = { message: unknownToError(error).message };
-        const classification = await current.session.classifyFailure(error, {
+        const failureCtx: OfflineFailureContext = {
           phase: 'sync',
           storeType,
           operationName: entryToUse.operation,
           sessionKey: current.sessionKey,
-        });
+        };
+        if (failedUploadId !== undefined) failureCtx.uploadId = failedUploadId;
+
+        const classification = await current.session.classifyFailure(
+          error,
+          failureCtx,
+        );
         const allowReplayRetry =
           classification === 'ignore' &&
           !current.session.getStatus().isOfflineMode
-            ? await current.session.classifyRetriableFailure(error, {
-                phase: 'sync',
-                storeType,
-                operationName: entryToUse.operation,
-                sessionKey: current.sessionKey,
-              })
+            ? await current.session.classifyRetriableFailure(error, failureCtx)
             : false;
 
         if (
@@ -3736,7 +3808,18 @@ export function createOfflineStoreController<
           allowReplayRetry,
         };
 
-        if (allowReplayRetry && nextFailures >= replayRetryMaxFailures) {
+        const retriesExhausted =
+          allowReplayRetry && nextFailures >= replayRetryMaxFailures;
+        // `execute` never ran when a dependency upload failed, so there is
+        // nothing to confirm with the server: a failure that is not retried
+        // automatically skips `needs-confirmation` and goes straight to manual
+        // resolution. A retried one still waits in `needs-confirmation`, which
+        // drives the retry schedule, so the next attempt runs the skip and
+        // conflict checks before uploading again.
+        const uploadWillNotBeRetried =
+          failedUploadId !== undefined && !allowReplayRetry;
+
+        if (retriesExhausted || uploadWillNotBeRetried) {
           await persistManualResolutionChain({
             current,
             parentEntry: entryToUse,
@@ -3870,6 +3953,7 @@ export function createOfflineStoreController<
     const operation = operations[registeredName];
     if (!operation) {
       await removeResolution(resolutionId, current);
+      await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
       return;
     }
 
@@ -3927,7 +4011,8 @@ export function createOfflineStoreController<
         return { resolution: retryResolution, entry };
       });
       // Queued before the resolutions are removed, for the other tabs (see
-      // `persistManualResolutionChain`)
+      // `persistManualResolutionChain`). This also keeps the attached files
+      // referenced the whole time, so cleanup never sees them unused.
       for (const nextEntry of nextEntries) {
         if (!nextEntry.entry) continue;
         await persistEntry(nextEntry.entry, current, true);
@@ -3945,6 +4030,14 @@ export function createOfflineStoreController<
       });
 
       refreshDerivedState(current);
+      // Resolutions of operations the app no longer registers were dropped
+      // instead of requeued.
+      await deleteOrphanedDependencyUploads(
+        current,
+        nextEntries.flatMap((nextEntry) =>
+          nextEntry.entry ? [] : [nextEntry.resolution],
+        ),
+      );
       await ensureReplayScheduled();
       return;
     }
@@ -3966,13 +4059,20 @@ export function createOfflineStoreController<
       const preparedMutation = prepareMutationWithSession(current, {
         operation: operationName,
         input: resolutionAction?.input,
+        // The replacement is sent with the files attached to the original
+        // mutation, which stay stored under their ids.
+        attachedUploadIds: resolutionRecord.attachedUploadIds,
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
       // Queued before the resolution is removed, for the other tabs (see
-      // `persistManualResolutionChain`)
+      // `persistManualResolutionChain`). This also keeps the attached files
+      // referenced the whole time, so cleanup never sees them unused.
       await queuePreparedMutations(preparedMutation, resolutionId);
       await removeResolution(resolutionId, current);
+      // The replacement input declared its own dependencies: uploads it kept
+      // are still referenced, the ones it dropped are not.
+      await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
       return;
     }
 
@@ -3997,6 +4097,7 @@ export function createOfflineStoreController<
         });
       }
       await removeResolution(resolutionId, current);
+      await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
       return;
     }
 
