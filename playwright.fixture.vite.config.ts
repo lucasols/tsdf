@@ -307,6 +307,18 @@ function createFixtureApiPlugin(): Plugin {
           return;
         }
 
+        if (pathname === '/api/item/users/create' && req.method === 'POST') {
+          const body = await readJsonBody<{ name: string }>(req);
+          addHistoryEntry(scope, req, pathname);
+          const createdUser = {
+            id: Math.max(0, ...scope.state.users.map((user) => user.id)) + 1,
+            name: body.name,
+          };
+          scope.state.users.push(createdUser);
+          sendJson(res, 200, createdUser);
+          return;
+        }
+
         const itemMutationMatch = pathname.match(
           /^\/api\/item\/([^/]+)\/([^/]+)\/mutate$/,
         );

@@ -157,9 +157,9 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   /**
    * Saves a session-scoped upload locally for later dependency resolution. It
    * is deleted automatically once the queued work that depends on it leaves
-   * the queue. Only stores created in the current app session count as
-   * depending on it, so create the stores that share an upload id before
-   * their queued work replays.
+   * the queue. Only stores created in the tab count as depending on it, so
+   * create the stores that share an upload id before their queued work
+   * replays.
    */
   saveOfflineUpload: (
     args: SaveOfflineUploadArgs,
