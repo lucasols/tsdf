@@ -167,6 +167,21 @@ persistentStorage: {
 
 Use `createIndexedDbPersistentStorage({ databaseName })` from `tsdf/indexed-db-storage` when an app needs an isolated IndexedDB database.
 
+#### Connection recovery
+
+Browsers can take an IndexedDB connection away from a page that keeps running: the storage process restarts, a backgrounded mobile tab comes back with a dead connection, or another tab upgrades or deletes the database. The adapter recovers without a page reload:
+
+- A failed open is not remembered. The next operation opens the database again.
+- When the browser closes the connection (`close`), or another tab needs it released (`versionchange`), the adapter closes and forgets it, so the other tab is not blocked. The next operation opens a new connection.
+- When an operation fails with a connection error (`InvalidStateError`, `AbortError`, or `UnknownError`, e.g. WebKit's "Connection to Indexed Database server lost"), the adapter drops the connection, opens a new one, and runs the operation once more. Every adapter operation is a self-contained transaction that writes whole values, so repeating it never applies a batch twice or leaves half of it behind. Quota, data, and version errors are not retried.
+- When IndexedDB stops answering — an open or a transaction delivers no event at all — the operation is treated like a lost connection after two consecutive checks, 15 seconds apart, during which no event of the same database reached the page while the tab was visible (30 to 45 seconds). Progress is what is measured, not total duration: a large batch on a slow device is never cut short in the tab running it. Only events reaching this page count, so an operation of another tab that waits more than 30 seconds behind that batch can still be given up and retried. A check interval during which the tab was hidden at any point, or the page was not running at all (frozen tab, sleeping device), does not count, so an operation is never given up the moment a page resumes.
+
+If the second attempt also fails, the error is reported through `onPersistentStorageError`. Recovery depends on the browser accepting a new connection; some Safari versions refuse one until the page is reloaded, in which case each failing operation is reported instead of staying pending.
+
+#### When a write fails
+
+A persistence write that still fails after the recovery above is reported through `onPersistentStorageError` and dropped. In-memory store state is not affected and the app keeps working; the entry keeps its previous persisted value (or stays absent) until the store saves it again. See [Offline](./offline.md#queuing-mutations) for what this means for queued mutations.
+
 ### Custom async adapters
 
 Use `createAsyncStorageAdapter(driver)` only when the built-in OPFS and IndexedDB adapters are not a fit. It wraps an `AsyncStorageDriver`, which is the low-level async backend contract used by TSDF persistence internals.

@@ -109,6 +109,8 @@ A mutation is also queued while online when older mutations for the same entitie
 
 Queued mutations and pending resolutions are persisted through the store's own `persistentStorage.adapter`, and the cached entries they reference are protected from cache expiry until the queue is replayed or discarded. They are not migrated when a store's adapter changes: let the queue drain first. See [Changing a store's adapter](./persistent-storage.md#changing-a-stores-adapter).
 
+The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the result is still `{ kind: 'queued' }`: the mutation stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded first. Treat an `onPersistentStorageError` call while offline as "pending changes may not survive a reload".
+
 ## Reading While Offline
 
 While the session is in offline mode, fetches are not sent to the server. What a document, item or query reports depends on whether it has data to return:
