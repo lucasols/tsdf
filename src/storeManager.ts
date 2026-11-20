@@ -459,10 +459,10 @@ export function registerStoreWithManager(
   registry.nextStoreRegistrationId += 1;
   registry.stores.set(registrationId, store);
 
-  if (
-    !registry.unsubscribeFromOfflineRecovery &&
-    storeManagerOfflineSessionRegistry.get(storeManager)
-  ) {
+  // Also without offline support of its own: the stores hold their
+  // revalidations while another manager's session with the same key is in
+  // offline mode, so they must still learn when it recovers.
+  if (!registry.unsubscribeFromOfflineRecovery) {
     registry.unsubscribeFromOfflineRecovery = subscribeToOfflineRecovery(
       (sessionKey, hasStoreRecovered) => {
         if (storeManager.getSessionKey() !== sessionKey) return;

@@ -600,23 +600,30 @@ export function createOfflineStoreController<
   }
 
   /**
-   * Whether mutations queued earlier for the entities of this mutation are
-   * still waiting to reach the server (queued, replaying or unconfirmed).
+   * Whether mutations queued earlier for the entities this mutation affects
+   * or depends on (`dependsOn`) are still waiting to reach the server
+   * (queued, replaying or unconfirmed).
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
     if (queueEntries.size === 0) return false;
 
-    const entityRefs =
-      prepared.entityRefs ??
-      resolveNormalizedRefs(
-        getOperationRawEntityRefs(
-          prepared.operation,
-          prepared.operationName,
-          prepared.validatedInput,
-        ),
-      );
+    const entityRefs = [
+      ...(prepared.entityRefs ??
+        resolveNormalizedRefs(
+          getOperationRawEntityRefs(
+            prepared.operation,
+            prepared.operationName,
+            prepared.validatedInput,
+          ),
+        )),
+      ...(prepared.operation.dependsOn
+        ? resolveNormalizedRefs(
+            prepared.operation.dependsOn({ input: prepared.validatedInput }),
+          )
+        : []),
+    ];
 
     for (const entry of queueEntries.values()) {
       for (const queuedEntityRef of entry.entityRefs) {
@@ -2465,16 +2472,7 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
-      storeAdapter.revalidateDiscardedEntities?.(
-        args.resolution.entityRefs.map((ref) => ({
-          ...ref,
-          payload: getPayloadForEntityRef({
-            operationName: args.resolution.operation,
-            input: args.resolution.input,
-            entityKey: ref.entityKey,
-          }),
-        })),
-      );
+      revalidateDiscardedWork([args.resolution], new Set());
       return;
     }
 
@@ -2515,6 +2513,59 @@ export function createOfflineStoreController<
     rollbackTempCreatePendingEntity(args.resolution);
 
     refreshDerivedState(args.current);
+
+    // The temp entities were removed, but descendants may also have changed
+    // entities that exist on the server (e.g. moved an item into the
+    // discarded one): those are refetched.
+    const discardedWork = [
+      ...descendantQueueEntries.values(),
+      ...descendantResolutions.values(),
+    ];
+    const removedTempEntityKeys = new Set(parentEntityKeys);
+    for (const workItem of discardedWork) {
+      for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
+        removedTempEntityKeys.add(entityKey);
+      }
+    }
+    revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
+  }
+
+  /**
+   * Refetches the entities discarded queued work referenced (its optimistic
+   * changes cannot be rolled back locally), except the removed temp entities.
+   */
+  function revalidateDiscardedWork(
+    discardedWork: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'entityRefs'
+    >[],
+    removedTempEntityKeys: ReadonlySet<string>,
+  ): void {
+    const entities: (OfflineEntityRef & {
+      payload: ValidPayload | undefined;
+    })[] = [];
+    const seenEntityKeys = new Set<string>();
+
+    for (const workItem of discardedWork) {
+      for (const ref of workItem.entityRefs) {
+        if (removedTempEntityKeys.has(ref.entityKey)) continue;
+        if (seenEntityKeys.has(ref.entityKey)) continue;
+        seenEntityKeys.add(ref.entityKey);
+
+        entities.push({
+          ...ref,
+          payload: getPayloadForEntityRef({
+            operationName: workItem.operation,
+            input: workItem.input,
+            entityKey: ref.entityKey,
+          }),
+        });
+      }
+    }
+
+    if (entities.length === 0) return;
+
+    storeAdapter.revalidateDiscardedEntities?.(entities);
   }
 
   function collectRetryResolutionChain(args: {

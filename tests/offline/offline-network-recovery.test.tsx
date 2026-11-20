@@ -625,3 +625,77 @@ test('a document that failed to load offline loads by itself when the session co
 
   hook.unmount();
 });
+
+test('a store of a manager without offline support revalidates when another manager of the same session recovers', async () => {
+  const sessionKey = 'offline-recovery-shared-session';
+
+  // Two managers share the session: only one of them has offline support,
+  // but the session's offline mode applies to the stores of both.
+  const offlineManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+  });
+  createDocumentStoreTestEnv(1, {
+    id: 'offline-enabled-doc',
+    getSessionKey: () => sessionKey,
+    storeManager: offlineManager,
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: { operations: {} },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv(1, {
+    id: 'realtime-doc',
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+    }),
+    usesRealTimeUpdates: true,
+  });
+  const renders = createLoggerStore();
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    renders.add({ status: doc.status, data: doc.data });
+  });
+  await flushAllTimers();
+
+  env.serverMock.setData(2);
+
+  // The realtime transport reconnects while the session is offline: the
+  // revalidation is held, since it could only fail.
+  renders.addMark('offline, then the realtime transport reconnects');
+  act(() => {
+    network.goOffline();
+  });
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+  await flushAllTimers();
+
+  // The held revalidation runs once the session recovers.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null
+    -> status: success ⋅ data: {value:1}
+
+    >>> offline, then the realtime transport reconnects
+
+    >>> back online
+
+    -> status: success ⋅ data: {value:2}
+    "
+  `);
+
+  hook.unmount();
+});

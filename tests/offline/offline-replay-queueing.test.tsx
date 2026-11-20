@@ -2,11 +2,17 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import type {
+  CollectionOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
+} from '../../src/main';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import {
   FetchError,
   TEST_INITIAL_TIME,
@@ -3095,6 +3101,245 @@ test('an edit made right after reconnecting is sent after the edits still waitin
   hook.unmount();
 });
 
+test('an item created right after reconnecting on top of an offline creation is sent once that creation reached the server', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-online-dependent-create-session';
+
+  type FolderOperations = {
+    createFolder: CollectionOfflineOperationDefinition<
+      { value: { name: string; parentId?: string } },
+      string,
+      { name: string },
+      unknown,
+      { id: string }
+    >;
+    createSubfolder: CollectionOfflineOperationDefinition<
+      { value: { name: string; parentId?: string } },
+      string,
+      { name: string; parentId: string },
+      unknown,
+      { id: string }
+    >;
+  };
+
+  const folderSchema = rc_object({
+    value: rc_object({ name: rc_string, parentId: rc_string.optionalKey() }),
+  });
+
+  const env = createCollectionStoreTestEnv<
+    { name: string; parentId?: string },
+    FolderOperations
+  >(
+    {},
+    {
+      id: 'offline-online-dependent-create-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: folderSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createFolder: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: async ({ input }) => {
+                // Replaying over the connection that just came back is slow.
+                await env.serverTable.delayedSetItem(
+                  'folders||1',
+                  { name: input.name },
+                  { durationMs: 3000 },
+                );
+                return { id: 'folders||1' };
+              },
+            },
+            createSubfolder: {
+              inputSchema: rc_object({ name: rc_string, parentId: rc_string }),
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              dependsOn: ({ input }) => [input.parentId],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name, parentId: input.parentId },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: async ({ input }) => {
+                await env.serverTable.delayedSetItem('folders||2', input);
+                return { id: 'folders||2' };
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Create a folder offline: it only exists locally, under a temp id.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createFolder', input: { name: 'Docs' } },
+    });
+  });
+
+  // Back online: the folder creation starts replaying, and the user creates
+  // a subfolder in it before that replay reaches the server.
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(500);
+
+  const sendSubfolderDirectly = vi.fn(() =>
+    Promise.reject(new Error('the parent folder does not exist yet')),
+  );
+  let subfolderResult:
+    | Awaited<ReturnType<typeof env.apiStore.performMutation>>
+    | undefined;
+  await act(async () => {
+    subfolderResult = await env.apiStore.performMutation(null, {
+      mutation: sendSubfolderDirectly,
+      offline: {
+        operation: 'createSubfolder',
+        input: { name: 'Invoices', parentId: 'temp:Docs' },
+      },
+    });
+  });
+  await flushAllTimers();
+
+  // Sent on its own, the subfolder would reference a folder the server does
+  // not have yet: it is queued behind the folder creation instead, and
+  // replayed with the folder's server id.
+  expect(sendSubfolderDirectly).not.toHaveBeenCalled();
+  expect(subfolderResult?.ok).toBe(true);
+  expect(env.serverTable.getAll()).toMatchInlineSnapshot(`
+    folders||1: { name: 'Docs' }
+    folders||2: { name: 'Invoices', parentId: 'folders||1' }
+  `);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+});
+
+test('lists are revalidated after replaying an offline creation that references no entity', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-entityless-create-session';
+
+  type EntitylessCreateOperations = {
+    createUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { name: string },
+      unknown
+    >;
+  };
+
+  // The server assigns the id and the app shows no optimistic row, so the
+  // operation references no entity: only the revalidation after the replay
+  // can bring the new row into the list.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    EntitylessCreateOperations
+  >(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      id: 'offline-entityless-create-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: () => [],
+              execute: async ({ input }) => {
+                await env.serverTable.addItemWithAutoGeneratedKey(
+                  'users',
+                  (id) => ({ id, name: input.name }),
+                );
+              },
+              // Nothing to sync locally: the list revalidation shows the row.
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { itemSelector: (item) => item.name },
+    );
+    env.trackItemUI('users', query.items.join(', '));
+  });
+  await flushAllTimers();
+
+  // Create Grace offline: the creation waits in the queue.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createUser', input: { name: 'Grace' } },
+    });
+  });
+
+  // Back online: the list must only be revalidated once the creation reached
+  // the server, otherwise it would be fetched without Grace and never again.
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the creation is replayed, then the list revalidated',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users      |
+    0     | Ada        | [users] ui-initialized
+    3.01s | Ada        | offline:createUser queued
+    .     | Ada        | -- back online: the creation is replayed, then the list revalidated
+    .     | Ada        | offline:createUser replay-started
+    .     | Ada        | [users||2] >add-item-started (value: {"id":2,"name":"Grace"})
+    3.85s | Ada        | [users||2] <add-item-persisted (value: {"id":2,"name":"Grace"})
+    4.21s | Ada        | offline:createUser replay-finished
+    4.22s | Ada        | 🔴 >list-fetch-started
+    5.02s | Ada        | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Ada, Grace | [users] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('discarding failed offline changes of collection items puts those items back to the server values', async () => {
   network.setOffline();
   const sessionKey = 'offline-discard-collection-item-session';
@@ -3277,6 +3522,217 @@ test('discarding failed offline changes of collection items puts those items bac
     33.63s | Ada renamed | Grace     | 🟠 [users||1] <fetch-finished (value: {"name":"Ada"})
     .      | Ada         | Grace     | [ada] ui-changed
     .      | Ada         | Grace     | 🟡 [users||2] <fetch-finished (value: {"name":"Grace"})
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('discarding a failed offline creation puts existing items changed on top of it back to the server values', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-create-dependents-session';
+
+  type TeamUser = { name: string; teamId?: string };
+  type TeamOperations = {
+    createTeam: CollectionOfflineOperationDefinition<
+      { value: TeamUser },
+      string,
+      { name: string },
+      unknown,
+      { id: string }
+    >;
+    moveUserToTeam: CollectionOfflineOperationDefinition<
+      { value: TeamUser },
+      string,
+      { itemId: string; teamId: string },
+      unknown
+    >;
+    patchUserName: CollectionOfflineOperationDefinition<
+      { value: TeamUser },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+
+  // The server rejects the team creation and the rename, so they end up
+  // waiting for the user to decide what to do with them.
+  const env = createCollectionStoreTestEnv<TeamUser, TeamOperations>(
+    { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
+    {
+      id: 'offline-discard-create-dependents-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: rc_object({
+          value: rc_object({
+            name: rc_string,
+            teamId: rc_string.optionalKey(),
+          }),
+        }),
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createTeam: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                }),
+              },
+              execute: () => {
+                throw new Error('team creation rejected');
+              },
+            },
+            moveUserToTeam: {
+              inputSchema: rc_object({ itemId: rc_string, teamId: rc_string }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              dependsOn: ({ input }) => [input.teamId],
+              execute: async ({ input }) => {
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  teamId: input.teamId,
+                });
+              },
+              onSuccessExecute: () => {},
+            },
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('rename rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const ada = env.apiStore.useItem('users||1');
+    const grace = env.apiStore.useItem('users||2');
+
+    env.trackItemUI(
+      'ada',
+      `${ada.data?.value.name} in ${ada.data?.value.teamId ?? 'no team'}`,
+    );
+    env.trackItemUI('grace', grace.data?.value.name ?? `- ${grace.status}`);
+  });
+  await flushAllTimers();
+
+  env.addTimelineComments('beforeNextAction', [
+    'offline: create a team, move Ada into it and rename Grace',
+  ]);
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'createTeam', input: { name: 'Core' } },
+    });
+    await env.apiStore.performMutation('users||1', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||1', (user) => ({
+          value: { ...user.value, teamId: 'temp:Core' },
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'moveUserToTeam',
+        input: { itemId: 'users||1', teamId: 'temp:Core' },
+      },
+    });
+    await env.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('users||2', () => ({
+          value: { name: 'Grace renamed' },
+        }));
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||2', name: 'Grace renamed' },
+      },
+    });
+  });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the team and the rename until they need a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  // 3 attempts per change, 5s apart: 30s covers both.
+  await advanceTime(30_000);
+  await flushAllTimers();
+
+  const teamResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'createTeam');
+  if (!teamResolution) {
+    throw new Error('Expected the team creation to wait for a resolution');
+  }
+
+  // Discarding the team also discards the move of Ada, which was made on top
+  // of it: Ada is refetched and leaves the team that never existed. Grace's
+  // rename is still waiting for a decision, so her item is untouched.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the team creation: the move of Ada is discarded with it',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      teamResolution.id,
+      'createTeam',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(
+    env.apiStore
+      .getOfflineResolutions()
+      .map((resolution) => resolution.operation),
+  ).toMatchInlineSnapshot(`['patchUserName']`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ada              | grace         |
+    0      | Ada in no team   | Grace         | [ada, grace] ui-initialized
+    1.01s  | Ada in no team   | Grace         | -- offline: create a team, move Ada into it and rename Grace
+    .      | Ada in no team   | Grace         | offline:createTeam queued
+    .      | Ada in temp:Core | Grace         | [ada] ui-changed
+    .      | Ada in temp:Core | Grace         | offline:moveUserToTeam queued
+    .      | Ada in temp:Core | Grace renamed | [grace] ui-changed
+    .      | Ada in temp:Core | Grace renamed | offline:patchUserName queued
+    .      | Ada in temp:Core | Grace renamed | -- back online: the server rejects the team and the rename until they need a resolution
+    .      | Ada in temp:Core | Grace renamed | offline:createTeam replay-started
+    6.01s  | Ada in temp:Core | Grace renamed | offline:createTeam replay-started
+    11.01s | Ada in temp:Core | Grace renamed | offline:createTeam replay-started
+    .      | Ada in temp:Core | Grace renamed | offline:createTeam resolution-required
+    .      | Ada in temp:Core | Grace renamed | offline:moveUserToTeam resolution-required
+    .      | Ada in temp:Core | Grace renamed | offline:patchUserName replay-started
+    16.01s | Ada in temp:Core | Grace renamed | offline:patchUserName replay-started
+    21.01s | Ada in temp:Core | Grace renamed | offline:patchUserName replay-started
+    .      | Ada in temp:Core | Grace renamed | offline:patchUserName resolution-required
+    31.02s | Ada in temp:Core | Grace renamed | -- discard the team creation: the move of Ada is discarded with it
+    .      | Ada in temp:Core | Grace renamed | 🔴 [users||1] >fetch-started
+    31.82s | Ada in temp:Core | Grace renamed | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
+    .      | Ada in no team   | Grace renamed | [ada] ui-changed
     "
   `);
 

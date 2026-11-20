@@ -79,6 +79,7 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
+  hasQueuedMutations: boolean;
 };
 
 type OfflineSessionMessage =
@@ -154,6 +155,12 @@ type SessionStoreState = {
   entities: InternalGlobalOfflineEntity[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
+  /**
+   * Whether any store of the session still has mutations in its queue,
+   * including the ones that reference no entity (they have no entry in
+   * `entities`).
+   */
+  hasQueuedMutations: boolean;
 };
 
 /**
@@ -168,7 +175,7 @@ type SessionStoreState = {
 function getStoresAwaitingRecovery(
   state: SessionStoreState,
 ): ReadonlySet<string> | null {
-  if (state.status.isOfflineMode) return null;
+  if (state.status.isOfflineMode || state.hasQueuedMutations) return null;
 
   const storeNames = new Set<string>();
 
@@ -737,12 +744,14 @@ class SessionOfflineCoordinator {
         entities: [],
         resolutions: [],
         uploads: [],
+        hasQueuedMutations: false,
       }),
     });
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
     this.store.subscribe(({ prev, current }) => {
       if (
         prev.entities === current.entities &&
+        prev.hasQueuedMutations === current.hasQueuedMutations &&
         prev.status.isOfflineMode === current.status.isOfflineMode
       ) {
         return;
@@ -1941,7 +1950,9 @@ class SessionOfflineCoordinator {
     const allResolutions: OfflineResolutionRecord[] = [];
     const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    let hasQueuedMutations = false;
     for (const contribution of this.#storeContributions.values()) {
+      if (contribution.replayHead !== null) hasQueuedMutations = true;
       allEntities.push(...contribution.entities);
       allResolutions.push(...contribution.resolutions);
       for (const uploadId of contribution.referencedUploadIds) {
@@ -2069,7 +2080,7 @@ class SessionOfflineCoordinator {
     }
 
     this.store.setPartialState(
-      { entities, resolutions },
+      { entities, resolutions, hasQueuedMutations },
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
@@ -2126,6 +2137,7 @@ class SessionOfflineCoordinator {
       entities: this.store.state.entities,
       resolutions: this.store.state.resolutions,
       uploads: this.store.state.uploads,
+      hasQueuedMutations: this.store.state.hasQueuedMutations,
     });
   }
 
@@ -2142,6 +2154,7 @@ class SessionOfflineCoordinator {
         entities: message.entities,
         resolutions: message.resolutions,
         uploads: message.uploads,
+        hasQueuedMutations: message.hasQueuedMutations,
       },
       { action: 'offline-session-remote' },
     );

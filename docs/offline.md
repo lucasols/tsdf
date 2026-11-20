@@ -105,7 +105,7 @@ await userStore.performMutation(
 
 When the online mutation succeeds, the result value is `{ kind: 'online', data }`. When TSDF queues the mutation for offline replay, the result value is `{ kind: 'queued' }`.
 
-A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them and then be overwritten, so it joins the queue and is replayed in the order the user made the changes.
+A mutation is also queued while online when older mutations for the same entities (the operation's `getEntityRefs`) or for the entities it depends on (`dependsOn`) are still waiting in the queue, for example right after reconnecting while the replay is in flight. Sent on its own it would reach the server before them (and be overwritten, or reference an entity the server does not have yet), so it joins the queue and is replayed in the order the user made the changes.
 
 ## Revalidation After Recovering
 
@@ -158,7 +158,7 @@ await userStore.resolveOfflineResolution(resolutions[0].id, 'renameUser', {
 
 Supported resolution actions include:
 
-- `discard` - Drop the resolution record. The optimistic changes of the discarded mutation cannot be rolled back locally, so TSDF refetches what the operation referenced (`getEntityRefs`): the document, the collection item, or the list query item together with the store's lists (the change may have moved or removed the row). Discarding a temp create removes the temp entity and everything queued on top of it.
+- `discard` - Drop the resolution record. The optimistic changes of the discarded mutation cannot be rolled back locally, so TSDF refetches what the operation referenced (`getEntityRefs`): the document, the collection item, or the list query item together with the store's lists (the change may have moved or removed the row). Discarding a temp create removes the temp entity and everything queued on top of it; existing entities changed on top of it are refetched.
 - `requeue` - Queue replacement input for an operation conflict.
 - `commit` - Accept an externally completed resolution result.
 - `retry` - Retry a retry-exhausted record.
