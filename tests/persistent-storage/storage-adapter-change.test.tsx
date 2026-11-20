@@ -47,52 +47,72 @@ const usersQuery = { tableId: 'users' };
 let network = createOfflineNetworkMock();
 let opfsStore = createOpfsPersistentStorageTestStore();
 
+type DisposableEnv = { apiStore: { dispose: () => void } };
+
+/**
+ * Stores still alive at the end of a test. They are disposed in `afterEach` so
+ * they stop reacting to the session events of the next test (their manager
+ * listens to the recovery of any session with the same key).
+ */
+const liveEnvs = new Set<DisposableEnv>();
+
+function trackEnv<T extends DisposableEnv>(env: T): T {
+  liveEnvs.add(env);
+  return env;
+}
+
 type Adapter = 'local-sync' | typeof opfsPersistentStorage;
 
 function createSettingsEnv(adapter: Adapter, storeName: string) {
-  return createDocumentStoreTestEnv(
-    { name: 'dark', value: 1 },
-    {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      persistentStorage: { adapter, schema: settingsSchema },
-    },
+  return trackEnv(
+    createDocumentStoreTestEnv(
+      { name: 'dark', value: 1 },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        persistentStorage: { adapter, schema: settingsSchema },
+      },
+    ),
   );
 }
 
 function createUsersCollectionEnv(adapter: Adapter, storeName: string) {
-  return createCollectionStoreTestEnv(
-    { '1': { id: '1', name: 'Ana' }, '2': { id: '2', name: 'Bob' } },
-    {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      persistentStorage: {
-        adapter,
-        schema: collectionItemSchema,
-        payloadSchema: rc_string,
+  return trackEnv(
+    createCollectionStoreTestEnv(
+      { '1': { id: '1', name: 'Ana' }, '2': { id: '2', name: 'Bob' } },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        persistentStorage: {
+          adapter,
+          schema: collectionItemSchema,
+          payloadSchema: rc_string,
+        },
       },
-    },
+    ),
   );
 }
 
 function createUsersListEnv(adapter: Adapter, storeName: string) {
-  return createListQueryStoreTestEnv<Row>(
-    {
-      users: [
-        { id: 1, name: 'Ana' },
-        { id: 2, name: 'Bob' },
-      ],
-    },
-    {
-      id: storeName,
-      getSessionKey: () => sessionKey,
-      persistentStorage: {
-        adapter,
-        schema: rowSchema,
-        itemPayloadSchema: rc_string,
-        queryPayloadSchema: rc_object({ tableId: rc_string }),
+  return trackEnv(
+    createListQueryStoreTestEnv<Row>(
+      {
+        users: [
+          { id: 1, name: 'Ana' },
+          { id: 2, name: 'Bob' },
+        ],
       },
-    },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        persistentStorage: {
+          adapter,
+          schema: rowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: rc_object({ tableId: rc_string }),
+        },
+      },
+    ),
   );
 }
 
@@ -150,14 +170,14 @@ function createOfflineCounterEnv(
   });
   envRef.current = env;
 
-  return env;
+  return trackEnv(env);
 }
 
 /**
  * Simulates closing the tab and opening the next deployed app version:
  * in-memory stores and session runtime are gone, persisted storage stays.
  */
-function restartApp(...envs: Array<{ apiStore: { dispose: () => void } }>) {
+function restartApp(...envs: DisposableEnv[]) {
   cleanup();
 
   // A closed tab never runs `dispose()`. It is only called here so the previous
@@ -173,6 +193,7 @@ function restartApp(...envs: Array<{ apiStore: { dispose: () => void } }>) {
   );
   for (const env of envs) {
     env.apiStore.dispose();
+    liveEnvs.delete(env);
   }
   resetSessionForTests();
   localStorage.clear();
@@ -193,6 +214,10 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks();
   cleanup();
+  for (const env of liveEnvs) {
+    env.apiStore.dispose();
+  }
+  liveEnvs.clear();
   // Drain background maintenance so it cannot write into the next test.
   await flushAllTimers();
   vi.useRealTimers();

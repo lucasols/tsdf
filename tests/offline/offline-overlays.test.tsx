@@ -225,6 +225,8 @@ describe('document overlays', () => {
       .     | "value:2 pending:yes" | server-data-changed (value: 2)
       .     | "value:2 pending:yes" | offline:updateValue replay-finished
       .     | "value:2 pending:no"  | ui-changed
+      2.01s | "value:2 pending:no"  | 🟡 >fetch-started
+      2.81s | "value:2 pending:no"  | 🟡 <fetch-finished (value: 2)
       "
     `);
 
@@ -470,6 +472,8 @@ describe('collection overlays', () => {
       .     | Ada pending  | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
       .     | Ada pending  | yes     | offline:renameItem replay-finished
       .     | Ada replayed | no      | [name, pending] ui-changed
+      2.01s | Ada replayed | no      | 🟠 [users||1] >fetch-started
+      2.81s | Ada replayed | no      | 🟠 [users||1] <fetch-finished (value: {"name":"Ada replayed"})
       "
     `);
 
@@ -838,6 +842,8 @@ describe('list-query overlays', () => {
       .     | yes     | Ada pending  | success      | [users||1] server-data-changed (value: {"name":"Ada replayed"})
       .     | yes     | Ada pending  | success      | offline:patchUserName replay-finished
       .     | no      | Ada replayed | success      | [query-items, pending] ui-changed
+      5.02s | no      | Ada replayed | success      | 🟠 >list-fetch-started
+      5.82s | no      | Ada replayed | success      | 🟠 <list-fetch-finished (value: {"count":1})
       "
     `);
 
@@ -977,6 +983,8 @@ describe('list-query overlays', () => {
       .     | Ada pending  | yes     | [users||1] server-data-changed (value: {"name":"Ada replayed"})
       .     | Ada pending  | yes     | offline:patchUserName replay-finished
       .     | Ada replayed | no      | [item-name, pending] ui-changed
+      7.63s | Ada replayed | no      | 🟢 [users||1] >fetch-started
+      8.43s | Ada replayed | no      | 🟢 [users||1] <fetch-finished (value: {"id":1,"name":"Ada replayed"})
       "
     `);
 
@@ -1112,6 +1120,9 @@ describe('list-query overlays', () => {
       .     | yes     | Ada, Grace, Linus offline | success      | [users||3] server-data-changed (value: {"id":3,"name":"Linus offline"})
       .     | yes     | Ada, Grace, Linus offline | success      | offline:createUser replay-finished
       .     | no      | Ada, Grace                | success      | [query-items, pending] ui-changed
+      5.02s | no      | Ada, Grace                | success      | 🟠 >list-fetch-started
+      5.82s | no      | Ada, Grace                | success      | 🟠 <list-fetch-finished (value: {"count":3})
+      .     | no      | Ada, Grace, Linus offline | success      | [query-items] ui-changed
       "
     `);
 
@@ -1384,6 +1395,8 @@ describe('list-query overlays', () => {
       5.01s |             | success      | -- replay settles — delete metadata clears, list stays empty
       .     |             | success      | [users||1] server-item-removed
       .     |             | success      | offline:deleteUser replay-finished
+      5.02s |             | success      | 🟠 >list-fetch-started
+      5.82s |             | success      | 🟠 <list-fetch-finished (value: {"count":0})
       "
     `);
 

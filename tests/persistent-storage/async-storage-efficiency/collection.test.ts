@@ -518,7 +518,7 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:collection-expiration"]
@@ -601,7 +601,7 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:collection-startup-max-items"]
@@ -718,7 +718,7 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:collection-startup-expiration-max-items"]
@@ -868,25 +868,26 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1.001s | 📂 dir-open ✅ tsdf/sess1/col-expired-during-max-items
+      1.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      1.002s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.003s | 📂 dir-open ✅ tsdf/sess1/col-expired-during-max-items
              |    └ (store directory)
-      1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.004s | 👁️ #1 file-open ✅ tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index)
-      1.003s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.005s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.25 kb
              ·
-      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~3986551515.p.json
+      1.048s | 🗑️ #2 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 🗑️ #3 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data)
-      1.049s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+      1.051s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.053s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.055s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.25 kb -> 0.20 kb
-      1.055s | end
+      1.057s | end
       "
     `);
   });
@@ -1634,23 +1635,24 @@ describe('async storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time   |
-      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1ms    | 📁 dir-open-or-create 🆕 tsdf (root directory)
+      2ms    | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.811s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.813s | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.852s | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.854s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
+      1.854s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.855s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.856s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)
-      1.855s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
+      1.857s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
              |    └ (entry data)
-      1.858s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
+      1.86s  | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
              |    └ (entry data) | 0.00 kb -> 0.08 kb
-      1.86s  | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
+      1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index)
-      1.863s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
+      1.865s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index) | 0.00 kb -> 0.09 kb
-      1.865s | end
+      1.867s | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

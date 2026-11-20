@@ -89,7 +89,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
@@ -186,7 +186,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf
               |    └ (root directory) entries=["dir:sess1","file:root-junk.txt"]
       12.003s | 🗑️ #1 ✅ tsdf/root-junk.txt (untracked root file)
@@ -303,7 +303,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:corrupted","dir:trigger"]
@@ -359,7 +359,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf
               |    └ (root directory) entries=["dir:sess1","dir:sess2"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
@@ -419,7 +419,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(firstCleanupOperations).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf
               |    └ (root directory) entries=["dir:sess-fail","dir:sess-sibling"]
       12.003s | 🗂️ list-dir-values tsdf/sess-fail
@@ -465,7 +465,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(retryCleanupOperations).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess-fail"]
       12.003s | 🗂️ list-dir-values tsdf/sess-fail
               |    └ (session directory) entries=["dir:failed-doc"]
@@ -531,7 +531,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:invalid-metadata","dir:missing-payload","dir:valid-doc"]
@@ -626,7 +626,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:mixed-list-query","dir:valid-doc"]
@@ -697,7 +697,7 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time    |
-      12.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      12.001s | 📂 dir-open ✅ tsdf (root directory)
       12.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       12.003s | 🗂️ list-dir-values tsdf/sess1
               |    └ (session directory) entries=["dir:orphan-collection"]
