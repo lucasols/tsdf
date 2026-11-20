@@ -221,7 +221,7 @@ addComment: {
 },
 ```
 
-When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, with the work queued on it. `cancelledWith` only drives this cleanup: it does not delay replay or rewrite the input when the task gets its server id, and it only reaches stores that are instantiated when the cancellation happens.
+When the creation of that task is cancelled as above, or its manual resolution is discarded, the queued comments are dropped with it and their temporary entities are removed. A comment added with a client-generated id instead of a temporary entity is removed the same way when it was never sent, with the work queued on it and the work of other stores declared as `cancelledWith` it. `cancelledWith` only drives this cleanup: it does not delay replay or rewrite the input when the task gets its server id, and it only reaches stores that are instantiated in the tab where the cancellation happens.
 
 ## Conflict Resolution
 
@@ -251,7 +251,7 @@ Use `parseOfflineResolutionConflict(resolution)` to narrow a persisted resolutio
 
 While the creation of an entity made offline waits for a resolution, the server does not know the entity, so nothing else can be sent for it. The mutations that target or depend on it become blocked resolutions behind the creation (`blockedResolutionCount > 0`, error `Blocked by unresolved dependency`), whether they were queued before the creation failed or made afterwards, online or offline. `performMutation(...)` returns `{ kind: 'queued' }` for them and the optimistic update stays visible.
 
-They follow the decision about the creation: `retry` (default scope) sends the creation again and then the blocked mutations with the server id, `discard` drops them with the creation. This includes a delete with `dropSelfIfTempLifecycleCancelled`: the creation may have reached the server, so it is not cancelled locally; the delete is sent after the creation is retried, or dropped when it is discarded.
+They follow the decision about the creation: `retry` (default scope) sends the creation again and then the blocked mutations with the server id, `discard` drops them with the creation. For a creation that hit a conflict, `requeue` sends them after the new creation, and `commit` sends them with the ref of the entity the result keeps. This includes a delete with `dropSelfIfTempLifecycleCancelled`: the creation may have reached the server, so it is not cancelled locally; the delete is sent after the creation is retried, or dropped when it is discarded.
 
 ### Resolving From A Session-Wide UI
 

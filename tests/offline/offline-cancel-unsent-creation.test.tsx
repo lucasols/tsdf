@@ -82,7 +82,7 @@ type TasksOperations = {
     ListQueryParams,
     string,
     { name: string },
-    unknown,
+    { reason: string },
     TaskRow
   >;
   createSubtask: ListQueryOfflineOperationDefinition<
@@ -92,6 +92,13 @@ type TasksOperations = {
     { name: string; parentId: string },
     unknown,
     TaskRow
+  >;
+  createSubtaskWithId: ListQueryOfflineOperationDefinition<
+    TaskRow,
+    ListQueryParams,
+    string,
+    { id: number; name: string; parentId: string },
+    unknown
   >;
   renameTask: ListQueryOfflineOperationDefinition<
     TaskRow,
@@ -133,6 +140,11 @@ const taskRowSchema = rc_object({
   parentId: rc_string.optionalKey(),
 });
 const subtaskInputSchema = rc_object({ name: rc_string, parentId: rc_string });
+const subtaskWithIdInputSchema = rc_object({
+  id: rc_number,
+  name: rc_string,
+  parentId: rc_string,
+});
 const taskPatchSchema = rc_object({
   itemId: rc_string,
   name: rc_string.optionalKey(),
@@ -147,6 +159,11 @@ const tasksQuery = { tableId: 'tasks' } as const;
  *   server assigns `tasks||<id>` starting at 3)
  * - a subtask, or an existing task moved under another one, declares its
  *   parent task with `dependsOn`
+ * - `createSubtaskWithId` creates a subtask whose id (`tasks||<id>`) the app
+ *   generates on the client, so it needs no temp row
+ * - when `conflicts.createTask` is set, the replay of a task creation reports
+ *   a conflict (the server already has a task with that name) instead of
+ *   sending it
  * - `editTask` sends a partial change of a task (name and/or parent); the
  *   offline edits of the same task are merged into one request
  * - deleting a task supersedes its queued edits and, when the task was
@@ -167,6 +184,7 @@ function createTasksEnv(
     createTask: [],
     deleteTask: [],
   };
+  const conflicts = { createTask: false };
 
   async function createOnServer(input: { name: string; parentId?: string }) {
     const result: TaskRow = { id: nextTaskId, ...input };
@@ -210,6 +228,11 @@ function createTasksEnv(
                   finalData: result,
                 }),
               },
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () =>
+                  conflicts.createTask ? { reason: 'name-taken' } : false,
+              },
               execute: async ({ input }) => {
                 sentRequests.push(`createTask "${input.name}"`);
                 const fault = faults.createTask.shift();
@@ -246,6 +269,18 @@ function createTasksEnv(
                 );
                 return createOnServer(input);
               },
+            },
+            createSubtaskWithId: {
+              inputSchema: subtaskWithIdInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`tasks||${input.id}`],
+              dependsOn: ({ input }) => [input.parentId],
+              execute: async ({ input }) => {
+                const itemId = `tasks||${input.id}`;
+                sentRequests.push(`createSubtaskWithId ${itemId}`);
+                await env.serverTable.delayedSetItem(itemId, input);
+              },
+              onSuccessExecute: () => {},
             },
             renameTask: {
               inputSchema: userPatchSchema,
@@ -383,6 +418,30 @@ function createTasksEnv(
     });
   }
 
+  function createSubtaskWithId(id: number, name: string, parentId: string) {
+    return act(async () => {
+      await env.apiStore.performMutation(`tasks||${id}`, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            `tasks||${id}`,
+            { id, name, parentId },
+            { addItemToQueries: { queries: [tasksQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () =>
+          env.serverTable.delayedSetItem(`tasks||${id}`, {
+            id,
+            name,
+            parentId,
+          }),
+        offline: {
+          operation: 'createSubtaskWithId',
+          input: { id, name, parentId },
+        },
+      });
+    });
+  }
+
   function renameTask(itemId: string, name: string) {
     return act(async () => {
       await env.apiStore.performMutation(itemId, {
@@ -472,8 +531,10 @@ function createTasksEnv(
     },
     sentRequests,
     faults,
+    conflicts,
     createTask,
     createSubtask,
+    createSubtaskWithId,
     renameTask,
     moveTask,
     editTask,
@@ -2165,5 +2226,131 @@ describe('tasks whose creation waits for a manual decision', () => {
     `);
 
     list.unmount();
+  });
+
+  test('discarding a failed creation also drops a subtask added to it with a client-generated id, and the edits of that subtask', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWhoseCreationKeepsFailing(
+        'discard-client-id-subtask-session',
+        'discard-client-id-subtask-store',
+      );
+
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    // The subtask is held behind the creation of its parent. Its rename only
+    // targets the subtask, which the server does not know yet either.
+    await env.createSubtaskWithId(50, 'Book flights', 'temp:Plan trip');
+    await env.renameTask('tasks||50', 'Book cheap flights');
+
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'discard' },
+      );
+    });
+    await flushAllTimers();
+
+    // The subtask will never be created, so its rename is dropped with it
+    // instead of being sent later for a task the server does not have:
+    // nothing is left to send or decide.
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(list.result.current.items).toMatchInlineSnapshot(`
+      ['Write report', 'Review budget']
+    `);
+
+    list.unmount();
+  });
+});
+
+describe('tasks whose creation waits for a conflict decision', () => {
+  /**
+   * Creates "Plan trip" offline, then reconnects while the server reports
+   * that a task with that name already exists: the creation is not sent and
+   * waits for the user's decision about the conflict.
+   */
+  async function createTaskWithConflict(sessionKey: string) {
+    network.setOffline();
+    const env = createTasksEnv(sessionKey, `${sessionKey}-tasks`);
+
+    await env.createTask('Plan trip');
+    env.conflicts.createTask = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createTask = false;
+
+    const conflict = env.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+
+    // The rename made while the creation waits for the decision cannot be
+    // sent with the temporary id: it is held behind the creation.
+    await env.renameTask('temp:Plan trip', 'Plan summer trip');
+    await flushAllTimers();
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['kind', 'op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - { kind: 'conflict', op: 'createTask' }
+      - { blockedBy: 1, kind: 'retry-exhausted', op: 'renameTask' }
+    `);
+
+    return { env, conflict };
+  }
+
+  test('a rename held while the creation waits for a conflict decision is sent after the creation the user sends again', async () => {
+    const { env, conflict } = await createTaskWithConflict('requeue-conflict');
+
+    // The user creates the task anyway, under another name.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(conflict.id, 'createTask', {
+        action: 'requeue',
+        input: { name: 'Plan trip again' },
+      });
+    });
+    await flushAllTimers();
+
+    // The creation goes first, then the held rename with the id the server
+    // assigned, without asking the user to send it again.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createTask "Plan trip again"', 'renameTask tasks||3 to "Plan summer trip"']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget', '3: Plan summer trip']`,
+    );
+  });
+
+  test('a rename held while the creation waits for a conflict decision is sent to the task the user keeps from the server', async () => {
+    const { env, conflict } = await createTaskWithConflict('commit-conflict');
+    // The task another device created with that name.
+    env.serverTable.setItem('tasks||9', { id: 9, name: 'Plan trip' });
+
+    // The user keeps the task of the server instead of creating another one.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(conflict.id, 'createTask', {
+        action: 'commit',
+        result: { id: 9, name: 'Plan trip' },
+      });
+    });
+    await flushAllTimers();
+
+    // Nothing is created: the held rename is sent to the server task.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['renameTask tasks||9 to "Plan summer trip"']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget', '9: Plan summer trip']`,
+    );
   });
 });

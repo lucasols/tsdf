@@ -953,7 +953,8 @@ export type OfflineExternalEntityRef<
   storeName: string;
   /**
    * Payload of the entity in that store. For an entity created offline this
-   * is the temporary payload its create operation returns in `getEntityRefs`.
+   * is the temporary payload, or the client-generated one, its create
+   * operation returns in `getEntityRefs`.
    */
   entityRef: TEntityRef;
 };
