@@ -101,7 +101,10 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   addToQueries: CreateUserTempEntity['addToQueries'];
   loadedFields?: CreateUserTempEntity['loadedFields'];
   partialResources?: PartialResourcesConfig<UserRow>;
-  offlineSession?: Partial<OfflineSessionConfig>;
+  offlineSession?: Pick<
+    OfflineSessionConfig,
+    'classifyRetryableFailure' | 'replayRetry'
+  >;
   nextUserIdRef?: { current: number };
   createUserDurationMs?: number;
   failCreateUser?: boolean;
