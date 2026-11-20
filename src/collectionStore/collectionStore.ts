@@ -39,6 +39,7 @@ import {
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
+  recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from '../persistentStorage/offline/sessionCoordinator';
@@ -359,7 +360,9 @@ export type CollectionStoreOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
-   * revalidation. Set to `0` to disable this cooldown. */
+   * revalidation. Recovering from offline mode waits one cooldown for a
+   * reconnect before revalidating, so the two share one revalidation. Set to
+   * `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   /** Called when an already-loaded item is invalidated. */
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
@@ -895,6 +898,10 @@ export function createCollectionStore<
   >({ debugName: `${id}:collection-offline-overlays`, state: () => ({}) });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
+  // Items that only exist locally: offline creations not sent to the server
+  // yet (still queued, or waiting for a manual resolution). They cannot be
+  // refetched, so invalidations skip them.
+  const unsentCreationItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
 
   let initialData:
@@ -1036,6 +1043,7 @@ export function createCollectionStore<
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
+    unsentCreationItemKeys.clear();
   }
 
   function rebindOfflineOverlays(
@@ -1186,9 +1194,35 @@ export function createCollectionStore<
 
               rebindOfflineOverlays(itemKeyRewrites);
             },
+            revalidateDiscardedEntities: (entities) => {
+              // Discarding the last change of a realtime store schedules its
+              // recovery revalidation for the end of the reconnect cooldown:
+              // run it now with this refetch instead of fetching twice.
+              focusLifecycle.flushPendingReconnectRevalidate();
+              for (const { entityKey, payload } of entities) {
+                const item = store.state[entityKey];
+                if (item) {
+                  invalidateItem(item.payload, 'highPriority');
+                } else if (item === null && payload !== undefined) {
+                  // The discarded change deleted the item locally and
+                  // invalidations skip deleted items: fetch it again.
+                  scheduleFetch(
+                    'highPriority',
+                    // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
+                    __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+                  );
+                }
+              }
+            },
             syncEntityOverlays: ({ entities, sessionKey }) => {
               if (offlineOverlaySessionKey !== sessionKey)
                 clearOfflineOverlays(sessionKey);
+              unsentCreationItemKeys.clear();
+              for (const entity of entities) {
+                if (entity.tempId !== undefined) {
+                  unsentCreationItemKeys.add(entity.entityKey);
+                }
+              }
               const activeItemKeys = new Set(
                 entities
                   .filter((entity) => entity.entityKind === 'item')
@@ -1979,6 +2013,7 @@ export function createCollectionStore<
       const item = store.state[itemKey];
 
       if (!item) continue;
+      if (unsentCreationItemKeys.has(itemKey)) continue;
 
       const currentInvalidationPriority = item.refetchOnMount
         ? fetchTypePriority[item.refetchOnMount]
@@ -2670,6 +2705,10 @@ export function createCollectionStore<
     return result;
   }
 
+  function getIsOfflineMode(): boolean {
+    return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -2680,7 +2719,10 @@ export function createCollectionStore<
       invalidateItem(() => true, 'lowPriority');
     },
     () => {
-      invalidateItem(() => true, 'realtimeUpdate');
+      invalidateItem(
+        () => true,
+        usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
+      );
     },
     () => {
       for (const scheduler of batchKeySchedulers.values()) {
@@ -2690,6 +2732,7 @@ export function createCollectionStore<
         scheduler.reevaluateDelayedRTU();
       }
     },
+    getIsOfflineMode,
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,
@@ -2927,6 +2970,7 @@ export function createCollectionStore<
     id,
     reset,
     onTransportReconnect,
+    onOfflineRecovery: focusLifecycle.onOfflineRecovery,
     resolveOfflineResolution:
       offlineController?.resolveOfflineResolutionWithGenericAction,
   });

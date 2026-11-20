@@ -293,6 +293,8 @@ export function createMutationApi<
   >,
   itemMutationCountsWithoutScheduler: Map<string, number>,
   onItemMutationsEnd: () => void,
+  /** Offline creations not sent yet: local-only items that cannot be refetched. */
+  unsentCreationItemKeys: ReadonlySet<string>,
 ) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -872,6 +874,8 @@ export function createMutationApi<
         const staleInvalidateFieldsByItemKey = new Map<string, string[]>();
 
         for (const { itemKey } of itemsKey) {
+          if (unsentCreationItemKeys.has(itemKey)) continue;
+
           const effectiveLoadedFields = getInvalidationBaselineFields(itemKey);
 
           const staleInvalidateFields =
@@ -1014,6 +1018,7 @@ export function createMutationApi<
       const item = store.state.itemQueries[itemKey];
 
       if (!item) continue;
+      if (unsentCreationItemKeys.has(itemKey)) continue;
 
       const effectiveLoadedFields = getInvalidationBaselineFields(itemKey);
 

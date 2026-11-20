@@ -2,6 +2,7 @@ import {
   isWindowFocused,
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { notNullish } from '@ls-stack/utils/assertions';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
@@ -32,6 +33,7 @@ import {
   rebindOfflineOverlayEntries,
 } from '../persistentStorage/offline/overlayStoreLifecycle';
 import {
+  recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreEntitiesWithPayload,
   useOfflineStoreResolutions,
@@ -1185,7 +1187,9 @@ type ListQueryStoreOptionsBase<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
-   * revalidation. Set to `0` to disable this cooldown. */
+   * revalidation. Recovering from offline mode waits one cooldown for a
+   * reconnect before revalidating, so the two share one revalidation. Set to
+   * `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   /** Rules that keep cached query membership in sync after item updates. */
   optimisticListUpdates?: OptimisticListUpdate<
@@ -1372,6 +1376,10 @@ export function createListQueryStore<
   >({ debugName: `${id}:list-query-offline-overlays`, state: () => ({}) });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
+  // Items that only exist locally: offline creations not sent to the server
+  // yet (still queued, or waiting for a manual resolution). They cannot be
+  // refetched, so invalidations skip them.
+  const unsentCreationItemKeys = new Set<string>();
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
 
@@ -2193,6 +2201,7 @@ export function createListQueryStore<
     () => {
       revalidateAfterIgnoredConfirmedSnapshots();
     },
+    unsentCreationItemKeys,
   );
 
   if (resolvedPersistentStorageConfig && resolvedOfflineConfig) {
@@ -2282,9 +2291,55 @@ export function createListQueryStore<
 
           rebindOfflineOverlays(itemKeyRewrites);
         },
+        revalidateDiscardedEntities: (entities, hasPendingResolutions) => {
+          // Discarding the last change of a realtime store schedules its
+          // recovery revalidation for the end of the reconnect cooldown: run
+          // it now with this refetch instead of fetching twice.
+          focusLifecycle.flushPendingReconnectRevalidate();
+          invalidateQueryAndItems({
+            itemPayload: filterAndMap(
+              entities,
+              (ref) => store.state.itemQueries[ref.entityKey]?.payload ?? false,
+            ),
+            // Queries too: the discarded change may have removed the item
+            // from lists (a delete) or moved it between them. Unless other
+            // changes of the store still wait for a decision: refetched lists
+            // would replace them. The recovery revalidation refreshes the
+            // lists once the last one is handled.
+            queryPayload: hasPendingResolutions ? false : () => true,
+            type: 'highPriority',
+          });
+
+          if (!fetchItemFn) return;
+
+          for (const { entityKey, payload } of entities) {
+            if (
+              store.state.itemQueries[entityKey] !== null ||
+              payload === undefined
+            ) {
+              continue;
+            }
+
+            // The discarded change deleted the item locally and invalidations
+            // skip deleted items: fetch it again for screens that show it
+            // outside of a list.
+            scheduleItemFetch(
+              'highPriority',
+              // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+              { fields: '*' },
+            );
+          }
+        },
         syncEntityOverlays: ({ entities, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)
             clearOfflineOverlays(sessionKey);
+          unsentCreationItemKeys.clear();
+          for (const entity of entities) {
+            if (entity.entityKind === 'item' && entity.tempId !== undefined) {
+              unsentCreationItemKeys.add(entity.entityKey);
+            }
+          }
           const activeItemKeys = new Set(
             entities
               .filter((entity) => entity.entityKind === 'item')
@@ -2544,6 +2599,7 @@ export function createListQueryStore<
   function clearOfflineOverlays(nextSessionKey: string | null = null): void {
     offlineOverlaySessionKey = nextSessionKey;
     offlineOverlayStore.setState({});
+    unsentCreationItemKeys.clear();
   }
 
   function rebindOfflineOverlays(
@@ -3346,6 +3402,10 @@ export function createListQueryStore<
     );
   }
 
+  function getIsOfflineMode(): boolean {
+    return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -3356,9 +3416,13 @@ export function createListQueryStore<
       invalidateQueryAndItems({ all: true, type: 'lowPriority' });
     },
     () => {
-      invalidateQueryAndItems({ all: true, type: 'realtimeUpdate' });
+      invalidateQueryAndItems({
+        all: true,
+        type: usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority',
+      });
     },
     reevaluateDelayedRTUs,
+    getIsOfflineMode,
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,
@@ -3727,6 +3791,7 @@ export function createListQueryStore<
     id,
     reset,
     onTransportReconnect,
+    onOfflineRecovery: focusLifecycle.onOfflineRecovery,
     resolveOfflineResolution:
       offlineController?.resolveOfflineResolutionWithGenericAction,
   });

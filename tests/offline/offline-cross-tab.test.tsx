@@ -1087,8 +1087,8 @@ test('a tab whose own connectivity check fails stays offline until that check pa
   logTabA('60s after reconnecting');
 
   // The realtime connection is back and tab A's check runs again on the
-  // user's next edit: tab A is back online, sends that edit directly and
-  // replays the queued one.
+  // user's next edit: tab A is back online and sends the queued edit, then
+  // the new one, queued behind it because it changes the same document.
   tabARealtimeConnected = true;
   tabAStatus.addMark('realtime connection back');
   void tabA.queueEdit(3);
@@ -1106,7 +1106,11 @@ test('a tab whose own connectivity check fails stays offline until that check pa
 
     >>> realtime connection back
 
-    -> label: after the next edit ⋅ offline: ❌ ⋅ serverCalls: tab A sent doc = 2
+    ┌─
+    ⋅ label: after the next edit
+    ⋅ offline: ❌
+    ⋅ serverCalls: tab A sent doc = 2, tab A sent doc = 3
+    └─
     "
   `);
 });

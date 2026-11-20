@@ -394,23 +394,25 @@ test('nested descendants cascade into blocked resolutions and discard together',
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time | query-items                                    |
-    0    | Ada, Grace                                     | ui-initialized
-    12s  | Ada, Grace, Parent offline                     | ui-changed
-    .    | Ada, Grace, Parent offline                     | offline:createUser queued
-    .    | Ada, Grace, Parent offline, Child offline      | ui-changed
-    .    | Ada, Grace, Parent offline, Child offline      | offline:createChildUser queued
-    .    | Ada, Grace, Parent offline, Child blocked edit | ui-changed
-    .    | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
-    .    | Ada, Grace, Parent offline, Child blocked edit | -- go online — parent create replay will fail 3 times, cascading blocked status to descendants
-    .    | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    17s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    22s  | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
-    .    | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
-    .    | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
-    .    | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
-    .    | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent — should cascade-remove child and grandchild resolutions
-    .    | Ada, Grace                                     | ui-changed
+    time   | query-items                                    |
+    0      | Ada, Grace                                     | ui-initialized
+    12s    | Ada, Grace, Parent offline                     | ui-changed
+    .      | Ada, Grace, Parent offline                     | offline:createUser queued
+    .      | Ada, Grace, Parent offline, Child offline      | ui-changed
+    .      | Ada, Grace, Parent offline, Child offline      | offline:createChildUser queued
+    .      | Ada, Grace, Parent offline, Child blocked edit | ui-changed
+    .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName queued
+    .      | Ada, Grace, Parent offline, Child blocked edit | -- go online — parent create replay will fail 3 times, cascading blocked status to descendants
+    .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+    17s    | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+    22s    | Ada, Grace, Parent offline, Child blocked edit | offline:createUser replay-started
+    .      | Ada, Grace, Parent offline, Child blocked edit | offline:createChildUser resolution-required
+    .      | Ada, Grace, Parent offline, Child blocked edit | offline:createUser resolution-required
+    .      | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName resolution-required
+    .      | Ada, Grace, Parent offline, Child blocked edit | -- discard the parent — should cascade-remove child and grandchild resolutions
+    .      | Ada, Grace                                     | ui-changed
+    22.01s | Ada, Grace                                     | 🔴 >list-fetch-started
+    22.81s | Ada, Grace                                     | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 
@@ -729,6 +731,8 @@ test('retrying a retry-exhausted parent replays nested descendants by default', 
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-started
     7.61s | Ada, Grace, Parent offline, Child blocked edit | [users||4] server-data-changed (value: {"name":"Child blocked edit"})
     .     | Ada, Grace, Parent offline, Child blocked edit | offline:patchUserName replay-finished
+    7.62s | Ada, Grace, Parent offline, Child blocked edit | 🔴 >list-fetch-started
+    8.42s | Ada, Grace, Parent offline, Child blocked edit | 🔴 <list-fetch-finished (value: {"count":4})
     "
   `);
 
@@ -973,6 +977,8 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
     15.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
+    15.42s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
+    16.22s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":3})
     "
   `);
 
@@ -1252,6 +1258,8 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-started
     16.41s | Ada, Grace, Linus blocked edit | [users||3] server-data-changed (value: {"name":"Linus blocked edit"})
     .      | Ada, Grace, Linus blocked edit | offline:patchUserName replay-finished
+    16.42s | Ada, Grace, Linus blocked edit | 🔴 >list-fetch-started
+    17.22s | Ada, Grace, Linus blocked edit | 🔴 <list-fetch-finished (value: {"count":3})
     "
   `);
 
@@ -1670,7 +1678,7 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
   // --- Discarding the parent through the manager clears the whole chain and
   // rolls the optimistic temp row back, like the store-level discard ---
   env.addTimelineComments('beforeNextAction', [
-    'discard the parent through the manager — the blocked child edit is removed with it',
+    'discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates',
   ]);
   const discardResult = await resolveOfflineResolutionThroughManager(
     storeManager,
@@ -1700,8 +1708,10 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
     .     | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .     | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .     | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
-    4.01s | Ada, Grace, Linus blocked edit | -- discard the parent through the manager — the blocked child edit is removed with it
+    4.01s | Ada, Grace, Linus blocked edit | -- discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates
     .     | Ada, Grace                     | ui-changed
+    4.02s | Ada, Grace                     | 🔴 >list-fetch-started
+    4.82s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 
