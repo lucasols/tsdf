@@ -374,7 +374,7 @@ Behavior:
   (see [Offline - Conflict Resolution](./offline.md#conflict-resolution))
 - `isUnsentCreation` - `true` while the item was created offline (a
   `tempEntity` / `tempEntities` operation) and the server has not confirmed it
-  yet, so it only exists locally under its temporary payload. Creations queued
+  yet, so it is still tracked under its temporary payload. Creations queued
   without a temp entity (e.g. with a client-generated id) report `false`
 
 ### Items created offline
@@ -388,16 +388,21 @@ an edit made right after creating it) with `isUnsentCreation: false`.
 function onDeleteClick(itemPayload: UserPayload) {
   const offlineState = store.getItemOfflineState(itemPayload);
 
-  // The server never saw an unsent creation, so deleting it only discards
-  // local work: no need to ask before deleting for everyone.
-  if (offlineState?.isUnsentCreation || confirmDeleteForEveryone()) {
+  // A creation that was not sent yet only exists locally, so deleting it
+  // only discards local work: no need to ask before deleting for everyone.
+  const isLocalOnly =
+    offlineState?.isUnsentCreation && offlineState.syncState === 'pending';
+
+  if (isLocalOnly || confirmDeleteForEveryone()) {
     deleteUser(itemPayload);
   }
 }
 ```
 
 `isUnsentCreation` stays `true` while the creation itself is being sent, until
-the server result is reconciled.
+the server result is reconciled. The server may already have the item while
+`syncState` is `'syncing'` or `'needs-confirmation'`, which is why the example
+also checks for `'pending'`.
 
 ## useMultipleItems
 

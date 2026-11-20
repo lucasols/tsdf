@@ -333,10 +333,12 @@ export type ItemOfflineState = {
   requiresResolution: boolean;
   /**
    * Whether the item was created offline through a `tempEntity` /
-   * `tempEntities` operation and the server has not confirmed it yet, so it
-   * only exists locally under its temporary payload. Creations queued without
-   * a temp entity (e.g. with a client-generated id) report `false`. It stays
-   * `true` while the creation itself is being sent. Once the server entity is
+   * `tempEntities` operation and the server has not confirmed it yet, so it is
+   * still tracked under its temporary payload. Creations queued without a temp
+   * entity (e.g. with a client-generated id) report `false`. It stays `true`
+   * while the creation itself is being sent, so the server may already have
+   * it while `syncState` is `syncing` or `needs-confirmation`; only with
+   * `syncState: 'pending'` has it not been sent yet. Once the server entity is
    * reconciled, the temporary payload has no state anymore and the final
    * payload reports any mutation still queued with `isUnsentCreation: false`.
    */
@@ -361,7 +363,12 @@ export type GlobalOfflineEntity = {
   kind: OfflineEntityMutationKind;
   /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
-  /** Current sync state for the entity. */
+  /**
+   * Current sync state for the entity. With several mutations queued for it
+   * this is the most urgent state among them (`needs-confirmation` >
+   * `syncing` > `pending`): the entity is `syncing` while any of its mutations
+   * is being sent.
+   */
   syncState: OfflineSyncState | 'resolution-required';
   /** Whether the entity currently requires manual resolution. */
   requiresResolution: boolean;
