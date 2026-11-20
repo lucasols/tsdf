@@ -90,12 +90,15 @@ function createOfflineDocumentEnv({
   storeName,
   testScenario,
   onExecute,
+  startedLongBeforeTestTime = false,
 }: {
   adapter: 'local-sync' | typeof opfsPersistentStorage;
   sessionKey: string;
   storeName: string;
   testScenario: 'idle' | 'loaded';
   onExecute?: (input: { value: number }) => void;
+  /** The app ran days before `TEST_INITIAL_TIME`. */
+  startedLongBeforeTestTime?: boolean;
 }) {
   const envRef: {
     current: ReturnType<
@@ -112,6 +115,7 @@ function createOfflineDocumentEnv({
       offlineSession: { network: network.config },
     }),
     testScenario,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: startedLongBeforeTestTime,
     persistentStorage: {
       adapter,
       schema: docSchema,
@@ -694,6 +698,67 @@ test('local-sync offline persistence replays queued data when a new browser sess
     isLoading: '❌'
     pendingSync: '❌'
     status: 'success'
+  `);
+  expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+    `[]`,
+  );
+
+  hook.unmount();
+});
+
+test('local-sync offline edits are still sent when the app is reopened more than a week later', async () => {
+  const sessionKey = 'offline-sync-week-later-session';
+  const storeName = 'offline-sync-week-later-doc';
+  const replayedInputs: { value: number }[] = [];
+
+  // Eight days ago, longer than the cache max age, the user edited offline
+  // and closed the app before reconnecting.
+  vi.setSystemTime(TEST_INITIAL_TIME - 8 * 24 * 60 * 60 * 1000);
+  network.setOffline();
+  const firstEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+    startedLongBeforeTestTime: true,
+  });
+  await resolveAfterAllTimers(
+    firstEnv.apiStore.performMutation({
+      optimisticUpdate: () => {
+        firstEnv.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: async () => {
+        await firstEnv.serverMock.delayedSetData(2);
+        return 2;
+      },
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // Today the user reopens the app online.
+  resetSessionForTests();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+  act(() => {
+    network.goOnline();
+  });
+  const restartedEnv = createOfflineDocumentEnv({
+    adapter: 'local-sync',
+    sessionKey,
+    storeName,
+    testScenario: 'idle',
+    onExecute: (input) => {
+      replayedInputs.push(input);
+    },
+  });
+  const hook = renderHook(() => restartedEnv.apiStore.useDocument());
+  await flushAllTimers();
+
+  // The queued edit is not expired like cached data: it is still sent.
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
   `);
   expect(restartedEnv.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
     `[]`,

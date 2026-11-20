@@ -237,6 +237,8 @@ export function recheckIsSessionInOfflineMode(
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
 const OFFLINE_UPLOAD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const OFFLINE_UPLOAD_RETENTION_STABLE_ONLINE_MS = 5_000;
+/** Start of a queue entry id after its `<storeName>:` prefix. */
+const ENTRY_ID_TIMESTAMP_REGEX = /^\d+:/;
 
 export function createDefaultStatus(sessionKey: string): GlobalOfflineStatus {
   return {
@@ -1987,13 +1989,20 @@ class SessionOfflineCoordinator {
     const uploadsConfig = this.#uploadsConfig;
     if (!uploadsConfig) return;
 
-    // Mutation upload ids start with the id of their queue entry, which starts
-    // with the store name. Only stores created in this runtime report their
-    // references, so uploads of other stores (lazily created ones, or ones
-    // only another deploy has) are left to the retention cleanup.
+    // Mutation upload ids start with the id of their queue entry:
+    // `<storeName>:<createdAt>:…`. Only stores created in this runtime report
+    // their references, so uploads of other stores (lazily created ones, or
+    // ones only another deploy has) are left to the retention cleanup. Store
+    // names can contain `:`, so the timestamp must follow the name.
     const registeredStorePrefixes = [...this.#registrations.keys()].map(
       (storeName) => `${storeName}:`,
     );
+    const isOwnedByRegisteredStore = (id: string): boolean =>
+      registeredStorePrefixes.some(
+        (prefix) =>
+          id.startsWith(prefix) &&
+          ENTRY_ID_TIMESTAMP_REGEX.test(id.slice(prefix.length)),
+      );
     const removableIds = [...this.#uploads.values()]
       .filter((upload) => upload.source === 'mutation')
       .map((upload) => upload.id)
@@ -2001,7 +2010,7 @@ class SessionOfflineCoordinator {
         (id) =>
           !this.#referencedUploadIds.has(id) &&
           !this.#uploadPromisesById.has(id) &&
-          registeredStorePrefixes.some((prefix) => id.startsWith(prefix)),
+          isOwnedByRegisteredStore(id),
       );
 
     if (removableIds.length === 0) return;

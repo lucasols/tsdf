@@ -1235,6 +1235,11 @@ export function createPersistentStorageNamespaceHandle<
     : undefined;
   const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
+  // Unsent offline work is kept however long the app stays closed, as the
+  // generic cleanup also never expires it.
+  const allowExpiredRead = UNSENT_OFFLINE_WORK_ENTRY_PREFIXES.includes(
+    config.entryPrefix,
+  );
   // List-query query entries have no manifest under 'local-sync', so this
   // handle has nothing to probe: the items handle detects the store's
   // leftovers, and the cleanup removes its query entries too.
@@ -1606,7 +1611,7 @@ export function createPersistentStorageNamespaceHandle<
       const entry = readStorageEntryFromLocalStorageSync<T>(
         key,
         version,
-        { metadata: 'namespace', namespacePrefix: prefix },
+        { metadata: 'namespace', namespacePrefix: prefix, allowExpiredRead },
         localCodec,
       );
       if (import.meta.env.DEV) {

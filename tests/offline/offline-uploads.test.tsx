@@ -2164,6 +2164,10 @@ test('an older deploy keeps the attached file of an edit queued for an operation
 test('attached files of a store the app has not created yet after a restart survive offline edits in other stores', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-lazy-store-upload-session';
+  const otherStoreName = 'offline-lazy-store-upload-doc';
+  // Its id starts with the other store's id, so the files of each store must
+  // not be told apart only by that prefix.
+  const lazyStoreName = `${otherStoreName}:archive`;
   const sent: string[] = [];
 
   // The user attaches a file to an offline edit of a store that lives in a
@@ -2171,7 +2175,7 @@ test('attached files of a store the app has not created yet after a restart surv
   network.setOffline();
   const firstEnv = createRecordingDocumentEnv({
     storeManager: createUploadsStoreManager(sessionKey),
-    storeName: 'offline-lazy-store-upload-doc',
+    storeName: lazyStoreName,
     operationNames: ['updateValue'],
     sent,
   });
@@ -2188,7 +2192,7 @@ test('attached files of a store the app has not created yet after a restart surv
   const restartedStoreManager = createUploadsStoreManager(sessionKey);
   const otherEnv = createRecordingDocumentEnv({
     storeManager: restartedStoreManager,
-    storeName: 'offline-lazy-store-upload-other-doc',
+    storeName: otherStoreName,
     operationNames: ['updateValue'],
     sent,
   });
@@ -2207,7 +2211,7 @@ test('attached files of a store the app has not created yet after a restart surv
   // back: the edit is sent with its file.
   const lazyEnv = createRecordingDocumentEnv({
     storeManager: restartedStoreManager,
-    storeName: 'offline-lazy-store-upload-doc',
+    storeName: lazyStoreName,
     operationNames: ['updateValue'],
     sent,
   });

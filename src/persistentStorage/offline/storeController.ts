@@ -531,10 +531,12 @@ export function createOfflineStoreController<
     sessionConfig.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
-  // Uploads of persisted records whose operation this deploy doesn't define
-  // (queued by a newer deploy). The records stay in storage untouched, so their
-  // uploads must not be cleaned up.
+  // Uploads and entities of persisted records whose operation this deploy
+  // doesn't define (queued by a newer deploy). The records stay in storage
+  // untouched, so their uploads must not be cleaned up and the cached data of
+  // their entities stays protected.
   let unknownOperationUploadIds: string[] = [];
+  let unknownOperationEntityRefs: OfflineEntityRef[] = [];
   const countedReplayFailures = new Map<string, number>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
@@ -816,6 +818,7 @@ export function createOfflineStoreController<
     queueEntries.clear();
     resolutions.clear();
     unknownOperationUploadIds = [];
+    unknownOperationEntityRefs = [];
     nextQueueOrder = 0;
     hydratedSessionKey = null;
     hydratedPromise = null;
@@ -1104,6 +1107,7 @@ export function createOfflineStoreController<
       queueEntries.clear();
       resolutions.clear();
       const loadedUnknownOperationUploadIds: string[] = [];
+      const loadedUnknownOperationEntityRefs: OfflineEntityRef[] = [];
       // Records of an operation this deploy doesn't define were written by a
       // newer deploy (or belong to an operation the app removed). They stay
       // in storage for a deploy that can send or resolve them, and this tab
@@ -1116,6 +1120,7 @@ export function createOfflineStoreController<
           ...Object.values(record.attachedUploadIds ?? {}),
           ...(record.dependencyUploadIds ?? []),
         );
+        loadedUnknownOperationEntityRefs.push(...record.entityRefs);
         return true;
       };
       for (const entry of loadedQueueEntries.values()) {
@@ -1132,6 +1137,7 @@ export function createOfflineStoreController<
         resolutions.set(resolution.id, resolution);
       }
       unknownOperationUploadIds = loadedUnknownOperationUploadIds;
+      unknownOperationEntityRefs = loadedUnknownOperationEntityRefs;
       // Unknown entries keep their place in the queue order.
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
@@ -1577,12 +1583,13 @@ export function createOfflineStoreController<
         ...unknownOperationUploadIds,
       ]),
     ].sort((left, right) => left.localeCompare(right));
-    const protectedKeys = storeAdapter.getProtectedCacheKeys(
-      entities.map((entity) => ({
+    const protectedKeys = storeAdapter.getProtectedCacheKeys([
+      ...entities.map((entity) => ({
         entityKey: entity.entityKey,
         entityKind: entity.entityKind,
       })),
-    );
+      ...unknownOperationEntityRefs,
+    ]);
     const nextReplayEntry = getSortedEntries()[0] ?? null;
 
     // Before publishing to the session: publishing can make the store
