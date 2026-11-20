@@ -25,7 +25,7 @@ import {
   takePendingQuotaWritesDisabledError,
 } from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
-import type { OfflineNetworkModeConfig } from './offline/types';
+import type { OfflineSessionConfig } from './offline/types';
 import { clearRegisteredOfflineUploadStorage } from './offlineUploadRegistry';
 import { serializeJsonForStorage } from './persistenceUtils';
 import {
@@ -490,9 +490,12 @@ export function getLocalStorageMaxAgeMs(): number {
 }
 
 export function isOfflineNetworkModeActiveSync(
-  networkConfig: OfflineNetworkModeConfig | undefined,
+  sessionConfig: Pick<OfflineSessionConfig, 'enabled' | 'network'> | undefined,
 ): boolean {
-  if (!networkConfig?.enabled) return false;
+  const networkConfig = sessionConfig?.network;
+  if (!networkConfig?.enabled || sessionConfig?.enabled?.() === false) {
+    return false;
+  }
 
   try {
     const currentOffline =

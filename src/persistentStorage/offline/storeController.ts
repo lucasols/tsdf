@@ -645,6 +645,11 @@ export function createOfflineStoreController<
     touchedNextEntry: boolean;
   };
 
+  /** Reads the session gate (`offlineSession.enabled`). */
+  function isSessionEnabled(): boolean {
+    return sessionConfig.enabled?.() !== false;
+  }
+
   function getActiveMutationQueueingCause(
     current: ActiveSessionState,
   ): OfflineMutationQueueingCause | null {
@@ -3866,13 +3871,19 @@ export function createOfflineStoreController<
           error,
           failureCtx,
         );
+        // A session gate closed while the entry was in flight leaves the
+        // failure unclassified: the entry stays queued as it was, to be
+        // replayed once the gate reopens
+        const sessionEnabled = isSessionEnabled();
         const allowReplayRetry =
+          sessionEnabled &&
           classification === 'ignore' &&
           !current.session.getStatus().isOfflineMode
             ? await current.session.classifyRetriableFailure(error, failureCtx)
             : false;
 
         if (
+          !sessionEnabled ||
           classification !== 'ignore' ||
           current.session.getStatus().isOfflineMode
         ) {
@@ -4267,6 +4278,14 @@ export function createOfflineStoreController<
     const current = ensureActiveSession();
     if (!current) return false;
 
+    if (!isSessionEnabled()) {
+      // The fetch runs online: the closed gate is applied to the status too,
+      // for the fetches that read this without refreshing the network state
+      // first (`loadMore`)
+      void current.session.refreshNetworkState();
+      return false;
+    }
+
     return shouldTreatFutureOperationsAsOffline(current);
   }
 
@@ -4278,7 +4297,13 @@ export function createOfflineStoreController<
   }
 
   function canQueueMutation(): boolean {
-    return !isDisposed && getSessionKey() !== false;
+    if (isDisposed || getSessionKey() === false) return false;
+    if (isSessionEnabled()) return true;
+
+    // The mutation runs online: the closed gate is applied to the status
+    // too, as before a fetch, so it stops reporting offline mode
+    void ensureActiveSession()?.session.refreshNetworkState();
+    return false;
   }
 
   async function prepareForFetch(): Promise<void> {

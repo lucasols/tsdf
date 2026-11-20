@@ -111,6 +111,83 @@ Queued mutations and pending resolutions are persisted through the store's own `
 
 The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the result is still `{ kind: 'queued' }`: the mutation stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded first. Treat an `onPersistentStorageError` call while offline as "pending changes may not survive a reload".
 
+Without an active offline session — `getSessionKey()` returns `false`, or the [session gate](#session-gate) is closed — the same call runs as a plain online mutation: `mutation` is called, a success resolves with `{ kind: 'online', data }`, and a failure goes through the normal error handling (optimistic update rolled back, `onMutationError` called). Nothing is queued.
+
+## Health Check
+
+The session is in offline mode for one of two causes: `network` (this device cannot reach the backend) or `outage` (the backend is reached but down). Browser `online` / `offline` events only cover part of the first one. For everything else the app usually has one health endpoint that answers both "this request failed: is it the network, an outage, or just this request?" and "are we back?". Wire it once with `offlineSession.healthCheck`:
+
+```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    network: { enabled: true },
+    outage: { enabled: true },
+    healthCheck: {
+      check: async ({ signal }) => {
+        try {
+          const response = await fetch('/api/health', { signal });
+          return response.ok ? 'up' : 'outage';
+        } catch {
+          return 'unreachable';
+        }
+      },
+    },
+  },
+});
+```
+
+`check(ctx)` receives `{ sessionKey, signal }` and returns (or resolves to) one of:
+
+| Answer          | Meaning                                        | As a failure classification | As a recovery check             |
+| --------------- | ---------------------------------------------- | --------------------------- | ------------------------------- |
+| `'up'`          | The backend answered and is healthy            | The session stays online    | Offline mode ends               |
+| `'outage'`      | The backend was reached but is down            | Outage mode becomes active  | Outage mode (stays or replaces) |
+| `'unreachable'` | The backend cannot be reached from this device | Network mode becomes active | Network mode (stays or returns) |
+
+The session uses the same function in both places:
+
+- **Failure classification.** When a fetch, a mutation or the replay of a queued mutation fails, the session runs the check and applies the answer.
+- **Recovery checks.** While a mode is active because of a failure, its recovery probe runs the check on that mode's `recoveryProbe` cadence (network: 5s growing to 60s, outage: 30s growing to 5min by default). `'up'` ends the offline mode — both causes at once when both are active. `'outage'` during network mode means the device reaches the backend again but the backend is down: outage mode takes over, or, when outage mode is disabled, network mode just ends and requests (including the replay of queued mutations) fail with their own errors. `'unreachable'` during outage mode activates network mode and keeps the outage, since nothing can be said about it until the backend is reachable. With a health check, `outage.recoveryCheck` is optional.
+
+In both places an answer only activates a mode that is enabled (`network.enabled` / `outage.enabled`, including runtime overrides). An answer for a disabled mode is ignored: a failed request is left to its own error.
+
+### `'up'` means the failure belongs to the request
+
+When the check answers `'up'` for a failed request, the session stays online and that request's own failure handling applies, even if the endpoint it called is down. For example, an upload endpoint answering 503 while the API health check passes:
+
+- a fetch or a direct mutation fails with its own error;
+- a queued mutation being replayed goes through `classifyRetryableFailure` and the `replayRetry` budget, and ends in a `retry-exhausted` resolution (see [Conflict Resolution](#conflict-resolution)).
+
+If the session should pause for that service instead, make `check` cover it (answer `'outage'` when it is down) or return `'outage'` for its failures from `classifyFailure`.
+
+### One request for many failures
+
+While a check is in flight, every failure and recovery tick that needs an answer waits for that same call: a burst of requests failing right when the backend goes down costs one health request. Failures that arrive while the session is already in offline mode do not run the check at all — the active mode explains them, and asking "are we back?" is the job of the recovery checks.
+
+A finished answer is never reused. A cached `'up'` could hide an outage that started right after it, so the next failure after a check has settled starts a new one. The check is never called on the success path.
+
+### With `classifyFailure` and `recoveryCheck`
+
+The health check is the fallback; the more specific hooks win:
+
+- `classifyFailure(error, ctx)` runs first. `'outage'`, `'network'` and `'ignore'` are final answers and the health check is not called for that failure. Return `'unknown'` when the error alone does not tell, to ask the health check. This keeps obvious request errors (validation, 404) from costing a health request:
+
+  ```ts
+  classifyFailure: (error) => (isClientError(error) ? 'ignore' : 'unknown'),
+  ```
+
+  Without `classifyFailure`, every failure asks the health check.
+
+- A mode with its own `recoveryCheck` (`network.recoveryCheck` / `outage.recoveryCheck`) keeps using it for its recovery; the health check is the recovery check of the modes that do not have one.
+
+### When the check gives no answer
+
+A check that throws, rejects, or takes longer than `healthCheck.timeoutMs` (default 10s) gives no answer and changes nothing: a failure being classified is left to its request, and a recovery check counts as "not recovered yet" and is retried on the normal cadence. `ctx.signal` is aborted on timeout so the health request can be cancelled. No answer is never read as `'unreachable'`: a broken or slow health endpoint is not evidence about connectivity, and the browser going offline is already detected by network mode. Return `'unreachable'` from `check` when the request itself fails, as in the example above.
+
+The check is not called while the [session gate](#session-gate) is closed, or while both modes are disabled and neither is still active.
+
 ## Reading While Offline
 
 While the session is in offline mode, fetches are not sent to the server. What a document, item or query reports depends on whether it has data to return:
@@ -323,6 +400,35 @@ storeManager.resetOfflineRuntimeConfig();
 ```
 
 `getOfflineRuntimeConfig()` returns the current effective controls. Runtime updates are useful for explicit "work offline" toggles, diagnostics, or temporarily disabling queueing modes.
+
+Disabling a mode only stops new work from entering it: an offline state that is already active is preserved so the work depending on it can still recover and replay. To turn the whole offline layer off, use the session gate instead.
+
+### Session gate
+
+`offlineSession.enabled` turns the whole offline layer on and off at runtime — for a feature flag or a per-workspace setting — without recreating the store manager or its stores:
+
+```ts
+const storeManager = createStoreManager({
+  getSessionKey: () => currentTenantId ?? false,
+  errorNormalizer: normalizeError,
+  offlineSession: {
+    enabled: () => featureFlags.offlineMode,
+    network: { enabled: true },
+  },
+});
+```
+
+While it returns `false` the session behaves as if no offline session existed:
+
+- it never enters offline mode: network detection is ignored and neither `classifyFailure` nor `healthCheck` is called. The offline status reports `isOfflineMode: false`, and `getOfflineRuntimeConfig()` reports both modes as not enabled
+- fetches always go to the network and fail with their normal errors
+- mutations with an `offline` descriptor run as plain online mutations (see [Queuing Mutations](#queuing-mutations))
+
+Mutations already queued when the gate closes are neither deleted nor replayed. They stay in persistent storage untouched, still listed by the offline entities / resolutions APIs, and are replayed once the gate reopens and the session is online. A queued mutation whose replay request fails because the gate closed mid-flight goes back to the queue as pending. Mutations made while the gate is closed go straight to the server, so they are not ordered after older mutations still waiting in the queue for the same entities: when that matters, close the gate only once the offline entities list is empty.
+
+The callback is read before every fetch and every mutation with an `offline` descriptor, on browser `online` / `offline` events, before each recovery check and before each queued mutation is replayed, so it must be synchronous and cheap (read a variable or a store, no I/O). The app does not have to call anything for a flip to apply to the next fetch or mutation. To apply it right away — clear the offline status in the UI as soon as the gate closes, or start replaying the queue as soon as it reopens on an idle screen — call `storeManager.setOfflineRuntimeConfig({})` after changing the value: every runtime config update re-reads the gate. Runtime overrides and the upload helpers are not affected by the gate.
+
+The tabs of a session key share its offline status and its replay, so `enabled()` must return the same value in every tab of that session key. A tab with the gate closed would clear an offline mode another tab still relies on, and a leading tab with the gate closed holds back the replay of every tab. To gate per workspace, include the workspace in the session key.
 
 ## Uploads
 
