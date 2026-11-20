@@ -2422,8 +2422,8 @@ class SessionOfflineCoordinator {
     );
     void this.#persistSessionSnapshot();
     if (publish) this.#publishSnapshot();
-    // Another tab's changes arrive one record at a time (e.g. a conflict's
-    // queue entry is removed before its resolution is saved), so an upload
+    // Another tab's changes arrive one record at a time (e.g. a superseded
+    // queue entry is removed before its replacement is saved), so an upload
     // can look unused in between. The tab that made the change cleans up.
     if (
       publish &&
