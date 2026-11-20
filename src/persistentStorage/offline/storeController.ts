@@ -2948,9 +2948,18 @@ export function createOfflineStoreController<
           );
         }
 
+        // The merged input may reference other uploads than the queued one
+        const mergedDependencyUploadIds = getDependencyUploadIds({
+          operationName,
+          input: validatedMergedInput,
+        });
         const nextEntry = {
           ...existingEntry,
           input: validatedMergedInput,
+          dependencyUploadIds:
+            mergedDependencyUploadIds.length > 0
+              ? mergedDependencyUploadIds
+              : undefined,
           updatedAt: now,
         };
         workingQueue.set(nextEntry.id, nextEntry);
