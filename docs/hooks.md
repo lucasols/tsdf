@@ -149,7 +149,7 @@ store.useDocument({ disabled: true });
 
 - `data` - The selected data (or `null` if not loaded)
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'`
-- `error` - The `StoreError` if the fetch failed, otherwise `null`
+- `error` - The `StoreError` if the fetch failed, otherwise `null`. While [offline](./offline.md#reading-while-offline), it is only set when there is no cached data to return; check it with `isOfflineStoreError(error)`
 - `isLoading` - Shorthand for `status === 'loading'`
 - `pendingSync` - `true` while local offline changes for this document still need to sync to the server
 
@@ -204,7 +204,7 @@ because the required refresh must be scheduled immediately.
 
 - `data` - The selected data (or `null`)
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'` | `'deleted'`
-- `error` - The `StoreError` if the fetch failed
+- `error` - The `StoreError` if the fetch failed. While [offline](./offline.md#reading-while-offline), it is only set when there is no cached data to return; check it with `isOfflineStoreError(error)`
 - `isLoading` - Shorthand for `status === 'loading'`
 - `payload` - The resolved payload
 - `itemStateKey` - The internal key for this item
@@ -280,7 +280,7 @@ changes on every keystroke.
 - `isDerived` - Whether the result is currently coming from `derivedQueries` instead of an exact cached/fetched query
 - `isLoading` - Shorthand for `status === 'loading'`
 - `isLoadingMore` - Shorthand for `status === 'loadingMore'`
-- `error` - The `StoreError` if the fetch failed
+- `error` - The `StoreError` if the fetch failed. While [offline](./offline.md#reading-while-offline), it is only set when there is no cached data to return; check it with `isOfflineStoreError(error)`
 - `payload` - The resolved payload
 - `queryKey` - The internal key for this query
 - `pendingSync` - `true` while local offline changes for this query still need to sync to the server
