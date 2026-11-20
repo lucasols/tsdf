@@ -2974,6 +2974,8 @@ export function createOfflineStoreController<
     preparedMutation: PreparedQueuedMutation;
     queueOrder: number;
     workingQueue: Map<string, OfflineQueueEntry>;
+    /** A resolution this mutation replaces, removed once it is queued */
+    replacedResolutionId: string | undefined;
   }): Promise<PlannedQueuedMutation> {
     const {
       current,
@@ -2988,6 +2990,7 @@ export function createOfflineStoreController<
       },
       queueOrder,
       workingQueue,
+      replacedResolutionId,
     } = args;
 
     const tempEntity = operation.tempEntity;
@@ -3091,7 +3094,11 @@ export function createOfflineStoreController<
         entityRefs,
         tempIds,
         entries: workingQueue.values(),
-        resolutionEntries: resolutions.values(),
+        resolutionEntries: replacedResolutionId
+          ? [...resolutions.values()].filter(
+              (resolution) => resolution.id !== replacedResolutionId,
+            )
+          : resolutions.values(),
       });
 
       if (duplicateTempEntityKey !== null) {
@@ -3234,6 +3241,7 @@ export function createOfflineStoreController<
 
   async function queuePreparedMutations(
     preparedMutation: PreparedQueuedMutation,
+    replacedResolutionId?: string,
   ): Promise<void> {
     const current = ensureActiveSession();
     if (!current || current.sessionKey !== preparedMutation.currentSessionKey) {
@@ -3256,6 +3264,7 @@ export function createOfflineStoreController<
         preparedMutation,
         queueOrder,
         workingQueue: new Map(queueEntries),
+        replacedResolutionId,
       });
     } while (
       plannedMutation.accumulatedEntry &&
@@ -3959,8 +3968,10 @@ export function createOfflineStoreController<
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
-      await removeResolution(resolutionId, current, true);
-      await queuePreparedMutations(preparedMutation);
+      // Queued before the resolution is removed, for the other tabs (see
+      // `persistManualResolutionChain`)
+      await queuePreparedMutations(preparedMutation, resolutionId);
+      await removeResolution(resolutionId, current);
       return;
     }
 

@@ -1364,6 +1364,78 @@ test('an edit another tab turned into a conflict keeps showing in the tab that m
   `);
 });
 
+test('an edit sent again from another tab keeps showing in the tab that made it', async () => {
+  network.setOffline();
+  // Tab A keeps the focus and leads
+  const tabA = await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  setDocumentHidden(false);
+
+  // The user edits in tab B while offline; on reconnect tab A replays the
+  // edit and the server rejects it with a conflict (negative values).
+  const tabBEnv = tabB.getEnv();
+  await tabBEnv.apiStore.performMutation({
+    optimisticUpdate: () => {
+      tabBEnv.apiStore.updateState((draft) => {
+        draft.value = -1;
+      });
+    },
+    mutation: async () => {
+      await tabBEnv.serverMock.delayedSetData(-1);
+      return -1;
+    },
+    offline: { operation: 'updateValue', input: { value: -1 } },
+  });
+  await advanceTime(10);
+  network.goOnline();
+  await advanceTime(10_000);
+
+  const tabBDoc = createLoggerStore();
+  function logTabB(label: string) {
+    tabBDoc.add({
+      label,
+      value: tabBEnv.store.state.data?.value,
+      // set when the store is revalidated with no screen showing it: the
+      // next screen that shows the document refetches it
+      refetchOnOpen: tabBEnv.store.state.refetchOnMount !== false,
+      resolutions: describeTabs(tabB)['tab B']?.resolutions.join(', '),
+    });
+  }
+  logTabB('conflict waiting for a decision');
+
+  // From tab A's offline panel the user sends the edit again with another
+  // value, which the server rejects too. The change moves from the conflict
+  // back to the queue and into a new conflict without ever being gone, so
+  // tab B must not refetch the document over it.
+  const [conflict] = tabA.storeManager.getOfflineResolutions();
+  await tabA
+    .getEnv()
+    .apiStore.resolveOfflineResolution(
+      conflict?.id ?? 'missing',
+      'updateValue',
+      { action: 'requeue', input: { value: -2 } },
+    );
+  await advanceTime(10_000);
+  logTabB('sent again from tab A and rejected again');
+
+  expect(tabBDoc.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ label: conflict waiting for a decision
+    ⋅ value: -1
+    ⋅ refetchOnOpen: ❌
+    ⋅ resolutions: doc: conflict
+    └─
+    ┌─
+    ⋅ label: sent again from tab A and rejected again
+    ⋅ value: -1
+    ⋅ refetchOnOpen: ❌
+    ⋅ resolutions: doc: conflict
+    └─
+    "
+  `);
+});
+
 test('discarding a conflict in one tab refetches the user in the tab that made the change', async () => {
   sharedUsersServer = createSharedServerTableState({
     'users||Ada': { name: 'Ada' },
