@@ -773,7 +773,12 @@ class SessionOfflineCoordinator {
       try {
         const uploads = await this.#uploadsConfig.adapter.list(this.sessionKey);
         if (hydrationToken === this.#hydrationToken) {
-          this.#uploads = new Map(uploads.map((upload) => [upload.id, upload]));
+          // Records saved or loaded while the list ran are already persisted
+          // and at least as recent as the listed ones, so they win.
+          this.#uploads = new Map([
+            ...uploads.map((upload) => [upload.id, upload] as const),
+            ...this.#uploads,
+          ]);
           this.#syncUploadsState();
           this.#scheduleUploadOnlineSessionStabilization();
           void this.#refreshUploadRetention();
@@ -1006,6 +1011,15 @@ class SessionOfflineCoordinator {
     }
 
     const existing = this.#uploads.get(args.id);
+    // The running transport marks the record as uploaded when it finishes, so
+    // swapping the file under it would pair the new file with the old ref.
+    if (
+      existing?.state === 'uploading' &&
+      this.#uploadPromisesById.has(args.id)
+    ) {
+      throw new Error(`Cannot save upload "${args.id}" while uploading`);
+    }
+
     const nextRecord = createStoredUploadRecord(
       args.id,
       this.sessionKey,
@@ -1028,10 +1042,9 @@ class SessionOfflineCoordinator {
     file: Blob | File;
     metadata?: ValidPayload;
   }): Promise<void> {
-    const existing = this.#uploads.get(args.id);
-    if (existing?.state === 'uploading') {
-      throw new Error(`Cannot replace upload "${args.id}" while uploading`);
-    }
+    // Read through storage: right after a restart the stored uploads may not
+    // be listed yet, and the replacement must keep the persisted metadata.
+    const existing = await this.#getUploadRecord(args.id);
 
     await this.saveUpload({
       id: args.id,

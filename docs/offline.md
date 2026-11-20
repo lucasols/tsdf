@@ -223,6 +223,10 @@ const storeManager = createStoreManager({
     uploads: {
       adapter: opfsOfflineUploadAdapter,
       upload: ({ file, metadata, onProgress }) => {
+        // Uploads staged without metadata (direct mutation uploads, uploads
+        // saved by older versions) use the default request.
+        if (metadata === undefined) return uploadFile(file, onProgress);
+
         // Restored from storage: validate before use.
         const target = rc_parse(metadata, uploadMetadataSchema).unwrap();
 
@@ -243,6 +247,6 @@ await storeManager.saveOfflineUpload({
 
 - `metadata` is optional and must be a JSON-serializable `ValidPayload` (`string`, `number`, or a plain object).
 - It is persisted with the upload record, so it survives reloads, is passed to the `upload` transport both on replay and on `resolveOfflineUpload(s)`, and is exposed as `metadata` on the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()`.
-- Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata (including the ones persisted by older versions) reach the transport with `metadata: undefined`.
-- `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed.
+- Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata reach the transport with `metadata: undefined`, so handle that case explicitly. This includes the ones persisted by older versions and files attached directly to a mutation with its `upload` option, which can't carry metadata.
+- `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed. Both fail while that upload's file is being sent.
 - Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.

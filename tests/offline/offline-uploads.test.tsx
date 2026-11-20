@@ -1644,3 +1644,166 @@ test('replacing a staged upload keeps its metadata unless new metadata is provid
 
   uploadHook.unmount();
 });
+
+test('replacing an upload right after a restart keeps the metadata saved before the restart', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-metadata-replace-after-restart-session';
+  const transportCalls: Array<Record<string, unknown>> = [];
+
+  function createUploadManager() {
+    return createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: async ({ id, file, metadata }) => {
+            transportCalls.push({ id, fileText: await file.text(), metadata });
+            return `server:${id}`;
+          },
+        },
+      },
+    });
+  }
+
+  // Stage the upload offline with the metadata the transport needs.
+  network.setOffline();
+  const firstSession = createUploadManager();
+  await flushAllTimers();
+  (
+    await resolveAfterAllTimers(
+      firstSession.saveOfflineUpload({
+        id: 'attachment',
+        file: new File(['first draft'], 'draft.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+        metadata: { kind: 'chat', chatId: 'chat-42' },
+      }),
+    )
+  ).unwrap();
+
+  // After a full restart, replacing the file is the first thing the app does
+  // with the new session, before the stored uploads were listed.
+  resetSessionForTests();
+  const restartedSession = createUploadManager();
+  (
+    await resolveAfterAllTimers(
+      restartedSession.replaceOfflineUpload({
+        id: 'attachment',
+        file: new File(['final version'], 'final.txt', {
+          type: 'text/plain',
+          lastModified: 2,
+        }),
+      }),
+    )
+  ).unwrap();
+  await flushAllTimers();
+
+  // The replacement keeps the metadata persisted before the restart instead
+  // of silently dropping it.
+  expect(
+    restartedSession
+      .getOfflineUploads()
+      .map((upload) => pick(upload, ['id', 'fileName', 'metadata'])),
+  ).toMatchInlineSnapshot(`
+    - fileName: 'final.txt'
+      id: 'attachment'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+  `);
+
+  // So the transport still receives it when the replaced file is uploaded.
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await advanceTime(0);
+  (
+    await resolveAfterAllTimers(
+      restartedSession.resolveOfflineUpload('attachment'),
+    )
+  ).unwrap();
+
+  expect(transportCalls).toMatchInlineSnapshot(`
+    - fileText: 'final version'
+      id: 'attachment'
+      metadata: { chatId: 'chat-42', kind: 'chat' }
+  `);
+});
+
+test('saving a new file over an upload that is still being sent is rejected, so the new file is never marked as uploaded with the previous file ref', async () => {
+  createMockBrowserOpfs();
+  const sessionKey = 'offline-upload-save-while-uploading-session';
+  const transportCalls: string[] = [];
+
+  const storeManager = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: async ({ file }) => {
+          transportCalls.push(`upload-start:${file.name}`);
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          transportCalls.push(`upload-finish:${file.name}`);
+          return `server:${file.name}`;
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  (
+    await resolveAfterAllTimers(
+      storeManager.saveOfflineUpload({
+        id: 'avatar',
+        file: new File(['first photo'], 'first.png', {
+          type: 'image/png',
+          lastModified: 1,
+        }),
+      }),
+    )
+  ).unwrap();
+
+  // The app starts sending the first photo...
+  const firstResolve = storeManager.resolveOfflineUpload('avatar');
+  await advanceTime(100);
+  expect(storeManager.getOfflineUploads()[0]?.state).toBe('uploading');
+
+  // ...and the user picks another photo for the same upload id mid-upload.
+  const savePromise = storeManager.saveOfflineUpload({
+    id: 'avatar',
+    file: new File(['second photo'], 'second.png', {
+      type: 'image/png',
+      lastModified: 2,
+    }),
+  });
+  // Let the storage write settle while the first upload is still running.
+  await advanceTime(100);
+  const saveDuringUpload = await savePromise;
+
+  // The save is rejected instead of swapping the file under the running
+  // upload.
+  expect(
+    saveDuringUpload.ok ? 'saved' : saveDuringUpload.error.message,
+  ).toMatchInlineSnapshot(`"Cannot save upload "avatar" while uploading"`);
+
+  await flushAllTimers();
+  expect((await firstResolve).unwrap()).toBe('server:first.png');
+
+  // The stored upload is still the file that was actually sent, so its ref
+  // matches its bytes.
+  const storedUpload = storeManager.getOfflineUploads()[0];
+  expect(
+    storedUpload && pick(storedUpload, ['fileName', 'state', 'resolvedRef']),
+  ).toMatchInlineSnapshot(`
+    fileName: 'first.png'
+    resolvedRef: 'server:first.png'
+    state: 'uploaded'
+  `);
+  expect(transportCalls).toMatchInlineSnapshot(
+    `['upload-start:first.png', 'upload-finish:first.png']`,
+  );
+});
