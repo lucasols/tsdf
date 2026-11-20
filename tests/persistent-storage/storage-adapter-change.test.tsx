@@ -4,6 +4,7 @@ import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
+import { createOfflineNetworkMock } from '../../src/testing';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -23,7 +24,6 @@ import {
   range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { createOfflineNetworkMock } from '../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import {
   getLocalStorageTree,
