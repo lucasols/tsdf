@@ -120,6 +120,8 @@ export type {
   OfflineUploadSource,
   OfflineUploadState,
   OfflineUploadTransportContext,
+  ReplaceOfflineUploadArgs,
+  SaveOfflineUploadArgs,
 } from './persistentStorage/offlineUploadTypes';
 
 export type {
@@ -150,7 +152,10 @@ export type {
   OfflineSessionConfig,
   OfflineReplayRetryConfig,
   OfflineResolutionAction,
+  OfflineResolutionActionError,
+  OfflineResolutionActionErrorCode,
   OfflineResolutionActionForOperation,
+  OfflineResolutionGenericAction,
   OfflineResolutionConflictParseErrorCode,
   OfflineResolutionConflictParseError,
   OfflineResolutionRecordForStore,

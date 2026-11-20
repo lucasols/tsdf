@@ -21,6 +21,7 @@ import {
   classifyRetryableReplayFailure,
   collectionCreateInputSchema,
   listQueryQueryPayloadSchema,
+  resolveOfflineResolutionThroughManager,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -1467,4 +1468,253 @@ test('temp-looking input values do not create dependencies unless dependsOn decl
   `);
 
   hook.unmount();
+});
+
+// A session-wide "sync problems" panel acts on resolutions through the store
+// manager. Blocked children must be reported as such (so the panel can explain
+// why nothing happened), and discarding the parent has to cascade exactly like
+// the store-level API does.
+test('manager-level actions report blocked resolutions and cascade a parent discard', async () => {
+  network.setOffline();
+  const usersQuery = { tableId: 'users' } as const;
+  const sessionKey = 'offline-resolution-manager-blocked-session';
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      network: network.config,
+      classifyRetryableFailure: (error, ctx) =>
+        classifyRetryableReplayFailure(error, ctx.phase),
+      // A single failed replay is enough to require a manual resolution.
+      replayRetry: { maxFailures: 1, intervalMs: 1 },
+    },
+  });
+  const createUserExecute = vi
+    .fn<
+      ({
+        input,
+      }: {
+        input: { name: string };
+      }) => Promise<{ id: number; name: string }>
+    >()
+    .mockRejectedValue(new Error('create replay failed'));
+  const patchUserExecute =
+    vi.fn<(ctx: PatchUserReplayContext) => Promise<{ name: string }>>();
+
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    CreateAndPatchListQueryUserOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-resolution-manager-blocked-store',
+      getSessionKey: () => sessionKey,
+      storeManager,
+      testScenario: { loaded: { queries: [usersQuery] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: createUserExecute,
+            },
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: patchUserExecute,
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.itemId, (item) => ({
+                  ...item,
+                  name: input.name,
+                }));
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      itemSelector: (item) => item.name,
+    });
+
+    env.trackItemUI('query-items', query.items.join(', '));
+    return query;
+  });
+  // The session-wide panel only has the manager, not the store.
+  const panel = renderHook(() => storeManager.useOfflineResolutions());
+  await flushAllTimers();
+
+  // --- Setup: a temp create plus an edit that depends on it, both offline ---
+  await act(async () => {
+    await env.apiStore.performMutation('temp:Linus offline', {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState(
+          'temp:Linus offline',
+          { id: -1, name: 'Linus offline' },
+          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+        );
+      },
+      mutation: async () => {
+        const result = { id: 3, name: 'Linus offline' };
+        await env.serverTable.delayedSetItem('users||3', result);
+        return result;
+      },
+      offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+    });
+    await env.apiStore.performMutation('temp:Linus offline', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+          ...item,
+          name: 'Linus blocked edit',
+        }));
+      },
+      mutation: async () => {
+        await env.serverTable.delayedUpdateItem('temp:Linus offline', {
+          name: 'Linus blocked edit',
+        });
+        return { name: 'Linus blocked edit' };
+      },
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
+      },
+    });
+  });
+
+  // --- Setup: reconnect so the create fails and blocks the dependent edit ---
+  env.addTimelineComments('beforeNextAction', [
+    'go online — the create fails once, both operations become manual resolutions',
+  ]);
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+    await flushAllTimers();
+    await waitForMicrotaskCondition(() => panel.result.current.length === 2);
+  });
+
+  // What the panel can derive from the session-wide records alone, without any
+  // extra API: the child row is blocked, so its Retry / Discard buttons should
+  // be disabled until the parent is resolved.
+  const resolutionsBeforeActions = panel.result.current;
+  expect(
+    resolutionsBeforeActions
+      .map((resolution) => ({
+        operation: resolution.operation,
+        canRetry:
+          resolution.kind === 'retry-exhausted' &&
+          resolution.blockedResolutionCount === 0,
+        canDiscard: resolution.blockedResolutionCount === 0,
+      }))
+      // Both records were created at the same instant, so their relative
+      // order is not deterministic.
+      .sort((left, right) => left.operation.localeCompare(right.operation)),
+  ).toMatchInlineSnapshot(`
+    - { canDiscard: '✅', canRetry: '✅', operation: 'createUser' }
+    - { canDiscard: '❌', canRetry: '❌', operation: 'patchUserName' }
+  `);
+
+  const parentResolution = panel.result.current.find(
+    (resolution) => resolution.operation === 'createUser',
+  );
+  const childResolution = panel.result.current.find(
+    (resolution) => resolution.operation === 'patchUserName',
+  );
+  if (!parentResolution || !childResolution) {
+    throw new Error('Expected parent and child dependency resolutions');
+  }
+
+  // --- Blocked child: neither generic action is applied, and the manager
+  // says why instead of throwing (like the store API) or silently succeeding ---
+  expect(
+    await resolveOfflineResolutionThroughManager(
+      storeManager,
+      childResolution.id,
+      'retry',
+    ),
+  ).toMatchInlineSnapshot(`
+    error: 'resolution-blocked'
+    message: '[tsdf] Cannot resolve a blocked offline resolution before its blocking dependencies are cleared'
+    storeName: 'offline-resolution-manager-blocked-store'
+  `);
+  expect(
+    await resolveOfflineResolutionThroughManager(
+      storeManager,
+      childResolution.id,
+      'discard',
+    ),
+  ).toMatchInlineSnapshot(`
+    error: 'resolution-blocked'
+    message: '[tsdf] Cannot resolve a blocked offline resolution before its blocking dependencies are cleared'
+    storeName: 'offline-resolution-manager-blocked-store'
+  `);
+  // Both records are untouched and the blocked edit was never replayed.
+  expect(panel.result.current).toEqual(resolutionsBeforeActions);
+  expect(patchUserExecute).not.toHaveBeenCalled();
+
+  // --- Discarding the parent through the manager clears the whole chain and
+  // rolls the optimistic temp row back, like the store-level discard ---
+  env.addTimelineComments('beforeNextAction', [
+    'discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates',
+  ]);
+  const discardResult = await resolveOfflineResolutionThroughManager(
+    storeManager,
+    parentResolution.id,
+    'discard',
+  );
+  await flushAllTimers();
+
+  expect(discardResult).toMatchInlineSnapshot(`"ok"`);
+  expect(panel.result.current).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
+  expect(hook.result.current.items).toMatchInlineSnapshot(`['Ada', 'Grace']`);
+  // Only the single failed create attempt ever reached the server boundary.
+  expect(createUserExecute).toHaveBeenCalledTimes(1);
+  expect(patchUserExecute).not.toHaveBeenCalled();
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | query-items                    |
+    0     | Ada, Grace                     | ui-initialized
+    3.01s | Ada, Grace, Linus offline      | ui-changed
+    .     | Ada, Grace, Linus offline      | offline:createUser queued
+    .     | Ada, Grace, Linus blocked edit | ui-changed
+    .     | Ada, Grace, Linus blocked edit | offline:patchUserName queued
+    .     | Ada, Grace, Linus blocked edit | -- go online — the create fails once, both operations become manual resolutions
+    .     | Ada, Grace, Linus blocked edit | offline:createUser replay-started
+    .     | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
+    .     | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
+    4.01s | Ada, Grace, Linus blocked edit | -- discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates
+    .     | Ada, Grace                     | ui-changed
+    4.02s | Ada, Grace                     | 🔴 >list-fetch-started
+    4.82s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
+    "
+  `);
+
+  hook.unmount();
+  panel.unmount();
 });
