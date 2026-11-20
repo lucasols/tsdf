@@ -124,7 +124,8 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
    * them back to, so the store refetches the entities from the server.
    * `payload` is the item payload the operation referenced, if any: the
    * store may have no state left to read it from (an item deleted locally).
-   * `hasPendingResolutions` is `true` while other changes of the store still
+   * Entities other changes still wait for a manual resolution on are left
+   * out: a refetch would replace those changes. `hasPendingResolutions` is `true` while other changes of the store still
    * wait for a manual resolution: a broad refetch (e.g. of lists) would
    * replace them, so the store should limit itself to the discarded entities.
    */
@@ -580,6 +581,8 @@ export function createOfflineStoreController<
     pendingEntities: PendingTempEntity[];
     nextEntry?: OfflineQueueEntry;
     removedEntries: OfflineQueueEntry[];
+    /** The queued entry `nextEntry` merges into, when accumulating */
+    accumulatedEntry?: OfflineQueueEntry;
   };
 
   type AppliedQueuedMutation = PlannedQueuedMutation & {
@@ -635,23 +638,26 @@ export function createOfflineStoreController<
 
   /**
    * Whether mutations queued earlier for the entities this mutation affects
-   * or depends on (`dependsOn`) are still waiting to reach the server
-   * (queued, replaying or unconfirmed).
+   * or depends on (`dependsOn`), or that depend on an entity this mutation
+   * affects, are still waiting to reach the server (queued, replaying or
+   * unconfirmed).
    */
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
     if (queueEntries.size === 0) return false;
 
+    const affectedEntityRefs =
+      prepared.entityRefs ??
+      resolveNormalizedRefs(
+        getOperationRawEntityRefs(
+          prepared.operation,
+          prepared.operationName,
+          prepared.validatedInput,
+        ),
+      );
     const entityRefs = [
-      ...(prepared.entityRefs ??
-        resolveNormalizedRefs(
-          getOperationRawEntityRefs(
-            prepared.operation,
-            prepared.operationName,
-            prepared.validatedInput,
-          ),
-        )),
+      ...affectedEntityRefs,
       ...(prepared.operation.dependsOn
         ? resolveNormalizedRefs(
             prepared.operation.dependsOn({ input: prepared.validatedInput }),
@@ -668,6 +674,18 @@ export function createOfflineStoreController<
         ) {
           return true;
         }
+      }
+
+      // A queued mutation that depends on an entity this one changes (e.g. a
+      // queued child creation and an online delete of its parent) must reach
+      // the server first.
+      const queuedDependencyKeys = getDependencyBlockerEntityKeys(entry);
+      if (
+        affectedEntityRefs.some((entityRef) =>
+          queuedDependencyKeys.has(entityRef.entityKey),
+        )
+      ) {
+        return true;
       }
     }
 
@@ -2566,7 +2584,10 @@ export function createOfflineStoreController<
 
   /**
    * Refetches the entities discarded queued work referenced (its optimistic
-   * changes cannot be rolled back locally), except the removed temp entities.
+   * changes cannot be rolled back locally), except the removed temp entities
+   * and the entities other changes still wait for a decision on: a refetch
+   * would replace those changes. The recovery revalidation refetches them
+   * once the last one is handled.
    */
   function revalidateDiscardedWork(
     discardedWork: Pick<
@@ -2578,13 +2599,17 @@ export function createOfflineStoreController<
     const entities: (OfflineEntityRef & {
       payload: ValidPayload | undefined;
     })[] = [];
-    const seenEntityKeys = new Set<string>();
+    const skippedEntityKeys = new Set(removedTempEntityKeys);
+    for (const resolution of resolutions.values()) {
+      for (const ref of resolution.entityRefs) {
+        skippedEntityKeys.add(ref.entityKey);
+      }
+    }
 
     for (const workItem of discardedWork) {
       for (const ref of workItem.entityRefs) {
-        if (removedTempEntityKeys.has(ref.entityKey)) continue;
-        if (seenEntityKeys.has(ref.entityKey)) continue;
-        seenEntityKeys.add(ref.entityKey);
+        if (skippedEntityKeys.has(ref.entityKey)) continue;
+        skippedEntityKeys.add(ref.entityKey);
 
         entities.push({
           ...ref,
@@ -2953,46 +2978,42 @@ export function createOfflineStoreController<
           existingInput: existingEntry.input,
           incomingInput: validatedInput,
         });
-        const latestEntry = queueEntries.get(existingEntry.id);
+        const validatedMergedInput = validateWithSchema(
+          operation.inputSchema,
+          mergedInput,
+        );
 
-        // While an async merge ran, the replay may have picked the entry up
-        // or already sent it: merging into it would drop the incoming input
-        // or send the existing one again, so the mutation is queued on its
-        // own instead.
-        if (latestEntry === existingEntry) {
-          const validatedMergedInput = validateWithSchema(
-            operation.inputSchema,
-            mergedInput,
+        if (validatedMergedInput === null) {
+          throw new Error(
+            `Invalid accumulated offline operation input for "${operationName}"`,
           );
-
-          if (validatedMergedInput === null) {
-            throw new Error(
-              `Invalid accumulated offline operation input for "${operationName}"`,
-            );
-          }
-
-          const nextEntry = {
-            ...existingEntry,
-            input: validatedMergedInput,
-            updatedAt: now,
-          };
-          workingQueue.set(nextEntry.id, nextEntry);
-
-          return {
-            operationName,
-            validatedInput,
-            tempIds,
-            pendingEntities,
-            nextEntry,
-            removedEntries: [existingEntry],
-          };
         }
 
-        if (latestEntry) {
-          workingQueue.set(latestEntry.id, latestEntry);
-        } else {
-          workingQueue.delete(existingEntry.id);
-        }
+        // The merged input may reference other uploads than the queued one
+        const mergedDependencyUploadIds = getDependencyUploadIds({
+          operationName,
+          input: validatedMergedInput,
+        });
+        const nextEntry = {
+          ...existingEntry,
+          input: validatedMergedInput,
+          dependencyUploadIds:
+            mergedDependencyUploadIds.length > 0
+              ? mergedDependencyUploadIds
+              : undefined,
+          updatedAt: now,
+        };
+        workingQueue.set(nextEntry.id, nextEntry);
+
+        return {
+          operationName,
+          validatedInput,
+          tempIds,
+          pendingEntities,
+          nextEntry,
+          removedEntries: [existingEntry],
+          accumulatedEntry: existingEntry,
+        };
       }
     }
 
@@ -3061,13 +3082,23 @@ export function createOfflineStoreController<
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
-    const workingQueue = new Map(queueEntries);
-    const plannedMutation = await planPreparedMutation({
-      current,
-      preparedMutation,
-      queueOrder,
-      workingQueue,
-    });
+    let plannedMutation: PlannedQueuedMutation;
+    // An async accumulation merge lets the replay pick up or send the entry
+    // being merged into before it is committed. Merging into it then would
+    // drop the incoming input or send the existing one twice, so the mutation
+    // is planned again. The check runs with no `await` before the commit below.
+    do {
+      plannedMutation = await planPreparedMutation({
+        current,
+        preparedMutation,
+        queueOrder,
+        workingQueue: new Map(queueEntries),
+      });
+    } while (
+      plannedMutation.accumulatedEntry &&
+      queueEntries.get(plannedMutation.accumulatedEntry.id) !==
+        plannedMutation.accumulatedEntry
+    );
 
     const persistedMutations: AppliedQueuedMutation[] = [];
     const persistedUploadIds: string[] = [];
@@ -3662,15 +3693,16 @@ export function createOfflineStoreController<
     }
 
     if (action === 'requeue') {
+      // validated before the resolution is removed, so an invalid input
+      // throws without losing the change the user still has to resolve
+      const preparedMutation = prepareMutationWithSession(current, {
+        operation: operationName,
+        input: resolutionAction?.input,
+        tempIds: resolutionRecord.tempIds,
+        entityRefs: resolutionRecord.entityRefs,
+      });
       await removeResolution(resolutionId, current, true);
-      await queuePreparedMutations(
-        prepareMutationWithSession(current, {
-          operation: operationName,
-          input: resolutionAction?.input,
-          tempIds: resolutionRecord.tempIds,
-          entityRefs: resolutionRecord.entityRefs,
-        }),
-      );
+      await queuePreparedMutations(preparedMutation);
       return;
     }
 
