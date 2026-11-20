@@ -80,13 +80,14 @@ The overall store state is `Record<string, TSFDCollectionItem | null>` where key
 
 ### Hooks
 
-| Hook                                     | Description                           | Details                                                       |
-| ---------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
-| `useItem(payload, options?)`             | Fetch and subscribe to a single item  | See [Hooks - useItem](./hooks.md#useitem)                     |
-| `useMultipleItems(items, options?)`      | Fetch and subscribe to multiple items | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems)   |
-| `useListItemIsLoading(payload, options)` | Detect if a sub-item is loading       | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
-| `useListItemIsDeleted(payload, options)` | Detect if a sub-item was deleted      | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
-| `useListItem(payload, options)`          | Combined loading + deletion detection | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| Hook                                     | Description                             | Details                                                           |
+| ---------------------------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| `useItem(payload, options?)`             | Fetch and subscribe to a single item    | See [Hooks - useItem](./hooks.md#useitem)                         |
+| `useMultipleItems(items, options?)`      | Fetch and subscribe to multiple items   | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems)       |
+| `useItemOfflineState(payload)`           | Read the offline sync state of one item | See [Hooks - useItemOfflineState](./hooks.md#useitemofflinestate) |
+| `useListItemIsLoading(payload, options)` | Detect if a sub-item is loading         | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks)     |
+| `useListItemIsDeleted(payload, options)` | Detect if a sub-item was deleted        | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks)     |
+| `useListItem(payload, options)`          | Combined loading + deletion detection   | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks)     |
 
 ### Methods
 
@@ -113,6 +114,7 @@ The overall store state is `Record<string, TSFDCollectionItem | null>` where key
 | Method                                                | Description                                                       |
 | ----------------------------------------------------- | ----------------------------------------------------------------- |
 | `getOfflineEntities()` / `useOfflineEntities()`       | Read offline entities scoped to this store                        |
+| `getItemOfflineState(payload)`                        | Read the offline sync state of one item, `null` if nothing queued |
 | `getOfflineResolutions()` / `useOfflineResolutions()` | Read manual conflict/retry resolutions scoped to this store       |
 | `parseOfflineResolutionConflict(resolution)`          | Narrow a persisted resolution to this store's operation types     |
 | `resolveOfflineResolution(id, operation, action)`     | Resolve, retry, discard, requeue, or commit an offline resolution |

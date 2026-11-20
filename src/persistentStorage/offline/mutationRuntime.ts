@@ -8,7 +8,9 @@ import type {
  * Successful result of an offline-enabled mutation attempt.
  *
  * `online` means the direct request completed and returned the server payload.
- * `queued` means the mutation was durably persisted for offline replay.
+ * `queued` means the mutation was queued for offline replay. It is normally
+ * persisted, but if the queue write failed (reported through
+ * `onPersistentStorageError`) it is only kept in memory until the page reloads.
  */
 export type OfflineMutationResult<T> =
   | {
@@ -18,7 +20,11 @@ export type OfflineMutationResult<T> =
       data: Awaited<T>;
     }
   | {
-      /** The mutation was durably queued for offline replay. */
+      /**
+       * The mutation was queued for offline replay. If the queue write failed
+       * (reported through `onPersistentStorageError`), it is only kept in
+       * memory until the page reloads.
+       */
       kind: 'queued';
     };
 

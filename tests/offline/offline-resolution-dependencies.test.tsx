@@ -890,8 +890,9 @@ test('blocked children unblock after the parent succeeds, remaps, and exposes re
   env.addTimelineComments('beforeNextAction', [
     'go online — parent create fails 3 times, both operations become manual resolutions',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOnline();
+    await Promise.resolve();
   });
   await exhaustDefaultRetryBudget(createUserExecute);
   await flushAllTimers();
@@ -1135,8 +1136,9 @@ test('retry scope self keeps descendants as manual resolutions after the parent 
   env.addTimelineComments('beforeNextAction', [
     'go online — parent create fails 3 times, both operations become manual resolutions',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOnline();
+    await Promise.resolve();
   });
   await exhaustDefaultRetryBudget(createUserExecute);
   await flushAllTimers();
