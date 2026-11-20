@@ -504,6 +504,7 @@ Set `resolvedRefSchema` to validate those refs. It accepts the same schemas as a
 
 - Refs restored from the upload adapter are parsed once when their record is loaded, and refs received from another tab once per record version.
 - A ref that fails the schema is dropped and its upload goes back to `pending`. The staged file is kept with the record, so the next `resolveOfflineUpload(s)` call or the replay of an operation that depends on the upload sends the file through the transport again and stores the new ref. The dependent operation is not failed, and `execute` never receives the invalid ref. The file uploaded under the old ref is not cleaned up by TSDF.
+- The exception is a ref another tab sends when it deletes an upload that was already sent: its staged file is gone, so a ref that fails the schema can't be uploaded again, and its id stops resolving (`resolveOfflineUpload(s)` returns an unknown upload error).
 - Queued operations only persist upload ids. Their refs are resolved when the operation replays, so they are covered by the same validation.
 - Without `resolvedRefSchema`, restored refs are exposed as they were stored.
 
