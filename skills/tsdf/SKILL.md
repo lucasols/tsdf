@@ -202,6 +202,8 @@ const schema: ConvertedPersistentStorageDataSchema<User, StoredUser> = {
 
 Loaded data must pass `storageSchema`, then `convertFromStorage(...)`, then `storeSchema`; fetched data runs through `convertToStorage(...)` before saving.
 
+Changing a store's `adapter` starts it with an empty cache; nothing is migrated. Moving from `'local-sync'` to an async adapter auto-removes the store's old `localStorage` entries, except while it still has queued offline work there (kept and reported through `onPersistentStorageError`, replayed only under `'local-sync'`).
+
 Utilities: `clearSessionStorage(sessionKey, adapter)`, `clearAllSessionStorage(sessionKey)`.
 
 Docs: `docs/persistent-storage.md`.
