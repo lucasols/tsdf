@@ -105,6 +105,13 @@ type TasksOperations = {
     { itemId: string },
     unknown
   >;
+  moveTask: ListQueryOfflineOperationDefinition<
+    TaskRow,
+    ListQueryParams,
+    string,
+    { itemId: string; parentId: string },
+    unknown
+  >;
 };
 type TasksEnv = ReturnType<
   typeof createListQueryStoreTestEnv<TaskRow, false, false, TasksOperations>
@@ -123,7 +130,8 @@ const tasksQuery = { tableId: 'tasks' } as const;
  *
  * - tasks and subtasks can be created offline (temp rows `temp:<name>`, the
  *   server assigns `tasks||<id>` starting at 3)
- * - a subtask declares its parent task with `dependsOn`
+ * - a subtask, or an existing task moved under another one, declares its
+ *   parent task with `dependsOn`
  * - deleting a task supersedes its queued edits and, when the task was
  *   created offline and never sent, cancels the creation instead of deleting
  * - the delete treats a not-found answer as success
@@ -274,6 +282,24 @@ function createTasksEnv(
                 env.apiStore.deleteItemState(input.itemId);
               },
             },
+            moveTask: {
+              inputSchema: rc_object({
+                itemId: rc_string,
+                parentId: rc_string,
+              }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              dependsOn: ({ input }) => [input.parentId],
+              execute: async ({ input }) => {
+                sentRequests.push(
+                  `moveTask ${input.itemId} under ${input.parentId}`,
+                );
+                await env.serverTable.delayedUpdateItem(input.itemId, {
+                  parentId: input.parentId,
+                });
+              },
+              onSuccessExecute: () => {},
+            },
           },
         },
       },
@@ -328,6 +354,24 @@ function createTasksEnv(
     });
   }
 
+  function moveTask(itemId: string, parentId: string) {
+    return act(async () => {
+      await env.apiStore.performMutation(itemId, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(itemId, (item) => ({
+            ...item,
+            parentId,
+          }));
+        },
+        mutation: async () => {
+          sentRequests.push(`moveTask ${itemId} under ${parentId}`);
+          await env.serverTable.delayedUpdateItem(itemId, { parentId });
+        },
+        offline: { operation: 'moveTask', input: { itemId, parentId } },
+      });
+    });
+  }
+
   /** The app removes only the deleted row from its lists right away. */
   function deleteTask(itemId: string) {
     return act(async () => {
@@ -367,6 +411,7 @@ function createTasksEnv(
     createTask,
     createSubtask,
     renameTask,
+    moveTask,
     deleteTask,
     renderTaskList,
     /** Queued mutations of the store, in replay order. */
@@ -498,6 +543,77 @@ describe('list-query rows', () => {
       "
     `);
 
+    list.unmount();
+  });
+
+  test('deleting a task created offline puts an existing task moved under it back under its server parent', async () => {
+    network.setOffline();
+    const env = createTasksEnv(
+      'cancel-unsent-task-moved-session',
+      'cancel-unsent-task-moved-store',
+    );
+    const list = env.renderTaskList();
+    // Tracks where the existing task "Write report" is shown.
+    const movedTask = renderHook(() => {
+      const task = env.apiStore.useItem('tasks||1');
+      env.trackItemUI(
+        'tasks||1 parent',
+        task.data ? (task.data.parentId ?? 'no parent') : '-',
+      );
+    });
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create a task and move an existing task under it',
+    ]);
+    await env.createTask('Plan trip');
+    await env.moveTask('tasks||1', 'temp:Plan trip');
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: delete the task that was never sent',
+    ]);
+    await env.deleteTask('temp:Plan trip');
+
+    // The move only made sense under the cancelled task: it is dropped with
+    // it and never sent.
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+
+    env.addTimelineComments('beforeNextAction', ['back online']);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // Nothing was sent. The moved task cannot be rolled back locally, so it
+    // is refetched as soon as the server is reachable: it shows its server
+    // parent again instead of the task that never existed.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getItemState('tasks||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Write report'
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | tasks                                  | tasks||1 parent |
+      0     | Write report, Review budget            | no parent       | [tasks, tasks||1 parent] ui-initialized
+      3.01s | Write report, Review budget            | no parent       | -- offline: create a task and move an existing task under it
+      .     | Write report, Review budget, Plan trip | no parent       | [tasks] ui-changed
+      .     | Write report, Review budget, Plan trip | no parent       | offline:createTask queued
+      .     | Write report, Review budget, Plan trip | temp:Plan trip  | [tasks||1 parent] ui-changed
+      .     | Write report, Review budget, Plan trip | temp:Plan trip  | offline:moveTask queued
+      .     | Write report, Review budget, Plan trip | temp:Plan trip  | -- offline: delete the task that was never sent
+      .     | Write report, Review budget            | temp:Plan trip  | [tasks] ui-changed
+      .     | Write report, Review budget            | temp:Plan trip  | offline:deleteTask queued
+      3.02s | Write report, Review budget            | temp:Plan trip  | -- back online
+      .     | Write report, Review budget            | temp:Plan trip  | 🔴 [tasks||1] >fetch-started
+      .     | Write report, Review budget            | temp:Plan trip  | 🟠 >list-fetch-started
+      3.82s | Write report, Review budget            | temp:Plan trip  | 🔴 [tasks||1] <fetch-finished (value: {"id":1,"name":"Write report"})
+      .     | Write report, Review budget            | no parent       | [tasks||1 parent] ui-changed
+      .     | Write report, Review budget            | no parent       | 🟠 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+
+    movedTask.unmount();
     list.unmount();
   });
 

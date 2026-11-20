@@ -86,6 +86,7 @@ type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   attemptedCreationEntityIds?: string[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
+  hasQueuedMutations: boolean;
 };
 
 type OfflineSessionMessage =
@@ -176,6 +177,12 @@ type SessionStoreState = {
   attemptedCreationEntityIds: string[];
   resolutions: OfflineResolutionRecord[];
   uploads: OfflineUpload[];
+  /**
+   * Whether any store of the session still has mutations in its queue,
+   * including the ones that reference no entity (they have no entry in
+   * `entities`).
+   */
+  hasQueuedMutations: boolean;
 };
 
 /**
@@ -184,13 +191,13 @@ type SessionStoreState = {
  *
  * - offline, or with queued mutations still to replay: anything fetched now
  *   may predate the replayed mutations, in any store
- * - a store with entities waiting for a manual resolution: a refetch would
+ * - a store with changes waiting for a manual resolution: a refetch would
  *   replace the local changes the user still has to decide on
  */
 function getStoresAwaitingRecovery(
   state: SessionStoreState,
 ): ReadonlySet<string> | null {
-  if (state.status.isOfflineMode) return null;
+  if (state.status.isOfflineMode || state.hasQueuedMutations) return null;
 
   const storeNames = new Set<string>();
 
@@ -199,13 +206,18 @@ function getStoresAwaitingRecovery(
     if (entity.requiresResolution) storeNames.add(entity.storeName);
   }
 
+  // Also from the resolutions: an operation may reference no entity
+  for (const resolution of state.resolutions) {
+    storeNames.add(resolution.storeName);
+  }
+
   return storeNames;
 }
 
 /**
  * Subscribes to stores recovering in this tab (any session key; listeners
  * filter by the key they care about). A store recovers when its session is
- * back online with its queued mutations replayed and the store has no entity
+ * back online with its queued mutations replayed and the store has no change
  * left waiting for a manual resolution: from then on its cached data can be
  * revalidated against the server.
  * @internal
@@ -223,12 +235,25 @@ export function subscribeToOfflineRecovery(
 /**
  * Whether the session is in offline mode in this tab, without creating or
  * reconfiguring its coordinator (a session nothing tracks is online).
+ *
+ * While it is, also re-checks connectivity: callers ask on a hint that the
+ * connection may be back (a transport reconnect, a window focus), and some
+ * setups have nothing else that ends offline mode (a custom `getIsOffline`
+ * without browser events, a classified network failure without a recovery
+ * check). Leaving offline mode notifies the recovery listeners, which
+ * revalidate the stores, so callers skip their own revalidation either way.
  * @internal
  */
-export function isSessionInOfflineMode(sessionKey: string | false): boolean {
+export function recheckIsSessionInOfflineMode(
+  sessionKey: string | false,
+): boolean {
   if (sessionKey === false) return false;
 
-  return registry.get(sessionKey)?.getStatus().isOfflineMode ?? false;
+  const coordinator = registry.get(sessionKey);
+  if (!coordinator?.getStatus().isOfflineMode) return false;
+
+  coordinator.recheckNetworkState();
+  return true;
 }
 
 const DEFAULT_UPLOAD_CONCURRENCY = 3;
@@ -684,6 +709,7 @@ class SessionOfflineCoordinator {
   #classificationToken = 0;
   #retriableFailureToken = 0;
   #networkStateToken = 0;
+  #isRecheckingNetworkState = false;
   #lastRemoteSnapshotAt = 0;
   #recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
@@ -760,12 +786,15 @@ class SessionOfflineCoordinator {
         attemptedCreationEntityIds: [],
         resolutions: [],
         uploads: [],
+        hasQueuedMutations: false,
       }),
     });
     this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
     this.store.subscribe(({ prev, current }) => {
       if (
         prev.entities === current.entities &&
+        prev.resolutions === current.resolutions &&
+        prev.hasQueuedMutations === current.hasQueuedMutations &&
         prev.status.isOfflineMode === current.status.isOfflineMode
       ) {
         return;
@@ -879,7 +908,12 @@ class SessionOfflineCoordinator {
       try {
         const uploads = await this.#uploadsConfig.adapter.list(this.sessionKey);
         if (hydrationToken === this.#hydrationToken) {
-          this.#uploads = new Map(uploads.map((upload) => [upload.id, upload]));
+          // Records saved or loaded while the list ran are already persisted
+          // and at least as recent as the listed ones, so they win.
+          this.#uploads = new Map([
+            ...uploads.map((upload) => [upload.id, upload] as const),
+            ...this.#uploads,
+          ]);
           this.#syncUploadsState();
           this.#scheduleUploadOnlineSessionStabilization();
           void this.#refreshUploadRetention();
@@ -917,15 +951,21 @@ class SessionOfflineCoordinator {
           `[tsdf] Incompatible offline upload configuration for session "${this.sessionKey}"`,
         );
       }
+      // Every manager call reconfigures the session, so the queue is only
+      // recreated when the config changes; recreating it on each call would
+      // let new uploads bypass the concurrency limit of the running ones.
+      if (!sameUploadsConfig(this.#uploadsConfig, options.uploads)) {
+        this.#uploadQueue = createAsyncQueue<ValidPayload>({
+          autoStart: true,
+          concurrency:
+            options.uploads.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY,
+        });
+      }
       this.#uploadsConfig = options.uploads;
       registerOfflineUploadAdapterForSession(
         this.sessionKey,
         options.uploads.adapter,
       );
-      this.#uploadQueue = createAsyncQueue<ValidPayload>({
-        autoStart: true,
-        concurrency: options.uploads.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY,
-      });
       void this.hydrate();
     }
 
@@ -1133,6 +1173,7 @@ class SessionOfflineCoordinator {
     id: string;
     file: Blob | File;
     source?: 'manual' | 'mutation';
+    metadata?: ValidPayload;
   }): Promise<void> {
     if (!this.#uploadsConfig) {
       throw new Error(
@@ -1140,7 +1181,17 @@ class SessionOfflineCoordinator {
       );
     }
 
+    // The queued or running transport marks the record as uploaded when it
+    // finishes, so swapping the file under it would pair the new file with
+    // the old ref.
+    if (this.#uploadPromisesById.has(args.id)) {
+      throw new Error(
+        `Cannot change upload "${args.id}" while it is queued or uploading`,
+      );
+    }
+
     const existing = this.#uploads.get(args.id);
+
     const nextRecord = createStoredUploadRecord(
       args.id,
       this.sessionKey,
@@ -1152,21 +1203,26 @@ class SessionOfflineCoordinator {
       undefined,
       undefined,
       this.#getCurrentUploadOnlineSessionStartedAt(),
+      args.metadata,
     );
 
     await this.#saveUploadRecord(nextRecord);
   }
 
-  async replaceUpload(args: { id: string; file: Blob | File }): Promise<void> {
-    const existing = this.#uploads.get(args.id);
-    if (existing?.state === 'uploading') {
-      throw new Error(`Cannot replace upload "${args.id}" while uploading`);
-    }
+  async replaceUpload(args: {
+    id: string;
+    file: Blob | File;
+    metadata?: ValidPayload;
+  }): Promise<void> {
+    // Read through storage: right after a restart the stored uploads may not
+    // be listed yet, and the replacement must keep the persisted metadata.
+    const existing = await this.#getUploadRecord(args.id);
 
     await this.saveUpload({
       id: args.id,
       file: args.file,
       source: existing?.source ?? 'manual',
+      metadata: args.metadata ?? existing?.metadata,
     });
   }
 
@@ -1435,6 +1491,20 @@ class SessionOfflineCoordinator {
     return false;
   }
 
+  /**
+   * Re-checks connectivity on a hint that it may be back. Hints from several
+   * stores (e.g. their window-focus handlers) share a re-check still in flight
+   * instead of calling `getIsOffline` once per store.
+   */
+  recheckNetworkState(): void {
+    if (this.#isRecheckingNetworkState) return;
+
+    this.#isRecheckingNetworkState = true;
+    void this.refreshNetworkState().finally(() => {
+      this.#isRecheckingNetworkState = false;
+    });
+  }
+
   async refreshNetworkState(): Promise<boolean> {
     const token = ++this.#networkStateToken;
     const detectedOffline = this.#getCurrentOfflineState();
@@ -1624,6 +1694,9 @@ class SessionOfflineCoordinator {
     if (!this.#uploadsConfig) return null;
 
     const loaded = await this.#uploadsConfig.adapter.load(this.sessionKey, id);
+    // A save during the load already persisted a newer record; keep it.
+    const current = this.#uploads.get(id);
+    if (current) return current;
     if (loaded) {
       this.#uploads.set(id, loaded);
       this.#syncUploadsState();
@@ -1917,6 +1990,7 @@ class SessionOfflineCoordinator {
             id,
             sessionKey: this.sessionKey,
             file,
+            metadata: queuedRecord.metadata,
             onProgress: (progress) => {
               void this.#updateUploadState({
                 id,
@@ -1995,7 +2069,9 @@ class SessionOfflineCoordinator {
     const allResolutions: OfflineResolutionRecord[] = [];
     const referencedUploadIds = new Set<string>();
     const nextProtectedKeysByAdapter = new Map<StorageAdapter, string[]>();
+    let hasQueuedMutations = false;
     for (const contribution of this.#storeContributions.values()) {
+      if (contribution.replayHead !== null) hasQueuedMutations = true;
       allEntities.push(...contribution.entities);
       attemptedCreationEntityIds.push(
         ...contribution.attemptedCreationEntityIds,
@@ -2126,7 +2202,7 @@ class SessionOfflineCoordinator {
     }
 
     this.store.setPartialState(
-      { entities, attemptedCreationEntityIds, resolutions },
+      { entities, attemptedCreationEntityIds, resolutions, hasQueuedMutations },
       { action: 'offline-session-aggregate' },
     );
     void this.#persistSessionSnapshot();
@@ -2184,6 +2260,7 @@ class SessionOfflineCoordinator {
       attemptedCreationEntityIds: this.store.state.attemptedCreationEntityIds,
       resolutions: this.store.state.resolutions,
       uploads: this.store.state.uploads,
+      hasQueuedMutations: this.store.state.hasQueuedMutations,
     });
   }
 
@@ -2201,6 +2278,7 @@ class SessionOfflineCoordinator {
         attemptedCreationEntityIds: message.attemptedCreationEntityIds ?? [],
         resolutions: message.resolutions,
         uploads: message.uploads,
+        hasQueuedMutations: message.hasQueuedMutations,
       },
       { action: 'offline-session-remote' },
     );
@@ -2640,15 +2718,15 @@ export function createOfflineSession<
         await coordinator.resolveUploadIds(ids),
       );
     },
-    saveOfflineUpload: ({ id, file }) => {
+    saveOfflineUpload: ({ id, file, metadata }) => {
       const coordinator = getActiveCoordinator();
       if (!coordinator) return Promise.resolve();
-      return coordinator.saveUpload({ id, file, source: 'manual' });
+      return coordinator.saveUpload({ id, file, metadata, source: 'manual' });
     },
-    replaceOfflineUpload: ({ id, file }) => {
+    replaceOfflineUpload: ({ id, file, metadata }) => {
       const coordinator = getActiveCoordinator();
       if (!coordinator) return Promise.resolve();
-      return coordinator.replaceUpload({ id, file });
+      return coordinator.replaceUpload({ id, file, metadata });
     },
     loadOfflineUpload: (id) => {
       const coordinator = getActiveCoordinator();

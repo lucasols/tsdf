@@ -34,6 +34,7 @@ export function createStoredUploadRecord<
   resolvedRef?: TResolvedRef,
   lastError?: OfflineStoredUploadRecord<TResolvedRef>['lastError'],
   lastOnlineSessionStartedAt?: number,
+  metadata?: ValidPayload,
 ): OfflineStoredUploadRecord<TResolvedRef> {
   const file = normalizeUploadFile(fileInput, id);
   const now = Date.now();
@@ -56,6 +57,7 @@ export function createStoredUploadRecord<
     ...(lastOnlineSessionStartedAt !== undefined
       ? { lastOnlineSessionStartedAt }
       : {}),
+    ...(metadata !== undefined ? { metadata } : {}),
     file,
     lastModified: file.lastModified,
   };
