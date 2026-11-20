@@ -1,7 +1,13 @@
 import { cleanup, renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { RemovedStore } from '../../src/main';
+import { createAsyncStorageAdapter } from '../../src/async-storage';
+import type {
+  AsyncStorageDriver,
+  RemovedStore,
+  StorageAdapter,
+} from '../../src/main';
+import { OpfsAsyncStorageDriver } from '../../src/persistentStorage/opfsAsyncStorageAdapter';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -44,8 +50,6 @@ let network = createOfflineNetworkMock();
 let opfsStore = createOpfsPersistentStorageTestStore();
 let persistentStorageErrors: string[] = [];
 
-type Adapter = 'local-sync' | typeof opfsPersistentStorage;
-
 /**
  * The app's store manager. `removedStores` lists the stores deleted in this
  * app version.
@@ -71,7 +75,7 @@ type AppStoreManager = ReturnType<typeof createAppStoreManager>;
 
 function createSettingsEnv(
   storeManager: AppStoreManager,
-  adapter: Adapter,
+  adapter: StorageAdapter,
   storeName: string,
 ) {
   return createDocumentStoreTestEnv(
@@ -126,7 +130,7 @@ function createUsersListEnv(storeManager: AppStoreManager) {
 /** Document store with one offline operation. */
 function createOfflineCounterEnv(
   storeManager: AppStoreManager,
-  adapter: Adapter,
+  adapter: StorageAdapter,
 ) {
   const envRef: {
     current: ReturnType<
@@ -314,13 +318,13 @@ describe('stores deleted from the app', () => {
     // maintenance bookkeeping (`_m.g`) and the marker listing the removed
     // stores already cleaned (`_m.rs`).
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.58 kb)
-      ├ _m (0.33 kb)
+      "tsdf (0.61 kb)
+      ├ _m (0.36 kb)
       │ ├ g (0.04 kb)
       │ ├ r (0.22 kb)
       │ │ ├ s:sess1.settings-profile.m (0.11 kb)
       │ │ └ s:sess2.settings-profile.m (0.11 kb)
-      │ └ rs (0.07 kb)
+      │ └ rs (0.10 kb)
       ├ sess1.settings-profile (0.12 kb)
       └ sess2.settings-profile (0.12 kb)"
     `);
@@ -418,13 +422,13 @@ describe('stores deleted from the app', () => {
     await flushAllTimers();
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.47 kb)
-      ├ _m (0.25 kb)
+      "tsdf (0.50 kb)
+      ├ _m (0.28 kb)
       │ ├ g (0.04 kb)
       │ ├ r.s:sess1 (0.18 kb)
       │ │ ├ _o_.s.m (0.07 kb)
       │ │ └ settings-profile.m (0.09 kb)
-      │ └ rs (0.03 kb)
+      │ └ rs (0.05 kb)
       └ sess1 (0.21 kb)
         ├ _o_.s (0.09 kb)
         └ settings-profile (0.11 kb)"
@@ -500,6 +504,214 @@ describe('stores deleted from the app', () => {
     );
   });
 
+  test('adding the adapter a removed store also used cleans that adapter too', async () => {
+    // Older app version: `settings` persisted to localStorage, in an account
+    // that has not opened the app since.
+    const oldestSettings = createSettingsEnv(
+      createAppStoreManager('sess2'),
+      'local-sync',
+      'settings',
+    );
+    renderHook(() => oldestSettings.apiStore.useDocument());
+    await flushAllTimers();
+
+    // Previous app version: `settings` moved to OPFS and another account used
+    // it there.
+    restartApp(oldestSettings);
+    const previousSettings = createSettingsEnv(
+      createAppStoreManager('sess1'),
+      opfsPersistentStorage,
+      'settings',
+    );
+    renderHook(() => previousSettings.apiStore.useDocument());
+    await flushAllTimers();
+
+    // The store is deleted, but only its localStorage data is declared.
+    restartApp(previousSettings);
+    createAppStoreManager('sess1', [{ id: 'settings', adapter: 'local-sync' }]);
+    await flushAllTimers();
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.16 kb)
+      ├ _am.g (0.05 kb)
+      └ _m (0.10 kb)
+        ├ g (0.04 kb)
+        └ rs (0.06 kb)"
+    `);
+    // The OPFS data is still there, since that adapter was not declared.
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.27 kb)
+      ├ sess1 (0.20 kb)
+      │ └ settings (0.19 kb)
+      │   ├ d._i.r.json (0.08 kb)
+      │   └ d.e.p.json (0.09 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+
+    // A later version also declares OPFS for the same id: the cleanup runs for
+    // the new adapter even though `settings` was already cleaned from
+    // localStorage.
+    restartApp();
+    createAppStoreManager('sess1', [
+      { id: 'settings', adapter: 'local-sync' },
+      { id: 'settings', adapter: opfsPersistentStorage },
+    ]);
+    await flushAllTimers();
+
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.07 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('an adapter that fails is retried on the next start, without holding back the others', async () => {
+    // Queue entry ids embed a random suffix; pin it for stable snapshots.
+    vi.spyOn(Math, 'random').mockReturnValue(0.123456789);
+
+    // Previous app version: the counter persisted to localStorage, where the
+    // user queued an edit while offline, and `settings` persisted to OPFS.
+    network.setOffline();
+    const previousStoreManager = createAppStoreManager('sess1');
+    const previousCounter = createOfflineCounterEnv(
+      previousStoreManager,
+      'local-sync',
+    );
+    const previousSettings = createSettingsEnv(
+      previousStoreManager,
+      opfsPersistentStorage,
+      'settings',
+    );
+    renderHook(() => previousSettings.apiStore.useDocument());
+    await queueOfflineCounterEdit(previousCounter);
+
+    // Both stores are deleted. The browser fails to delete one of the OPFS
+    // files of `settings` on the first start.
+    restartApp(previousCounter, previousSettings);
+    opfsStore.mockBrowserOpfs.failRemoveEntry(
+      'tsdf/sess1/settings/d.e.p.json',
+      1,
+    );
+    const removedStores: RemovedStore[] = [
+      { id: 'counter', adapter: 'local-sync' },
+      { id: 'settings', adapter: opfsPersistentStorage },
+    ];
+    createAppStoreManager('sess1', removedStores);
+    await flushAllTimers();
+
+    // localStorage is cleaned and marked as done, and the lost queued edit is
+    // reported. The OPFS failure is reported too, and `settings` is left
+    // unmarked so the next start retries it.
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.35 kb)
+      ├ _am.g (0.05 kb)
+      ├ _m (0.19 kb)
+      │ ├ g (0.04 kb)
+      │ ├ r.s:sess1._o_.s.m (0.09 kb)
+      │ └ rs (0.05 kb)
+      └ sess1._o_.s (0.10 kb)"
+    `);
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.18 kb)
+      ├ sess1 (0.11 kb)
+      │ └ settings (0.10 kb)
+      │   └ d.e.p.json (0.09 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`
+      - '[tsdf] Removed store "counter" still had 1 unsent offline record(s) (queued mutations or pending resolutions). They were deleted with the rest of its persisted data: no store can replay them anymore.'
+      - '[tsdf] Some persisted data of removed store(s) "settings" could not be deleted. The cleanup retries on the next page load.'
+    `);
+
+    // Next start: only OPFS is cleaned again, and nothing is reported twice.
+    restartApp();
+    persistentStorageErrors.length = 0;
+    createAppStoreManager('sess1', removedStores);
+    await flushAllTimers();
+
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.07 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.38 kb)
+      ├ _am.g (0.05 kb)
+      ├ _m (0.23 kb)
+      │ ├ g (0.04 kb)
+      │ ├ r.s:sess1._o_.s.m (0.09 kb)
+      │ └ rs (0.09 kb)
+      └ sess1._o_.s (0.10 kb)"
+    `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a removed store on a custom adapter without storageId is reported until the adapter gets one', async () => {
+    // Previous app version: `settings` persisted through the app's own async
+    // adapter. Its driver stores everything in OPFS but, like any custom
+    // driver written before `storageId` existed, does not declare one.
+    const opfsDriver = new OpfsAsyncStorageDriver();
+    const customDriver: AsyncStorageDriver = {
+      get: (...args) => opfsDriver.get(...args),
+      set: (...args) => opfsDriver.set(...args),
+      remove: (...args) => opfsDriver.remove(...args),
+      listKeys: (...args) => opfsDriver.listKeys(...args),
+      clear: (...args) => opfsDriver.clear(...args),
+      listScopes: (...args) => opfsDriver.listScopes(...args),
+      listScopesWithKnownRecordKeys: (...args) =>
+        opfsDriver.listScopesWithKnownRecordKeys(...args),
+      getMany: (...args) => opfsDriver.getMany(...args),
+      setMany: (...args) => opfsDriver.setMany(...args),
+      removeMany: (...args) => opfsDriver.removeMany(...args),
+    };
+    const previousSettings = createSettingsEnv(
+      createAppStoreManager('sess1'),
+      createAsyncStorageAdapter(customDriver),
+      'settings',
+    );
+    renderHook(() => previousSettings.apiStore.useDocument());
+    await flushAllTimers();
+
+    // The store is deleted. Without a storageId TSDF could not remember that
+    // the cleanup ran, so it reports the entry instead and removes nothing.
+    restartApp(previousSettings);
+    createAppStoreManager('sess1', [
+      { id: 'settings', adapter: createAsyncStorageAdapter(customDriver) },
+    ]);
+    await flushAllTimers();
+
+    expect(persistentStorageErrors).toMatchInlineSnapshot(
+      `- '[tsdf] Removed store(s) "settings" use an async adapter TSDF cannot clean: it must be created with createAsyncStorageAdapter from a driver that has a storageId.'`,
+    );
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.27 kb)
+      ├ sess1 (0.20 kb)
+      │ └ settings (0.19 kb)
+      │   ├ d._i.r.json (0.08 kb)
+      │   └ d.e.p.json (0.09 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+
+    // The next version gives the driver a storageId: the data is removed.
+    restartApp();
+    persistentStorageErrors.length = 0;
+    createAppStoreManager('sess1', [
+      {
+        id: 'settings',
+        adapter: createAsyncStorageAdapter({
+          ...customDriver,
+          storageId: 'app-custom-storage',
+        }),
+      },
+    ]);
+    await flushAllTimers();
+
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.07 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
   test('a store cannot use an id listed in removedStores', () => {
     const storeManager = createAppStoreManager('sess1', [
       { id: 'settings', adapter: 'local-sync' },
@@ -544,7 +756,7 @@ describe('localStorage cost of removedStores', () => {
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
-      12s  | 📖 #1 ✅ tsdf._m.rs (entry data) | 0.02 kb
+      12s  | 📖 #1 ✅ tsdf._m.rs (entry data) | 0.05 kb
       "
     `);
   });

@@ -669,12 +669,14 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   readonly #instrumentation: IndexedDbDriverInstrumentation | undefined;
 
   readonly databaseName: string;
+  readonly storageId: string;
 
   constructor(
     databaseName: string = DEFAULT_INDEXED_DB_NAME,
     instrumentation: IndexedDbDriverInstrumentation | undefined = undefined,
   ) {
     this.databaseName = databaseName;
+    this.storageId = `indexedDb:${databaseName}`;
     this.#instrumentation = instrumentation;
   }
 

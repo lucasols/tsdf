@@ -66,6 +66,7 @@ type ParsedScopedFileInfo = {
 };
 
 export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
+  readonly storageId = 'opfs';
   debugLogger?: TSDFDebugLogger;
 
   #rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;

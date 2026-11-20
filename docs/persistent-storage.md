@@ -176,6 +176,8 @@ import type { AsyncStorageDriver } from 'tsdf';
 import { createAsyncStorageAdapter } from 'tsdf/async-storage';
 
 const driver: AsyncStorageDriver = {
+  // Stable id, needed to list this adapter's deleted stores in `removedStores`
+  storageId: 'custom-store',
   get: (scope, key) => customStore.get(scope, key),
   set: (scope, key, value) => customStore.set(scope, key, value),
   remove: (scope, key) => customStore.remove(scope, key),
@@ -192,7 +194,7 @@ const driver: AsyncStorageDriver = {
 const customPersistentStorage = createAsyncStorageAdapter(driver);
 ```
 
-Driver methods should preserve the JSON-compatible values TSDF gives them, isolate data by the full namespace scope, and implement bulk methods consistently with their single-record equivalents. `listScopes(...)` and `listScopesWithKnownRecordKeys(...)` are required for cleanup, session clearing, and offline protected-key restoration.
+Driver methods should preserve the JSON-compatible values TSDF gives them, isolate data by the full namespace scope, and implement bulk methods consistently with their single-record equivalents. `listScopes(...)` and `listScopesWithKnownRecordKeys(...)` are required for cleanup, session clearing, and offline protected-key restoration. The optional `storageId` must stay the same across page loads and be unique among the app's adapters; it is only needed to list stores persisted with this adapter in the store manager's `removedStores`.
 
 ### Changing a store's adapter
 
@@ -227,10 +229,11 @@ const storeManager = createStoreManager({
 - Each entry names the deleted store's `id` and the `adapter` it persisted with. Add one entry per adapter when the store used more than one. Naming the adapter lets TSDF clean it even when no remaining store uses it, without bundling or opening adapters the app does not import.
 - Once, during browser idle time after startup, TSDF removes everything each listed store persisted with that adapter, in every session: cached entries and their metadata, offline entity records, and any queued offline mutations or pending resolutions. Other stores and non-TSDF keys are not touched.
 - Unsent offline work can no longer be replayed once its store is deleted, so it is removed too, and the number of records dropped is reported once per store through the manager's `onPersistentStorageError`.
-- TSDF then records the cleaned ids in a small `localStorage` marker. Every later startup reads that marker once during idle time and stops there; apps without `removedStores` pay nothing. Entries can be dropped from `removedStores` once every user has run a version that includes them.
+- TSDF then records each cleaned id and adapter pair in a small `localStorage` marker. Every later startup reads that marker once during idle time and stops there; apps without `removedStores` pay nothing. Adding an adapter for an id already cleaned from another adapter still cleans the new one. Entries can be dropped from `removedStores` once every user has run a version that includes them.
+- When an adapter fails (for example a file it cannot delete), the error is reported through `onPersistentStorageError` and only that adapter is retried on the next page load; the other adapters stay marked as done.
 - A store attached to the manager cannot use an id listed in `removedStores`: creating it throws, since the cleanup would remove its data.
-- Custom async adapters are supported when created with `createAsyncStorageAdapter`; for other adapters TSDF cannot list what a store stored, so it reports an error through `onPersistentStorageError` instead.
-- The cleanup runs once per id. A tab still running the previous app version can write the deleted store's entries again after the cleanup; those are only removed by the adapter's regular expiry while another store keeps using it.
+- Custom async adapters are supported when created with `createAsyncStorageAdapter` from a driver with a `storageId`: a stable id, unique among the app's adapters, that TSDF uses to remember the cleanup across page loads. For other adapters TSDF reports an error through `onPersistentStorageError` on every page load and removes nothing, until the entry names a supported adapter.
+- The cleanup runs once per id and adapter. A tab still running the previous app version can write the deleted store's entries again after the cleanup; those are only removed by the adapter's regular expiry while another store keeps using it.
 - In `localStorage`, a store is found through its metadata entries, so a list-query store whose every cached query was empty (and that cached no items) is not found; those small query entries stay.
 - Offline uploads belong to the session, not to a store, and are not removed.
 

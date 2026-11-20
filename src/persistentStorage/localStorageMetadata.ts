@@ -5,6 +5,7 @@ import {
   rc_object,
   rc_parse,
   rc_parse_json,
+  rc_record,
   rc_string,
   rc_unknown,
   type RcType,
@@ -38,7 +39,7 @@ import {
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
-/** Ids of `removedStores` whose persisted data was already removed. */
+/** `removedStores` entries whose persisted data was already removed. */
 const REMOVED_STORES_CLEANUP_KEY = `${METADATA_KEY_PREFIX}rs`;
 const MANIFEST_KEY_PREFIX = `${METADATA_KEY_PREFIX}r.`;
 const MANIFEST_KEY_SUFFIX = '.m';
@@ -477,36 +478,39 @@ const managedLocalStorageGlobalMaintenanceSchema = rc_object({
   lca: rc_number.orNull(),
 });
 
-const removedStoresCleanupSchema = rc_array(rc_string);
+/** Removed store ids already cleaned, keyed by the adapter's storage id. */
+const removedStoresCleanupSchema = rc_record(rc_array(rc_string));
+
+export type RemovedStoresCleanupMarker = Record<string, string[]>;
 
 /**
- * Reads the ids of removed stores whose data was already removed. Throws when
- * `localStorage` is unavailable.
+ * Reads which removed stores were already cleaned from each adapter. Throws
+ * when `localStorage` is unavailable.
  */
-export function readRemovedStoresCleanupMarker(): Set<string> {
-  return new Set(
+export function readRemovedStoresCleanupMarker(): RemovedStoresCleanupMarker {
+  return (
     readParsedMetadataJson(
       REMOVED_STORES_CLEANUP_KEY,
       removedStoresCleanupSchema,
       directManagedLocalStorageIo,
-    ),
+    ) ?? {}
   );
 }
 
+/**
+ * Losing this marker only makes the next startup check the removed stores
+ * again, so the write skips quota recovery (which would evict other stores'
+ * cached data) and ignores any failure.
+ */
 export function writeRemovedStoresCleanupMarker(
-  storeNames: readonly string[],
+  marker: RemovedStoresCleanupMarker,
 ): void {
   try {
-    writeMetadataJson(
-      REMOVED_STORES_CLEANUP_KEY,
-      storeNames,
-      directManagedLocalStorageIo,
-    );
-  } catch (error) {
-    // losing this marker only makes the next startup check the removed
-    // stores again; a full localStorage must not break the cleanup
-    if (!isQuotaExceededError(error)) throw error;
+    localStorage.setItem(REMOVED_STORES_CLEANUP_KEY, JSON.stringify(marker));
+  } catch {
+    return;
   }
+  notifyManagedLocalStorageMutation(REMOVED_STORES_CLEANUP_KEY);
 }
 
 function readCompactListQueryEntry(

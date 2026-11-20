@@ -1918,30 +1918,70 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
   }
 
+  /** Stable id of the storage behind this adapter, if its driver has one. */
+  get storageId(): string | undefined {
+    return this.#driver.storageId;
+  }
+
+  async #listStoreScopes(
+    storeNames: ReadonlySet<string>,
+  ): Promise<AsyncStorageNamespaceScope[]> {
+    return (await this.#listDiscoveredScopes()).filter((scope) =>
+      storeNames.has(scope.storeName),
+    );
+  }
+
   /**
    * Removes every namespace of the given stores, in every session. Returns how
-   * many queued offline mutations and pending resolutions each store had.
+   * many queued offline mutations and pending resolutions each store lost, and
+   * the first failure when some of their data could not be removed.
    */
   async removeStores(
     storeNames: ReadonlySet<string>,
-  ): Promise<Map<string, number>> {
+  ): Promise<{ unsentRecordsByStore: Map<string, number>; failure: unknown }> {
     const unsentRecordsByStore = new Map<string, number>();
-    const scopes = (await this.#listDiscoveredScopes()).filter((scope) =>
-      storeNames.has(scope.storeName),
-    );
+    let failure: unknown = null;
 
-    for (const scope of scopes) {
-      if (scope.kind === 'offline.queue' || scope.kind === 'offline.conflict') {
-        const unsentRecords = (await this.listManagedKeys(scope)).length;
+    for (const scope of await this.#listStoreScopes(storeNames)) {
+      try {
+        // Counted under the same lock as the clear, so a tab running the same
+        // cleanup at the same time finds the namespace already empty.
+        const unsentRecords = await this.#runWithSessionWriterLock(
+          scope.sessionKey,
+          async () => {
+            const count =
+              scope.kind === 'offline.queue' ||
+              scope.kind === 'offline.conflict'
+                ? (await this.listManagedKeys(scope)).length
+                : 0;
+            await this.#clearManagedNamespaceUnlocked(scope, true);
+            return count;
+          },
+        );
         unsentRecordsByStore.set(
           scope.storeName,
           (unsentRecordsByStore.get(scope.storeName) ?? 0) + unsentRecords,
         );
+      } catch (error) {
+        failure ??= error;
       }
-      await this.clearManagedNamespace(scope);
     }
 
-    return unsentRecordsByStore;
+    // Drivers skip records they fail to delete (OPFS ignores per-file
+    // failures), so only listing again proves nothing is left.
+    if (failure === null) {
+      const remainingScopes = await this.#listStoreScopes(storeNames);
+      if (remainingScopes.length > 0) {
+        const storesWithData = new Set(
+          remainingScopes.map(({ storeName }) => `"${storeName}"`),
+        );
+        failure = new Error(
+          `[tsdf] Some persisted data of removed store(s) ${[...storesWithData].join(', ')} could not be deleted. The cleanup retries on the next page load.`,
+        );
+      }
+    }
+
+    return { unsentRecordsByStore, failure };
   }
 
   async clearManagedNamespace(
@@ -3404,19 +3444,28 @@ export function createAsyncStorageAdapter(
 }
 
 /**
- * Removes every namespace of the given stores, in every session. Returns how
- * many queued offline mutations and pending resolutions each store had, or
- * `null` when the adapter was not created with `createAsyncStorageAdapter`
- * (TSDF cannot list the namespaces of other adapters).
+ * Returns the adapter's managed implementation and the stable id of its
+ * storage, or `null` when TSDF cannot clean removed stores from it: the
+ * adapter was not created with `createAsyncStorageAdapter` (TSDF cannot list
+ * its namespaces), or its driver has no `storageId` (TSDF cannot remember
+ * across page loads that the cleanup already ran).
  */
-export async function removeStoresFromAsyncStorage(
+export function getRemovableStoresAsyncStorage(
   adapter: AsyncStorageAdapter,
-  storeNames: ReadonlySet<string>,
-): Promise<Map<string, number> | null> {
+): {
+  storageId: string;
+  removeStores: (
+    storeNames: ReadonlySet<string>,
+  ) => Promise<{ unsentRecordsByStore: Map<string, number>; failure: unknown }>;
+} | null {
   const managedAdapter = managedAsyncStorageAdapters.get(adapter);
-  if (managedAdapter === undefined) return null;
+  const storageId = managedAdapter?.storageId;
+  if (managedAdapter === undefined || storageId === undefined) return null;
 
-  return managedAdapter.removeStores(storeNames);
+  return {
+    storageId,
+    removeStores: (storeNames) => managedAdapter.removeStores(storeNames),
+  };
 }
 
 /**

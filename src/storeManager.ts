@@ -345,8 +345,9 @@ export type CreateStoreManagerOptions<
    * entity records, and any queued offline mutations or pending resolutions,
    * which no store can replay anymore. Unsent records it deletes are reported
    * once through `onPersistentStorageError`. Later startups only read a small
-   * marker listing the ids already cleaned, so entries can be removed from
-   * this list once every user has run a version that includes them.
+   * marker listing the id and adapter pairs already cleaned, so entries can be
+   * removed from this list once every user has run a version that includes
+   * them. An adapter that fails is reported and retried on the next startup.
    *
    * A listed id cannot be used by a store attached to this manager.
    *
