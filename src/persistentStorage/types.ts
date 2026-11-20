@@ -196,6 +196,14 @@ export type AsyncStorageDiscoveredScope = {
 
 /** Low-level async backend contract implemented by custom storage drivers. */
 export type AsyncStorageDriver = {
+  /**
+   * Stable id of the storage this driver reads and writes, unique among the
+   * app's adapters and the same on every page load (for example
+   * `indexedDb:<database name>`). TSDF uses it to remember one-time
+   * maintenance across page loads: stores listed in the store manager's
+   * `removedStores` can only be cleaned from adapters whose driver has one.
+   */
+  readonly storageId?: string;
   /** Mutable debug logger used by concrete adapters to emit operation timings. */
   debugLogger?: TSDFDebugLogger;
   /** Mutable logger used for low-volume production signals. */
