@@ -42,7 +42,7 @@ function createRemoteStatusMessage(
 ): SyncTestMessage {
   return {
     kind: 'tab-status',
-    protocolVersion: 1,
+    protocolVersion: 2,
     storeType: 'document',
     sessionKey,
     tabId: 'remote-tab',
@@ -54,6 +54,29 @@ function createRemoteStatusMessage(
     lastPresenceAt: seq,
   };
 }
+
+test('browser tabs coordinator ignores messages from a tab running another tsdf release', () => {
+  const transport = createControlledTransportFactory();
+  const receivedMessageIds: string[] = [];
+
+  createBrowserTabsCoordinator<SyncTestMessage>(
+    'document',
+    'coordinator-protocol-mismatch',
+    () => 'test-session',
+    (message) => {
+      receivedMessageIds.push(message.messageId);
+    },
+    undefined,
+    transport.transportFactory,
+    undefined,
+  );
+
+  // A tab still running the previous release, whose message shapes differ.
+  transport.deliver({ ...createRemoteStatusMessage(1), protocolVersion: 1 });
+  transport.deliver(createRemoteStatusMessage(2));
+
+  expect(receivedMessageIds).toMatchInlineSnapshot(`['remote-tab:2']`);
+});
 
 test('browser tabs coordinator ignores messages from a different session key', () => {
   const transport = createControlledTransportFactory();

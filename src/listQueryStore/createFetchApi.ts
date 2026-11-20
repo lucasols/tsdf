@@ -2,6 +2,7 @@ import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { Result, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
+import { isOfflineStoreError } from '../persistentStorage/offline/offlineStoreError.typeGuards';
 import {
   BatchRequest,
   FetchContext,
@@ -1216,7 +1217,7 @@ export function createFetchApi<
 
     let query = getQueryStateByKey(queryKey);
 
-    if (query?.error?.id === 'offline') {
+    if (isOfflineStoreError(query?.error)) {
       const hydratedQuery = persistence?.readHydratedQuery(queryKey);
 
       if (hydratedQuery) {
@@ -1456,7 +1457,7 @@ export function createFetchApi<
 
     let itemState = readItemState(itemKey);
 
-    if (itemState?.itemQuery?.error?.id === 'offline') {
+    if (isOfflineStoreError(itemState?.itemQuery?.error)) {
       const hydratedItem = persistence?.readHydratedItem(itemKey);
 
       if (hydratedItem) {

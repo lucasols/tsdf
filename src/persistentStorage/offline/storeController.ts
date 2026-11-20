@@ -15,6 +15,10 @@ import {
 import { Result, unknownToError } from 't-result';
 import type { TSDFDebugLogger } from '../../debug';
 import type { ValidPayload } from '../../utils/storeShared';
+import {
+  getNavigatorLockManager,
+  warnIfNavigatorLockUnavailable,
+} from '../navigatorLocks';
 import type {
   OfflineAttachedUploadIds,
   OfflineMutationUploadsInput,
@@ -67,6 +71,13 @@ import {
 
 const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 3;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
+/**
+ * Time given to a tab to learn about the queue changes of the tab that just
+ * replayed, before it may replay itself.
+ */
+const REPLAY_HANDOFF_SETTLE_MS = 500;
+const REPLAY_LOCK_UNAVAILABLE_WARNING =
+  '[TSDF] navigator.locks is unavailable; with several tabs open, a queued offline mutation can be sent more than once.';
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
 
@@ -96,6 +107,15 @@ type OfflineStoreAdapter = {
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
   }) => void;
+  /**
+   * Another tab reconciled a temp entity of the store. The final item's data
+   * arrives through the store's tab sync; this applies what only this tab
+   * knows (like where the temp item sits in its lists) and notifies listeners.
+   */
+  applyTempReconciliationFromAnotherTab?: (
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ) => void;
   captureQueuedMutationOverlays?: (args: {
     sessionKey: string;
     entityRefs: OfflineEntityRef[];
@@ -530,6 +550,9 @@ export function createOfflineStoreController<
   let replayRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let hydratedSessionKey: string | null = null;
   let hydratedPromise: Promise<void> | null = null;
+  let releaseReplayLock: (() => void) | null = null;
+  let heldReplayLockName: string | null = null;
+  let replayLockReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   let nextQueueOrder = 0;
   const replayRetryMaxFailures =
     sessionConfig.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
@@ -538,6 +561,10 @@ export function createOfflineStoreController<
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
+  // Queue entries another tab wrote. Another tab may be merging into them at
+  // the same moment, so this tab never accumulates into them: both merges
+  // would save the same entry id and one tab's input would be lost.
+  const entryIdsFromAnotherTab = new Set<string>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -814,8 +841,12 @@ export function createOfflineStoreController<
     activeSession?.unregister?.();
     activeSession = null;
     resetReplayRetryState();
+    // A running drain may still be sending an entry: it releases the lock
+    // itself once that request settles, so another tab cannot send it too.
+    if (!replayScheduled) releaseHeldReplayLock();
     resolvedEntityRefBySerializedRef.clear();
     queueEntries.clear();
+    entryIdsFromAnotherTab.clear();
     resolutions.clear();
     nextQueueOrder = 0;
     hydratedSessionKey = null;
@@ -1070,6 +1101,58 @@ export function createOfflineStoreController<
       onOfflineCycle: () => {
         resetReplayRetryState();
       },
+      onRemoteQueueEntryChange: (entryId, entry) => {
+        applyRecordChangeFromAnotherTab(() => {
+          if (entry) {
+            nextQueueOrder = Math.max(nextQueueOrder, getQueueOrder(entry) + 1);
+            // Queued by a tab running a newer deploy of the app: this tab
+            // cannot replay it, and must not drop it from storage either
+            if (!operations[entry.operation]) return;
+
+            queueEntries.set(entryId, entry);
+            entryIdsFromAnotherTab.add(entryId);
+            return;
+          }
+
+          queueEntries.delete(entryId);
+          entryIdsFromAnotherTab.delete(entryId);
+          countedReplayFailures.delete(entryId);
+          if (queueEntries.size === 0) clearReplayRetryTimer();
+        });
+      },
+      onRemoteResolutionChange: (resolutionId, resolution) => {
+        applyRecordChangeFromAnotherTab(() => {
+          if (
+            resolution &&
+            rc_parse(resolution, offlineResolutionRecordSchema).ok &&
+            operations[resolution.operation]
+          ) {
+            resolutions.set(resolutionId, resolution);
+          } else {
+            resolutions.delete(resolutionId);
+          }
+        });
+      },
+      onRemoteWorkDiscarded: (discardedWork, removedTempEntityKeys) => {
+        // Sent after the removals of the discarded records, so this tab's
+        // remaining resolutions already exclude them
+        applyRecordChangeFromAnotherTab(() => {
+          revalidateDiscardedWork(
+            discardedWork,
+            new Set(removedTempEntityKeys),
+          );
+        });
+      },
+      onRemoteTempReconciled: (tempId, finalPayload) => {
+        // The replaying tab already rewrote and broadcast the queued records
+        // that referenced the temp entity; this tab maps the temp payload and
+        // replaces its own copy of the temp entity
+        rememberResolvedEntityRef(tempId, finalPayload);
+        storeAdapter.applyTempReconciliationFromAnotherTab?.(
+          tempId,
+          finalPayload,
+        );
+      },
     });
 
     activeSession = {
@@ -1103,6 +1186,7 @@ export function createOfflineStoreController<
       if (!isActiveSessionState(current)) return;
 
       queueEntries.clear();
+      entryIdsFromAnotherTab.clear();
       resolutions.clear();
       for (const entry of loadedQueueEntries.values()) {
         queueEntries.set(entry.id, entry);
@@ -1128,6 +1212,34 @@ export function createOfflineStoreController<
     });
 
     return hydratedPromise;
+  }
+
+  /**
+   * Applies to this tab's in-memory queue a record change made by another tab,
+   * so the leader replays entries queued by any tab and every tab stops
+   * showing (and can never replay) an entry another tab already replayed.
+   */
+  function applyRecordChangeFromAnotherTab(
+    applyChange: () => void,
+    changeSession: ActiveSessionState | null = activeSession,
+  ): void {
+    const current = activeSession;
+    // A change deferred behind hydration belongs to the session it came from
+    if (!current || current !== changeSession) return;
+
+    if (hydratedPromise) {
+      // The hydration in flight may have read the records before the change
+      const applyAfterHydration = (): void => {
+        applyRecordChangeFromAnotherTab(applyChange, current);
+      };
+      void hydratedPromise.then(applyAfterHydration, applyAfterHydration);
+      return;
+    }
+    // Not hydrated yet: the eventual hydration reads the current records
+    if (hydratedSessionKey !== current.sessionKey) return;
+
+    applyChange();
+    refreshDerivedState(current, true);
   }
 
   function parseConflictPayloadForOperation<
@@ -1437,7 +1549,10 @@ export function createOfflineStoreController<
     );
   }
 
-  function refreshDerivedState(current?: ActiveSessionState): void {
+  function refreshDerivedState(
+    current?: ActiveSessionState,
+    isRemoteChange?: boolean,
+  ): void {
     const session = current ?? ensureActiveSession();
     if (!session || !isActiveSessionState(session)) return;
     const sessionState = session;
@@ -1576,24 +1691,29 @@ export function createOfflineStoreController<
       sessionKey: sessionState.sessionKey,
       entities,
     });
-    sessionState.session.syncStoreData(storeName, {
-      adapter,
-      entities,
-      resolutions: derivedResolutions,
-      referencedUploadIds,
-      protectedKeys,
-      replayHead:
-        nextReplayEntry === null
-          ? null
-          : {
-              storeName,
-              entryId: nextReplayEntry.id,
-              queueOrder: getQueueOrder(nextReplayEntry),
-              createdAt: nextReplayEntry.createdAt,
-            },
-    });
+    sessionState.session.syncStoreData(
+      storeName,
+      {
+        adapter,
+        entities,
+        resolutions: derivedResolutions,
+        referencedUploadIds,
+        protectedKeys,
+        replayHead:
+          nextReplayEntry === null
+            ? null
+            : {
+                storeName,
+                entryId: nextReplayEntry.id,
+                queueOrder: getQueueOrder(nextReplayEntry),
+                createdAt: nextReplayEntry.createdAt,
+              },
+      },
+      isRemoteChange,
+    );
 
-    void syncEntityNamespace(sessionState, entities);
+    // The tab that made the change already persisted the derived entities
+    if (!isRemoteChange) void syncEntityNamespace(sessionState, entities);
   }
 
   async function syncEntityNamespace(
@@ -1696,6 +1816,7 @@ export function createOfflineStoreController<
       if (entry.operation !== args.operationName) continue;
       if (entry.syncState !== 'pending') continue;
       if (entry.attempts > 0) continue;
+      if (entryIdsFromAnotherTab.has(entry.id)) continue;
       if (entry.tempIds && entry.tempIds.length > 0) continue;
       if (normalizeEntityRefs(entry.entityRefs) !== normalizedEntityRefs) {
         continue;
@@ -2116,6 +2237,11 @@ export function createOfflineStoreController<
         rewrittenResolution.id,
         rewrittenResolution,
       );
+      args.current.session.publishResolutionChange(
+        storeName,
+        rewrittenResolution.id,
+        rewrittenResolution,
+      );
       entityRefRewrites.push({
         previousEntityRefs: resolution.entityRefs,
         nextEntityRefs: rewrittenResolution.entityRefs,
@@ -2189,6 +2315,13 @@ export function createOfflineStoreController<
         args.result,
         tempId,
       );
+      // Sent first so the other tabs move the temp item before the store's
+      // tab sync tells them it was deleted
+      args.current.session.publishTempReconciled(
+        storeName,
+        tempId,
+        reconciliation.finalPayload,
+      );
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,
@@ -2225,6 +2358,11 @@ export function createOfflineStoreController<
     });
 
     for (const reconciliation of reconciliations) {
+      args.current.session.publishTempReconciled(
+        storeName,
+        reconciliation.tempId,
+        reconciliation.finalPayload,
+      );
       storeAdapter.reconcileTempEntity({
         operationName: args.operationName,
         input: args.input,
@@ -2252,6 +2390,7 @@ export function createOfflineStoreController<
       queueEntries.set(entry.id, entry);
     }
     await session.queueNamespace.save(entry.id, entry);
+    session.session.publishQueueEntryChange(storeName, entry.id, entry);
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2282,11 +2421,15 @@ export function createOfflineStoreController<
     if (!session) return;
     if (isActiveSessionState(session)) {
       queueEntries.delete(entryId);
+      entryIdsFromAnotherTab.delete(entryId);
       countedReplayFailures.delete(entryId);
       if (queueEntries.size === 0) {
         clearReplayRetryTimer();
       }
     }
+    // Announced before the storage write: an entry that was replayed must
+    // leave the other tabs' queues as early as possible.
+    session.session.publishQueueEntryChange(storeName, entryId, null);
     await session.queueNamespace.remove(entryId);
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
@@ -2304,6 +2447,11 @@ export function createOfflineStoreController<
       resolutions.set(resolution.id, resolution);
     }
     await session.resolutionNamespace.save(resolution.id, resolution);
+    session.session.publishResolutionChange(
+      storeName,
+      resolution.id,
+      resolution,
+    );
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2320,6 +2468,7 @@ export function createOfflineStoreController<
       resolutions.delete(resolutionId);
     }
     await session.resolutionNamespace.remove(resolutionId);
+    session.session.publishResolutionChange(storeName, resolutionId, null);
     if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -2466,7 +2615,6 @@ export function createOfflineStoreController<
     }
 
     for (const dependentEntry of descendantQueueEntries.values()) {
-      await removeEntry(dependentEntry.id, args.current, true);
       await persistResolution(
         buildRetryExhaustedResolutionRecord(args.current, dependentEntry, {
           message: BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE,
@@ -2474,6 +2622,7 @@ export function createOfflineStoreController<
         args.current,
         true,
       );
+      await removeEntry(dependentEntry.id, args.current, true);
     }
   }
 
@@ -2482,8 +2631,12 @@ export function createOfflineStoreController<
     parentEntry: OfflineQueueEntry;
     parentResolution: PersistedOfflineResolutionRecord;
   }): Promise<void> {
-    await removeEntry(args.parentEntry.id, args.current, true);
+    // The resolution is saved before the entry is removed: the other tabs
+    // apply each change as it arrives, and in between they would see the
+    // store with nothing left to replay or decide on, and revalidate it over
+    // the change that now waits for the user's decision.
     await persistResolution(args.parentResolution, args.current, true);
+    await removeEntry(args.parentEntry.id, args.current, true);
     await promoteBlockedTempCreateDescendants({
       current: args.current,
       parentEntry: args.parentEntry,
@@ -2511,7 +2664,11 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
-      revalidateDiscardedWork([args.resolution], new Set());
+      revalidateDiscardedWorkInEveryTab(
+        args.current,
+        [args.resolution],
+        new Set(),
+      );
       return;
     }
 
@@ -2566,7 +2723,39 @@ export function createOfflineStoreController<
         removedTempEntityKeys.add(entityKey);
       }
     }
+    revalidateDiscardedWorkInEveryTab(
+      args.current,
+      discardedWork,
+      removedTempEntityKeys,
+    );
+  }
+
+  /**
+   * {@link revalidateDiscardedWork} in this tab and in the other tabs with the
+   * store: each one may show the discarded optimistic changes.
+   */
+  function revalidateDiscardedWorkInEveryTab(
+    current: ActiveSessionState,
+    discardedWork: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'entityRefs'
+    >[],
+    removedTempEntityKeys: ReadonlySet<string>,
+  ): void {
     revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
+
+    if (!discardedWork.some((workItem) => workItem.entityRefs.length > 0)) {
+      return;
+    }
+    current.session.publishWorkDiscarded(
+      storeName,
+      discardedWork.map(({ operation, input, entityRefs }) => ({
+        operation,
+        input,
+        entityRefs,
+      })),
+      [...removedTempEntityKeys],
+    );
   }
 
   /**
@@ -2791,6 +2980,8 @@ export function createOfflineStoreController<
     preparedMutation: PreparedQueuedMutation;
     queueOrder: number;
     workingQueue: Map<string, OfflineQueueEntry>;
+    /** A resolution this mutation replaces, removed once it is queued */
+    replacedResolutionId: string | undefined;
   }): Promise<PlannedQueuedMutation> {
     const {
       current,
@@ -2805,6 +2996,7 @@ export function createOfflineStoreController<
       },
       queueOrder,
       workingQueue,
+      replacedResolutionId,
     } = args;
 
     const tempEntity = operation.tempEntity;
@@ -2908,7 +3100,11 @@ export function createOfflineStoreController<
         entityRefs,
         tempIds,
         entries: workingQueue.values(),
-        resolutionEntries: resolutions.values(),
+        resolutionEntries: replacedResolutionId
+          ? [...resolutions.values()].filter(
+              (resolution) => resolution.id !== replacedResolutionId,
+            )
+          : resolutions.values(),
       });
 
       if (duplicateTempEntityKey !== null) {
@@ -3051,6 +3247,7 @@ export function createOfflineStoreController<
 
   async function queuePreparedMutations(
     preparedMutation: PreparedQueuedMutation,
+    replacedResolutionId?: string,
   ): Promise<void> {
     const current = ensureActiveSession();
     if (!current || current.sessionKey !== preparedMutation.currentSessionKey) {
@@ -3073,6 +3270,7 @@ export function createOfflineStoreController<
         preparedMutation,
         queueOrder,
         workingQueue: new Map(queueEntries),
+        replacedResolutionId,
       });
     } while (
       plannedMutation.accumulatedEntry &&
@@ -3115,6 +3313,7 @@ export function createOfflineStoreController<
               id: storedUploadId,
               file,
               source: 'mutation',
+              storeName,
             });
           }),
         );
@@ -3232,9 +3431,24 @@ export function createOfflineStoreController<
     }
 
     replayScheduled = true;
+    const replaySession = current;
     void replayQueue.resultifyAdd(async () => {
       try {
-        await drainReplay();
+        await acquireReplayLock(replaySession);
+        try {
+          await drainReplay(replaySession);
+        } finally {
+          if (replaySession.session.hasOtherTabs()) {
+            // Keep the lock while the other tabs catch up with what this tab
+            // just replayed, so none of them can send the same entries again.
+            replayLockReleaseTimer = setTimeout(
+              releaseHeldReplayLock,
+              REPLAY_HANDOFF_SETTLE_MS,
+            );
+          } else {
+            releaseHeldReplayLock();
+          }
+        }
       } finally {
         replayScheduled = false;
 
@@ -3242,14 +3456,94 @@ export function createOfflineStoreController<
         if (nextEntry?.syncState === 'needs-confirmation') {
           scheduleReplayRetry();
         }
+        // The session changed while this drain was running or waiting
+        if (!isActiveSessionState(replaySession)) void ensureReplayScheduled();
       }
     });
   }
 
-  async function drainReplay(): Promise<void> {
+  /**
+   * Leadership is decided from tab presence messages, so for a moment two tabs
+   * can both consider themselves the leader (e.g. while it moves to the tab
+   * that just got focus). This cross-tab lock makes sure only one of them
+   * replays this store's queue at a time.
+   */
+  async function acquireReplayLock(current: ActiveSessionState): Promise<void> {
+    const lockManager = getNavigatorLockManager();
+    if (lockManager === null) {
+      if (current.session.hasOtherTabs()) {
+        warnIfNavigatorLockUnavailable(REPLAY_LOCK_UNAVAILABLE_WARNING);
+      }
+      return;
+    }
+
+    if (replayLockReleaseTimer !== null) {
+      clearTimeout(replayLockReleaseTimer);
+      replayLockReleaseTimer = null;
+    }
+
+    const lockName = `tsdf:offline-replay:${current.sessionKey}:${storeName}`;
+    if (heldReplayLockName === lockName) return;
+    releaseHeldReplayLock();
+
+    if (await requestReplayLock(lockManager, lockName, true)) return;
+
+    // Another tab is replaying this queue or just did. Once it lets go, wait
+    // for the queue changes it announced to arrive, so this tab does not send
+    // what that tab already sent.
+    await requestReplayLock(lockManager, lockName, false);
+    await new Promise((resolve) => {
+      setTimeout(resolve, REPLAY_HANDOFF_SETTLE_MS);
+    });
+  }
+
+  /**
+   * Resolves `true` once this tab holds the lock (until
+   * `releaseHeldReplayLock`), or `false` when `ifAvailable` is set and another
+   * tab holds it.
+   */
+  function requestReplayLock(
+    lockManager: LockManager,
+    lockName: string,
+    ifAvailable: boolean,
+  ): Promise<boolean> {
+    return new Promise((onSettled) => {
+      lockManager
+        .request(lockName, { ifAvailable }, (lock) => {
+          if (lock === null) {
+            onSettled(false);
+            return undefined;
+          }
+
+          return new Promise<void>((release) => {
+            heldReplayLockName = lockName;
+            releaseReplayLock = release;
+            onSettled(true);
+          });
+        })
+        // Replaying without the lock is better than never replaying
+        .catch(() => {
+          onSettled(true);
+        });
+    });
+  }
+
+  function releaseHeldReplayLock(): void {
+    if (replayLockReleaseTimer !== null) {
+      clearTimeout(replayLockReleaseTimer);
+      replayLockReleaseTimer = null;
+    }
+    releaseReplayLock?.();
+    releaseReplayLock = null;
+    heldReplayLockName = null;
+  }
+
+  async function drainReplay(replaySession: ActiveSessionState): Promise<void> {
     while (true) {
       const current = ensureActiveSession();
       if (!current) return;
+      // The lock held by this drain belongs to the session it started with
+      if (current.sessionKey !== replaySession.sessionKey) return;
       if (
         current.session.getStatus().isOfflineMode ||
         current.session.isReplayBlocked() ||
@@ -3649,13 +3943,15 @@ export function createOfflineStoreController<
 
         return { resolution: retryResolution, entry };
       });
-      for (const retryResolution of resolutionsToRetry) {
-        await removeResolution(retryResolution.id, current, true);
-      }
-
+      // Queued before the resolutions are removed, for the other tabs (see
+      // `persistManualResolutionChain`)
       for (const nextEntry of nextEntries) {
         if (!nextEntry.entry) continue;
         await persistEntry(nextEntry.entry, current, true);
+      }
+
+      for (const retryResolution of resolutionsToRetry) {
+        await removeResolution(retryResolution.id, current, true);
       }
 
       storeAdapter.captureQueuedMutationOverlays?.({
@@ -3690,8 +3986,10 @@ export function createOfflineStoreController<
         tempIds: resolutionRecord.tempIds,
         entityRefs: resolutionRecord.entityRefs,
       });
-      await removeResolution(resolutionId, current, true);
-      await queuePreparedMutations(preparedMutation);
+      // Queued before the resolution is removed, for the other tabs (see
+      // `persistManualResolutionChain`)
+      await queuePreparedMutations(preparedMutation, resolutionId);
+      await removeResolution(resolutionId, current);
       return;
     }
 
