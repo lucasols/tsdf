@@ -1987,13 +1987,21 @@ class SessionOfflineCoordinator {
     const uploadsConfig = this.#uploadsConfig;
     if (!uploadsConfig) return;
 
+    // Mutation upload ids start with the id of their queue entry, which starts
+    // with the store name. Only stores created in this runtime report their
+    // references, so uploads of other stores (lazily created ones, or ones
+    // only another deploy has) are left to the retention cleanup.
+    const registeredStorePrefixes = [...this.#registrations.keys()].map(
+      (storeName) => `${storeName}:`,
+    );
     const removableIds = [...this.#uploads.values()]
       .filter((upload) => upload.source === 'mutation')
       .map((upload) => upload.id)
       .filter(
         (id) =>
           !this.#referencedUploadIds.has(id) &&
-          !this.#uploadPromisesById.has(id),
+          !this.#uploadPromisesById.has(id) &&
+          registeredStorePrefixes.some((prefix) => id.startsWith(prefix)),
       );
 
     if (removableIds.length === 0) return;

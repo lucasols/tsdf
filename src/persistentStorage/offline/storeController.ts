@@ -3288,10 +3288,9 @@ export function createOfflineStoreController<
       }
 
       const operation = operations[nextEntry.operation];
-      if (!operation) {
-        await removeEntry(nextEntry.id, current);
-        continue;
-      }
+      // Entries of operations this deploy doesn't define are never loaded
+      // into the queue, and must not be deleted if one ever gets here.
+      if (!operation) return;
 
       const shouldCheckSkipBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
