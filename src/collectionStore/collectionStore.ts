@@ -2952,6 +2952,8 @@ export function createCollectionStore<
     reset,
     onTransportReconnect,
     onOfflineRecovery: focusLifecycle.onOfflineRecovery,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {

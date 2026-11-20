@@ -3749,6 +3749,8 @@ export function createListQueryStore<
     reset,
     onTransportReconnect,
     onOfflineRecovery: focusLifecycle.onOfflineRecovery,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {

@@ -1877,6 +1877,8 @@ export function createDocumentStore<
     reset,
     onTransportReconnect,
     onOfflineRecovery: focusLifecycle.onOfflineRecovery,
+    resolveOfflineResolution:
+      offlineController?.resolveOfflineResolutionWithGenericAction,
   });
 
   return {
