@@ -244,6 +244,20 @@ function deserializeCompactOfflineEntityRef(
   return { entityKey, entityKind: fromCompactOfflineEntityKind(compactKind) };
 }
 
+/**
+ * An entity with several queued mutations reports the most urgent state among
+ * them, so it shows `syncing` while any of its mutations is being sent.
+ */
+const entitySyncStatePriority: Record<
+  GlobalOfflineEntity['syncState'],
+  number
+> = {
+  pending: 0,
+  syncing: 1,
+  'needs-confirmation': 2,
+  'resolution-required': 3,
+};
+
 function toCompactOfflineEntitySyncState(
   state: GlobalOfflineEntity['syncState'],
 ): 'p' | 's' | 'n' | 'r' {
@@ -1597,7 +1611,9 @@ export function createOfflineStoreController<
           kind: reduceOfflineEntityKind(existing?.kind, operationKind),
           pendingMutations: (existing?.pendingMutations ?? 0) + 1,
           syncState:
-            existing?.syncState === 'needs-confirmation'
+            existing &&
+            entitySyncStatePriority[existing.syncState] >
+              entitySyncStatePriority[entry.syncState]
               ? existing.syncState
               : entry.syncState,
           requiresResolution: existing?.requiresResolution ?? false,

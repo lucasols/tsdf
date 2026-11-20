@@ -321,9 +321,10 @@ export type ItemOfflineState = {
    *   reached the server, so the mutation is re-checked or retried
    * - `resolution-required`: waiting for a manual resolution
    *
-   * With several mutations queued for the item this is the state of the
-   * newest one: the item stays `pending` while its older mutations are sent
-   * (`pendingMutations` drops as each one finishes).
+   * With several mutations queued for the item this is the most urgent state
+   * among them (`needs-confirmation` > `syncing` > `pending`): the item is
+   * `syncing` while any of its mutations is being sent (`pendingMutations`
+   * drops as each one finishes).
    */
   syncState: OfflineSyncState | 'resolution-required';
   /** Number of queued mutations of the item still waiting to sync. */

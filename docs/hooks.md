@@ -365,8 +365,9 @@ Behavior:
 - `syncState` - `'pending'` (waiting to be sent), `'syncing'` (being sent),
   `'needs-confirmation'` (a send failed and it is not known whether it reached
   the server, so it is re-checked or retried) or `'resolution-required'`. With
-  several mutations queued for the item this is the state of the newest one:
-  the item stays `'pending'` while its older mutations are sent
+  several mutations queued for the item this is the most urgent state among
+  them (`'needs-confirmation'` > `'syncing'` > `'pending'`): the item is
+  `'syncing'` while any of its mutations is being sent
 - `pendingMutations` - Number of queued mutations of the item still waiting to
   sync
 - `requiresResolution` - `true` while the item waits for a manual resolution
