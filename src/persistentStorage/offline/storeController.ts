@@ -2350,14 +2350,17 @@ export function createOfflineStoreController<
     if (!tempEntity && !tempEntities) return;
     if (!storeAdapter.reconcileTempEntity) return;
 
-    // The server already applied the mutation, so a failed storage read must
-    // not fail the replay: the temp items are then reconciled from memory.
-    await storeAdapter
-      .loadTempEntities?.(
+    // The server already applied the mutation, so a failed storage read, or a
+    // throwing `addToQueries` filter, must not fail the replay: the temp items
+    // are then reconciled from memory.
+    try {
+      await storeAdapter.loadTempEntities?.(
         args.tempIds,
         getReplayedTempEntityQueries(tempEntity, args.input, args.tempIds),
-      )
-      ?.catch(() => {});
+      );
+    } catch {
+      // ignored, see above
+    }
 
     if (tempEntity) {
       const tempId = args.tempIds[0];
