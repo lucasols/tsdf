@@ -309,7 +309,13 @@ function createLocalStorageLeftoversCheck(
     checkedSessionKey = sessionKey;
 
     const storageKey = getStorageKey(sessionKey, storeName);
-    if (localStorage.getItem(getManifestKey(storageKey)) === null) return;
+    try {
+      if (localStorage.getItem(getManifestKey(storageKey)) === null) return;
+    } catch {
+      // `localStorage` is unavailable (e.g. site data blocked): there is
+      // nothing to clean, and the async adapter must still start.
+      return;
+    }
 
     // Every handle of the store can detect the leftovers; handle them once.
     if (storesWithHandledLocalStorageLeftovers.has(storageKey)) return;
@@ -1218,14 +1224,20 @@ export function createPersistentStorageNamespaceHandle<
     : undefined;
   const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
-  const checkLocalStorageLeftovers = createLocalStorageLeftoversCheck(
-    config.storeName,
-    (storageKey) =>
-      localPersistentStorage.getManifestKeyForPrefix(
-        `${storageKey}.${config.entryPrefix}.`,
-      ),
-    onPersistentStorageError,
-  );
+  // List-query query entries have no manifest under 'local-sync', so this
+  // handle has nothing to probe: the items handle detects the store's
+  // leftovers, and the cleanup removes its query entries too.
+  const checkLocalStorageLeftovers =
+    config.entryPrefix === LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX
+      ? null
+      : createLocalStorageLeftoversCheck(
+          config.storeName,
+          (storageKey) =>
+            localPersistentStorage.getManifestKeyForPrefix(
+              `${storageKey}.${config.entryPrefix}.`,
+            ),
+          onPersistentStorageError,
+        );
 
   scheduleAdapterExpirationScan(adapter);
 
@@ -1242,7 +1254,7 @@ export function createPersistentStorageNamespaceHandle<
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
 
-    checkLocalStorageLeftovers(sessionKey);
+    checkLocalStorageLeftovers?.(sessionKey);
 
     asyncAdapter.debugLogger = config.debugLogger;
     asyncAdapter.logger = config.logger;

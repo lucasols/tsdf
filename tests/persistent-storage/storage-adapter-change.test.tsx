@@ -191,6 +191,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   cleanup();
   // Drain background maintenance so it cannot write into the next test.
   await flushAllTimers();
@@ -550,6 +551,34 @@ describe('store moves from local-sync to an async adapter', () => {
       └ _m.g (0.05 kb)"
     `);
   });
+
+  test('a store on an async adapter still starts when the browser blocks localStorage', async () => {
+    // Blocking site data makes every `localStorage` read throw.
+    const getItemSpy = vi
+      .spyOn(localStorage, 'getItem')
+      .mockImplementation(() => {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      });
+
+    // Looking for leftovers must not stop the store from being created, and
+    // the store keeps loading and persisting through its own adapter.
+    const settings = createSettingsEnv(opfsPersistentStorage, 'settings');
+    const settingsHook = renderHook(() => settings.apiStore.useDocument());
+    await flushAllTimers();
+
+    expect(settingsHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'dark', value: 1 }`,
+    );
+    // The tree helper reads localStorage too, so unblock it to inspect OPFS.
+    getItemSpy.mockRestore();
+    expect(getOpfsDirTree(opfsStore)).toMatchInlineSnapshot(`
+      "tsdf (0.20 kb)
+      └ sess1 (0.20 kb)
+        └ settings (0.19 kb)
+          ├ d._i.r.json (0.08 kb)
+          └ d.e.p.json (0.09 kb)"
+    `);
+  });
 });
 
 describe('localStorage cost of detecting a moved store', () => {
@@ -567,15 +596,15 @@ describe('localStorage cost of detecting a moved store', () => {
     // idle slot where a cleanup would run.
     await advanceTime(4000);
 
-    // One `getItem` per handle when it is created (a list-query store has two:
-    // items and queries). No key scans, no writes and nothing scheduled.
+    // One `getItem` per handle when it is created. A list-query store only
+    // probes its items index: its query entries have no index to look for.
+    // No key scans, no writes and nothing scheduled.
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time |
       0    | 📖 #1 ❌ tsdf._m.r.s:sess1.settings.m (namespace index)
       .    | 📖 #2 ❌ tsdf._m.r.n:sess1.users.ci.m (namespace index)
       .    | 📖 #3 ❌ tsdf._m.r.n:sess1.users-list.li.m (items index)
-      .    | 📖 #4 ❌ tsdf._m.r.n:sess1.users-list.lq.m (queries index)
       "
     `);
   });
