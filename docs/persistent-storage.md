@@ -353,6 +353,8 @@ Items and queries are stored and evicted separately, so a cached list query can 
 
 A cached query is restored as a loaded query (`status: 'success'`, shown immediately and revalidated in the background) when every row it was saved with can be restored, or when only its last rows are missing: like a list cut by `maxQuerySize`, the rows that are left are restored as a loaded list with `hasMore: true`. This is what happens to a list larger than `maxItemBytes`: the budget evicts its last rows right after it is saved.
 
+Eviction follows read recency, not the order of the rows in a list. A list larger than `maxItemBytes` is restored as loaded on the first start after its last rows were cut, but once an online refetch saves it again, the rows that were rewritten look more recent than the unchanged ones, so the budget can evict earlier rows instead. The next start then restores it as a list with a gap (see below). To keep such a list restorable, raise `maxItemBytes` or lower `maxQuerySize`.
+
 When a row before one of the rows that are left is missing, or no row is left, the rows that are left are still restored, but the query is not restored as loaded (`wasLoaded: false`), so the list with a gap — or an empty list — is never presented as the complete one:
 
 - Online, hooks report `status: 'loading'` and fetch the query right away, as for a query that was never cached. The remaining rows are available in `items` meanwhile (stores using [Partial Resources](./partial-resources.md) hide items while loading, as usual).
