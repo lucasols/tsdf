@@ -3471,6 +3471,305 @@ test('an offline creation that references no entity and waits for a decision del
   hook.unmount();
 });
 
+test('discarding one of two failed offline changes of a document keeps the other one visible until it is handled', async () => {
+  const sessionKey = 'offline-discard-document-pending-session';
+
+  // The server rejects every change, so they end up waiting for the user to
+  // decide what to do with them.
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    getSessionKey: () => sessionKey,
+    storeManager: createStoreManager({
+      errorNormalizer: normalizeError,
+      getSessionKey: () => sessionKey,
+      offlineSession: {
+        network: network.config,
+        classifyRetryableFailure: (error, ctx) =>
+          classifyRetryableReplayFailure(error, ctx.phase),
+      },
+    }),
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: () => {
+              throw new Error('update rejected');
+            },
+            onSuccessExecute: () => {},
+          },
+        },
+      },
+    },
+  });
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(`value:${doc.data?.value ?? 'null'}`);
+  });
+  // Let the mount revalidation finish while online.
+  await advanceTime(1_000);
+
+  const updateValueOffline = async (value: number) => {
+    await act(async () => {
+      await env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = value;
+          });
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: { operation: 'updateValue', input: { value } },
+      });
+    });
+  };
+
+  env.addTimelineComments('beforeNextAction', [
+    'offline: change the value to 2, then to 3',
+  ]);
+  await act(async () => {
+    network.goOffline();
+    await Promise.resolve();
+  });
+  await updateValueOffline(2);
+  await updateValueOffline(3);
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects both changes until they need a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  // 3 attempts per change, 5s apart: 30s covers both.
+  await advanceTime(30_000);
+  await flushAllTimers();
+
+  const [firstResolution, secondResolution] =
+    env.apiStore.getOfflineResolutions();
+  if (!firstResolution || !secondResolution) {
+    throw new Error('Expected both changes to be waiting for a resolution');
+  }
+  expect(
+    [firstResolution, secondResolution].map(
+      (resolution) => summarizeResolution(resolution).input,
+    ),
+  ).toMatchInlineSnapshot(`['value: 2', 'value: 3']`);
+
+  // Discard the first change. Refetching the document now would replace the
+  // second change, which still waits for a decision: the document keeps
+  // showing it.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the change to 2: no refetch, the change to 3 is still shown',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      firstResolution.id,
+      'updateValue',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  // Discarding the last change refetches the document: it shows the server
+  // value again.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the change to 3: the document is refetched',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      secondResolution.id,
+      'updateValue',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui        |
+    0      | "value:1" | ui-initialized
+    10ms   | "value:1" | 🔴 >fetch-started
+    810ms  | "value:1" | 🔴 <fetch-finished (value: 1)
+    1s     | "value:1" | -- offline: change the value to 2, then to 3
+    .      | "value:2" | ui-changed
+    .      | "value:2" | offline:updateValue queued
+    .      | "value:3" | ui-changed
+    .      | "value:3" | offline:updateValue queued
+    .      | "value:3" | -- back online: the server rejects both changes until they need a resolution
+    .      | "value:3" | offline:updateValue replay-started
+    6s     | "value:3" | offline:updateValue replay-started
+    11s    | "value:3" | offline:updateValue replay-started
+    .      | "value:3" | offline:updateValue resolution-required
+    .      | "value:3" | offline:updateValue replay-started
+    16s    | "value:3" | offline:updateValue replay-started
+    21s    | "value:3" | offline:updateValue replay-started
+    .      | "value:3" | offline:updateValue resolution-required
+    31.01s | "value:3" | -- discard the change to 2: no refetch, the change to 3 is still shown
+    .      | "value:3" | -- discard the change to 3: the document is refetched
+    .      | "value:3" | 🟠 >fetch-started
+    31.81s | "value:3" | 🟠 <fetch-finished (value: 1)
+    .      | "value:1" | ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
+test('discarding one of two failed offline changes of a collection item keeps the other one visible until it is handled', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-collection-pending-session';
+
+  type RejectedRenameOperations = {
+    patchUserName: CollectionOfflineOperationDefinition<
+      { value: { name: string } },
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+
+  // The server rejects every rename, so they end up waiting for the user to
+  // decide what to do with them.
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    RejectedRenameOperations
+  >(
+    { 'users||1': { name: 'Ada' } },
+    {
+      id: 'offline-discard-collection-pending-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('rename rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const hook = renderHook(() => {
+    const ada = env.apiStore.useItem('users||1');
+    env.trackItemUI('ada', ada.data?.value.name ?? `- ${ada.status}`);
+  });
+  await advanceTime(1_000);
+
+  const renameAdaOffline = async (name: string) => {
+    await act(async () => {
+      await env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('users||1', () => ({ value: { name } }));
+        },
+        mutation: () => Promise.reject(new Error('unreachable while offline')),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name },
+        },
+      });
+    });
+  };
+
+  env.addTimelineComments('beforeNextAction', ['offline: rename Ada twice']);
+  await renameAdaOffline('Ada renamed');
+  await renameAdaOffline('Ada renamed again');
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects both renames until they need a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  // 3 attempts per rename, 5s apart: 30s covers both.
+  await advanceTime(30_000);
+  await flushAllTimers();
+
+  const [firstRename, secondRename] = env.apiStore.getOfflineResolutions();
+  if (!firstRename || !secondRename) {
+    throw new Error('Expected both renames to be waiting for a resolution');
+  }
+
+  // Discard the first rename. Refetching Ada now would replace the second
+  // rename, which still waits for a decision: she keeps showing it.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the first rename: no refetch, the second rename is still shown',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      firstRename.id,
+      'patchUserName',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  // Discarding the last rename refetches Ada: she shows the server name.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the second rename: Ada is refetched',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      secondRename.id,
+      'patchUserName',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ada               |
+    0      | Ada               | [ada] ui-initialized
+    1s     | Ada               | -- offline: rename Ada twice
+    .      | Ada renamed       | [ada] ui-changed
+    .      | Ada renamed       | offline:patchUserName queued
+    .      | Ada renamed again | [ada] ui-changed
+    .      | Ada renamed again | offline:patchUserName queued
+    .      | Ada renamed again | -- back online: the server rejects both renames until they need a resolution
+    .      | Ada renamed again | offline:patchUserName replay-started
+    6s     | Ada renamed again | offline:patchUserName replay-started
+    11s    | Ada renamed again | offline:patchUserName replay-started
+    .      | Ada renamed again | offline:patchUserName resolution-required
+    .      | Ada renamed again | offline:patchUserName replay-started
+    16s    | Ada renamed again | offline:patchUserName replay-started
+    21s    | Ada renamed again | offline:patchUserName replay-started
+    .      | Ada renamed again | offline:patchUserName resolution-required
+    31.01s | Ada renamed again | -- discard the first rename: no refetch, the second rename is still shown
+    .      | Ada renamed again | -- discard the second rename: Ada is refetched
+    .      | Ada renamed again | 🔴 [users||1] >fetch-started
+    31.81s | Ada renamed again | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
+    .      | Ada               | [ada] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('discarding failed offline changes of collection items puts those items back to the server values', async () => {
   network.setOffline();
   const sessionKey = 'offline-discard-collection-item-session';

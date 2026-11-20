@@ -109,7 +109,8 @@ type OfflineStoreAdapter = {
    * them back to, so the store refetches the entities from the server.
    * `payload` is the item payload the operation referenced, if any: the
    * store may have no state left to read it from (an item deleted locally).
-   * `hasPendingResolutions` is `true` while other changes of the store still
+   * Entities other changes still wait for a manual resolution on are left
+   * out: a refetch would replace those changes. `hasPendingResolutions` is `true` while other changes of the store still
    * wait for a manual resolution: a broad refetch (e.g. of lists) would
    * replace them, so the store should limit itself to the discarded entities.
    */
@@ -2549,7 +2550,10 @@ export function createOfflineStoreController<
 
   /**
    * Refetches the entities discarded queued work referenced (its optimistic
-   * changes cannot be rolled back locally), except the removed temp entities.
+   * changes cannot be rolled back locally), except the removed temp entities
+   * and the entities other changes still wait for a decision on: a refetch
+   * would replace those changes. The recovery revalidation refetches them
+   * once the last one is handled.
    */
   function revalidateDiscardedWork(
     discardedWork: Pick<
@@ -2561,13 +2565,17 @@ export function createOfflineStoreController<
     const entities: (OfflineEntityRef & {
       payload: ValidPayload | undefined;
     })[] = [];
-    const seenEntityKeys = new Set<string>();
+    const skippedEntityKeys = new Set(removedTempEntityKeys);
+    for (const resolution of resolutions.values()) {
+      for (const ref of resolution.entityRefs) {
+        skippedEntityKeys.add(ref.entityKey);
+      }
+    }
 
     for (const workItem of discardedWork) {
       for (const ref of workItem.entityRefs) {
-        if (removedTempEntityKeys.has(ref.entityKey)) continue;
-        if (seenEntityKeys.has(ref.entityKey)) continue;
-        seenEntityKeys.add(ref.entityKey);
+        if (skippedEntityKeys.has(ref.entityKey)) continue;
+        skippedEntityKeys.add(ref.entityKey);
 
         entities.push({
           ...ref,
