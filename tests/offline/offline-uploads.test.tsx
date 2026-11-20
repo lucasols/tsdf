@@ -731,14 +731,14 @@ test('queued direct uploads keep same logical field names isolated per mutation'
     await flushAllTimers();
 
     expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
-      "tsdf-uploads (1.40 kb)
-      └ offline-direct-upload-collision-session (1.37 kb)
-        ├ offline-direct-upload-collision-doc:1735689612000:eeeeeeee:avatar (0.66 kb)
+      "tsdf-uploads (1.56 kb)
+      └ offline-direct-upload-collision-session (1.54 kb)
+        ├ offline-direct-upload-collision-doc:1735689612000:eeeeeeee:avatar (0.74 kb)
         │ ├ binary.blob (0.06 kb)
-        │ └ metadata.json (0.47 kb)
-        └ offline-direct-upload-collision-doc:1735689612009:i:avatar (0.64 kb)
+        │ └ metadata.json (0.56 kb)
+        └ offline-direct-upload-collision-doc:1735689612009:i:avatar (0.72 kb)
           ├ binary.blob (0.06 kb)
-          └ metadata.json (0.46 kb)"
+          └ metadata.json (0.54 kb)"
     `);
 
     // Reconnecting should replay each mutation with its own original file.
@@ -1998,4 +1998,142 @@ test('upload concurrency is respected across separate resolve calls, and an uplo
     - 'upload-start:second.png'
     - 'upload-finish:second.png'
   `);
+});
+
+test('a file queued offline is kept after a restart when another store is created before the store that queued it', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  const sessionKey = 'offline-lazy-store-upload-session';
+  const replayedFiles: Array<{ fileName?: string; fileText: string | null }> =
+    [];
+
+  function createManager() {
+    return createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: opfsOfflineUploadAdapter,
+          upload: ({ id }) => Promise.resolve(`server:${id}`),
+        },
+      },
+    });
+  }
+
+  // The store of the "profile" screen, whose edits carry an avatar file.
+  function createProfileStore(
+    storeManager: ReturnType<typeof createManager>,
+    testScenario: 'loaded' | 'idle',
+  ) {
+    return createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(1, {
+      id: 'offline-lazy-profile-doc',
+      storeManager,
+      testScenario,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: rc_object({ value: rc_number }),
+              kind: 'update',
+              execute: async (ctx) => {
+                const file = ctx.uploads.filesById.avatar;
+                replayedFiles.push({
+                  fileName: file?.name,
+                  fileText: file ? await file.text() : null,
+                });
+                return ctx.input;
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    });
+  }
+
+  // Queue a profile edit with an avatar while offline.
+  network.setOffline();
+  const storeManager = createManager();
+  storeManager.getOfflineStatus();
+  const profileEnv = createProfileStore(storeManager, 'loaded');
+  await flushAllTimers();
+
+  await resolveAfterAllTimers(
+    profileEnv.apiStore.performMutation({
+      mutation: () => Promise.resolve({ value: 2 }),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+      upload: {
+        avatar: new File(['avatar body'], 'avatar.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+      },
+    }),
+  );
+  await flushAllTimers();
+  expect(storeManager.getOfflineUploads()).toHaveLength(1);
+
+  // The app restarts on another screen: only the "settings" store is created,
+  // the profile store is code-split and created later.
+  resetSessionForTests();
+  const restartedStoreManager = createManager();
+  restartedStoreManager.getOfflineStatus();
+  const settingsEnv = createDocumentStoreTestEnv<
+    number,
+    DirectUploadUpdateOperations
+  >(1, {
+    id: 'offline-lazy-settings-doc',
+    storeManager: restartedStoreManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: rc_object({ value: rc_number }),
+            kind: 'update',
+            execute: (ctx) => Promise.resolve(ctx.input),
+            onSuccessExecute: () => {},
+          },
+        },
+      },
+    },
+  });
+  await flushAllTimers();
+
+  // Still offline, the user edits a setting.
+  await resolveAfterAllTimers(
+    settingsEnv.apiStore.performMutation({
+      mutation: () => Promise.resolve({ value: 5 }),
+      offline: { operation: 'updateValue', input: { value: 5 } },
+    }),
+  );
+  await flushAllTimers();
+
+  // The queued profile edit still needs its avatar, so the settings store
+  // being the only one created must not delete it.
+  expect(
+    restartedStoreManager.getOfflineUploads().map((upload) => upload.state),
+  ).toMatchInlineSnapshot(`['pending']`);
+  expect(getOpfsDirTree(mockBrowserOpfs)).toContain('binary.blob');
+
+  // The user opens the profile screen and the connection comes back: the
+  // queued edit is sent with the original file.
+  createProfileStore(restartedStoreManager, 'idle');
+  await flushAllTimers();
+  await act(async () => {
+    network.goOnline();
+    await Promise.resolve();
+  });
+  await flushAllTimers();
+
+  expect(replayedFiles).toMatchInlineSnapshot(`
+    - { fileName: 'avatar.txt', fileText: 'avatar body' }
+  `);
+  // Once the profile store exists and its edit is sent, the file is unused
+  // and removed as usual.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });

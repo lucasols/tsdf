@@ -1367,6 +1367,8 @@ class SessionOfflineCoordinator {
     file: Blob | File;
     source?: 'manual' | 'mutation';
     metadata?: ValidPayload;
+    /** Store whose queued mutation attaches the file. */
+    storeName?: string;
   }): Promise<void> {
     if (!this.#uploadsConfig) {
       throw new Error(
@@ -1397,6 +1399,7 @@ class SessionOfflineCoordinator {
       undefined,
       this.#getCurrentUploadOnlineSessionStartedAt(),
       args.metadata,
+      args.storeName,
     );
 
     await this.#saveUploadRecord(nextRecord);
@@ -1416,6 +1419,7 @@ class SessionOfflineCoordinator {
       file: args.file,
       source: existing?.source ?? 'manual',
       metadata: args.metadata ?? existing?.metadata,
+      storeName: existing?.storeName,
     });
   }
 
@@ -2233,8 +2237,16 @@ class SessionOfflineCoordinator {
     const uploadsConfig = this.#uploadsConfig;
     if (!uploadsConfig) return;
 
+    // Only files of stores created in this tab: the queue of a store that isn't
+    // created yet (code-split screens, the app started on another screen) is
+    // not loaded, so its files look unused.
     const removableIds = [...this.#uploads.values()]
-      .filter((upload) => upload.source === 'mutation')
+      .filter(
+        (upload) =>
+          upload.source === 'mutation' &&
+          upload.storeName !== undefined &&
+          this.#registrations.has(upload.storeName),
+      )
       .map((upload) => upload.id)
       .filter(
         (id) =>
