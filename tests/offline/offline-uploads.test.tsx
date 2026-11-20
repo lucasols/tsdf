@@ -4249,6 +4249,84 @@ test('files attached directly to a mutation are deleted when that mutation is di
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
 
+test('a file attached to a mutation is kept while another store queues a mutation during the file write', async () => {
+  const mockBrowserOpfs = createMockBrowserOpfs();
+  network.setOffline();
+  const storeManager = createUploadCleanupStoreManager(
+    'offline-direct-upload-concurrent-session',
+  );
+  const replayedFiles: string[] = [];
+
+  function createDocEnv(id: string) {
+    return createDocumentStoreTestEnv<number, DirectUploadUpdateOperations>(1, {
+      id,
+      storeManager,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offline: {
+          operations: {
+            updateValue: {
+              inputSchema: rc_object({ value: rc_number }),
+              kind: 'update',
+              execute: async (ctx) => {
+                const file = ctx.uploads.filesById.avatar;
+                if (file) replayedFiles.push(await file.text());
+                return ctx.input;
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    });
+  }
+
+  const profile = createDocEnv('offline-direct-upload-concurrent-profile');
+  const settings = createDocEnv('offline-direct-upload-concurrent-settings');
+  await flushAllTimers();
+
+  // --- Action: one offline save edits two stores, one of them with a file ---
+  // The settings mutation is queued while the profile file is still being
+  // written to storage, before the profile mutation that references it is.
+  await resolveWithin(
+    Promise.all([
+      profile.apiStore.performMutation({
+        optimisticUpdate: () => {},
+        mutation: () => Promise.resolve({ value: 2 }),
+        offline: { operation: 'updateValue', input: { value: 2 } },
+        upload: {
+          avatar: new File(['avatar body'], 'avatar.txt', {
+            type: 'text/plain',
+            lastModified: 1,
+          }),
+        },
+      }),
+      settings.apiStore.performMutation({
+        optimisticUpdate: () => {},
+        mutation: () => Promise.resolve({ value: 3 }),
+        offline: { operation: 'updateValue', input: { value: 3 } },
+      }),
+    ]),
+  );
+
+  // The attached file is still stored for the queued profile mutation.
+  expect(
+    storeManager
+      .getOfflineUploads()
+      .map((upload) => pick(upload, ['source', 'state'])),
+  ).toMatchInlineSnapshot(`- { source: 'mutation', state: 'pending' }`);
+
+  // --- Assert: after reconnecting the profile mutation is sent with its file ---
+  await reconnect();
+
+  expect(replayedFiles).toMatchInlineSnapshot(`['avatar body']`);
+  expect(profile.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  // Once replayed, nothing needs the attached file anymore.
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
+});
+
 test('replacing an upload right after a restart keeps the metadata saved before the restart', async () => {
   createMockBrowserOpfs();
   const sessionKey = 'offline-upload-metadata-replace-after-restart-session';

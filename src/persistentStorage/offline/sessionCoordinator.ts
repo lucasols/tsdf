@@ -682,6 +682,12 @@ class SessionOfflineCoordinator {
    * had not reported its references, or the upload was still being sent.
    */
   #pendingUploadReleases = new Set<string>();
+  /**
+   * Files attached to a mutation that is still being queued: saved before the
+   * queue entry that references them, so unused-mutation-upload cleanup must
+   * skip them until a store reports that reference.
+   */
+  #stagedMutationUploadIds = new Set<string>();
   /** Adapter removals in flight, awaited before the same id is read or saved. */
   #uploadRemovals = new Map<string, Promise<void>>();
   #uploadCleanupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1138,6 +1144,7 @@ class SessionOfflineCoordinator {
 
     // A file staged again under a released id is a new upload.
     this.#pendingUploadReleases.delete(args.id);
+    if (args.source === 'mutation') this.#stagedMutationUploadIds.add(args.id);
 
     const existing = this.#uploads.get(args.id);
 
@@ -1192,6 +1199,7 @@ class SessionOfflineCoordinator {
     if (this.#uploadPromisesById.has(id)) {
       throw new Error(`Cannot delete upload "${id}" while it is uploading`);
     }
+    this.#stagedMutationUploadIds.delete(id);
     await this.#removeUploads([id]);
   }
 
@@ -1222,6 +1230,12 @@ class SessionOfflineCoordinator {
    * still being sent settles.
    */
   async #releasePendingUploads(): Promise<void> {
+    if (this.#pendingUploadReleases.size === 0) return;
+
+    // A released upload not restored from storage yet would be skipped below
+    // and then listed back with nothing left to delete it.
+    await this.#restoreStoredUploads();
+
     if (
       this.#disposed ||
       this.#pendingUploadReleases.size === 0 ||
@@ -1300,8 +1314,14 @@ class SessionOfflineCoordinator {
    * moved it to manual resolution. Uploads still being sent are marked if
    * they fail too. Uploads that are not waiting on a failure (restarted or
    * uploaded meanwhile) are left untouched.
+   *
+   * Never rejects: the state only drives the upload UI, so a storage error is
+   * reported instead of interrupting the replay.
    */
   async markUploadsFailed(ids: readonly string[]): Promise<void> {
+    const reportError = (error: unknown) =>
+      this.#onPersistentStorageError?.(error);
+
     const settledIds: string[] = [];
     for (const id of ids) {
       const inFlight = this.#uploadPromisesById.get(id);
@@ -1310,12 +1330,12 @@ class SessionOfflineCoordinator {
         continue;
       }
 
-      void inFlight
-        .catch(() => this.#markUploadFailed(id))
-        .catch((error: unknown) => this.#onPersistentStorageError?.(error));
+      void inFlight.catch(() => this.#markUploadFailed(id)).catch(reportError);
     }
 
-    await Promise.all(settledIds.map((id) => this.#markUploadFailed(id)));
+    await Promise.all(
+      settledIds.map((id) => this.#markUploadFailed(id).catch(reportError)),
+    );
   }
 
   async #markUploadFailed(id: string): Promise<void> {
@@ -2165,7 +2185,8 @@ class SessionOfflineCoordinator {
         .filter(
           (id) =>
             !this.#referencedUploadIds.has(id) &&
-            !this.#uploadPromisesById.has(id),
+            !this.#uploadPromisesById.has(id) &&
+            !this.#stagedMutationUploadIds.has(id),
         ),
     );
   }
@@ -2323,6 +2344,9 @@ class SessionOfflineCoordinator {
     }
     this.#protectedKeysByAdapter = nextProtectedKeysByAdapter;
     this.#referencedUploadIds = referencedUploadIds;
+    for (const id of this.#stagedMutationUploadIds) {
+      if (referencedUploadIds.has(id)) this.#stagedMutationUploadIds.delete(id);
+    }
 
     if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
       this.#protectedKeys = nextProtectedKeys;

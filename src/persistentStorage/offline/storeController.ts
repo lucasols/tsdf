@@ -1102,6 +1102,7 @@ export function createOfflineStoreController<
       for (const entry of loadedQueueEntries.values()) {
         queueEntries.set(entry.id, entry);
       }
+      const droppedResolutions: PersistedOfflineResolutionRecord[] = [];
       for (const resolution of loadedResolutionEntries.values()) {
         const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
         if (!parsed.ok) {
@@ -1111,6 +1112,7 @@ export function createOfflineStoreController<
         const operation = operations[resolution.operation];
         if (!operation) {
           void current.resolutionNamespace.remove(resolution.id);
+          droppedResolutions.push(resolution);
           continue;
         }
         resolutions.set(resolution.id, resolution);
@@ -1118,6 +1120,9 @@ export function createOfflineStoreController<
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
+      // The operation of these was removed from the app, so they will never
+      // replay and the uploads only they depended on have no consumer left.
+      void deleteOrphanedDependencyUploads(current, droppedResolutions);
     })().finally(() => {
       hydratedPromise = null;
     });
@@ -2492,6 +2497,11 @@ export function createOfflineStoreController<
     parentEntry: OfflineQueueEntry;
     parentResolution: PersistedOfflineResolutionRecord;
   }): Promise<void> {
+    // Replay will not upload these again on its own, so an upload left waiting
+    // on an earlier failure must not keep reporting an automatic retry.
+    await args.current.session.markUploadsFailed(
+      args.parentEntry.dependencyUploadIds ?? [],
+    );
     await removeEntry(args.parentEntry.id, args.current, true);
     await persistResolution(args.parentResolution, args.current, true);
     await promoteBlockedTempCreateDescendants({
@@ -3505,11 +3515,6 @@ export function createOfflineStoreController<
           failedUploadId !== undefined && !allowReplayRetry;
 
         if (retriesExhausted || uploadWillNotBeRetried) {
-          if (failedUploadId !== undefined) {
-            await current.session.markUploadsFailed(
-              entryToUse.dependencyUploadIds ?? [],
-            );
-          }
           await persistManualResolutionChain({
             current,
             parentEntry: entryToUse,
