@@ -13,6 +13,8 @@ import {
 import {
   createDefaultStatus,
   createOfflineSession,
+  recheckIsSessionInOfflineMode,
+  subscribeToOfflineRecovery,
 } from './persistentStorage/offline/sessionCoordinator';
 import type {
   GlobalOfflineEntity,
@@ -179,7 +181,13 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
   getAllStoreIds: () => string[];
   /** Resets all registered stores except the ignored logical ids. */
   resetAll: (ignoreStores: string[]) => void;
-  /** Signals a shared real-time transport reconnect to all registered stores. */
+  /**
+   * Signals a shared real-time transport reconnect to all registered stores.
+   * While the offline session is in offline mode it only re-checks
+   * connectivity instead: each store is revalidated when it recovers (the session is back online, its queued
+   * mutations finished replaying and the store has nothing left waiting for
+   * a manual resolution).
+   */
   onTransportReconnect: () => void;
 } & StoreManagerOfflineApi<TUploadRef>;
 
@@ -187,6 +195,7 @@ type RegisteredStore = {
   id: string;
   reset: () => void;
   onTransportReconnect: () => void;
+  onOfflineRecovery: () => void;
   /**
    * Applies a generic resolution action to one of the store's own offline
    * resolutions, returning why it was not applied. `undefined` when the store
@@ -202,6 +211,7 @@ type RegisteredStore = {
 
 type StoreManagerRegistry = {
   appVersion: string | undefined;
+  unsubscribeFromOfflineRecovery: (() => void) | undefined;
   removedStoreIds: ReadonlySet<string>;
   browserTabsPresence: BrowserTabsPresencePriority | undefined;
   nextStoreRegistrationId: number;
@@ -379,6 +389,7 @@ export function createStoreManager<
   }
   const registry: StoreManagerRegistry = {
     appVersion,
+    unsubscribeFromOfflineRecovery: undefined,
     removedStoreIds: new Set(removedStores.map(({ id }) => id)),
     browserTabsPresence: undefined,
     nextStoreRegistrationId: 0,
@@ -535,6 +546,10 @@ export function createStoreManager<
       }
     },
     onTransportReconnect: () => {
+      // Re-checked once for all stores: leaving offline mode revalidates
+      // every recovered store, and staying offline holds the revalidations.
+      if (recheckIsSessionInOfflineMode(storeManager.getSessionKey())) return;
+
       for (const registeredStore of [...registry.stores.values()]) {
         registeredStore.onTransportReconnect();
       }
@@ -591,9 +606,28 @@ export function registerStoreWithManager(
   registry.nextStoreRegistrationId += 1;
   registry.stores.set(registrationId, store);
 
+  // Also without offline support of its own: the stores hold their
+  // revalidations while another manager's session with the same key is in
+  // offline mode, so they must still learn when it recovers.
+  if (!registry.unsubscribeFromOfflineRecovery) {
+    registry.unsubscribeFromOfflineRecovery = subscribeToOfflineRecovery(
+      (sessionKey, hasStoreRecovered) => {
+        if (storeManager.getSessionKey() !== sessionKey) return;
+
+        for (const registeredStore of [...registry.stores.values()]) {
+          if (hasStoreRecovered(registeredStore.id)) {
+            registeredStore.onOfflineRecovery();
+          }
+        }
+      },
+    );
+  }
+
   return () => {
     registry.stores.delete(registrationId);
     if (registry.stores.size === 0) {
+      registry.unsubscribeFromOfflineRecovery?.();
+      registry.unsubscribeFromOfflineRecovery = undefined;
       registry.browserTabsPresence?.close();
       registry.browserTabsPresence = undefined;
     }

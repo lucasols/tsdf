@@ -194,6 +194,7 @@ Behavior:
 - `deriveQuery(...)` receives `{ fields, isOfflineMode, deriveSource }`
 - `fields` lets derivation opt out of partial-resource queries when local data is insufficient
 - `deriveSource` is `'online'`, `'offline'`, or `'sticky-offline'`
+- A query derived offline keeps its derived view after reconnecting (`'sticky-offline'`) until it is invalidated, which also happens automatically once the offline session recovered (queued mutations replayed)
 - Derived results expose `isDerived: true`
 - Derived results always expose `hasMore: false`
 - Derived results do not create `state.queries[queryKey]`

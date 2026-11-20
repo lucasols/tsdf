@@ -496,10 +496,12 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
     network.goOnline();
   });
 
-  // Remount the same wildcard hook. It should request just the invalidated
-  // field and then expose the refreshed item data.
+  // Remount the same wildcard hook. Recovering from offline mode marks the
+  // whole store as stale (anything could have changed while offline), so the
+  // remount refetches the full item, which covers the invalidated field, and
+  // then exposes the refreshed item data.
   env.addTimelineComments('beforeNextAction', [
-    'remount after reconnecting; the wildcard hook should refetch the pending `age` field',
+    'remount after reconnecting; the wildcard hook should refetch the item, including the pending `age` field',
   ]);
   const remountedHook = renderTrackedItem();
   await flushAllTimers();
@@ -511,14 +513,14 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
       data: { age: 31, id: 1, name: 'Ada' }
       status: 'success'
     `);
+  // Exactly one request after reconnecting: the offline recovery revalidation
+  // and the pending `age` invalidation are served by the same full refetch.
   expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
     - _type: 'item'
       payload: { itemId: 'users||1' }
       time: '10ms -> 810ms | duration: 800ms'
     - _type: 'item'
-      payload:
-        fields: ['age']
-        itemId: 'users||1'
+      payload: { itemId: 'users||1' }
       time: '2.83s -> 3.63s | duration: 800ms'
   `);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -526,9 +528,9 @@ test('partial-resource field invalidations should still refetch `fields: *` afte
     time  | item-data                      | item-status |
     1.81s | {"age":30,"id":1,"name":"Ada"} | success     | -- timeline-cleared
     2.83s | {"age":30,"id":1,"name":"Ada"} | success     | -- invalidate only \`age\` while offline; the hook should stay on cached data
-    .     | {"age":30,"id":1,"name":"Ada"} | success     | -- remount after reconnecting; the wildcard hook should refetch the pending \`age\` field
+    .     | {"age":30,"id":1,"name":"Ada"} | success     | -- remount after reconnecting; the wildcard hook should refetch the item, including the pending \`age\` field
     .     | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] >fetch-started
-    3.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"age":31})
+    3.63s | {"age":30,"id":1,"name":"Ada"} | success     | 🟠 [users||1] <fetch-finished (value: {"id":1,"name":"Ada","age":31,"city":"London"})
     .     | {"age":31,"id":1,"name":"Ada"} | success     | [item-data] ui-changed
     "
   `);

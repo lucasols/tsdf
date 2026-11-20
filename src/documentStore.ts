@@ -44,6 +44,7 @@ import {
 } from './persistentStorage/offline/mutationRuntime';
 import { isOfflineResolutionRecordForStore } from './persistentStorage/offline/offlineResolution.typeGuards';
 import {
+  recheckIsSessionInOfflineMode,
   useOfflineStoreEntities,
   useOfflineStoreResolutions,
 } from './persistentStorage/offline/sessionCoordinator';
@@ -252,7 +253,9 @@ export type DocumentStoreOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
-   * revalidation. Set to `0` to disable this cooldown. */
+   * revalidation. Recovering from offline mode waits one cooldown for a
+   * reconnect before revalidating, so the two share one revalidation. Set to
+   * `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   /** Delay applied to medium-priority requests before they enter the scheduler. */
   mediumPriorityDelayMs?: number;
@@ -761,6 +764,13 @@ export function createDocumentStore<
             normalizeEntityRefs: () => [
               { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
             ],
+            revalidateDiscardedEntities: () => {
+              // Discarding the last change of a realtime store schedules its
+              // recovery revalidation for the end of the reconnect cooldown:
+              // run it now with this refetch instead of fetching twice.
+              focusLifecycle.flushPendingReconnectRevalidate();
+              invalidateData('highPriority');
+            },
             getProtectedCacheKeys: () => {
               const sessionKey = getSessionKeyForRuntime();
               if (sessionKey === false) return [];
@@ -1126,6 +1136,10 @@ export function createDocumentStore<
     );
   }
 
+  function getIsOfflineMode(): boolean {
+    return recheckIsSessionInOfflineMode(storeManager.getSessionKey());
+  }
+
   const focusLifecycle = createStoreFocusLifecycle(
     resolvedRevalidateOnWindowFocus,
     usesRealTimeUpdates,
@@ -1136,11 +1150,12 @@ export function createDocumentStore<
       invalidateData('lowPriority');
     },
     () => {
-      invalidateData('realtimeUpdate');
+      invalidateData(usesRealTimeUpdates ? 'realtimeUpdate' : 'highPriority');
     },
     () => {
       scheduler.reevaluateDelayedRTU();
     },
+    getIsOfflineMode,
     import.meta.env.DEV
       ? {
           debugLogger: storeManager.debugLogger,
@@ -1867,6 +1882,7 @@ export function createDocumentStore<
     id,
     reset,
     onTransportReconnect,
+    onOfflineRecovery: focusLifecycle.onOfflineRecovery,
     resolveOfflineResolution:
       offlineController?.resolveOfflineResolutionWithGenericAction,
   });
