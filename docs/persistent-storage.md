@@ -305,6 +305,7 @@ const settingsStore = createDocumentStore<Settings>({
   - `local-sync`: ~1 week old entries
   - `opfsPersistentStorage`: ~2 weeks old entries
   - `indexedDbPersistentStorage`: ~2 weeks old entries
+- Queued offline mutations and unresolved offline resolutions never expire, in any adapter.
 - Entries referenced by queued offline mutations are protected from expiry until that queued work is replayed or discarded.
 - Expiry runs for an adapter only while at least one store uses it, and then covers every entry in that adapter, including ones left by stores that moved elsewhere. See [Changing a store's adapter](#changing-a-stores-adapter).
 
