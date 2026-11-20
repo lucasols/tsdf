@@ -149,12 +149,26 @@ type SessionWorkDiscardedMessage = BrowserTabsMessageMeta & {
   removedTempEntityKeys: string[];
 };
 
+/**
+ * A tab deleted stored uploads. Each tab keeps its own in-memory copy of the
+ * upload records, so the others drop theirs: a stale copy would stay listed,
+ * be saved back to storage by the retention stamp, or be uploaded again.
+ * `releasedRefs` carries the server refs of uploads deleted after they were
+ * sent, so ids still held by app data resolve in every open tab.
+ */
+type SessionUploadsRemovedMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-uploads-removed';
+  ids: string[];
+  releasedRefs: Array<[id: string, ref: ValidPayload]>;
+};
+
 type OfflineSessionMessage =
   | SessionSnapshotMessage
   | SessionQueueEntryMessage
   | SessionResolutionMessage
   | SessionTempReconciledMessage
   | SessionWorkDiscardedMessage
+  | SessionUploadsRemovedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -975,6 +989,10 @@ class SessionOfflineCoordinator {
               );
             return;
           }
+          if (message.kind === 'offline-uploads-removed') {
+            this.#applyRemoteUploadsRemoved(message.ids, message.releasedRefs);
+            return;
+          }
           this.#applyRemoteSnapshot(message);
         },
         undefined,
@@ -1498,13 +1516,25 @@ class SessionOfflineCoordinator {
     // and then listed back with nothing left to delete it.
     await this.#restoreStoredUploads();
 
-    if (
+    const cannotRelease = (): boolean =>
       this.#disposed ||
       this.#pendingUploadReleases.size === 0 ||
       // A store that has not reported its queue yet may reference the uploads.
-      this.#storeContributions.size !== this.#registrations.size
-    ) {
-      return;
+      this.#storeContributions.size !== this.#registrations.size;
+    if (cannotRelease()) return;
+
+    // Uploads another tab staged after this tab listed the stored ones are
+    // only in storage, e.g. when this tab discards work that tab queued.
+    const missingIds = [...this.#pendingUploadReleases].filter(
+      (id) => !this.#uploads.has(id) && !this.#uploadPromisesById.has(id),
+    );
+    if (missingIds.length > 0) {
+      try {
+        await Promise.all(missingIds.map((id) => this.#getUploadRecord(id)));
+      } catch (error) {
+        this.#onPersistentStorageError?.(error);
+      }
+      if (cannotRelease()) return;
     }
 
     const removableIds: string[] = [];
@@ -2264,9 +2294,13 @@ class SessionOfflineCoordinator {
       for (const id of expiredIdSet) {
         this.#uploads.delete(id);
       }
-      await Promise.all(
-        expiredIds.map((id) => this.#removeStoredUpload(uploadsConfig, id)),
-      );
+      try {
+        await Promise.all(
+          expiredIds.map((id) => this.#removeStoredUpload(uploadsConfig, id)),
+        );
+      } finally {
+        this.#publishUploadsRemoved(expiredIds);
+      }
       didChange = true;
     }
 
@@ -2503,14 +2537,49 @@ class SessionOfflineCoordinator {
     const uploadsConfig = this.#uploadsConfig;
     if (!uploadsConfig || ids.length === 0) return;
 
-    await Promise.all(
-      ids.map((id) => {
-        this.#uploads.delete(id);
-        return this.#removeStoredUpload(uploadsConfig, id);
-      }),
-    );
+    try {
+      await Promise.all(
+        ids.map((id) => {
+          this.#uploads.delete(id);
+          return this.#removeStoredUpload(uploadsConfig, id);
+        }),
+      );
+    } finally {
+      this.#publishUploadsRemoved(ids);
+    }
     this.#syncUploadsState();
     void this.#refreshUploadRetention();
+  }
+
+  /** Tells the other tabs that this tab deleted these stored uploads. */
+  #publishUploadsRemoved(ids: readonly string[]): void {
+    // A tab opened later lists the stored uploads, so it has nothing to drop.
+    if (this.#disposed || ids.length === 0 || !this.hasOtherTabs()) return;
+
+    const releasedRefs: Array<[string, ValidPayload]> = [];
+    for (const id of ids) {
+      const ref = this.#releasedUploadRefs.get(id);
+      if (ref !== undefined) releasedRefs.push([id, ref]);
+    }
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-uploads-removed',
+      ids: [...ids],
+      releasedRefs,
+    });
+  }
+
+  #applyRemoteUploadsRemoved(
+    ids: readonly string[],
+    releasedRefs: ReadonlyArray<readonly [string, ValidPayload]>,
+  ): void {
+    for (const [id, ref] of releasedRefs) this.#releasedUploadRefs.set(id, ref);
+
+    let didChange = false;
+    for (const id of ids) {
+      this.#pendingUploadReleases.delete(id);
+      if (this.#uploads.delete(id)) didChange = true;
+    }
+    if (didChange) this.#syncUploadsState();
   }
 
   /**

@@ -136,7 +136,7 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   /**
    * Resolves a staged upload id to its latest final ref, uploading first if
    * needed. An upload deleted after it was sent keeps resolving to its ref for
-   * the rest of the app session.
+   * the rest of the app session, in every tab open when it was deleted.
    *
    * When the `upload` transport fails, the result is `Result.err` with the
    * transport error and the upload becomes `failed` with `lastError` set. The
