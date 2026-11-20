@@ -5,11 +5,22 @@ import {
   type MaybeTSDFResult,
 } from '../../utils/storeShared';
 
-export const offlineConnectivityError = {
+/**
+ * The error TSDF reports for a fetch that could not complete because the
+ * offline session is in offline mode. Use `isOfflineStoreError` to recognise
+ * it.
+ */
+export type OfflineStoreError = StoreError & {
+  code: 0;
+  id: 'offline';
+  message: 'Offline';
+};
+
+export const offlineConnectivityError: OfflineStoreError = {
   code: 0,
   id: 'offline',
   message: 'Offline',
-} as const;
+};
 
 export function normalizeFetchResultError(
   fetchResult: { offline: true } | { offline: false; error: unknown },

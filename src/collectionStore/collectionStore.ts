@@ -34,6 +34,7 @@ import {
   type OfflineMutationResult,
 } from '../persistentStorage/offline/mutationRuntime';
 import { isOfflineResolutionRecordForStore } from '../persistentStorage/offline/offlineResolution.typeGuards';
+import { isOfflineStoreError } from '../persistentStorage/offline/offlineStoreError.typeGuards';
 import {
   captureOfflineOverlayEntries,
   rebindOfflineOverlayEntries,
@@ -1893,7 +1894,7 @@ export function createCollectionStore<
       materializeSyncState: true,
     });
 
-    if (item?.error?.id === 'offline') {
+    if (isOfflineStoreError(item?.error)) {
       const hydratedItem = persistence?.readHydratedItem(itemId);
 
       if (hydratedItem?.data) {

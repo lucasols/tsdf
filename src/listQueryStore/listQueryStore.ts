@@ -37,7 +37,7 @@ import {
   useOfflineStoreEntities,
   useOfflineStoreEntitiesWithPayload,
   useOfflineStoreResolutions,
-  useOfflineStoreStatus,
+  useOfflineStoreIsOfflineMode,
 } from '../persistentStorage/offline/sessionCoordinator';
 import {
   createOfflineStoreController,
@@ -3135,6 +3135,25 @@ export function createListQueryStore<
     applyRemoteQuerySnapshot(message);
   }
 
+  /**
+   * Reactive version of `isOfflineFetchModeActive` for the hooks: it re-renders
+   * them when the session enters or leaves offline mode, and, unlike the
+   * session status getter, reads nothing that writes state during render.
+   */
+  function useIsStoreOfflineMode(): boolean {
+    const isSessionOfflineMode = useOfflineStoreIsOfflineMode({
+      sessionKey: getSessionKeyForRuntime(),
+      inactiveScope: id,
+    });
+
+    return (
+      isSessionOfflineMode ||
+      isOfflineNetworkModeActiveSync(
+        resolvedOfflineConfig?.session.getConfig().network,
+      )
+    );
+  }
+
   const useMultipleListQueries: ListQueryUseMultipleListQueriesApi<
     ItemState,
     QueryPayload,
@@ -3163,15 +3182,7 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
-    const offlineStatus = useOfflineStoreStatus({
-      sessionKey: getSessionKeyForRuntime(),
-      inactiveScope: id,
-    });
-    const isStoreOfflineMode =
-      offlineStatus.isOfflineMode ||
-      isOfflineNetworkModeActiveSync(
-        resolvedOfflineConfig?.session.getConfig().network,
-      );
+    const isStoreOfflineMode = useIsStoreOfflineMode();
     const offlineOverlaysSelector = useCallback(
       (
         state: Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>,
@@ -3278,6 +3289,7 @@ export function createListQueryStore<
     const offlineOverlays = offlineOverlayStore.useSelector(
       offlineOverlaysSelector,
     );
+    const isStoreOfflineMode = useIsStoreOfflineMode();
 
     return useMultipleItemsHook<
       ItemState,
@@ -3310,6 +3322,7 @@ export function createListQueryStore<
       partialResources,
       offlineEntities,
       offlineOverlays,
+      isStoreOfflineMode,
     );
   };
 

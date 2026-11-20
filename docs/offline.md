@@ -111,6 +111,40 @@ Queued mutations and pending resolutions are persisted through the store's own `
 
 The mutation promise resolves only after the queue write has settled, so a mutation is never reported as queued while its write is still in flight. If the storage adapter cannot write the queue at all (for example the browser lost its IndexedDB connection and a new one cannot be opened), the failure is reported through `onPersistentStorageError`, but the result is still `{ kind: 'queued' }`: the mutation stays queued in memory, its optimistic state stays visible, and it is replayed if the session recovers in the same page load. It is not on disk, so it is lost if the page is reloaded first. Treat an `onPersistentStorageError` call while offline as "pending changes may not survive a reload".
 
+## Reading While Offline
+
+While the session is in offline mode, fetches are not sent to the server. What a document, item or query reports depends on whether it has data to return:
+
+- **Cached data** (loaded earlier, or restored from persistent storage): the cached data stays visible with `status: 'success'` and `error: null`. A refetch attempted offline leaves it that way, so there is no offline error to hide in the UI.
+- **Nothing cached**: the read fails with `status: 'error'` and the offline error `{ code: 0, id: 'offline', message: 'Offline' }`. This is the only offline state the app has to explain to the user.
+
+Use `isOfflineStoreError(error)` to recognise that error instead of comparing `error.id` by hand. It matches the whole error shape, so an app error whose `errorNormalizer` also uses the `'offline'` id is not mistaken for it, and it narrows the error to the exported `OfflineStoreError` type:
+
+```tsx
+import { isOfflineStoreError } from 'tsdf';
+
+function UserName({ id }: { id: number }) {
+  const { data, error, isLoading } = userStore.useItem({ id });
+
+  if (isLoading) return <Spinner />;
+  if (isOfflineStoreError(error)) return <NotAvailableOffline />;
+  if (error) return <ErrorMessage error={error} />;
+
+  return <span>{data?.name}</span>;
+}
+```
+
+It also accepts the `StoreFetchError` returned by the `awaitFetch` methods, which resolve with the cached data while offline and with the offline error only when nothing is cached.
+
+With [partial resources](./partial-resources.md), "cached" is decided per hook, by the `fields` it requests:
+
+- A hook whose requested fields are all cached is a cached read: `status: 'success'`, `error: null`. Fields that were loaded and later invalidated count as cached — they stay visible and are refreshed after recovering.
+- A hook requesting fields that were never loaded has nothing usable to return for them, so it reports `status: 'error'` with the offline error, without attempting a fetch. Its data stays hidden as it would be while loading (`data: null`, `items: []`), or stays visible with `loadingFields` when `showPartialAsRefetching` is enabled.
+
+Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
+
+Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
+
 ## Revalidation After Recovering
 
 While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations only re-check connectivity (`network.getIsOffline`) instead of refetching, and cached data stays visible. When the re-check finds the connection back, the session leaves offline mode and the stores revalidate as described below.
