@@ -1055,7 +1055,9 @@ export function createFetchApi<
     if (!persistence) return 'skipped';
 
     const hydratedQuery = persistence.readHydratedQuery(queryKey);
-    if (!hydratedQuery) return 'skipped';
+    // A cached list missing some of its rows can't continue the loaded one:
+    // its next rows may come after a missing row.
+    if (!hydratedQuery?.wasLoaded) return 'skipped';
     if (!isStrictItemKeyPrefix(queryState.items, hydratedQuery.items)) {
       return 'skipped';
     }

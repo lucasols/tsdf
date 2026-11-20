@@ -936,6 +936,109 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`[]`);
   });
 
+  test('reopening a list whose rows were evicted in the same session saves it as complete again', async () => {
+    const storeName = 'lq-evicted-rows-reopened';
+    const projectsQuery = { tableId: 'projects' };
+    const serverData = {
+      users: [
+        { id: 1, name: 'User 1' },
+        { id: 2, name: 'User 2' },
+      ],
+      projects: [
+        { id: 1, name: 'Project 1' },
+        { id: 2, name: 'Project 2' },
+      ],
+    };
+
+    function startNextSession() {
+      return createEnv({
+        storeName,
+        sessionKey: 'sess1',
+        // The item budget fits only one list's two rows.
+        maxItemBytes: sumPersistedEntryBytes(
+          ...serverData.users.map((row) =>
+            getLocalListItemEntrySizeBytes(
+              rawItemPayload('users', row.id),
+              row,
+            ),
+          ),
+        ),
+        offlineNetwork: network.config,
+        serverData: structuredClone(serverData),
+      });
+    }
+
+    // The users list is opened and cached.
+    const session = startNextSession();
+    const usersList = renderHook(() =>
+      session.apiStore.useListQuery(usersListQuery),
+    );
+    await flushAllTimers();
+    usersList.unmount();
+    await advanceTime(60_000);
+
+    // Opening the projects list pushes the items over maxItemBytes: the user
+    // rows are evicted and the users query is rewritten as missing rows.
+    const projectsList = renderHook(() =>
+      session.apiStore.useListQuery(projectsQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    projectsList.unmount();
+    expect(
+      persistentStore
+        .scope(storeName, 'sess1')
+        .listQuery.readQueryEntry(usersListQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: []
+      missingItems: '✅'
+      payload: { tableId: 'users' }
+    `);
+    await advanceTime(60_000);
+
+    // Both projects are deleted, which frees the item budget again.
+    session.apiStore.deleteItemState('projects||1');
+    session.apiStore.deleteItemState('projects||2');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The users list is opened again in the same session: its refetch returns
+    // the same rows as before the eviction, which fit and are cached again.
+    const reopenedUsersList = renderHook(() =>
+      session.apiStore.useListQuery(usersListQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    reopenedUsersList.unmount();
+
+    // The users query is saved as a complete list again: the save is not
+    // skipped because the list is the same as before the eviction.
+    expect(
+      persistentStore
+        .scope(storeName, 'sess1')
+        .listQuery.readQueryEntry(usersListQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||1', '"users||2']
+      payload: { tableId: 'users' }
+    `);
+
+    // So an offline start shows the cached list as loaded.
+    network.setOffline();
+    const { renders } = mountUsersList(startNextSession());
+    await flushAllTimers();
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2]
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      "
+    `);
+  });
+
   test('refreshing the first page of a cached list that lost a row does not save the rows after it as complete', async () => {
     const storeName = 'lq-evicted-row-in-cached-suffix';
     const projectsQuery = { tableId: 'projects' };
@@ -1034,6 +1137,133 @@ describe('localStorage: list query store persistence', () => {
     expect(
       getStoredQueryItemKeys(storeName, 'sess1', usersListQuery),
     ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+  });
+
+  test('loading more rows offline is skipped when a cached row after the loaded page was evicted', async () => {
+    const storeName = 'lq-offline-load-more-evicted-row';
+    const projectsQuery = { tableId: 'projects' };
+    const serverData = {
+      users: Array.from({ length: 7 }, (_, index) => ({
+        id: index + 1,
+        name: `User ${index + 1}`,
+      })),
+      projects: [
+        { id: 1, name: 'Project 1' },
+        { id: 2, name: 'Project 2' },
+      ],
+    };
+    // The item budget fits the two project rows and four of the user rows.
+    const maxItemBytes = sumPersistedEntryBytes(
+      ...serverData.projects.map((row) =>
+        getLocalListItemEntrySizeBytes(rawItemPayload('projects', row.id), row),
+      ),
+      ...[1, 2, 3, 5].map((id) =>
+        getLocalListItemEntrySizeBytes(rawItemPayload('users', id), {
+          id,
+          name: `User ${id}`,
+        }),
+      ),
+    );
+
+    function startNextSession() {
+      return createEnv({
+        storeName,
+        sessionKey: 'sess1',
+        maxItemBytes,
+        offlineNetwork: network.config,
+        serverData: structuredClone(serverData),
+        defaultQuerySize: 2,
+      });
+    }
+
+    // The first five rows of the users list are loaded and cached.
+    let session = startNextSession();
+    session.apiStore.scheduleListQueryFetch('highPriority', usersListQuery, 5);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    await advanceTime(60_000);
+
+    // In a new session "User 4", "User 1" and "User 2" are opened in that
+    // order, so "User 4" ends up as the least recently read row.
+    session = startNextSession();
+    for (const id of [4, 1, 2]) {
+      const userDetails = renderHook(() =>
+        session.apiStore.useItem(rawItemPayload('users', id)),
+      );
+      await flushAllTimers();
+      // Wait for the localStorage touch throttle so the read recency is stored.
+      await advanceTime(SYNC_STORAGE_TOUCH_THROTTLE_MS + 100);
+      userDetails.unmount();
+      await advanceTime(60_000);
+    }
+
+    // Only the first page of the users list is refreshed: the cached rows
+    // after it are kept in storage.
+    session.apiStore.scheduleListQueryFetch('highPriority', usersListQuery, 2);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // Loading the projects list pushes the items over maxItemBytes: "User 4"
+    // is evicted and the users query is rewritten without it.
+    const projectsList = renderHook(() =>
+      session.apiStore.useListQuery(projectsQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    projectsList.unmount();
+    expect(
+      persistentStore
+        .scope(storeName, 'sess1')
+        .listQuery.readQueryEntry(usersListQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '✅'
+      items: ['"users||1', '"users||2', '"users||3', '"users||5']
+      missingItems: '✅'
+      payload: { tableId: 'users' }
+    `);
+
+    network.setOffline();
+
+    // Offline, loading more rows from the cache must not skip over the
+    // evicted row: that would show the list without "User 4" as loaded.
+    const loadMoreResults = [
+      session.apiStore.loadMore(usersListQuery, 1),
+      session.apiStore.loadMore(usersListQuery, 1),
+    ];
+    const queryState = session.apiStore.getQueryState(usersListQuery);
+    expect({
+      loadMoreResults,
+      status: queryState?.status,
+      items: queryState?.items,
+    }).toMatchInlineSnapshot(`
+      items: ['"users||1', '"users||2']
+      loadMoreResults: ['skipped', 'skipped']
+      status: 'success'
+    `);
+
+    // The hook does not offer the cached rows after the evicted one either.
+    const usersList = renderHook(() =>
+      session.apiStore.useListQuery(usersListQuery),
+    );
+    expect(usersList.result.current.hasMore).toMatchInlineSnapshot(`"❌"`);
+    await flushAllTimers();
+    usersList.unmount();
+
+    // The next offline start does not restore a list with a hole as loaded.
+    await advanceTime(1100);
+    await flushAllTimers();
+    const { renders } = mountUsersList(startNextSession());
+    await flushAllTimers();
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2]
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      "
+    `);
   });
 
   test('a cached list with a row the schema no longer accepts shows the remaining rows as still loading, then the full list', async () => {

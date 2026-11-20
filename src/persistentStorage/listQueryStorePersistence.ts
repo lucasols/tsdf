@@ -2873,7 +2873,17 @@ export function setupListQueryPersistence<
         } else {
           saved = false;
         }
-        if (!saved) staleQueryFound = true;
+        if (!saved) {
+          staleQueryFound = true;
+        } else if (querySnapshotByKey.has(queryData.queryKey)) {
+          // Keep the remembered entry in sync with the rewrite: a later save
+          // of the same rows as before the eviction must not be skipped as
+          // unchanged.
+          querySnapshotByKey.set(
+            queryData.queryKey,
+            JSON.stringify(nextQueryData),
+          );
+        }
       }
 
       if (staleQueryFound) {

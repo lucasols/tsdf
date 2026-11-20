@@ -67,6 +67,21 @@ import {
   type TSFDUseListQueryReturn,
 } from './types';
 
+/**
+ * Whether the cached query has rows after `items` that offline `loadMore` can
+ * append. A cached list missing some of its rows can't: its next rows may come
+ * after a missing row.
+ */
+function canLoadMoreFromCachedQuery(
+  items: readonly string[],
+  cachedQuery: { items: readonly string[]; wasLoaded: boolean } | undefined,
+): boolean {
+  return (
+    cachedQuery?.wasLoaded === true &&
+    isStrictItemKeyPrefix(items, cachedQuery.items)
+  );
+}
+
 export type UseMultipleListQueriesOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -927,11 +942,10 @@ export function useMultipleListQueries<
                 })),
             error,
             hasMore: isOfflineMode
-              ? !!readFallbackQueryState &&
-                effectiveQuery.query.hasMore &&
-                isStrictItemKeyPrefix(
+              ? effectiveQuery.query.hasMore &&
+                canLoadMoreFromCachedQuery(
                   effectiveQuery.query.items,
-                  readFallbackQueryState(queryKey)?.items ?? [],
+                  readFallbackQueryState?.(queryKey),
                 )
               : effectiveQuery.query.hasMore,
             isDerived: effectiveQuery.isDerived,
