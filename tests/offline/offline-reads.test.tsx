@@ -1642,6 +1642,195 @@ test('when the fetch of the missing fields of an item is what reveals a backend 
   hook.unmount();
 });
 
+/** Summarizes an imperative read result: its data, or whether it failed with the offline error. */
+function describeRead(
+  result:
+    | { ok: true; value: unknown }
+    | { ok: false; error: { id: string; code: number; message: string } },
+): string {
+  if (result.ok) return `ok ${JSON.stringify(result.value)}`;
+  return isOfflineStoreError(result.error)
+    ? 'offline error'
+    : `error ${result.error.id}`;
+}
+
+test('when imperative item reads ask for fields that are not cached while offline, they fail with the offline error instead of returning the partial item, and succeed after recovering', async () => {
+  const env = createPartialUsersEnv('offline-partial-item-imperative-reads');
+
+  // Only `name` is loaded (and so cached) before going offline.
+  await resolveAfterAllTimers(
+    env.apiStore.awaitItemFetch('users||1', { fields: ['name'] }),
+  );
+
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  async function readAll() {
+    const awaitUncached = await resolveAfterAllTimers(
+      env.apiStore.awaitItemFetch('users||1', { fields: ['name', 'age'] }),
+    );
+
+    return {
+      // A read of the cached field is served from the cache.
+      cachedFields: describeRead(
+        await resolveAfterAllTimers(
+          env.apiStore.getItemFromStateOrFetch('users||1', {
+            fields: ['name'],
+          }),
+        ),
+      ),
+      // Reads of data that was never loaded cannot be answered offline: they
+      // must not report success with the requested fields missing.
+      uncachedFields: describeRead(
+        await resolveAfterAllTimers(
+          env.apiStore.getItemFromStateOrFetch('users||1', {
+            fields: ['name', 'age'],
+          }),
+        ),
+      ),
+      allFields: describeRead(
+        await resolveAfterAllTimers(
+          env.apiStore.getItemFromStateOrFetch('users||1', { fields: '*' }),
+        ),
+      ),
+      awaitUncachedFields: awaitUncached.error
+        ? describeRead({ ok: false, error: awaitUncached.error })
+        : describeRead({ ok: true, value: awaitUncached.data }),
+    };
+  }
+
+  expect(await readAll()).toMatchInlineSnapshot(`
+    allFields: 'offline error'
+    awaitUncachedFields: 'offline error'
+    cachedFields: 'ok {"name":"Ada"}'
+    uncachedFields: 'offline error'
+  `);
+
+  // The failed reads leave the cached item untouched, so hooks and state
+  // getters still show it as loaded.
+  expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(
+    `name: 'Ada'`,
+  );
+  const itemQuery =
+    env.store.state.itemQueries[env.apiStore.getItemKey('users||1')];
+  expect(itemQuery && pick(itemQuery, ['status', 'error']))
+    .toMatchInlineSnapshot(`
+    error: null
+    status: 'success'
+  `);
+
+  // After recovering, the same reads fetch the missing fields. The cached-field
+  // read now also shows `age`, merged into the cached item by the first read.
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(await readAll()).toMatchInlineSnapshot(`
+    allFields: 'ok {"name":"Ada","age":30,"id":1,"city":"London"}'
+    awaitUncachedFields: 'ok {"name":"Ada","age":30}'
+    cachedFields: 'ok {"name":"Ada","age":30}'
+    uncachedFields: 'ok {"name":"Ada","age":30}'
+  `);
+});
+
+test('when imperative list query reads ask for fields that are not cached while offline, they fail with the offline error instead of returning partial items, and succeed after recovering', async () => {
+  const env = createPartialUsersEnv('offline-partial-query-imperative-reads');
+  const usersQuery = { tableId: 'users' };
+
+  // Only `name` is loaded (and so cached) before going offline.
+  await resolveAfterAllTimers(
+    env.apiStore.awaitListQueryFetch(usersQuery, { fields: ['name'] }),
+  );
+
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+
+  function itemsData(
+    result: Awaited<ReturnType<typeof env.apiStore.getQueryFromStateOrFetch>>,
+  ) {
+    return result.ok
+      ? { ok: true as const, value: result.value.items.map((i) => i.data) }
+      : result;
+  }
+
+  async function readAll() {
+    const awaitUncached = await resolveAfterAllTimers(
+      env.apiStore.awaitListQueryFetch(usersQuery, { fields: ['name', 'age'] }),
+    );
+
+    return {
+      // A read of the cached field is served from the cache.
+      cachedFields: describeRead(
+        itemsData(
+          await resolveAfterAllTimers(
+            env.apiStore.getQueryFromStateOrFetch(usersQuery, {
+              fields: ['name'],
+            }),
+          ),
+        ),
+      ),
+      // Reads of data that was never loaded cannot be answered offline: they
+      // must not report success with the requested fields missing.
+      uncachedFields: describeRead(
+        itemsData(
+          await resolveAfterAllTimers(
+            env.apiStore.getQueryFromStateOrFetch(usersQuery, {
+              fields: ['name', 'age'],
+            }),
+          ),
+        ),
+      ),
+      allFields: describeRead(
+        itemsData(
+          await resolveAfterAllTimers(
+            env.apiStore.getQueryFromStateOrFetch(usersQuery, { fields: '*' }),
+          ),
+        ),
+      ),
+      awaitUncachedFields: awaitUncached.error
+        ? describeRead({ ok: false, error: awaitUncached.error })
+        : describeRead({
+            ok: true,
+            value: awaitUncached.items.map((i) => i.data),
+          }),
+    };
+  }
+
+  expect(await readAll()).toMatchInlineSnapshot(`
+    allFields: 'offline error'
+    awaitUncachedFields: 'offline error'
+    cachedFields: 'ok [{"name":"Ada"}]'
+    uncachedFields: 'offline error'
+  `);
+
+  // The failed reads leave the cached query untouched.
+  const queryState = env.apiStore.getQueryState(usersQuery);
+  expect(queryState && pick(queryState, ['status', 'error']))
+    .toMatchInlineSnapshot(`
+    error: null
+    status: 'success'
+  `);
+
+  // After recovering, the same reads fetch the missing fields. The cached-field
+  // read now also shows `age`, merged into the cached item by the first read.
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(await readAll()).toMatchInlineSnapshot(`
+    allFields: 'ok [{"name":"Ada","age":30,"id":1,"city":"London"}]'
+    awaitUncachedFields: 'ok [{"name":"Ada","age":30}]'
+    cachedFields: 'ok [{"name":"Ada","age":30}]'
+    uncachedFields: 'ok [{"name":"Ada","age":30}]'
+  `);
+});
+
 test('when the app starts offline, startup cleanup keeps an expired list-query cache available for offline reads', async () => {
   // Startup cleanup should preserve stale list-query snapshots too, otherwise a
   // cold offline launch would erase the only cached query the UI can show.
