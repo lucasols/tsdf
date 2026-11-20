@@ -148,7 +148,10 @@ type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
     items: ItemPayload[];
     status: 'success' | 'error' | 'skipped';
   };
-  /** Emitted when an offline temp item is reconciled to its final payload. */
+  /**
+   * Emitted when an offline temp item is reconciled to its final payload, in
+   * every tab of the session, not only the one that sent the creation.
+   */
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 

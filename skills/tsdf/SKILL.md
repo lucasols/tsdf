@@ -230,11 +230,15 @@ Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`
 
 Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query).
 
+Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
+
 Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied).
 
 Recovery: while offline, `onTransportReconnect()` and focus revalidations only re-check connectivity; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities (or the ones they `dependsOn`) are still pending.
 
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. The upload ref type is inferred from the `upload` transport (do not annotate the manager as plain `StoreManager`); pass `StoreManagerUploadRef<typeof storeManager>` as the last type argument of `Define*OfflineOperations` to type `ctx.uploads.resolvedRefsById` in `execute`. Optional `uploads.resolvedRefSchema` validates refs restored from storage / other tabs (invalid ones are re-uploaded). The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
+
+Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
 
 Docs: `docs/offline.md`.
 
