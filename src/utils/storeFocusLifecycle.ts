@@ -4,6 +4,22 @@ type TimeoutId = ReturnType<typeof setTimeout>;
 
 type StoreFocusLifecycle = {
   onTransportReconnect: () => void;
+  /**
+   * The store recovered from offline mode (the session is online, its queued
+   * mutations finished replaying and the store has nothing left waiting for
+   * a manual resolution): revalidates it. Real-time stores wait one transport
+   * reconnect cooldown first, so a transport reconnect in that window runs a
+   * single revalidation for both. Reconnect and focus revalidations are
+   * dropped while offline, see below.
+   */
+  onOfflineRecovery: () => void;
+  /**
+   * Runs now a reconnect or recovery revalidation that is waiting for the
+   * cooldown to end, for callers about to refetch the store anyway: both
+   * fetches then collapse into one instead of refetching again when the
+   * cooldown ends.
+   */
+  flushPendingReconnectRevalidate: () => void;
   reset: () => void;
   dispose: () => void;
 };
@@ -24,8 +40,16 @@ export function createStoreFocusLifecycle(
   getWindowIsFocused: () => boolean,
   onWindowFocus: (handler: () => void) => () => void,
   onWindowFocusRevalidate: () => void,
-  onTransportReconnectRevalidate: () => void,
+  /** Revalidation run after a transport reconnect or an offline recovery. */
+  onReconnectRevalidate: () => void,
   onWindowFocusReevaluateDelayedRTU: () => void,
+  /**
+   * Whether the manager's offline session is in offline mode (re-checking
+   * connectivity while it is). Revalidations are dropped while it is: they
+   * could only fail, and recovering from offline mode revalidates the store
+   * anyway (`onOfflineRecovery`).
+   */
+  getIsOfflineMode: () => boolean,
   debug: FocusLifecycleDebugOptions | undefined,
 ): StoreFocusLifecycle {
   let cleanupFocusListener: (() => void) | null = null;
@@ -72,8 +96,10 @@ export function createStoreFocusLifecycle(
       : undefined;
 
   function runTransportReconnectRevalidate(): void {
+    if (getIsOfflineMode()) return;
+
     lastTransportReconnectRevalidateAt = Date.now();
-    onTransportReconnectRevalidate();
+    onReconnectRevalidate();
   }
 
   function ensureReconnectFocusListener(): void {
@@ -150,6 +176,14 @@ export function createStoreFocusLifecycle(
         return;
       }
 
+      if (getIsOfflineMode()) {
+        logWindowFocusRevalidate?.('window focus revalidation skipped', {
+          reason: 'offline-mode',
+          status: 'skipped',
+        });
+        return;
+      }
+
       logWindowFocusRevalidate?.('window focus revalidation triggered', {
         policy:
           typeof revalidateOnWindowFocus === 'function' ? 'dynamic' : 'enabled',
@@ -189,7 +223,38 @@ export function createStoreFocusLifecycle(
     scheduleTrailingTransportReconnectRevalidate();
   }
 
+  function onOfflineRecovery(): void {
+    // Not gated by the last revalidation: whatever was revalidated before the
+    // offline period / the replay is stale again. Unfocused tabs still wait
+    // for focus.
+    if (!usesRealTimeUpdates || transportReconnectCooldownMs <= 0) {
+      flushTransportReconnectRevalidate();
+      return;
+    }
+
+    if (hasPendingReconnectRevalidateOnFocus) return;
+
+    // Real-time apps usually reconnect their transport right after the network
+    // comes back, and that reconnect revalidates the store anyway (it has to,
+    // updates sent while the transport was down are missed). Waiting one
+    // cooldown lets that reconnect flush this revalidation instead of
+    // revalidating twice; without a reconnect it runs when the cooldown ends.
+    scheduleTrailingTransportReconnectRevalidate();
+  }
+
+  function flushPendingReconnectRevalidate(): void {
+    if (reconnectCooldownTimeoutId === null) return;
+
+    flushTransportReconnectRevalidate();
+  }
+
   reset();
 
-  return { onTransportReconnect, reset, dispose };
+  return {
+    onTransportReconnect,
+    onOfflineRecovery,
+    flushPendingReconnectRevalidate,
+    reset,
+    dispose,
+  };
 }

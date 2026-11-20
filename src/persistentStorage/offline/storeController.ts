@@ -104,6 +104,21 @@ type OfflineStoreAdapter = {
     sessionKey: string;
     entities: GlobalOfflineEntity[];
   }) => void;
+  /**
+   * A queued mutation for these entities was discarded. Its optimistic
+   * changes are still applied to the store and no baseline exists to roll
+   * them back to, so the store refetches the entities from the server.
+   * `payload` is the item payload the operation referenced, if any: the
+   * store may have no state left to read it from (an item deleted locally).
+   * Entities other changes still wait for a manual resolution on are left
+   * out: a refetch would replace those changes. `hasPendingResolutions` is `true` while other changes of the store still
+   * wait for a manual resolution: a broad refetch (e.g. of lists) would
+   * replace them, so the store should limit itself to the discarded entities.
+   */
+  revalidateDiscardedEntities?: (
+    entities: (OfflineEntityRef & { payload: ValidPayload | undefined })[],
+    hasPendingResolutions: boolean,
+  ) => void;
 };
 
 type ActiveSessionState = {
@@ -548,6 +563,8 @@ export function createOfflineStoreController<
     pendingEntities: PendingTempEntity[];
     nextEntry?: OfflineQueueEntry;
     removedEntries: OfflineQueueEntry[];
+    /** The queued entry `nextEntry` merges into, when accumulating */
+    accumulatedEntry?: OfflineQueueEntry;
   };
 
   type AppliedQueuedMutation = PlannedQueuedMutation & {
@@ -588,12 +605,88 @@ export function createOfflineStoreController<
     );
   }
 
+  function getOperationRawEntityRefs(
+    operation: AnyOfflineOperationDefinition,
+    operationName: string,
+    validatedInput: unknown,
+  ): unknown[] {
+    return typeof operation.getEntityRefs === 'function'
+      ? operation.getEntityRefs({ input: validatedInput })
+      : (storeAdapter.getEntityRefs?.({
+          operationName,
+          input: validatedInput,
+        }) ?? []);
+  }
+
+  /**
+   * Whether mutations queued earlier for the entities this mutation affects
+   * or depends on (`dependsOn`), or that depend on an entity this mutation
+   * affects, are still waiting to reach the server (queued, replaying or
+   * unconfirmed).
+   */
+  function hasQueuedWorkForSameEntities(
+    prepared: PreparedQueuedMutation,
+  ): boolean {
+    if (queueEntries.size === 0) return false;
+
+    const affectedEntityRefs =
+      prepared.entityRefs ??
+      resolveNormalizedRefs(
+        getOperationRawEntityRefs(
+          prepared.operation,
+          prepared.operationName,
+          prepared.validatedInput,
+        ),
+      );
+    const entityRefs = [
+      ...affectedEntityRefs,
+      ...(prepared.operation.dependsOn
+        ? resolveNormalizedRefs(
+            prepared.operation.dependsOn({ input: prepared.validatedInput }),
+          )
+        : []),
+    ];
+
+    for (const entry of queueEntries.values()) {
+      for (const queuedEntityRef of entry.entityRefs) {
+        if (
+          entityRefs.some((entityRef) =>
+            isSameEntityRef(entityRef, queuedEntityRef),
+          )
+        ) {
+          return true;
+        }
+      }
+
+      // A queued mutation that depends on an entity this one changes (e.g. a
+      // queued child creation and an online delete of its parent) must reach
+      // the server first.
+      const queuedDependencyKeys = getDependencyBlockerEntityKeys(entry);
+      if (
+        affectedEntityRefs.some((entityRef) =>
+          queuedDependencyKeys.has(entityRef.entityKey),
+        )
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function getInitialOfflineMutationAction(
     current: ActiveSessionState,
+    prepared: PreparedQueuedMutation,
   ): PreparedOfflineMutation['initialAction'] {
     const status = current.session.getStatus();
 
-    if (!status.isOfflineMode) return 'run';
+    if (!status.isOfflineMode) {
+      // Sent on its own, an online mutation would reach the server before
+      // the older mutations still queued for the same entities, which would
+      // then overwrite it (or it would target an entity that does not exist
+      // there yet). It joins the queue to keep the order the user made them.
+      return hasQueuedWorkForSameEntities(prepared) ? 'queue' : 'run';
+    }
 
     const cause = getActiveMutationQueueingCause(current);
     if (cause === null) return 'run';
@@ -1471,6 +1564,13 @@ export function createOfflineStoreController<
     );
     const nextReplayEntry = getSortedEntries()[0] ?? null;
 
+    // Before publishing to the session: publishing can make the store
+    // recover and revalidate, which must already see the store's current
+    // entities (e.g. a creation that is no longer local-only).
+    storeAdapter.syncEntityOverlays?.({
+      sessionKey: sessionState.sessionKey,
+      entities,
+    });
     sessionState.session.syncStoreData(storeName, {
       adapter,
       entities,
@@ -1486,10 +1586,6 @@ export function createOfflineStoreController<
               queueOrder: getQueueOrder(nextReplayEntry),
               createdAt: nextReplayEntry.createdAt,
             },
-    });
-    storeAdapter.syncEntityOverlays?.({
-      sessionKey: sessionState.sessionKey,
-      entities,
     });
 
     void syncEntityNamespace(sessionState, entities);
@@ -2425,6 +2521,7 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
+      revalidateDiscardedWork([args.resolution], new Set());
       await deleteOrphanedDependencyUploads(args.current, [args.resolution]);
       return;
     }
@@ -2466,11 +2563,70 @@ export function createOfflineStoreController<
     rollbackTempCreatePendingEntity(args.resolution);
 
     refreshDerivedState(args.current);
-    await deleteOrphanedDependencyUploads(args.current, [
-      args.resolution,
+
+    // The temp entities were removed, but descendants may also have changed
+    // entities that exist on the server (e.g. moved an item into the
+    // discarded one): those are refetched.
+    const discardedWork = [
       ...descendantQueueEntries.values(),
       ...descendantResolutions.values(),
+    ];
+    const removedTempEntityKeys = new Set(parentEntityKeys);
+    for (const workItem of discardedWork) {
+      for (const entityKey of getTempLifecycleEntityKeys(workItem)) {
+        removedTempEntityKeys.add(entityKey);
+      }
+    }
+    revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
+    await deleteOrphanedDependencyUploads(args.current, [
+      args.resolution,
+      ...discardedWork,
     ]);
+  }
+
+  /**
+   * Refetches the entities discarded queued work referenced (its optimistic
+   * changes cannot be rolled back locally), except the removed temp entities
+   * and the entities other changes still wait for a decision on: a refetch
+   * would replace those changes. The recovery revalidation refetches them
+   * once the last one is handled.
+   */
+  function revalidateDiscardedWork(
+    discardedWork: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'entityRefs'
+    >[],
+    removedTempEntityKeys: ReadonlySet<string>,
+  ): void {
+    const entities: (OfflineEntityRef & {
+      payload: ValidPayload | undefined;
+    })[] = [];
+    const skippedEntityKeys = new Set(removedTempEntityKeys);
+    for (const resolution of resolutions.values()) {
+      for (const ref of resolution.entityRefs) {
+        skippedEntityKeys.add(ref.entityKey);
+      }
+    }
+
+    for (const workItem of discardedWork) {
+      for (const ref of workItem.entityRefs) {
+        if (skippedEntityKeys.has(ref.entityKey)) continue;
+        skippedEntityKeys.add(ref.entityKey);
+
+        entities.push({
+          ...ref,
+          payload: getPayloadForEntityRef({
+            operationName: workItem.operation,
+            input: workItem.input,
+            entityKey: ref.entityKey,
+          }),
+        });
+      }
+    }
+
+    if (entities.length === 0) return;
+
+    storeAdapter.revalidateDiscardedEntities?.(entities, resolutions.size > 0);
   }
 
   function collectRetryResolutionChain(args: {
@@ -2694,13 +2850,11 @@ export function createOfflineStoreController<
       );
     }
 
-    const rawEntityRefs =
-      typeof operation.getEntityRefs === 'function'
-        ? operation.getEntityRefs({ input: validatedInput })
-        : (storeAdapter.getEntityRefs?.({
-            operationName,
-            input: validatedInput,
-          }) ?? []);
+    const rawEntityRefs = getOperationRawEntityRefs(
+      operation,
+      operationName,
+      validatedInput,
+    );
     const resolvedEntityRefs = resolveNormalizedRefs(rawEntityRefs);
     const hasTempLifecycle =
       tempEntity !== undefined || tempEntities !== undefined;
@@ -2854,6 +3008,7 @@ export function createOfflineStoreController<
           pendingEntities,
           nextEntry,
           removedEntries: [existingEntry],
+          accumulatedEntry: existingEntry,
         };
       }
     }
@@ -2923,13 +3078,23 @@ export function createOfflineStoreController<
     if (queueOrder === undefined) {
       throw new Error('Missing queue order for prepared offline mutation');
     }
-    const workingQueue = new Map(queueEntries);
-    const plannedMutation = await planPreparedMutation({
-      current,
-      preparedMutation,
-      queueOrder,
-      workingQueue,
-    });
+    let plannedMutation: PlannedQueuedMutation;
+    // An async accumulation merge lets the replay pick up or send the entry
+    // being merged into before it is committed. Merging into it then would
+    // drop the incoming input or send the existing one twice, so the mutation
+    // is planned again. The check runs with no `await` before the commit below.
+    do {
+      plannedMutation = await planPreparedMutation({
+        current,
+        preparedMutation,
+        queueOrder,
+        workingQueue: new Map(queueEntries),
+      });
+    } while (
+      plannedMutation.accumulatedEntry &&
+      queueEntries.get(plannedMutation.accumulatedEntry.id) !==
+        plannedMutation.accumulatedEntry
+    );
 
     const persistedMutations: AppliedQueuedMutation[] = [];
     const persistedUploadIds: string[] = [];
@@ -3352,11 +3517,9 @@ export function createOfflineStoreController<
               lastError,
             ),
           });
-          // Same as when a `needs-confirmation` entry is promoted to manual
-          // resolution: the session is healthy, so the rest of the queue
-          // keeps replaying.
-          if (uploadWillNotBeRetried) continue;
-          return;
+          // The entry left the queue (with its dependents), so the entries
+          // behind it are not waiting on it anymore: keep draining.
+          continue;
         }
 
         await persistEntry(entryToUse, current);
@@ -3404,7 +3567,7 @@ export function createOfflineStoreController<
     await current.session.refreshNetworkState();
 
     return {
-      initialAction: getInitialOfflineMutationAction(current),
+      initialAction: getInitialOfflineMutationAction(current, prepared),
       queueMutation: () => queuePreparedMutations(prepared),
       handleDirectSuccess: () =>
         clearOfflineStatusOnSuccess(prepared.currentSessionKey),
@@ -3568,15 +3731,16 @@ export function createOfflineStoreController<
     }
 
     if (action === 'requeue') {
+      // validated before the resolution is removed, so an invalid input
+      // throws without losing the change the user still has to resolve
+      const preparedMutation = prepareMutationWithSession(current, {
+        operation: operationName,
+        input: resolutionAction?.input,
+        tempIds: resolutionRecord.tempIds,
+        entityRefs: resolutionRecord.entityRefs,
+      });
       await removeResolution(resolutionId, current, true);
-      await queuePreparedMutations(
-        prepareMutationWithSession(current, {
-          operation: operationName,
-          input: resolutionAction?.input,
-          tempIds: resolutionRecord.tempIds,
-          entityRefs: resolutionRecord.entityRefs,
-        }),
-      );
+      await queuePreparedMutations(preparedMutation);
       // The replacement input declared its own dependencies: uploads it kept
       // are still referenced, the ones it dropped are not.
       await deleteOrphanedDependencyUploads(current, [resolutionRecord]);

@@ -788,9 +788,11 @@ test('direct list-query store offline public api', async () => {
     expect(listQueryStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
     expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
     expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
+    // With nothing left to sync the store revalidates from the server, so the
+    // list also shows the user created by the replayed offline mutation.
     expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
       .toMatchInlineSnapshot(`
-        items: ['Ada resolved', 'Grace offline']
+        items: ['Ada resolved', 'Grace offline', 'Linus offline']
         pendingSync: '❌'
         status: 'success'
       `);
@@ -801,7 +803,7 @@ test('direct list-query store offline public api', async () => {
       isDerived: '❌'
       isLoading: '❌'
       isLoadingMore: '❌'
-      items: ['Ada resolved', 'Grace offline']
+      items: ['Ada resolved', 'Grace offline', 'Linus offline']
       payload: { tableId: 'users' }
       pendingSync: '❌'
       queryKey: '["users"]'
@@ -816,7 +818,7 @@ test('direct list-query store offline public api', async () => {
       network: { active: '❌', enabled: '✅' }
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'direct-list-query-offline-session'
-      updatedAt: 1735689618010
+      updatedAt: 1735689619050
     `);
 
     listHook.unmount();
