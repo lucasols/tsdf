@@ -2037,7 +2037,7 @@ test('a session-wide sync problems panel can retry or discard failed mutations f
   // --- Action: "Retry" on the document row, using only the manager ---
   panelRenders.addMark('user clicks Retry on the document row');
   docEnv.addTimelineComments('beforeNextAction', [
-    'user clicks Retry in the panel — the manager requeues the mutation in its store',
+    'user clicks Retry in the panel — the manager requeues the mutation in its store, which revalidates once it is replayed',
   ]);
   const retryResult = await resolveOfflineResolutionThroughManager(
     storeManager,
@@ -2055,7 +2055,7 @@ test('a session-wide sync problems panel can retry or discard failed mutations f
   // --- Action: "Discard" on the collection row, using only the manager ---
   panelRenders.addMark('user clicks Discard on the users row');
   collectionEnv.addTimelineComments('beforeNextAction', [
-    'user clicks Discard in the panel — the manager drops the mutation in its store',
+    'user clicks Discard in the panel — the manager drops the mutation in its store, which refetches the user',
   ]);
   const discardResult = await resolveOfflineResolutionThroughManager(
     storeManager,
@@ -2096,39 +2096,43 @@ test('a session-wide sync problems panel can retry or discard failed mutations f
   // Each store went through the same flow the store-level API produces.
   expect(docEnv.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                 |
-    0     | "value:1 sync:none"                | ui-initialized
-    12s   | "value:2 sync:none"                | ui-changed
-    .     | "value:2 sync:pending"             | ui-changed
-    .     | "value:2 sync:pending"             | offline:updateValue queued
-    .     | "value:2 sync:pending"             | -- reconnect — the replay fails once and requires manual resolution
-    .     | "value:2 sync:syncing"             | ui-changed
-    .     | "value:2 sync:syncing"             | offline:updateValue replay-started
-    .     | "value:2 sync:syncing"             | offline:updateValue resolution-required
-    .     | "value:2 sync:resolution-required" | ui-changed
-    13s   | "value:2 sync:resolution-required" | -- user clicks Retry in the panel — the manager requeues the mutation in its store
-    .     | "value:2 sync:pending"             | ui-changed
-    .     | "value:2 sync:syncing"             | ui-changed
-    .     | "value:2 sync:syncing"             | offline:updateValue replay-started
-    14.2s | "value:2 sync:syncing"             | server-data-changed (value: 2)
-    .     | "value:2 sync:syncing"             | offline:updateValue replay-finished
-    .     | "value:2 sync:none"                | ui-changed
+    time   | ui                                 |
+    0      | "value:1 sync:none"                | ui-initialized
+    12s    | "value:2 sync:none"                | ui-changed
+    .      | "value:2 sync:pending"             | ui-changed
+    .      | "value:2 sync:pending"             | offline:updateValue queued
+    .      | "value:2 sync:pending"             | -- reconnect — the replay fails once and requires manual resolution
+    .      | "value:2 sync:syncing"             | ui-changed
+    .      | "value:2 sync:syncing"             | offline:updateValue replay-started
+    .      | "value:2 sync:syncing"             | offline:updateValue resolution-required
+    .      | "value:2 sync:resolution-required" | ui-changed
+    13s    | "value:2 sync:resolution-required" | -- user clicks Retry in the panel — the manager requeues the mutation in its store, which revalidates once it is replayed
+    .      | "value:2 sync:pending"             | ui-changed
+    .      | "value:2 sync:syncing"             | ui-changed
+    .      | "value:2 sync:syncing"             | offline:updateValue replay-started
+    14.2s  | "value:2 sync:syncing"             | server-data-changed (value: 2)
+    .      | "value:2 sync:syncing"             | offline:updateValue replay-finished
+    .      | "value:2 sync:none"                | ui-changed
+    14.21s | "value:2 sync:none"                | 🔴 >fetch-started
+    15.01s | "value:2 sync:none"                | 🔴 <fetch-finished (value: 2)
     "
   `);
   expect(collectionEnv.timelineString).toMatchInlineSnapshot(`
     "
-    time  | user-1                               |
-    0     | Ada sync:none                        | ui-initialized
-    12s   | Ada renamed sync:none                | ui-changed
-    .     | Ada renamed sync:pending             | ui-changed
-    .     | Ada renamed sync:pending             | offline:renameUser queued
-    .     | Ada renamed sync:pending             | -- reconnect — the replay fails once and requires manual resolution
-    .     | Ada renamed sync:syncing             | ui-changed
-    .     | Ada renamed sync:syncing             | offline:renameUser replay-started
-    .     | Ada renamed sync:syncing             | offline:renameUser resolution-required
-    .     | Ada renamed sync:resolution-required | ui-changed
-    14.2s | Ada renamed sync:resolution-required | -- user clicks Discard in the panel — the manager drops the mutation in its store
-    .     | Ada renamed sync:none                | ui-changed
+    time   | user-1                               |
+    0      | Ada sync:none                        | [user-1] ui-initialized
+    12s    | Ada renamed sync:pending             | [user-1, user-1] ui-changed
+    .      | Ada renamed sync:pending             | offline:renameUser queued
+    .      | Ada renamed sync:pending             | -- reconnect — the replay fails once and requires manual resolution
+    .      | Ada renamed sync:syncing             | [user-1] ui-changed
+    .      | Ada renamed sync:syncing             | offline:renameUser replay-started
+    .      | Ada renamed sync:syncing             | offline:renameUser resolution-required
+    .      | Ada renamed sync:resolution-required | [user-1] ui-changed
+    16.01s | Ada renamed sync:resolution-required | -- user clicks Discard in the panel — the manager drops the mutation in its store, which refetches the user
+    .      | Ada renamed sync:none                | [user-1] ui-changed
+    16.02s | Ada renamed sync:none                | 🔴 [users||1] >fetch-started
+    16.82s | Ada renamed sync:none                | 🔴 [users||1] <fetch-finished (value: {"name":"Ada"})
+    .      | Ada sync:none                        | [user-1] ui-changed
     "
   `);
 
@@ -2298,7 +2302,7 @@ test('the manager reports why a resolution action could not be applied', async (
 
   // --- The generic action a conflict does support still works ---
   env.addTimelineComments('beforeNextAction', [
-    'the rejected actions above left no trace — discard through the manager drops the conflict',
+    'the rejected actions above left no trace — discard through the manager drops the conflict and refetches the document',
   ]);
   const discardResult = await resolveOfflineResolutionThroughManager(
     storeManager,
@@ -2313,20 +2317,22 @@ test('the manager reports why a resolution action could not be applied', async (
   expect(execute).not.toHaveBeenCalled();
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui                                 |
-    0     | "value:1 sync:none"                | ui-initialized
-    .     | "value:2 sync:none"                | ui-changed
-    .     | "value:2 sync:pending"             | ui-changed
-    .     | "value:2 sync:pending"             | offline:updateValue queued
-    .     | "value:2 sync:pending"             | -- reconnect — the replay is stopped as a conflict before execute runs
-    .     | "value:2 sync:syncing"             | ui-changed
-    .     | "value:2 sync:syncing"             | offline:updateValue resolution-required
-    .     | "value:2 sync:resolution-required" | ui-changed
-    10ms  | "value:2 sync:resolution-required" | 🔴 >fetch-started
-    810ms | "value:2 sync:resolution-required" | 🔴 <fetch-finished (value: 1)
-    .     | "value:1 sync:resolution-required" | ui-changed
-    12s   | "value:1 sync:resolution-required" | -- the rejected actions above left no trace — discard through the manager drops the conflict
-    .     | "value:1 sync:none"                | ui-changed
+    time   | ui                                 |
+    0      | "value:1 sync:none"                | ui-initialized
+    .      | "value:2 sync:none"                | ui-changed
+    .      | "value:2 sync:pending"             | ui-changed
+    .      | "value:2 sync:pending"             | offline:updateValue queued
+    .      | "value:2 sync:pending"             | -- reconnect — the replay is stopped as a conflict before execute runs
+    .      | "value:2 sync:syncing"             | ui-changed
+    .      | "value:2 sync:syncing"             | offline:updateValue resolution-required
+    .      | "value:2 sync:resolution-required" | ui-changed
+    10ms   | "value:2 sync:resolution-required" | 🔴 >fetch-started
+    810ms  | "value:2 sync:resolution-required" | 🔴 <fetch-finished (value: 1)
+    .      | "value:1 sync:resolution-required" | ui-changed
+    12s    | "value:1 sync:resolution-required" | -- the rejected actions above left no trace — discard through the manager drops the conflict and refetches the document
+    .      | "value:1 sync:none"                | ui-changed
+    12.01s | "value:1 sync:none"                | 🟠 >fetch-started
+    12.81s | "value:1 sync:none"                | 🟠 <fetch-finished (value: 1)
     "
   `);
 

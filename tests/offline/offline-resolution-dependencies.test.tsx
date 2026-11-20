@@ -1678,7 +1678,7 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
   // --- Discarding the parent through the manager clears the whole chain and
   // rolls the optimistic temp row back, like the store-level discard ---
   env.addTimelineComments('beforeNextAction', [
-    'discard the parent through the manager — the blocked child edit is removed with it',
+    'discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates',
   ]);
   const discardResult = await resolveOfflineResolutionThroughManager(
     storeManager,
@@ -1708,8 +1708,10 @@ test('manager-level actions report blocked resolutions and cascade a parent disc
     .     | Ada, Grace, Linus blocked edit | offline:createUser replay-started
     .     | Ada, Grace, Linus blocked edit | offline:createUser resolution-required
     .     | Ada, Grace, Linus blocked edit | offline:patchUserName resolution-required
-    4.01s | Ada, Grace, Linus blocked edit | -- discard the parent through the manager — the blocked child edit is removed with it
+    4.01s | Ada, Grace, Linus blocked edit | -- discard the parent through the manager — the blocked child edit is removed with it, then the list revalidates
     .     | Ada, Grace                     | ui-changed
+    4.02s | Ada, Grace                     | 🔴 >list-fetch-started
+    4.82s | Ada, Grace                     | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
 
