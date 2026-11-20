@@ -897,7 +897,6 @@ class SessionOfflineCoordinator {
     | OfflineRuntimeConfigUpdate['mutationQueueing']
     | undefined;
   #hydrated = false;
-  #hydration: Promise<void> | undefined;
   #hydrationToken = 0;
   #protectedKeys: string[] = [];
   #protectedKeysByAdapter = new Map<StorageAdapter, string[]>();
@@ -1093,16 +1092,9 @@ class SessionOfflineCoordinator {
     }
   }
 
-  hydrate(): Promise<void> {
-    if (!this.#hydrated) {
-      this.#hydrated = true;
-      this.#hydration = this.#runHydration();
-    }
-
-    return this.#hydration ?? Promise.resolve();
-  }
-
-  async #runHydration(): Promise<void> {
+  async hydrate(): Promise<void> {
+    if (this.#hydrated) return;
+    this.#hydrated = true;
     const hydrationToken = this.#hydrationToken;
     let persistedLocalSnapshot: PersistedLocalSessionSnapshot | null = null;
 
@@ -2463,9 +2455,9 @@ class SessionOfflineCoordinator {
     let failure: Error | undefined;
 
     try {
-      // Startup hydration lists every staged upload, so waiting for it avoids
-      // reading the same file twice and reporting it as missing too early.
-      await this.#hydration?.catch(noop);
+      // Waits for the stored uploads list before reading the file on its own,
+      // so a file staged before a reload is read once and never reported as
+      // missing too early.
       await this.#getUploadRecord(id);
     } catch (error) {
       failure = unknownToError(error);
