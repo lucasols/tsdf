@@ -2328,17 +2328,38 @@ export function createListQueryStore<
 
           rebindOfflineOverlays(itemKeyRewrites);
         },
-        revalidateDiscardedEntities: (entityRefs) => {
+        revalidateDiscardedEntities: (entities) => {
           // Queries too: the discarded change may have removed the item from
           // lists (a delete) or moved it between them.
           invalidateQueryAndItems({
             itemPayload: filterAndMap(
-              entityRefs,
+              entities,
               (ref) => store.state.itemQueries[ref.entityKey]?.payload ?? false,
             ),
             queryPayload: () => true,
             type: 'highPriority',
           });
+
+          if (!fetchItemFn) return;
+
+          for (const { entityKey, payload } of entities) {
+            if (
+              store.state.itemQueries[entityKey] !== null ||
+              payload === undefined
+            ) {
+              continue;
+            }
+
+            // The discarded change deleted the item locally and invalidations
+            // skip deleted items: fetch it again for screens that show it
+            // outside of a list.
+            scheduleItemFetch(
+              'highPriority',
+              // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+              { fields: '*' },
+            );
+          }
         },
         syncEntityOverlays: ({ entities, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)

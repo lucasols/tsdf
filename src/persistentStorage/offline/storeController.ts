@@ -105,8 +105,12 @@ type OfflineStoreAdapter = {
    * A queued mutation for these entities was discarded. Its optimistic
    * changes are still applied to the store and no baseline exists to roll
    * them back to, so the store refetches the entities from the server.
+   * `payload` is the item payload the operation referenced, if any: the
+   * store may have no state left to read it from (an item deleted locally).
    */
-  revalidateDiscardedEntities?: (entityRefs: OfflineEntityRef[]) => void;
+  revalidateDiscardedEntities?: (
+    entities: (OfflineEntityRef & { payload: ValidPayload | undefined })[],
+  ) => void;
 };
 
 type ActiveSessionState = {
@@ -1519,6 +1523,13 @@ export function createOfflineStoreController<
     );
     const nextReplayEntry = getSortedEntries()[0] ?? null;
 
+    // Before publishing to the session: publishing can make the store
+    // recover and revalidate, which must already see the store's current
+    // entities (e.g. a creation that is no longer local-only).
+    storeAdapter.syncEntityOverlays?.({
+      sessionKey: sessionState.sessionKey,
+      entities,
+    });
     sessionState.session.syncStoreData(storeName, {
       adapter,
       entities,
@@ -1534,10 +1545,6 @@ export function createOfflineStoreController<
               queueOrder: getQueueOrder(nextReplayEntry),
               createdAt: nextReplayEntry.createdAt,
             },
-    });
-    storeAdapter.syncEntityOverlays?.({
-      sessionKey: sessionState.sessionKey,
-      entities,
     });
 
     void syncEntityNamespace(sessionState, entities);
@@ -2458,7 +2465,16 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
-      storeAdapter.revalidateDiscardedEntities?.(args.resolution.entityRefs);
+      storeAdapter.revalidateDiscardedEntities?.(
+        args.resolution.entityRefs.map((ref) => ({
+          ...ref,
+          payload: getPayloadForEntityRef({
+            operationName: args.resolution.operation,
+            input: args.resolution.input,
+            entityKey: ref.entityKey,
+          }),
+        })),
+      );
       return;
     }
 

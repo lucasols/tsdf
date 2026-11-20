@@ -2431,3 +2431,140 @@ test('discarding failed offline changes puts the rows back to what the server ha
 
   hook.unmount();
 });
+
+test('discarding a failed offline delete shows the item again on screens that only display that item', async () => {
+  network.setOffline();
+  const sessionKey = 'offline-discard-delete-item-session';
+  type RejectedDeleteOperations = {
+    deleteUser: ListQueryOfflineOperationDefinition<
+      { id: number; name: string },
+      ListQueryParams,
+      string,
+      { itemId: string },
+      unknown
+    >;
+  };
+
+  // The server rejects the delete on every replay attempt, so it ends up
+  // waiting for the user to decide what to do with it.
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    RejectedDeleteOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-discard-delete-item-store',
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          network: network.config,
+          classifyRetryableFailure: (error, ctx) =>
+            classifyRetryableReplayFailure(error, ctx.phase),
+        },
+      }),
+      testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: {
+          operations: {
+            deleteUser: {
+              inputSchema: deleteItemInputSchema,
+              kind: 'delete',
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: () => {
+                throw new Error('delete rejected');
+              },
+              onSuccessExecute: () => {},
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // A detail screen: only Grace's item is displayed, no list is mounted.
+  const hook = renderHook(() => {
+    const grace = env.apiStore.useItem('users||2');
+
+    env.trackItemUI('grace', grace.data?.name ?? `- ${grace.status}`);
+    return grace;
+  });
+  await flushAllTimers();
+
+  env.addTimelineComments('beforeNextAction', ['offline: delete Grace']);
+  await act(async () => {
+    await env.apiStore.performMutation('users||2', {
+      optimisticUpdate: () => {
+        env.apiStore.deleteItemState('users||2');
+      },
+      mutation: () => Promise.reject(new Error('unreachable while offline')),
+      offline: { operation: 'deleteUser', input: { itemId: 'users||2' } },
+    });
+  });
+
+  env.addTimelineComments('beforeNextAction', [
+    'back online: the server rejects the delete until it needs a resolution',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(15_000);
+  await flushAllTimers();
+
+  const [deleteResolution] = env.apiStore.getOfflineResolutions();
+  if (!deleteResolution) {
+    throw new Error('Expected the delete to be waiting for a resolution');
+  }
+
+  // Discard the delete: it never reached the server, so the item is fetched
+  // again and the screen shows Grace instead of a deleted item.
+  env.addTimelineComments('beforeNextAction', [
+    'discard the delete: Grace is fetched again',
+  ]);
+  await act(async () => {
+    await env.apiStore.resolveOfflineResolution(
+      deleteResolution.id,
+      'deleteUser',
+      { action: 'discard' },
+    );
+  });
+  await flushAllTimers();
+
+  expect(pick(hook.result.current, ['status', 'data'])).toMatchInlineSnapshot(`
+    data: { id: 2, name: 'Grace' }
+    status: 'success'
+  `);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | grace     |
+    0      | Grace     | [grace] ui-initialized
+    3.01s  | Grace     | -- offline: delete Grace
+    .      | - deleted | [grace] ui-changed
+    .      | - deleted | offline:deleteUser queued
+    .      | - deleted | -- back online: the server rejects the delete until it needs a resolution
+    .      | - deleted | offline:deleteUser replay-started
+    8.01s  | - deleted | offline:deleteUser replay-started
+    13.01s | - deleted | offline:deleteUser replay-started
+    .      | - deleted | offline:deleteUser resolution-required
+    18.02s | - deleted | -- discard the delete: Grace is fetched again
+    .      | - loading | [grace] ui-changed
+    .      | - loading | 🔴 [users||2] >fetch-started
+    18.82s | - loading | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Grace"})
+    .      | Grace     | [grace] ui-changed
+    "
+  `);
+
+  hook.unmount();
+});

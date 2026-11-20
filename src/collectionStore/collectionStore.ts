@@ -1179,10 +1179,20 @@ export function createCollectionStore<
 
               rebindOfflineOverlays(itemKeyRewrites);
             },
-            revalidateDiscardedEntities: (entityRefs) => {
-              for (const { entityKey } of entityRefs) {
+            revalidateDiscardedEntities: (entities) => {
+              for (const { entityKey, payload } of entities) {
                 const item = store.state[entityKey];
-                if (item) invalidateItem(item.payload, 'highPriority');
+                if (item) {
+                  invalidateItem(item.payload, 'highPriority');
+                } else if (item === null && payload !== undefined) {
+                  // The discarded change deleted the item locally and
+                  // invalidations skip deleted items: fetch it again.
+                  scheduleFetch(
+                    'highPriority',
+                    // WORKAROUND: Entity ref payloads cross the offline controller as ValidPayload and are narrowed back to the collection store's ItemPayload here.
+                    __LEGIT_CAST__<ItemPayload, ValidPayload>(payload),
+                  );
+                }
               }
             },
             syncEntityOverlays: ({ entities, sessionKey }) => {
