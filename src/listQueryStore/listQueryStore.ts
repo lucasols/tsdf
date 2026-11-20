@@ -2279,26 +2279,24 @@ export function createListQueryStore<
             __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
           );
         },
-        reconcileTempEntity: ({ tempId, reconciliation, getLoadedFields }) => {
+        reconcileTempEntity: ({ tempId, reconciliation }) => {
           reconcileOfflineTempItem(
             tempId,
             reconciliation.finalPayload,
             reconciliation.finalData,
-            // Loaded fields are only tracked with partial resources
-            partialResources ? getLoadedFields() : undefined,
           );
         },
+        loadTempEntities: (tempIds) =>
+          loadOfflineTempItems(
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when loading queued temp entities.
+            __LEGIT_CAST__<ItemPayload[], ValidPayload[]>(tempIds),
+          ),
         applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
           // The replaying tab only knows the query memberships it loaded, so
           // this tab moves its own memberships of the temp item to the final
           // one. The server data arrives next through the item snapshot.
           const reconciled = runWithoutBroadcast(() =>
-            reconcileOfflineTempItem(
-              tempId,
-              finalPayload,
-              undefined,
-              undefined,
-            ),
+            reconcileOfflineTempItem(tempId, finalPayload, undefined),
           );
           // The temp item is already gone here: listeners are still told
           if (!reconciled) emitTempItemReconciled(tempId, finalPayload);
@@ -2547,6 +2545,23 @@ export function createListQueryStore<
   }
 
   /**
+   * Loads offline temp items that are only in persistent storage, so their
+   * reconciliation reads their data and loaded fields from memory.
+   */
+  async function loadOfflineTempItems(
+    tempPayloads: ItemPayload[],
+  ): Promise<void> {
+    if (!persistence) return;
+    const unloadedItemKeys = filterAndMap(tempPayloads, (tempPayload) => {
+      const itemKey = getItemKey(tempPayload);
+      return store.state.items[itemKey] === undefined ? itemKey : false;
+    });
+    if (unloadedItemKeys.length > 0) {
+      await persistence.preloadItems(unloadedItemKeys);
+    }
+  }
+
+  /**
    * Replaces an offline temp item with its final one, in place in every query
    * that lists it. Returns `false` when there is no data for the final item.
    */
@@ -2554,7 +2569,6 @@ export function createListQueryStore<
     tempId: ValidPayload,
     finalPayloadValue: ValidPayload,
     finalDataValue: unknown,
-    declaredLoadedFields: ItemLoadedFields | undefined,
   ): boolean {
     const tempPayload =
       // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
@@ -2579,10 +2593,8 @@ export function createListQueryStore<
       }))
       .filter(({ index }) => index !== -1);
     // The final entity replaces the temp one, so it is as loaded as the temp
-    // entity was declared to be. The declaration is used first: with async
-    // storage the temp item may not be loaded in memory.
-    const tempLoadedFields =
-      declaredLoadedFields ?? store.state.itemLoadedFields[tempItemKey];
+    // entity was declared to be
+    const tempLoadedFields = store.state.itemLoadedFields[tempItemKey];
 
     deleteItemState(tempPayload);
     addItemToState(finalPayload, finalData, undefined, tempLoadedFields);

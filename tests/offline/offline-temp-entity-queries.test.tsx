@@ -93,6 +93,7 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   createUserDurationMs,
   failCreateUser = false,
   storageAdapter = 'local-sync',
+  keepPendingData = false,
 }: {
   sessionKey: string;
   storeName: string;
@@ -105,6 +106,8 @@ function createUsersEnv<TPartialResources extends boolean = false>({
   createUserDurationMs?: number;
   failCreateUser?: boolean;
   storageAdapter?: 'local-sync' | typeof opfsPersistentStorage;
+  /** The saved row keeps the pending row's data instead of the server's. */
+  keepPendingData?: boolean;
 }) {
   const env = createListQueryStoreTestEnv<
     UserRow,
@@ -136,10 +139,10 @@ function createUsersEnv<TPartialResources extends boolean = false>({
               buildPendingEntity: (input) => ({ id: -1, name: input.name }),
               addToQueries,
               loadedFields,
-              reconcileServerEntity: (result) => ({
-                finalPayload: `users||${result.id}`,
-                finalData: result,
-              }),
+              reconcileServerEntity: (result) =>
+                keepPendingData
+                  ? { finalPayload: `users||${result.id}` }
+                  : { finalPayload: `users||${result.id}`, finalData: result },
             },
             execute: async ({ input }) => {
               if (failCreateUser) throw new Error('create replay failed');
@@ -757,6 +760,82 @@ describe('temp entities declared in list queries', () => {
 
     hook.unmount();
   });
+
+  test('a row saved while the app is on another screen keeps its pending data when the server sends none, also with async storage', async () => {
+    createOpfsPersistentStorageTestStore();
+    const sessionKey = 'temp-queries-keep-pending-data-session';
+    const storeName = 'temp-queries-keep-pending-data-store';
+    const nextUserIdRef = { current: 3 };
+    const envOptions = {
+      sessionKey,
+      storeName,
+      testScenario: 'idle',
+      addToQueries: undefined,
+      nextUserIdRef,
+      // The create's reconcile hook returns no `finalData`, so the saved row
+      // keeps the data of the pending row
+      keepPendingData: true,
+      // Rows are only read from OPFS when a screen needs them
+      storageAdapter: opfsPersistentStorage,
+    } as const;
+
+    network.setOffline();
+    const first = createUsersEnv(envOptions);
+    await flushAllTimers();
+    // OPFS writes settle on timers, so they are flushed while the create is
+    // queued
+    await act(async () => {
+      await resolveAfterAllTimers(
+        first.env.apiStore.performMutation('temp:Linus', {
+          mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+          offline: { operation: 'createUser', input: { name: 'Linus' } },
+        }),
+      );
+    });
+    await flushAllTimers();
+    first.env.apiStore.dispose();
+
+    // Restart the app offline on a screen that shows no user, so the pending
+    // row is never read back from storage before its create is saved.
+    resetSessionForTests();
+    const restarted = createUsersEnv(envOptions);
+    await flushAllTimers();
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(restarted.env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(
+      `[]`,
+    );
+
+    // Back offline, the user opens the saved row: it holds the pending row's
+    // data under its server id, instead of being missing until it is fetched.
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    const hook = renderHook(() =>
+      restarted.env.apiStore.useItem('users||3', {
+        selector: (item) => item?.name ?? null,
+      }),
+    );
+    await flushAllTimers();
+
+    expect({
+      status: hook.result.current.status,
+      data: hook.result.current.data,
+    }).toMatchInlineSnapshot(`
+      data: 'Linus'
+      status: 'success'
+    `);
+    // The pending row is gone: it was replaced by the saved one.
+    expect(
+      restarted.env.apiStore.getItemState('temp:Linus'),
+    ).toMatchInlineSnapshot(`null`);
+
+    hook.unmount();
+  });
 });
 
 type DuplicateUsersOperations = {
@@ -1147,5 +1226,32 @@ describe('temp entities with partial resources', () => {
       firstCopy: { id: 3, name: 'Ada copy' }
       secondCopy: { id: 4, name: 'Grace copy' }
     `);
+
+    // Back offline, a reader of every field shows the saved copies: they were
+    // declared complete when they were queued, and stay so once saved.
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    const hook = renderHook(() =>
+      ['users||3', 'users||4'].map((itemPayload) => {
+        const { status, data } = restarted.apiStore.useItem(itemPayload, {
+          fields: '*',
+          selector: (item) => item?.name ?? null,
+        });
+        return { status, data };
+      }),
+    );
+    await flushAllTimers();
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      - { data: 'Ada copy', status: 'success' }
+      - { data: 'Grace copy', status: 'success' }
+    `);
+    // The saved copies were never requested: they were complete when saved.
+    expect(
+      restarted.serverTable.getRequestHistory('item'),
+    ).toMatchInlineSnapshot(`[]`);
+
+    hook.unmount();
   });
 });
