@@ -192,21 +192,22 @@ describe('async storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time   |
-      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1ms    | 📁 dir-open-or-create 🆕 tsdf (root directory)
+      2ms    | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.851s | 📂 dir-open ❌ tsdf/sess1 (session directory)
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.853s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
+      1.853s | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.854s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.855s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
              |    └ (store directory)
-      1.854s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+      1.856s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data)
-      1.857s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+      1.859s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data) | 0.00 kb -> 0.07 kb
-      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
+      1.861s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index)
-      1.862s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
+      1.864s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index) | 0.00 kb -> 0.06 kb
-      1.864s | end
+      1.866s | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
