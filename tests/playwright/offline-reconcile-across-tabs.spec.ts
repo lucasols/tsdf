@@ -47,7 +47,7 @@ async function getCreateRequestPages(
   >(await response.json());
 
   return body.history
-    .filter((entry) => entry.path === '/api/list/users/create')
+    .filter((entry) => entry.path === '/api/item/users/create')
     .map((entry) => entry.pageId)
     .join(',');
 }
@@ -65,7 +65,7 @@ async function openOfflineList(
 ): Promise<Page> {
   const page = await context.newPage();
   const searchParams = new URLSearchParams({
-    scenario: 'offline-list',
+    scenario: 'offline-list-reconcile',
     pageId,
     scopeId: fixtureScopeId,
     storeId,

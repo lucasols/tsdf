@@ -219,7 +219,7 @@ test('direct document store runtime offline controls public api', async () => {
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-runtime-controls'
-    updatedAt: 1735689612000
+    updatedAt: 1735689600000
   `);
 
   offlineSession
@@ -632,7 +632,7 @@ test('direct document store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-offline-session'
-    updatedAt: 1735689600010
+    updatedAt: 1735689600000
   `);
 
   act(() => {
@@ -934,7 +934,7 @@ test('direct document store offline public api', async () => {
     network: { active: '❌', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'direct-document-offline-session'
-    updatedAt: 1735689606050
+    updatedAt: 1735689601040
   `);
 
   documentHook.unmount();
