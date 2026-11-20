@@ -369,7 +369,9 @@ export type ItemOfflineState = {
    * `true` and this is `false`, the item only exists locally: deleting it
    * with an operation that cancels pending creations (see
    * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends
-   * nothing. Always `false` for items that are not unsent creations.
+   * nothing, unless one operation created it together with other entities
+   * (see that option). Always `false` for items that are not unsent
+   * creations.
    */
   creationAttempted: boolean;
 };
@@ -935,7 +937,9 @@ export type OfflineSupersedeConfig = {
    * A creation that was already sent is not cancelled, since the server may
    * have the entity: this operation is queued behind it and replays with the
    * final entity ref once the creation is confirmed. Its `execute` should
-   * treat a not-found answer as success (catch the error and return).
+   * treat a not-found answer as success (catch the error and return). The
+   * same applies to a `tempEntities` creation of several entities, which is
+   * never cancelled: the other entities still need it.
    */
   dropSelfIfTempLifecycleCancelled?: boolean;
 };

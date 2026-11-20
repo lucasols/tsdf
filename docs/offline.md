@@ -204,10 +204,11 @@ deleteTask: {
 What happens depends on whether the creation was already sent:
 
 - **Never sent** (still waiting in the queue): nothing is sent. TSDF drops the creation, the queued edits of the entity, the delete itself and the queued work that depends on the entity (`dependsOn`), then removes the temporary entity from the store and its lists.
+- **Created together with other entities** (a `tempEntities` operation that creates several entities at once): the creation is never cancelled, since the other entities still need it. The delete is queued behind it and sent with the server id, as for a creation that was sent.
 - **Sent** (`syncing`, `needs-confirmation`, or queued again after a `retry`): the server may have the entity, so the creation is kept and the delete stays queued behind it. Once the server id is known the delete is sent with it. `execute` should treat a not-found answer as success, as above: the server answers not-found when the creation never reached it, or when an earlier delete attempt did.
 - **Waiting for a manual resolution**: the creation is kept too, and the delete is held behind that resolution. See [Entities whose creation waits for a resolution](#entities-whose-creation-waits-for-a-resolution).
 
-`getItemOfflineState(payload)` tells the first case apart before deleting: `isUnsentCreation && !creationAttempted` means the delete only discards local work.
+`getItemOfflineState(payload)` tells the first case apart before deleting: `isUnsentCreation && !creationAttempted` means the delete only discards local work, unless the item was created together with other entities.
 
 Work queued in **other stores** for the cancelled entity is not known to its store. Declare the relation with `cancelledWith` in the other store's operation:
 

@@ -246,12 +246,20 @@ type UserLifecycleOperations = {
     { itemId: string },
     unknown
   >;
+  assignMentor: ListQueryOfflineOperationDefinition<
+    UserRow,
+    ListQueryParams,
+    string,
+    { itemId: string; mentorId: string; noteId: string },
+    unknown
+  >;
 };
 
 /**
  * Users list where creating a user uploads an avatar, renaming a user uploads
- * an attachment, and deleting a user that only exists offline cancels its
- * whole pending lifecycle.
+ * an attachment, assigning a mentor uploads a note and depends on the mentor,
+ * and deleting a user that only exists offline cancels its whole pending
+ * lifecycle.
  */
 function createUserLifecycleEnv(args: {
   storeManager: UploadCleanupStoreManager;
@@ -321,6 +329,22 @@ function createUserLifecycleEnv(args: {
                 }));
               },
             },
+            assignMentor: {
+              inputSchema: rc_object({
+                itemId: rc_string,
+                mentorId: rc_string,
+                noteId: rc_string,
+              }),
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.itemId],
+              dependsOn: ({ input }) => [input.mentorId],
+              dependsOnUploads: ({ input }) => [input.noteId],
+              execute: () => {
+                args.replayedOperations.push('assignMentor');
+                return Promise.resolve(undefined);
+              },
+              onSuccessExecute: () => {},
+            },
             deleteUser: {
               inputSchema: deleteItemInputSchema,
               kind: 'delete',
@@ -385,7 +409,26 @@ function createUserLifecycleEnv(args: {
     );
   }
 
-  return { ...env, queueCreateLinus, queueRenameLinus };
+  /** Queues assigning the still-offline "Linus" as the mentor of Ada. */
+  async function queueAssignLinusAsMentorOfAda(noteId: string): Promise<void> {
+    await resolveWithin(
+      env.apiStore.performMutation('users||1', {
+        optimisticUpdate: () => {},
+        mutation: () => Promise.resolve(undefined),
+        offline: {
+          operation: 'assignMentor',
+          input: { itemId: 'users||1', mentorId: 'temp:Linus', noteId },
+        },
+      }),
+    );
+  }
+
+  return {
+    ...env,
+    queueCreateLinus,
+    queueRenameLinus,
+    queueAssignLinusAsMentorOfAda,
+  };
 }
 
 test('discarding a failed create also deletes the staged uploads of the queued edits that depended on the new entity', async () => {
@@ -504,7 +547,7 @@ test('discarding a failed create also deletes the staged uploads of the queued e
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`"empty"`);
 });
 
-test('deleting an entity that only exists offline deletes the staged uploads of its cancelled create and edits', async () => {
+test('deleting an entity that only exists offline deletes the staged uploads of its cancelled create, its edits and the work that depends on it', async () => {
   const mockBrowserOpfs = createMockBrowserOpfs();
   network.setOffline();
   const storeManager = createUploadCleanupStoreManager(
@@ -519,21 +562,28 @@ test('deleting an entity that only exists offline deletes the staged uploads of 
   });
   await flushAllTimers();
 
-  // --- Setup: a create and an edit of the new user, each with its own file ---
+  // --- Setup: a create and an edit of the new user, and an edit of another
+  // user that depends on the new one, each with its own file ---
   await stageUpload(storeManager, 'linus-avatar');
   await stageUpload(storeManager, 'rename-attachment');
+  await stageUpload(storeManager, 'mentor-note');
   await env.queueCreateLinus('linus-avatar');
   await env.queueRenameLinus('Linus T.', 'rename-attachment');
+  await env.queueAssignLinusAsMentorOfAda('mentor-note');
 
   expect(getStagedUploads(storeManager)).toMatchInlineSnapshot(`
     - { id: 'linus-avatar', source: 'manual', state: 'pending' }
+    - { id: 'mentor-note', source: 'manual', state: 'pending' }
     - { id: 'rename-attachment', source: 'manual', state: 'pending' }
   `);
   expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
-    "tsdf-uploads (1.03 kb)
-    └ offline-upload-temp-cancel-session (1.01 kb)
+    "tsdf-uploads (1.47 kb)
+    └ offline-upload-temp-cancel-session (1.45 kb)
       ├ linus-avatar (0.45 kb)
       │ ├ binary.blob (0.06 kb)
+      │ └ metadata.json (0.37 kb)
+      ├ mentor-note (0.44 kb)
+      │ ├ binary.blob (0.05 kb)
       │ └ metadata.json (0.37 kb)
       └ rename-attachment (0.49 kb)
         ├ binary.blob (0.07 kb)
@@ -541,8 +591,9 @@ test('deleting an entity that only exists offline deletes the staged uploads of 
   `);
 
   // --- Action: the user deletes the new user before anything was replayed ---
-  // The delete cancels the create and the rename, and drops itself too because
-  // the server never knew about this user.
+  // The delete cancels the create and the rename, drops the mentor assignment
+  // that depends on the new user, and drops itself too because the server
+  // never knew about this user.
   await resolveWithin(
     env.apiStore.performMutation('temp:Linus', {
       optimisticUpdate: () => {

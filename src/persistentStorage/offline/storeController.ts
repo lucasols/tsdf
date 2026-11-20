@@ -3220,6 +3220,30 @@ export function createOfflineStoreController<
       }
     }
 
+    // A descendant that also waits for another creation still held in a
+    // resolution (or behind one such descendant) cannot be sent yet: it stays
+    // and goes with the decision about that creation.
+    let removedHeldDescendant = true;
+    while (removedHeldDescendant) {
+      removedHeldDescendant = false;
+      for (const resolution of descendantResolutions.values()) {
+        const blockers =
+          dependencySnapshot.blockedByResolutionIdsByResolutionId.get(
+            resolution.id,
+          ) ?? [];
+        if (
+          blockers.some(
+            (blockerId) =>
+              blockerId !== args.resolution.id &&
+              !descendantResolutions.has(blockerId),
+          )
+        ) {
+          descendantResolutions.delete(resolution.id);
+          removedHeldDescendant = true;
+        }
+      }
+    }
+
     const orderedDescendants: PersistedOfflineResolutionRecord[] = [];
     const remainingDescendants = [...descendantResolutions.values()].sort(
       compareResolutionRecords,
