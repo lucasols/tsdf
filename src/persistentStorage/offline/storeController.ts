@@ -151,7 +151,8 @@ const compactOfflineEntitySchema = rc_object({
   a: rc_number,
   u: rc_number,
   t: rc_unknown.optionalKey(),
-  v: rc_unknown.optionalKey(),
+  // Not `v`: local-sync reserves it for the entry version.
+  y: rc_unknown.optionalKey(),
 });
 const compactOfflineQueueEntrySchema = rc_object({
   d: rc_string,
@@ -1025,7 +1026,7 @@ export function createOfflineStoreController<
                 a: entity.createdAt,
                 u: entity.updatedAt,
                 ...(entity.tempId !== undefined ? { t: entity.tempId } : {}),
-                ...(entity.payload !== undefined ? { v: entity.payload } : {}),
+                ...(entity.payload !== undefined ? { y: entity.payload } : {}),
               };
             },
             deserialize(raw) {
@@ -1066,11 +1067,11 @@ export function createOfflineStoreController<
                       ),
                     }
                   : {}),
-                ...(compactEntity.v !== undefined
+                ...(compactEntity.y !== undefined
                   ? {
                       // WORKAROUND: Derived item payloads are persisted as unknown JSON values and are narrowed back to ValidPayload when hydrating the internal entity cache.
                       payload: __LEGIT_CAST__<ValidPayload, unknown>(
-                        compactEntity.v,
+                        compactEntity.y,
                       ),
                     }
                   : {}),

@@ -1403,13 +1403,52 @@ test('removing a create operation also deletes the queued edits of the items it 
   // it instead of being sent for an item the server doesn't have. The rename
   // of the existing user is still sent.
   expect(sent).toMatchInlineSnapshot(`['patchUserName(users||1, Ada L.)']`);
-  expect(
-    reportedErrors.filter((message) => message.includes('removedOperations')),
-  ).toMatchInlineSnapshot(
+  expect(reportedErrors).toMatchInlineSnapshot(
     `- '[tsdf] Store "offline-removed-create-operation-users" still had 2 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.'`,
   );
 
   newerHook.unmount();
+});
+
+test('local-sync offline edits of list-query items are persisted without storage errors', async () => {
+  const sessionKey = 'offline-entity-payload-session';
+  const storeName = 'offline-entity-payload-users';
+  const sent: string[] = [];
+  const reportedErrors: string[] = [];
+
+  // The user renames an existing user while offline. The store keeps the
+  // edited item's payload with the offline work it saves for that item.
+  network.setOffline();
+  const env = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    PatchUserNameOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey, (error) => {
+      reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+    }),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      patchUserName: createPatchUserNameOperation(sent),
+    }),
+  });
+  await resolveAfterAllTimers(
+    env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.resolve({ name: 'Ada L.' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada L.' },
+      },
+    }),
+  );
+  await flushAllTimers();
+
+  // Saving the offline state of an item with a payload must not fail: the
+  // app's storage error handler would otherwise report it on every offline
+  // edit of a list-query or collection item.
+  expect(reportedErrors).toMatchInlineSnapshot(`[]`);
 });
 
 test('local-sync restart keeps offline temp rows visible for partial-resource list queries', async () => {
