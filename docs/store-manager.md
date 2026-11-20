@@ -176,10 +176,14 @@ Upload methods:
 - `replaceOfflineUpload({ id, file, metadata? })` keeps the saved metadata unless new `metadata` is passed
 - `loadOfflineUpload(id)`
 - `deleteOfflineUpload(id)`
-- `resolveOfflineUpload(id)`
-- `resolveOfflineUploads(ids)`
+- `resolveOfflineUpload(id)` uploads the staged file if needed and returns its final ref
+- `resolveOfflineUploads(ids)` does the same for several ids and fails as a whole with the first transport error
 - `useOfflineUploads()`
 
+When the `upload` transport fails, `resolveOfflineUpload(s)` returns `Result.err(error)` with the transport error and the upload becomes `failed` (`lastError` set). The session failure classifiers are not consulted and nothing is retried automatically; calling the method again runs the upload again, and `lastError` is cleared once it succeeds. Uploads that run as a dependency of a replayed offline operation are classified and retried by the session instead. See [Offline: Upload failure handling](./offline.md#upload-failure-handling).
+
 `metadata` is a JSON-serializable `ValidPayload` persisted with the upload. The `upload` transport receives it in its context and `getOfflineUploads()` / `useOfflineUploads()` expose it on each `OfflineUpload`. See [Offline: Upload metadata](./offline.md#upload-metadata).
+
+Staged uploads are deleted automatically when the last queued mutation or resolution record that depends on them leaves the queue (replayed, discarded, superseded or cancelled). `deleteOfflineUpload(id)` is only needed for uploads no queued mutation used, which otherwise expire after a week online, and it returns an error while queued work still references the upload. See [Offline: Upload lifecycle](./offline.md#upload-lifecycle).
 
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.

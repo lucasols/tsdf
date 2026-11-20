@@ -1,6 +1,20 @@
 import type { ValidPayload } from '../utils/storeShared';
 
-/** Lifecycle state for a session-scoped offline upload. */
+/**
+ * Lifecycle state for a session-scoped offline upload.
+ *
+ * - `pending`: staged and waiting to be uploaded. An upload whose transport
+ *   failed during replay with a failure TSDF retries on its own (session went
+ *   offline, or the failure was classified as retryable) goes back to
+ *   `pending` with `lastError` set.
+ * - `uploading`: the `upload` transport is running.
+ * - `uploaded`: the transport returned the final ref (`resolvedRef`).
+ * - `failed`: the last transport attempt failed and TSDF will not retry on
+ *   its own: the dependent operation was moved to manual resolution, or the
+ *   upload was started through `resolveOfflineUpload(s)`. A failed upload is
+ *   not blocked: it is uploaded again when a dependent operation is replayed
+ *   (resolution `retry`) or `resolveOfflineUpload(s)` is called again.
+ */
 export type OfflineUploadState =
   | 'pending'
   | 'uploading'
@@ -72,7 +86,10 @@ export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   resolvedRef?: TResolvedRef;
   /** Latest upload progress snapshot. */
   progress?: OfflineUploadProgress;
-  /** Last upload failure message, when any. */
+  /**
+   * Message of the latest failed upload attempt. It stays set while the upload
+   * is retried and is cleared once the upload succeeds.
+   */
   lastError?: { message: string };
   /**
    * App-defined metadata saved with the upload through `saveOfflineUpload` /
@@ -153,7 +170,18 @@ export type OfflineSessionUploadsConfig<
 > = {
   /** Adapter used to persist staged files until replay can upload them. */
   adapter: OfflineUploadAdapter;
-  /** Upload transport that returns the final server-side file reference. */
+  /**
+   * Upload transport that returns the final server-side file reference.
+   *
+   * Reject (throw) to report a failure. When the upload runs as a dependency
+   * of a replayed operation, the thrown error goes through the session's
+   * `classifyFailure` / `classifyRetryableFailure` hooks with `ctx.uploadId`
+   * set, exactly like a failed `execute`: classify connection problems as
+   * `'network'` / `'outage'` (or as retryable) so they are retried, and leave
+   * permanent ones (file too large, type not accepted) unclassified so the
+   * operation goes to manual resolution. Throw errors those hooks can tell
+   * apart.
+   */
   upload: (ctx: OfflineUploadTransportContext) => Promise<TResolvedRef>;
   /** Maximum number of concurrent upload transports. */
   concurrency?: number;

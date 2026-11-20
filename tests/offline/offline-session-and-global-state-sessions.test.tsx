@@ -464,8 +464,9 @@ test('a global offline view sees the same blocked temp item as the store after r
   env.addTimelineComments('beforeNextAction', [
     'go back online and let replay exhaust every retry for the temp create',
   ]);
-  act(() => {
+  await act(async () => {
     network.goOnline();
+    await Promise.resolve();
   });
   await waitForMicrotaskCondition(
     () => createUserExecute.mock.calls.length === 1,

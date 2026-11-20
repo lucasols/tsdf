@@ -133,13 +133,34 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => Promise<ResultType<void, OfflineResolutionActionError>>;
   /** Returns the latest session-scoped offline uploads for this manager. */
   getOfflineUploads: () => readonly OfflineUpload<TUploadRef>[];
-  /** Resolves a staged upload id to its latest final ref, uploading first if needed. */
+  /**
+   * Resolves a staged upload id to its latest final ref, uploading first if
+   * needed. An upload deleted after it was sent keeps resolving to its ref for
+   * the rest of the app session, in every tab open when it was deleted.
+   *
+   * When the `upload` transport fails, the result is `Result.err` with the
+   * transport error and the upload becomes `failed` with `lastError` set. The
+   * session failure classifiers are not consulted and nothing is retried
+   * automatically: call it again to run the upload again.
+   */
   resolveOfflineUpload: (id: string) => Promise<ResultType<TUploadRef, Error>>;
-  /** Resolves multiple staged upload ids to their latest final refs. */
+  /**
+   * Resolves multiple staged upload ids to their latest final refs.
+   *
+   * Fails as a whole with the first transport error, following the same rules
+   * as `resolveOfflineUpload`. Uploads that already succeeded stay `uploaded`
+   * and are not sent again by a later call.
+   */
   resolveOfflineUploads: (
     ids: readonly string[],
   ) => Promise<ResultType<Record<string, TUploadRef>, Error>>;
-  /** Saves a session-scoped upload locally for later dependency resolution. */
+  /**
+   * Saves a session-scoped upload locally for later dependency resolution. It
+   * is deleted automatically once the queued work that depends on it leaves
+   * the queue. Only stores created in the tab count as depending on it, so
+   * create the stores that share an upload id before their queued work
+   * replays.
+   */
   saveOfflineUpload: (
     args: SaveOfflineUploadArgs,
   ) => Promise<ResultType<void, Error>>;
@@ -149,7 +170,11 @@ type StoreManagerOfflineApi<TUploadRef extends ValidPayload = ValidPayload> = {
   ) => Promise<ResultType<void, Error>>;
   /** Loads a previously stored session-scoped upload. */
   loadOfflineUpload: (id: string) => Promise<ResultType<File | null, Error>>;
-  /** Deletes a stored upload when it is no longer referenced. */
+  /**
+   * Deletes a stored upload that no queued work references. Only needed for
+   * uploads no queued mutation used: the others are deleted with the work that
+   * depends on them.
+   */
   deleteOfflineUpload: (id: string) => Promise<ResultType<void, Error>>;
   /** React hook subscribing to the manager's aggregated offline status. */
   useOfflineStatus: () => GlobalOfflineStatus;
