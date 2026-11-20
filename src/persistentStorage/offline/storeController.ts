@@ -631,8 +631,12 @@ export function createOfflineStoreController<
     attachedUploadIds?: OfflineAttachedUploadIds;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
-    /** Queued after its direct online request failed: it may have been applied */
-    afterDirectAttempt?: boolean;
+    /**
+     * Queued after an earlier request of the same mutation may have reached
+     * the server: its direct online request failed, or it replaces a conflict
+     * the user sent again.
+     */
+    mayHaveBeenApplied?: boolean;
   };
 
   type PlannedQueuedMutation = {
@@ -3560,7 +3564,7 @@ export function createOfflineStoreController<
         attachedUploadIds,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
-        afterDirectAttempt,
+        mayHaveBeenApplied,
       },
       queueOrder,
       workingQueue,
@@ -3895,12 +3899,12 @@ export function createOfflineStoreController<
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
       tempIds,
     });
-    // The server may have created the item before the direct request failed:
-    // a delete must not cancel the creation locally, since the item has the
-    // id the delete targets. A temp entity has no such id, so this only
-    // applies to an id the app generated.
+    // The server may have created the item in an earlier request: a delete
+    // must not cancel the creation locally, since the item has the id the
+    // delete targets. A temp entity has no such id, so this only applies to
+    // an id the app generated.
     if (
-      afterDirectAttempt &&
+      mayHaveBeenApplied &&
       getClientIdCreatedEntityKeys(nextEntry).length > 0
     ) {
       nextEntry.attempts = 1;
@@ -4604,7 +4608,9 @@ export function createOfflineStoreController<
       initialAction: getInitialOfflineMutationAction(current, prepared),
       queueMutation: (afterDirectAttempt) =>
         queuePreparedMutations(
-          afterDirectAttempt ? { ...prepared, afterDirectAttempt } : prepared,
+          afterDirectAttempt
+            ? { ...prepared, mayHaveBeenApplied: true }
+            : prepared,
         ),
       handleDirectSuccess: () =>
         clearOfflineStatusOnSuccess(prepared.currentSessionKey),
@@ -4792,8 +4798,14 @@ export function createOfflineStoreController<
       });
       // Queued before the resolution is removed, for the other tabs (see
       // `persistManualResolutionChain`). This also keeps the attached files
-      // referenced the whole time, so cleanup never sees them unused.
-      await queuePreparedMutations(preparedMutation, resolutionId);
+      // referenced the whole time, so cleanup never sees them unused. The
+      // conflicted mutation may have reached the server in an earlier
+      // attempt (the conflict can come from that), so the replacement does
+      // not count as never sent.
+      await queuePreparedMutations(
+        { ...preparedMutation, mayHaveBeenApplied: true },
+        resolutionId,
+      );
       await removeResolution(resolutionId, current);
       // The replacement input declared its own dependencies: uploads it kept
       // are still referenced, the ones it dropped are not.

@@ -101,7 +101,7 @@ type TasksOperations = {
     ListQueryParams,
     string,
     { id: number; name: string; parentId: string },
-    unknown
+    { reason: string }
   >;
   renameTask: ListQueryOfflineOperationDefinition<
     TaskRow,
@@ -166,7 +166,9 @@ export const tasksQuery = { tableId: 'tasks' } as const;
  *   generates on the client, so it needs no temp row
  * - when `conflicts.createTask` (or `conflicts.createSubtask`) is set, the
  *   replay of a task (or subtask) creation reports a conflict (the server
- *   already has a task with that name) instead of sending it
+ *   already has a task with that name) instead of sending it; with
+ *   `conflicts.createSubtaskWithId` the replay of `createSubtaskWithId`
+ *   reports that the server already has a task with that id
  * - `editTask` sends a partial change of a task (name and/or parent); the
  *   offline edits of the same task are merged into one request
  * - deleting a task supersedes its queued edits and, when the task was
@@ -187,7 +189,11 @@ export function createTasksEnv(
     createTask: [],
     deleteTask: [],
   };
-  const conflicts = { createTask: false, createSubtask: false };
+  const conflicts = {
+    createTask: false,
+    createSubtask: false,
+    createSubtaskWithId: false,
+  };
 
   async function createOnServer(input: { name: string; parentId?: string }) {
     const result: TaskRow = { id: nextTaskId, ...input };
@@ -283,6 +289,13 @@ export function createTasksEnv(
               kind: 'create',
               getEntityRefs: ({ input }) => [`tasks||${input.id}`],
               dependsOn: ({ input }) => [input.parentId],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () =>
+                  conflicts.createSubtaskWithId
+                    ? { reason: 'id-taken' }
+                    : false,
+              },
               execute: async ({ input }) => {
                 const itemId = `tasks||${input.id}`;
                 sentRequests.push(`createSubtaskWithId ${itemId}`);

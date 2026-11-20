@@ -898,6 +898,10 @@ export type OfflineRetryExhaustedResolutionAction =
       /**
        * Controls whether retrying a resolution should also requeue retryable
        * descendants from the same temp-lifecycle dependency chain.
+       *
+       * With `'self'`, the descendants stay as resolutions to decide one by
+       * one: they no longer count as work held behind the creation, so later
+       * mutations of their entities don't merge into or cancel them.
        * @default 'self-and-descendants'
        */
       scope?: 'self' | 'self-and-descendants';
@@ -1098,8 +1102,9 @@ export type OfflineSupersedeConfig = {
    *
    * A creation that was already sent is not cancelled, since the server may
    * have the entity (this includes a `create` of a client-generated id queued
-   * after its direct online request failed): this operation is queued behind it and replays with the
-   * final entity ref once the creation is confirmed. Its `execute` should
+   * after its direct online request failed, or sent again with `requeue`
+   * after a conflict): this operation is queued behind it and replays with
+   * the final entity ref once the creation is confirmed. Its `execute` should
    * treat a not-found answer as success (catch the error and return). The
    * same applies to a `tempEntities` creation of several entities, which is
    * never cancelled: the other entities still need it.

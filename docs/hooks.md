@@ -406,7 +406,9 @@ function onDeleteClick(itemPayload: UserPayload) {
 
 `isUnsentCreation` stays `true` while the creation itself is being sent, until
 the server result is reconciled; `creationAttempted` is `true` during that
-time. See
+time. The check only covers temp-entity creations: an item created with a
+client-generated id reports `isUnsentCreation: false` even when its delete only
+discards local work, so the app can't tell it apart from a server item. See
 [Offline - Deleting entities created offline](./offline.md#deleting-entities-created-offline)
 for what a delete does in each case.
 
