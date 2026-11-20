@@ -1,5 +1,7 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ValidPayload } from '../../src/main';
+import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
@@ -163,7 +165,8 @@ function setDocumentHidden(hidden: boolean) {
  * With `uploads: true` the tab stores offline file uploads in OPFS, shared by
  * every tab like in a real browser (install it with `createMockBrowserOpfs`).
  *
- * `getIsOffline` replaces the app's connectivity check in this tab only.
+ * `network` replaces parts of the app's connectivity config (its check, its
+ * recovery check) in this tab only.
  */
 async function openTab(
   name: string,
@@ -171,7 +174,7 @@ async function openTab(
     focused: boolean;
     storeIds?: string[];
     uploads?: boolean;
-    getIsOffline?: () => boolean;
+    network?: Pick<OfflineNetworkModeConfig, 'getIsOffline' | 'recoveryCheck'>;
   },
 ) {
   setDocumentHidden(!options.focused);
@@ -192,9 +195,7 @@ async function openTab(
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
     offlineSession: {
-      network: options.getIsOffline
-        ? { ...network.config, getIsOffline: options.getIsOffline }
-        : network.config,
+      network: { ...network.config, ...options.network },
       ...(options.uploads
         ? {
             uploads: {
@@ -728,7 +729,9 @@ test('the leading tab keeps its queued edits while its own connectivity check st
   network.setOffline();
   const tabA = await openTab('A', {
     focused: true,
-    getIsOffline: () => !network.isOnline() || !tabARealtimeConnected,
+    network: {
+      getIsOffline: () => !network.isOnline() || !tabARealtimeConnected,
+    },
   });
   const tabB = await openTab('B', { focused: false });
   // Tab A keeps the focus and leads
@@ -753,5 +756,67 @@ test('the leading tab keeps its queued edits while its own connectivity check st
       entities: ['doc: pending']
       leader: '❌'
       resolutions: []
+  `);
+});
+
+test('a tab whose own connectivity check fails stays offline until that check passes, even with a recovery check', async () => {
+  // The app's connectivity check also requires the tab's realtime connection,
+  // which each tab opens on its own. The recovery check only pings the server.
+  let tabARealtimeConnected = false;
+  network.setOffline();
+  const tabA = await openTab('A', {
+    focused: true,
+    network: {
+      getIsOffline: () => !network.isOnline() || !tabARealtimeConnected,
+      recoveryCheck: () => network.isOnline(),
+    },
+  });
+  await openTab('B', { focused: false });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+  await tabA.queueEdit(2);
+
+  const tabAStatus = createLoggerStore();
+  function logTabA(label: string) {
+    tabAStatus.add({
+      label,
+      offline: tabA.storeManager.getOfflineStatus().isOfflineMode,
+      serverCalls: serverCalls.join(', '),
+    });
+  }
+
+  // The browser is back online and tab B reports it to the other tabs, but
+  // tab A's realtime connection stays down for a minute. Recovery probes run
+  // every few seconds, so this covers several of them.
+  network.goOnline();
+  await advanceTime(10_000);
+  logTabA('10s after reconnecting');
+  await advanceTime(20_000);
+  logTabA('30s after reconnecting');
+  await advanceTime(30_000);
+  logTabA('60s after reconnecting');
+
+  // The realtime connection is back and tab A's check runs again on the
+  // user's next edit: tab A is back online, sends that edit directly and
+  // replays the queued one.
+  tabARealtimeConnected = true;
+  tabAStatus.addMark('realtime connection back');
+  void tabA.queueEdit(3);
+  await advanceTime(5_000);
+  logTabA('after the next edit');
+
+  // Tab A goes by its own check like a single tab would: the server ping
+  // does not bring it online while the check still fails, so it never sends
+  // the queued edit only to drop back offline on tab B's next report.
+  expect(tabAStatus.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> label: 10s after reconnecting ⋅ offline: ✅ ⋅ serverCalls: ''
+    -> label: 30s after reconnecting ⋅ offline: ✅ ⋅ serverCalls: ''
+    -> label: 60s after reconnecting ⋅ offline: ✅ ⋅ serverCalls: ''
+
+    >>> realtime connection back
+
+    -> label: after the next edit ⋅ offline: ❌ ⋅ serverCalls: tab A sent doc = 2
+    "
   `);
 });

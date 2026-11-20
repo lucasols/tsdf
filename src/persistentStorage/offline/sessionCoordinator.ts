@@ -663,8 +663,6 @@ class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
-  /** Result of this tab's last `getIsOffline` check. */
-  #lastDetectedOffline = false;
   /** Tabs of this session that sent anything on the session channel. */
   #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
@@ -1443,7 +1441,6 @@ class SessionOfflineCoordinator {
     if (token !== this.#networkStateToken) {
       return this.store.state.status.network.active;
     }
-    this.#lastDetectedOffline = detectedOffline;
 
     if (!this.#isNetworkEnabled()) {
       if (
@@ -1656,7 +1653,6 @@ class SessionOfflineCoordinator {
     const initial = this.#getCurrentOfflineState();
 
     if (typeof initial === 'boolean') {
-      this.#lastDetectedOffline = initial;
       this.setNetworkActive(initial, { classified: false });
     }
   }
@@ -2285,11 +2281,15 @@ class SessionOfflineCoordinator {
     // This tab's own detection wins over another tab saying the network is
     // back: tabs do not get the browser's online event at the same instant,
     // and replaying on another tab's word would send requests that fail.
-    // Uses the last `getIsOffline` result instead of calling it again: it may
-    // be an async probe and would run on every snapshot of every tab.
+    // Detected means offline without a classified request failure, so this
+    // tab's own `getIsOffline` check put it there; that check is not called
+    // again here, since it may be an async probe and would run on every
+    // snapshot of every tab.
     const isDetectedOffline =
       this.#isNetworkEnabled() &&
-      (this.#lastDetectedOffline || !this.#browserReportsOnline());
+      ((this.store.state.status.network.active &&
+        !this.#classifiedNetworkActive) ||
+        !this.#browserReportsOnline());
 
     this.store.setState(
       {
@@ -2311,7 +2311,12 @@ class SessionOfflineCoordinator {
       },
       { action: 'offline-session-remote' },
     );
-    this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    // A detected offline state stays this tab's own: classifying it would
+    // run the network recovery probe for it, which only checks request
+    // failures, not the app's connectivity check.
+    if (!isDetectedOffline) {
+      this.#syncClassifiedNetworkStateFromStatus(this.store.state.status);
+    }
     void this.#persistSessionSnapshot();
     this.#refreshLeadership();
     // Another tab can report the recovery before this tab detects it. Without
