@@ -325,6 +325,45 @@ export type GlobalOfflineStatus = {
 /** Queue state of an offline mutation entry. */
 export type OfflineSyncState = 'pending' | 'syncing' | 'needs-confirmation';
 
+/**
+ * Offline sync state of one collection/list-query item, returned by the
+ * stores' `useItemOfflineState(...)` and `getItemOfflineState(...)`.
+ */
+export type ItemOfflineState = {
+  /**
+   * Where the item's offline work stands (same value as the item's
+   * {@link GlobalOfflineEntity.syncState}):
+   *
+   * - `pending`: queued, waiting to be sent
+   * - `syncing`: being sent
+   * - `needs-confirmation`: a send failed and it is not known whether it
+   *   reached the server, so the mutation is re-checked or retried
+   * - `resolution-required`: waiting for a manual resolution
+   *
+   * With several mutations queued for the item this is the most urgent state
+   * among them (`needs-confirmation` > `syncing` > `pending`): the item is
+   * `syncing` while any of its mutations is being sent (`pendingMutations`
+   * drops as each one finishes).
+   */
+  syncState: OfflineSyncState | 'resolution-required';
+  /** Number of queued mutations of the item still waiting to sync. */
+  pendingMutations: number;
+  /** Whether the item is waiting for a manual resolution. */
+  requiresResolution: boolean;
+  /**
+   * Whether the item was created offline through a `tempEntity` /
+   * `tempEntities` operation and the server has not confirmed it yet, so it is
+   * still tracked under its temporary payload. Creations queued without a temp
+   * entity (e.g. with a client-generated id) report `false`. It stays `true`
+   * while the creation itself is being sent, so the server may already have
+   * it while `syncState` is `syncing` or `needs-confirmation`; only with
+   * `syncState: 'pending'` has it not been sent yet. Once the server entity is
+   * reconciled, the temporary payload has no state anymore and the final
+   * payload reports any mutation still queued with `isUnsentCreation: false`.
+   */
+  isUnsentCreation: boolean;
+};
+
 /** Aggregated offline status for a tracked document/item/query entity. */
 export type GlobalOfflineEntity = {
   /** Internal entity identifier tracked by offline machinery. */
@@ -343,7 +382,12 @@ export type GlobalOfflineEntity = {
   kind: OfflineEntityMutationKind;
   /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
-  /** Current sync state for the entity. */
+  /**
+   * Current sync state for the entity. With several mutations queued for it
+   * this is the most urgent state among them (`needs-confirmation` >
+   * `syncing` > `pending`): the entity is `syncing` while any of its mutations
+   * is being sent.
+   */
   syncState: OfflineSyncState | 'resolution-required';
   /** Whether the entity currently requires manual resolution. */
   requiresResolution: boolean;

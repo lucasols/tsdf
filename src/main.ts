@@ -142,6 +142,7 @@ export type {
   OfflineFailurePhase,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  ItemOfflineState,
   OfflineMutationInput,
   OfflineOperationKind,
   OfflineRuntimeConfig,

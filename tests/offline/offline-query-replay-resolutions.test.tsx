@@ -851,8 +851,9 @@ describe('list-query replay', () => {
     env.addTimelineComments('beforeNextAction', [
       'go online and let the temp create exhaust replay retries',
     ]);
-    act(() => {
+    await act(async () => {
       network.goOnline();
+      await Promise.resolve();
     });
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === 1,
@@ -1171,8 +1172,9 @@ describe('list-query replay', () => {
     env.addTimelineComments('beforeNextAction', [
       'go online and let the parent temp create exhaust replay',
     ]);
-    act(() => {
+    await act(async () => {
       network.goOnline();
+      await Promise.resolve();
     });
     await waitForMicrotaskCondition(
       () => createUserExecute.mock.calls.length === 1,

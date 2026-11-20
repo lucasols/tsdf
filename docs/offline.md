@@ -277,6 +277,19 @@ Each store also exposes scoped APIs:
 
 List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query.
 
+### Per-item state
+
+Collection and list-query stores expose `useItemOfflineState(itemPayload)` / `getItemOfflineState(itemPayload)` for per-row UI such as sync badges. They return `null` when the item has nothing queued, otherwise `{ syncState, pendingMutations, requiresResolution, isUnsentCreation }`:
+
+```tsx
+const offlineState = userStore.useItemOfflineState({ id: 1 });
+// null | { syncState: 'pending', pendingMutations: 1, requiresResolution: false, isUnsentCreation: false }
+```
+
+Prefer it over building a map from `useOfflineEntities()`: a component using the hook re-renders only when the state of its own item changes. `isUnsentCreation` is `true` for an item created offline until the server confirms it; after that the temporary payload returns `null` and the final payload reports the mutations still queued for the item. See [Hooks - useItemOfflineState](./hooks.md#useitemofflinestate).
+
+Document stores hold a single entity, so they do not need a per-item reader: use `useDocument().pendingSync` or `useOfflineEntities()[0]`.
+
 ## Multiple Tabs
 
 Tabs of the same session share one offline queue. Every tab can queue mutations and every tab shows the same pending state, but only one tab sends the queued work:

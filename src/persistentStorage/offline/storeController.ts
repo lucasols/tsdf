@@ -31,6 +31,10 @@ import {
 } from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import { parseWithSchema, validateWithSchema } from '../validateWithSchema';
+import {
+  getOfflineStoreEntityLookup,
+  toItemOfflineState,
+} from './entityMetadata';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import {
   getOfflineSessionAppVersion,
@@ -47,6 +51,7 @@ import {
   type OfflineFailureContext,
   type GlobalOfflineEntity,
   type InternalGlobalOfflineEntity,
+  type ItemOfflineState,
   type OfflineMutationInput,
   type OfflineMutationQueueingCause,
   type OfflineMutationQueueingPolicy,
@@ -239,6 +244,20 @@ function deserializeCompactOfflineEntityRef(
 
   return { entityKey, entityKind: fromCompactOfflineEntityKind(compactKind) };
 }
+
+/**
+ * An entity with several queued mutations reports the most urgent state among
+ * them, so it shows `syncing` while any of its mutations is being sent.
+ */
+const entitySyncStatePriority: Record<
+  GlobalOfflineEntity['syncState'],
+  number
+> = {
+  pending: 0,
+  syncing: 1,
+  'needs-confirmation': 2,
+  'resolution-required': 3,
+};
 
 function toCompactOfflineEntitySyncState(
   state: GlobalOfflineEntity['syncState'],
@@ -477,6 +496,7 @@ export type OfflineStoreController<
     upload?: OfflineMutationUploadsInput;
   }) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
+  getItemOfflineState: (itemKey: string) => ItemOfflineState | null;
   getOfflineResolutions: () => OfflineResolutionRecordForStore<TOperations>[];
   parseOfflineResolutionConflict: <TName extends keyof TOperations & string>(
     resolution: OfflineResolutionRecordForStore<TOperations, TName>,
@@ -1600,7 +1620,9 @@ export function createOfflineStoreController<
           kind: reduceOfflineEntityKind(existing?.kind, operationKind),
           pendingMutations: (existing?.pendingMutations ?? 0) + 1,
           syncState:
-            existing?.syncState === 'needs-confirmation'
+            existing &&
+            entitySyncStatePriority[existing.syncState] >
+              entitySyncStatePriority[entry.syncState]
               ? existing.syncState
               : entry.syncState,
           requiresResolution: existing?.requiresResolution ?? false,
@@ -3924,6 +3946,17 @@ export function createOfflineStoreController<
       .filter((entity) => entity.storeName === storeName);
   }
 
+  function getItemOfflineState(itemKey: string): ItemOfflineState | null {
+    const current = ensureActiveSession();
+    if (!current) return null;
+    return toItemOfflineState(
+      getOfflineStoreEntityLookup(
+        current.session.store.state.entities,
+        storeName,
+      ).get(itemKey),
+    );
+  }
+
   function getOfflineResolutions(): OfflineResolutionRecordForStore<TOperations>[] {
     return buildDerivedResolutionRecords();
   }
@@ -4183,6 +4216,7 @@ export function createOfflineStoreController<
     prepareForMutation,
     queueMutation,
     getOfflineEntities,
+    getItemOfflineState,
     getOfflineResolutions,
     parseOfflineResolutionConflict: parseConflictPayloadForResolution,
     resolveOfflineResolution,
