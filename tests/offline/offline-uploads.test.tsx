@@ -2014,14 +2014,17 @@ function createUploadsStoreManager(sessionKey: string) {
   });
 }
 
+type DocumentValueInput = { value: number; draftUploadId?: string };
+
 type DocumentValueOperation = DocumentOfflineOperationDefinition<
   { value: number },
-  { input: { value: number } }
+  { input: DocumentValueInput }
 >;
 
 /**
  * A document store defining `operationNames`. Each replay is logged in `sent`
- * with the content of its attached `avatar` file.
+ * with the content of its attached `avatar` file. An edit can also depend on
+ * a file the app saved itself (`draftUploadId`).
  */
 function createRecordingDocumentEnv({
   storeManager,
@@ -2039,8 +2042,13 @@ function createRecordingDocumentEnv({
   const operations: Record<string, DocumentValueOperation> = {};
   for (const operationName of operationNames) {
     operations[operationName] = {
-      inputSchema: rc_object({ value: rc_number }),
+      inputSchema: rc_object({
+        value: rc_number,
+        draftUploadId: rc_string.optionalKey(),
+      }),
       kind: 'update',
+      dependsOnUploads: ({ input }) =>
+        input.draftUploadId === undefined ? [] : [input.draftUploadId],
       execute: async (ctx) => {
         const avatar = ctx.uploads.filesById.avatar;
         sent.push(
@@ -2071,11 +2079,14 @@ function queueOfflineEdit(
   operation: string,
   value: number,
   avatarContent?: string,
+  draftUploadId?: string,
 ) {
+  const input: DocumentValueInput =
+    draftUploadId === undefined ? { value } : { value, draftUploadId };
   return resolveAfterAllTimers(
     env.apiStore.performMutation({
       mutation: () => Promise.resolve(value),
-      offline: { operation, input: { value } },
+      offline: { operation, input },
       upload:
         avatarContent === undefined
           ? undefined
@@ -2164,12 +2175,13 @@ test('an older deploy keeps the attached file of an edit queued for an operation
 });
 
 test('attached files of edits queued for an operation listed in removedOperations are deleted with them', async () => {
-  createMockBrowserOpfs();
+  const mockBrowserOpfs = createMockBrowserOpfs();
   const sessionKey = 'offline-removed-operation-upload-session';
   const storeName = 'offline-removed-operation-upload-doc';
   const sent: string[] = [];
 
   // The user attaches a file to an offline edit made with `oldUpdateValue`.
+  // The edit also uses a draft photo the app saved on its own.
   network.setOffline();
   const olderStoreManager = createUploadsStoreManager(sessionKey);
   const olderEnv = createRecordingDocumentEnv({
@@ -2178,13 +2190,31 @@ test('attached files of edits queued for an operation listed in removedOperation
     operationNames: ['oldUpdateValue'],
     sent,
   });
-  await queueOfflineEdit(olderEnv, 'oldUpdateValue', 2, 'old photo');
+  (
+    await resolveAfterAllTimers(
+      olderStoreManager.saveOfflineUpload({
+        id: 'draft-photo',
+        file: new File(['draft'], 'draft.txt', {
+          type: 'text/plain',
+          lastModified: 1,
+        }),
+      }),
+    )
+  ).unwrap();
+  await queueOfflineEdit(
+    olderEnv,
+    'oldUpdateValue',
+    2,
+    'old photo',
+    'draft-photo',
+  );
   await flushAllTimers();
-  expect(olderStoreManager.getOfflineUploads()).toHaveLength(1);
+  expect(olderStoreManager.getOfflineUploads()).toHaveLength(2);
 
   // The next deploy deletes `oldUpdateValue` for good and lists it in
-  // `removedOperations`. Opening the store deletes the edit, and its file
-  // with it: no deploy could send it anymore.
+  // `removedOperations`. Opening the store deletes the edit, and its attached
+  // file with it: no deploy could send it anymore. The draft photo belongs to
+  // the app, which may still use it, so it is kept.
   resetSessionForTests();
   act(() => {
     network.goOnline();
@@ -2201,7 +2231,13 @@ test('attached files of edits queued for an operation listed in removedOperation
   await advanceTime(5_000);
 
   expect(sent).toMatchInlineSnapshot(`[]`);
-  expect(newerStoreManager.getOfflineUploads()).toMatchInlineSnapshot(`[]`);
+  expect(getOpfsDirTree(mockBrowserOpfs)).toMatchInlineSnapshot(`
+    "tsdf-uploads (0.52 kb)
+    └ offline-removed-operation-upload-session (0.50 kb)
+      └ draft-photo (0.42 kb)
+        ├ binary.blob (0.03 kb)
+        └ metadata.json (0.37 kb)"
+  `);
 
   newerHook.unmount();
 });

@@ -1074,7 +1074,10 @@ test('an older deploy pauses sync behind edits only a newer deploy can send, so 
   act(() => {
     network.goOnline();
   });
-  const olderStoreManager = createDeployStoreManager(sessionKey);
+  const reportedErrors: string[] = [];
+  const olderStoreManager = createDeployStoreManager(sessionKey, (error) => {
+    reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+  });
   const olderDoc = createDeployDocumentEnv({
     storeManager: olderStoreManager,
     storeName: docStoreName,
@@ -1098,6 +1101,12 @@ test('an older deploy pauses sync behind edits only a newer deploy can send, so 
   // The document store waits instead, and so does the later edit of the
   // other store, to keep the order the user made them in.
   expect(sent).toMatchInlineSnapshot(`[]`);
+  // The app is told why the store waits, in case the operation was removed
+  // for good (e.g. a rolled back deploy) and must be listed in
+  // `removedOperations`.
+  expect(reportedErrors).toMatchInlineSnapshot(
+    `- '[tsdf] Store "offline-unknown-operation-order-doc" has unsent offline work of operations this deploy does not define (updateValue). It is kept for a deploy that defines them, and the store pauses sending its offline work until then. If they were removed for good, list them in removedOperations.'`,
+  );
   olderDocHook.unmount();
   olderOtherHook.unmount();
 
@@ -1130,6 +1139,64 @@ test('an older deploy pauses sync behind edits only a newer deploy can send, so 
 
   reloadedDocHook.unmount();
   reloadedOtherHook.unmount();
+});
+
+test('an online edit in an older deploy waits behind an earlier edit only a newer deploy can send', async () => {
+  const sessionKey = 'offline-unknown-operation-online-edit-session';
+  const storeName = 'offline-unknown-operation-online-edit-doc';
+  const sent: string[] = [];
+
+  // In the newer deploy, which added `updateValue`, the user edits the
+  // document offline.
+  network.setOffline();
+  const newerEnv = createDeployDocumentEnv({
+    storeManager: createDeployStoreManager(sessionKey),
+    storeName,
+    label: 'newer',
+    operationNames: ['updateValue', 'legacyUpdateValue'],
+    sent,
+  });
+  await queueOfflineValueEdit(newerEnv, 'updateValue', 5);
+  await flushAllTimers();
+
+  // Back online, in a tab of the older deploy, the user edits it again. Sent
+  // right away, this later edit would reach the server first and the newer
+  // deploy would then overwrite it with `5`: it waits behind it instead.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const olderEnv = createDeployDocumentEnv({
+    storeManager: createDeployStoreManager(sessionKey),
+    storeName,
+    label: 'older',
+    operationNames: ['legacyUpdateValue'],
+    sent,
+  });
+  const olderHook = renderHook(() => olderEnv.apiStore.useDocument());
+  await flushAllTimers();
+  await queueOfflineValueEdit(olderEnv, 'legacyUpdateValue', 9);
+  await flushAllTimers();
+  olderHook.unmount();
+
+  // The user reloads into the newer deploy: both edits are sent in the order
+  // they were made, so the server ends with the latest one. Had the older
+  // deploy sent `9` right away, only `5` would be sent here.
+  resetSessionForTests();
+  const reloadedEnv = createDeployDocumentEnv({
+    storeManager: createDeployStoreManager(sessionKey),
+    storeName,
+    label: 'reloaded',
+    operationNames: ['updateValue', 'legacyUpdateValue'],
+    sent,
+  });
+  const reloadedHook = renderHook(() => reloadedEnv.apiStore.useDocument());
+  await flushAllTimers();
+  expect(sent).toMatchInlineSnapshot(
+    `['reloaded.updateValue(5)', 'reloaded.legacyUpdateValue(9)']`,
+  );
+
+  reloadedHook.unmount();
 });
 
 test('queued edits of an operation listed in removedOperations are deleted and no longer hold back sync', async () => {
@@ -1175,7 +1242,7 @@ test('queued edits of an operation listed in removedOperations are deleted and n
   // it is dropped and reported, and the edit after it is sent.
   expect(sent).toMatchInlineSnapshot(`['doc.updateValue(3)']`);
   expect(reportedErrors).toMatchInlineSnapshot(
-    `- '[tsdf] Store "offline-removed-operation-doc" still had 1 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations. They were deleted: no deploy can replay them anymore.'`,
+    `- '[tsdf] Store "offline-removed-operation-doc" still had 1 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.'`,
   );
   newerHook.unmount();
 
@@ -1197,6 +1264,152 @@ test('queued edits of an operation listed in removedOperations are deleted and n
   expect(reportedErrors).toMatchInlineSnapshot(`[]`);
 
   reopenedHook.unmount();
+});
+
+/**
+ * The persistent storage config of a users list query store of a deploy that
+ * defines `operations`.
+ */
+function usersDeployPersistentStorage<TOperations>(
+  operations: TOperations,
+  removedOperations?: readonly string[],
+) {
+  return {
+    adapter: 'local-sync' as const,
+    schema: userRowSchema,
+    itemPayloadSchema: rc_string,
+    queryPayloadSchema: listQueryQueryPayloadSchema,
+    offline: { operations, removedOperations },
+  };
+}
+
+type PatchUserNameOperation = ListQueryOfflineOperationDefinition<
+  OfflineStorageUserRow,
+  ListQueryParams,
+  string,
+  { itemId: string; name: string },
+  unknown
+>;
+
+function createPatchUserNameOperation(sent: string[]): PatchUserNameOperation {
+  return {
+    inputSchema: userPatchSchema,
+    kind: 'update',
+    getEntityRefs: ({ input }) => [input.itemId],
+    execute: ({ input }) => {
+      sent.push(`patchUserName(${input.itemId}, ${input.name})`);
+      return Promise.resolve({ name: input.name });
+    },
+    // Only what is sent matters here.
+    onSuccessExecute: () => {},
+  };
+}
+
+type PatchUserNameOperations = { patchUserName: PatchUserNameOperation };
+
+test('removing a create operation also deletes the queued edits of the items it would have created', async () => {
+  const sessionKey = 'offline-removed-create-operation-session';
+  const storeName = 'offline-removed-create-operation-users';
+  const sent: string[] = [];
+  const reportedErrors: string[] = [];
+
+  // In a deploy that still has `createUser`, the user creates a user offline
+  // and renames it. They also rename a user that already exists.
+  network.setOffline();
+  const createUser: CreateListQueryUserOperations['createUser'] = {
+    inputSchema: collectionCreateInputSchema,
+    kind: 'create',
+    getEntityRefs: ({ input }) => [`temp:${input.name}`],
+    tempEntity: {
+      buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+      reconcileServerEntity: (result) => ({
+        finalPayload: `users||${result.id}`,
+        finalData: result,
+      }),
+    },
+    execute: ({ input }) => {
+      sent.push(`createUser(${input.name})`);
+      return Promise.resolve({ id: 3, name: input.name });
+    },
+  };
+  const olderEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    CreateListQueryUserOperations & PatchUserNameOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage({
+      createUser,
+      patchUserName: createPatchUserNameOperation(sent),
+    }),
+  });
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus' }),
+      offline: { operation: 'createUser', input: { name: 'Linus' } },
+    }),
+  );
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation('temp:Linus', {
+      mutation: () => Promise.resolve({ name: 'Linus T.' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'temp:Linus', name: 'Linus T.' },
+      },
+    }),
+  );
+  await resolveAfterAllTimers(
+    olderEnv.apiStore.performMutation('users||1', {
+      mutation: () => Promise.resolve({ name: 'Ada L.' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada L.' },
+      },
+    }),
+  );
+  await flushAllTimers();
+
+  // The next deploy deletes `createUser` for good and lists it in
+  // `removedOperations`. The user opens it online.
+  resetSessionForTests();
+  act(() => {
+    network.goOnline();
+  });
+  const newerEnv = createListQueryStoreTestEnv<
+    OfflineStorageUserRow,
+    false,
+    false,
+    PatchUserNameOperations
+  >(offlineStorageUsersTable, {
+    id: storeName,
+    storeManager: createDeployStoreManager(sessionKey, (error) => {
+      reportedErrors.push(error instanceof Error ? error.message : 'unknown');
+    }),
+    testScenario: { loaded: { queries: [offlineStorageUsersQuery] } },
+    persistentStorage: usersDeployPersistentStorage(
+      { patchUserName: createPatchUserNameOperation(sent) },
+      ['createUser'],
+    ),
+  });
+  const newerHook = renderHook(() =>
+    newerEnv.apiStore.useListQuery(offlineStorageUsersQuery),
+  );
+  await flushAllTimers();
+
+  // The created user never reaches the server, so its rename is deleted with
+  // it instead of being sent for an item the server doesn't have. The rename
+  // of the existing user is still sent.
+  expect(sent).toMatchInlineSnapshot(`['patchUserName(users||1, Ada L.)']`);
+  expect(
+    reportedErrors.filter((message) => message.includes('removedOperations')),
+  ).toMatchInlineSnapshot(
+    `- '[tsdf] Store "offline-removed-create-operation-users" still had 2 unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.'`,
+  );
+
+  newerHook.unmount();
 });
 
 test('local-sync restart keeps offline temp rows visible for partial-resource list queries', async () => {

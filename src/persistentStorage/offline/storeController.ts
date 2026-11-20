@@ -543,6 +543,9 @@ export function createOfflineStoreController<
   // replay (and, through its replay head, the later work of other stores)
   // waits for a deploy that can send it.
   let earliestUnknownQueueEntry: OfflineQueueEntry | null = null;
+  // All of those queued records. A new mutation of the same entities must
+  // queue behind them instead of reaching the server first.
+  let unknownQueueEntries: OfflineQueueEntry[] = [];
   const countedReplayFailures = new Map<string, number>();
   const resolvedEntityRefBySerializedRef = new Map<string, ValidPayload>();
 
@@ -638,7 +641,9 @@ export function createOfflineStoreController<
   function hasQueuedWorkForSameEntities(
     prepared: PreparedQueuedMutation,
   ): boolean {
-    if (queueEntries.size === 0) return false;
+    if (queueEntries.size === 0 && unknownQueueEntries.length === 0) {
+      return false;
+    }
 
     const affectedEntityRefs =
       prepared.entityRefs ??
@@ -658,16 +663,19 @@ export function createOfflineStoreController<
         : []),
     ];
 
+    const hasSameEntity = (entry: OfflineQueueEntry) =>
+      entry.entityRefs.some((queuedEntityRef) =>
+        entityRefs.some((entityRef) =>
+          isSameEntityRef(entityRef, queuedEntityRef),
+        ),
+      );
+
+    // Work only a newer deploy can send: this deploy can't read its
+    // dependencies, so only its entities are compared.
+    if (unknownQueueEntries.some(hasSameEntity)) return true;
+
     for (const entry of queueEntries.values()) {
-      for (const queuedEntityRef of entry.entityRefs) {
-        if (
-          entityRefs.some((entityRef) =>
-            isSameEntityRef(entityRef, queuedEntityRef),
-          )
-        ) {
-          return true;
-        }
-      }
+      if (hasSameEntity(entry)) return true;
 
       // A queued mutation that depends on an entity this one changes (e.g. a
       // queued child creation and an online delete of its parent) must reach
@@ -826,6 +834,7 @@ export function createOfflineStoreController<
     unknownOperationUploadIds = [];
     unknownOperationEntityRefs = [];
     earliestUnknownQueueEntry = null;
+    unknownQueueEntries = [];
     nextQueueOrder = 0;
     hydratedSessionKey = null;
     hydratedPromise = null;
@@ -1116,9 +1125,12 @@ export function createOfflineStoreController<
       const loadedUnknownOperationUploadIds: string[] = [];
       const loadedUnknownOperationEntityRefs: OfflineEntityRef[] = [];
       let loadedEarliestUnknownQueueEntry: OfflineQueueEntry | null = null;
+      const loadedUnknownQueueEntries: OfflineQueueEntry[] = [];
       const removedQueueEntryIds: string[] = [];
       const removedResolutionIds: string[] = [];
       const removedUploadIds: string[] = [];
+      const removedTempEntityKeys: string[] = [];
+      const unknownOperationNames = new Set<string>();
       // Records of an operation this deploy doesn't define were written by a
       // newer deploy, unless the app lists the operation as removed. They stay
       // in storage for a deploy that can send or resolve them, and this tab
@@ -1129,29 +1141,43 @@ export function createOfflineStoreController<
         removedRecordIds: string[],
       ): 'known' | 'unknown' | 'removed' => {
         if (operations[record.operation]) return 'known';
-        const uploadIds = [
-          ...Object.values(record.attachedUploadIds ?? {}),
-          ...(record.dependencyUploadIds ?? []),
-        ];
+        const attachedUploadIds = Object.values(record.attachedUploadIds ?? {});
         if (removedOperations?.includes(record.operation)) {
           removedRecordIds.push(record.id);
-          removedUploadIds.push(...uploadIds);
+          // Only the record's own files: the uploads it depends on were saved
+          // by the app, which still owns them.
+          removedUploadIds.push(...attachedUploadIds);
+          // A removed creation never reaches the server, so the work queued
+          // for the entities it created is deleted with it.
+          if (record.tempIds && record.tempIds.length > 0) {
+            for (const entityRef of record.entityRefs) {
+              if (entityRef.entityKind === 'item') {
+                removedTempEntityKeys.push(entityRef.entityKey);
+              }
+            }
+          }
           return 'removed';
         }
-        loadedUnknownOperationUploadIds.push(...uploadIds);
+        loadedUnknownOperationUploadIds.push(
+          ...attachedUploadIds,
+          ...(record.dependencyUploadIds ?? []),
+        );
         loadedUnknownOperationEntityRefs.push(...record.entityRefs);
+        unknownOperationNames.add(record.operation);
         return 'unknown';
       };
       for (const entry of loadedQueueEntries.values()) {
         const kind = skipUndefinedOperation(entry, removedQueueEntryIds);
         if (kind === 'known') {
           queueEntries.set(entry.id, entry);
-        } else if (
-          kind === 'unknown' &&
-          (loadedEarliestUnknownQueueEntry === null ||
-            compareQueueEntries(entry, loadedEarliestUnknownQueueEntry) < 0)
-        ) {
-          loadedEarliestUnknownQueueEntry = entry;
+        } else if (kind === 'unknown') {
+          loadedUnknownQueueEntries.push(entry);
+          if (
+            loadedEarliestUnknownQueueEntry === null ||
+            compareQueueEntries(entry, loadedEarliestUnknownQueueEntry) < 0
+          ) {
+            loadedEarliestUnknownQueueEntry = entry;
+          }
         }
       }
       for (const resolution of loadedResolutionEntries.values()) {
@@ -1166,13 +1192,44 @@ export function createOfflineStoreController<
           continue;
         resolutions.set(resolution.id, resolution);
       }
+      for (const entityKey of removedTempEntityKeys) {
+        const descendants = collectTempCreateDescendants({
+          parentEntityKey: entityKey,
+        });
+        for (const entry of descendants.queueEntries) {
+          queueEntries.delete(entry.id);
+          removedQueueEntryIds.push(entry.id);
+          removedUploadIds.push(
+            ...Object.values(entry.attachedUploadIds ?? {}),
+          );
+        }
+        for (const resolution of descendants.resolutions) {
+          resolutions.delete(resolution.id);
+          removedResolutionIds.push(resolution.id);
+          removedUploadIds.push(
+            ...Object.values(resolution.attachedUploadIds ?? {}),
+          );
+        }
+      }
       unknownOperationUploadIds = loadedUnknownOperationUploadIds;
       unknownOperationEntityRefs = loadedUnknownOperationEntityRefs;
       earliestUnknownQueueEntry = loadedEarliestUnknownQueueEntry;
+      unknownQueueEntries = loadedUnknownQueueEntries;
       // Unknown entries keep their place in the queue order.
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
+
+      // Expected while a newer deploy rolls out, but after a rollback this
+      // work blocks the sync until the operations are listed in
+      // `removedOperations`, so the app is told which ones.
+      if (unknownOperationNames.size > 0) {
+        onPersistentStorageError?.(
+          new Error(
+            `[tsdf] Store "${storeName}" has unsent offline work of operations this deploy does not define (${[...unknownOperationNames].join(', ')}). It is kept for a deploy that defines them${loadedEarliestUnknownQueueEntry ? ', and the store pauses sending its offline work until then' : ''}. If they were removed for good, list them in removedOperations.`,
+          ),
+        );
+      }
 
       if (removedQueueEntryIds.length > 0 || removedResolutionIds.length > 0) {
         await deleteRemovedOperationRecords(
@@ -1195,20 +1252,20 @@ export function createOfflineStoreController<
     resolutionIds: string[],
     uploadIds: string[],
   ): Promise<void> {
-    try {
-      await Promise.all([
-        ...queueEntryIds.map((id) => current.queueNamespace.remove(id)),
-        ...resolutionIds.map((id) => current.resolutionNamespace.remove(id)),
-      ]);
-      for (const uploadId of uploadIds) {
-        await current.session.deleteUpload(uploadId);
-      }
-    } catch (error) {
-      onPersistentStorageError?.(error);
-    }
     onPersistentStorageError?.(
       new Error(
-        `[tsdf] Store "${storeName}" still had ${queueEntryIds.length + resolutionIds.length} unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations. They were deleted: no deploy can replay them anymore.`,
+        `[tsdf] Store "${storeName}" still had ${queueEntryIds.length + resolutionIds.length} unsent offline record(s) (queued mutations or pending resolutions) of operations listed in its removedOperations, or of entities they created. They are deleted: no deploy can replay them anymore.`,
+      ),
+    );
+    await Promise.all(
+      [
+        ...queueEntryIds.map((id) => current.queueNamespace.remove(id)),
+        ...resolutionIds.map((id) => current.resolutionNamespace.remove(id)),
+        ...uploadIds.map((id) => current.session.deleteUpload(id)),
+      ].map((removal) =>
+        Promise.resolve(removal).catch((error: unknown) => {
+          onPersistentStorageError?.(error);
+        }),
       ),
     );
   }

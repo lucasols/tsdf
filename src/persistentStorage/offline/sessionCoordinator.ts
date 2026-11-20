@@ -1996,7 +1996,10 @@ class SessionOfflineCoordinator {
 
     // Only uploads a store created in this runtime referenced, and no longer
     // does, are removed here. Uploads of other stores (lazily created ones, or
-    // ones only another deploy has) are left to the retention cleanup.
+    // ones only another deploy has) are left to the retention cleanup. So are
+    // the rare files no record references anymore that no store referenced in
+    // this runtime (e.g. the tab closed right after a replay removed their
+    // entry, before this cleanup ran).
     const removableIds = [...this.#uploads.values()]
       .filter((upload) => upload.source === 'mutation')
       .map((upload) => upload.id)
