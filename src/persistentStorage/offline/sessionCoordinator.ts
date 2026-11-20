@@ -2082,6 +2082,9 @@ class SessionOfflineCoordinator {
       const token = this.getClassificationToken();
       result = await classifyFailure(error, ctx);
 
+      // The gate may have closed while the classifier ran
+      if (!this.#canClassifyFailures()) return 'ignore';
+
       // An explicit answer overtaken by a newer classification is dropped.
       // An `unknown` one decides nothing by itself: it goes on to the health
       // check, whose answer is shared by every failure waiting for it

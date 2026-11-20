@@ -1,3 +1,4 @@
+import { sleep } from '@ls-stack/utils/sleep';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act } from 'react';
 import { rc_object, rc_string } from 'runcheck';
@@ -1439,4 +1440,73 @@ test('a request failing right after the gate reopens puts the session in network
   // The recovery check runs on the network probe cadence (5s by default)
   await advanceTime(6_000);
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
+});
+
+test('a failure whose classification is still running when the gate closes does not call the health endpoint', async () => {
+  const sessionKey = 'gate-closed-during-classification';
+  const health = createHealthCheckMock();
+  // The flag the app flips at runtime.
+  let offlineEnabled = true;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => offlineEnabled,
+      // The app's classifier needs time to decide (e.g. it reads the error
+      // response body) and then defers to the health check
+      classifyFailure: async () => {
+        await sleep(200);
+        return 'unknown' as const;
+      },
+      healthCheck: { check: health.check },
+      network: network.config,
+      outage: { enabled: true },
+    },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: 'gate-closed-during-classification-doc',
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await Promise.resolve();
+
+  // -- A mutation fails while the backend is down; the app closes the gate
+  // while the classifier is still deciding --
+  health.setBackend('outage');
+  const resultPromise = env.apiStore.performMutation({
+    mutation: () => Promise.reject(new Error('bad gateway')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+  await advanceTime(100);
+  offlineEnabled = false;
+  const result = await resolveAfterAllTimers(resultPromise);
+
+  // The gate was closed by the time the classifier answered: the health
+  // endpoint is not called and the failure stays a plain request error
+  expect(health.check).not.toHaveBeenCalled();
+  expect(result.ok).toBe(false);
+  expect(getGlobalOfflineStatusSummary(sessionKey).outage)
+    .toMatchInlineSnapshot(`
+      active: '❌'
+      enabled: '❌'
+    `);
 });

@@ -301,7 +301,8 @@ export type OfflineHealthCheckConfig = {
   ) => Promise<OfflineHealthCheckResult> | OfflineHealthCheckResult;
   /**
    * How long the session waits for `check`, in milliseconds, before giving up
-   * on it and aborting `ctx.signal`.
+   * on it and aborting `ctx.signal`. Must be a finite number below
+   * `2_147_483_647` (the `setTimeout` limit); there is no "no timeout" value.
    * @default 10_000
    */
   timeoutMs?: number;
