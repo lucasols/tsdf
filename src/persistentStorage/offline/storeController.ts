@@ -123,10 +123,12 @@ type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
     /**
-     * Loaded fields declared for the temp entity, passed because the temp
-     * item may not be loaded in memory (async storage)
+     * Loaded fields declared for the temp entity, needed because the temp
+     * item may not be loaded in memory (async storage). Only call it when the
+     * store tracks loaded fields: it may run the app's pending entity builder
+     * again, and returns `undefined` when that fails.
      */
-    loadedFields: ItemLoadedFields | undefined;
+    getLoadedFields: () => ItemLoadedFields | undefined;
   }) => void;
   /**
    * Another tab reconciled a temp entity of the store. The final item's data
@@ -2366,7 +2368,7 @@ export function createOfflineStoreController<
         tempId,
         result: args.result,
         reconciliation,
-        loadedFields: tempEntity.loadedFields,
+        getLoadedFields: () => tempEntity.loadedFields,
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
@@ -2395,13 +2397,34 @@ export function createOfflineStoreController<
           finalData: reconciliation.finalData,
         })),
     });
-    // Built again from the input for their declared loaded fields
-    const pendingEntries = orderByTempIds({
-      operationName: args.operationName,
-      label: 'Temp entities',
-      tempIds: args.tempIds,
-      items: tempEntities.buildPendingEntities(args.input, args.tempIds),
-    });
+    // The declared loaded fields are built again from the input, only for
+    // stores that track them. The server already applied the mutation, so a
+    // builder that fails now (e.g. it reads rows that are no longer loaded)
+    // must not fail the replay: the fields are then left undeclared.
+    const pendingEntityBuilder = tempEntities;
+    let pendingEntries:
+      | readonly { loadedFields?: ItemLoadedFields }[]
+      | undefined;
+    function getPendingEntryLoadedFields(
+      index: number,
+    ): ItemLoadedFields | undefined {
+      if (!pendingEntries) {
+        try {
+          pendingEntries = orderByTempIds({
+            operationName: args.operationName,
+            label: 'Temp entities',
+            tempIds: args.tempIds,
+            items: pendingEntityBuilder.buildPendingEntities(
+              args.input,
+              args.tempIds,
+            ),
+          });
+        } catch {
+          pendingEntries = [];
+        }
+      }
+      return pendingEntries[index]?.loadedFields;
+    }
 
     for (const [index, reconciliation] of reconciliations.entries()) {
       args.current.session.publishTempReconciled(
@@ -2415,7 +2438,7 @@ export function createOfflineStoreController<
         tempId: reconciliation.tempId,
         result: args.result,
         reconciliation,
-        loadedFields: pendingEntries[index]?.loadedFields,
+        getLoadedFields: () => getPendingEntryLoadedFields(index),
       });
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,

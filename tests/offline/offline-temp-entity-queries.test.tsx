@@ -7,6 +7,7 @@ import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type {
   ListQueryOfflineOperationDefinition,
   OfflineSessionConfig,
+  OfflineTempEntityPendingEntry,
 } from '../../src/main';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createStoreManager } from '../../src/storeManager';
@@ -758,6 +759,17 @@ describe('temp entities declared in list queries', () => {
   });
 });
 
+type DuplicateUsersOperations = {
+  duplicateUsers: ListQueryOfflineOperationDefinition<
+    UserRow,
+    ListQueryParams,
+    string,
+    string[],
+    unknown,
+    UserRow[]
+  >;
+};
+
 describe('temp entities with partial resources', () => {
   test('a row declared as fully loaded is shown by readers of every field instead of being fetched', async () => {
     const sessionKey = 'temp-queries-loaded-fields-session';
@@ -1000,5 +1012,140 @@ describe('temp entities with partial resources', () => {
     ).toMatchInlineSnapshot(`[]`);
 
     hook.unmount();
+  });
+  test('copies of rows created offline are saved after a restart, even when the copied rows are no longer loaded', async () => {
+    createOpfsPersistentStorageTestStore();
+    const sessionKey = 'temp-queries-duplicate-session';
+    let nextUserId = 3;
+
+    function createDuplicateUsersEnv(testScenario: ListQueryStoreTestScenario) {
+      const env = createListQueryStoreTestEnv<
+        UserRow,
+        true,
+        false,
+        DuplicateUsersOperations
+      >(initialUsers, {
+        id: 'temp-queries-duplicate-store',
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        testScenario,
+        partialResources: partialResourcesConfig,
+        persistentStorage: {
+          // Rows are only read from OPFS when a screen needs them
+          adapter: opfsPersistentStorage,
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: {
+            operations: {
+              duplicateUsers: {
+                inputSchema: rc_array(rc_string),
+                kind: 'create',
+                getEntityRefs: ({ input }) =>
+                  input.map((sourceId) => `temp:copy:${sourceId}`),
+                tempEntities: {
+                  // A "duplicate" action copies the rows loaded on screen, so
+                  // its pending copies can only be built while they are
+                  // loaded.
+                  buildPendingEntities: (
+                    input,
+                    tempIds,
+                  ): OfflineTempEntityPendingEntry<
+                    string,
+                    UserRow,
+                    ListQueryParams
+                  >[] =>
+                    input.map((sourceId, index) => {
+                      const source = env.apiStore.getItemState(sourceId);
+                      if (!source) throw new Error('Copied row is not loaded');
+                      return {
+                        tempId: tempIds[index] ?? `temp:copy:${sourceId}`,
+                        pendingEntity: { id: -1, name: `${source.name} copy` },
+                        loadedFields: '*',
+                      };
+                    }),
+                  reconcileServerEntities: (result, tempIds) =>
+                    result.map((item, index) => ({
+                      tempId: tempIds[index] ?? `temp:copy:${item.id}`,
+                      finalPayload: `users||${item.id}`,
+                      finalData: item,
+                    })),
+                },
+                execute: async ({ input }) => {
+                  const results = input.map((sourceId) => {
+                    const result = {
+                      id: nextUserId,
+                      name: `${sourceId === 'users||1' ? 'Ada' : 'Grace'} copy`,
+                    };
+                    nextUserId += 1;
+                    return result;
+                  });
+                  for (const result of results) {
+                    await env.serverTable.delayedSetItem(
+                      `users||${result.id}`,
+                      result,
+                    );
+                  }
+                  return results;
+                },
+              },
+            },
+          },
+        },
+      });
+      return env;
+    }
+
+    // Duplicate both rows offline while they are loaded on screen.
+    network.setOffline();
+    const first = createDuplicateUsersEnv({
+      loaded: { items: ['users||1', 'users||2'] },
+    });
+    await flushAllTimers();
+    // OPFS writes settle on timers, so they are flushed while the copy is
+    // queued
+    await act(async () => {
+      await resolveAfterAllTimers(
+        first.apiStore.performMutation(null, {
+          mutation: () => Promise.resolve([]),
+          offline: {
+            operation: 'duplicateUsers',
+            input: ['users||1', 'users||2'],
+          },
+        }),
+      );
+    });
+    await flushAllTimers();
+    first.apiStore.dispose();
+
+    // Restart on a screen that shows no user, so the copied rows are not
+    // loaded when the queued copy is saved.
+    resetSessionForTests();
+    const restarted = createDuplicateUsersEnv('idle');
+    await flushAllTimers();
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // The copies were created on the server once, and the saved copies
+    // replaced the pending ones: nothing is left waiting for a retry or a
+    // manual resolution that could create them twice.
+    expect(restarted.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(restarted.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    // The saved copies are in the store under their server ids.
+    expect({
+      firstCopy: restarted.apiStore.getItemState('users||3'),
+      secondCopy: restarted.apiStore.getItemState('users||4'),
+    }).toMatchInlineSnapshot(`
+      firstCopy: { id: 3, name: 'Ada copy' }
+      secondCopy: { id: 4, name: 'Grace copy' }
+    `);
   });
 });

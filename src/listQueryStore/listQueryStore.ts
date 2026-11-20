@@ -2279,13 +2279,13 @@ export function createListQueryStore<
             __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
           );
         },
-        reconcileTempEntity: ({ tempId, reconciliation, loadedFields }) => {
+        reconcileTempEntity: ({ tempId, reconciliation, getLoadedFields }) => {
           reconcileOfflineTempItem(
             tempId,
             reconciliation.finalPayload,
             reconciliation.finalData,
             // Loaded fields are only tracked with partial resources
-            partialResources ? loadedFields : undefined,
+            partialResources ? getLoadedFields() : undefined,
           );
         },
         applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
