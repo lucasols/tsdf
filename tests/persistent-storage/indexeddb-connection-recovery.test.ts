@@ -265,6 +265,12 @@ function editDocument(
   });
 }
 
+/** The user switches away from the tab (`hidden`) or back to it. */
+function setTabVisibility(visibilityState: DocumentVisibilityState): void {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(visibilityState);
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
 /**
  * The browser's storage backend stops answering: requests, transactions and
  * opens stay pending and no IndexedDB event is delivered. fake-indexeddb runs
@@ -601,9 +607,7 @@ describe('operations that stop making progress', () => {
     renderHook(() => env.apiStore.useDocument());
     await flushAllTimers();
 
-    const visibility = vi
-      .spyOn(document, 'visibilityState', 'get')
-      .mockReturnValue('hidden');
+    setTabVisibility('hidden');
     const storage = freezeStorage();
     editDocument(env, 2);
 
@@ -616,7 +620,7 @@ describe('operations that stop making progress', () => {
     // time before it is considered stuck, so a save that completes on resume
     // is never failed. The first check after becoming visible mostly covers
     // hidden time, so it does not count.
-    visibility.mockReturnValue('visible');
+    setTabVisibility('visible');
     storage.recoverLosingPendingWork();
     await advanceTime(2 * STALL_CHECK_INTERVAL_MS);
     expect(openDatabase).toHaveBeenCalledTimes(1);
@@ -627,6 +631,38 @@ describe('operations that stop making progress', () => {
     expect(openDatabase).toHaveBeenCalledTimes(2);
     expect(await readPersistedEntries()).toMatchInlineSnapshot(
       `doc-hung-hidden/d: { value: 2 }`,
+    );
+    expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('a save that hangs is not given up right after the user briefly switches to another tab', async () => {
+    const { env } = createDocumentApp('doc-hung-tab-switch', 1);
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
+
+    const storage = freezeStorage();
+    editDocument(env, 2);
+    // The debounced save starts and its first check sees no progress.
+    await advanceTime(2000 + STALL_CHECK_INTERVAL_MS);
+
+    // The user looks at another tab for a few seconds and comes back before
+    // the next check. Storage may have been paused while the tab was hidden,
+    // so that check does not count, even though the tab is visible again when
+    // it runs: the save is not given up.
+    setTabVisibility('hidden');
+    await advanceTime(5000);
+    setTabVisibility('visible');
+    await advanceTime(STALL_CHECK_INTERVAL_MS - 5000);
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+
+    // Storage answers: the original save completes on the original
+    // connection, without a second attempt.
+    storage.resume();
+    await flushAllTimers();
+
+    expect(openDatabase).toHaveBeenCalledTimes(1);
+    expect(await readPersistedEntries()).toMatchInlineSnapshot(
+      `doc-hung-tab-switch/d: { value: 2 }`,
     );
     expect(persistentStorageErrors).toMatchInlineSnapshot(`[]`);
   });

@@ -42,8 +42,8 @@ const DEFAULT_INDEXED_DB_NAME = 'tsdf-persistent-storage-compact-alpha-reset';
 const INDEXED_DB_VERSION = 1;
 const INDEXED_DB_ENTRY_STORE = 'entries';
 const INDEXED_DB_NAMESPACE_POLICY_STORE = 'namespacePolicies';
+/** No longer used; still created so the database schema stays the same. */
 const INDEXED_DB_META_STORE = 'meta';
-const INDEXED_DB_MAINTENANCE_META_KEY = 'maintenance';
 /**
  * How often a pending open request or transaction is checked for progress.
  * It is given up after two consecutive checks without a single IndexedDB
@@ -85,6 +85,25 @@ function isIndexedDbConnectionError(error: unknown): boolean {
  */
 const indexedDbProgressByDatabase = new Map<string, { events: number }>();
 
+/**
+ * Times the page was hidden or shown since the first stall watch started, so
+ * a check can tell its interval included hidden time even when the page was
+ * visible both when the interval started and when it ended.
+ */
+let pageVisibilityChanges = 0;
+let isTrackingPageVisibility = false;
+
+function trackPageVisibility(): void {
+  if (isTrackingPageVisibility) return;
+  isTrackingPageVisibility = true;
+  asPossiblyUndefined(globalThis.document)?.addEventListener(
+    'visibilitychange',
+    () => {
+      pageVisibilityChanges += 1;
+    },
+  );
+}
+
 function isPageHidden(): boolean {
   return asPossiblyUndefined(globalThis.document)?.visibilityState === 'hidden';
 }
@@ -102,11 +121,13 @@ class IndexedDbStallWatch {
   readonly #progress: { events: number };
   #checkedEventCount: number;
   #checkedAt = Date.now();
-  #hiddenAtCheck = isPageHidden();
+  #checkedVisibilityChanges: number;
   #stalledChecks = 0;
   #timer: ReturnType<typeof setTimeout>;
 
   constructor(databaseName: string, transaction: IDBTransaction | null) {
+    trackPageVisibility();
+    this.#checkedVisibilityChanges = pageVisibilityChanges;
     let progress = indexedDbProgressByDatabase.get(databaseName);
     if (progress === undefined) {
       progress = { events: 0 };
@@ -136,15 +157,15 @@ class IndexedDbStallWatch {
     // hidden tab may have its storage paused, and a check that fires late
     // means the page itself was not running (frozen tab, sleeping device,
     // throttled timers), so IndexedDB had no chance to answer either. An
-    // interval that started hidden is not counted either. An operation is
-    // therefore never given up the moment a page resumes.
+    // interval during which the page was hidden at any point is not counted
+    // either. An operation is therefore never given up the moment a page
+    // resumes.
     const now = Date.now();
-    const hidden = isPageHidden();
     if (
       this.#progress.events !== this.#checkedEventCount ||
       now - this.#checkedAt > INDEXED_DB_STALL_CHECK_INTERVAL_MS * 1.5 ||
-      hidden ||
-      this.#hiddenAtCheck
+      pageVisibilityChanges !== this.#checkedVisibilityChanges ||
+      isPageHidden()
     ) {
       this.#stalledChecks = 0;
     } else {
@@ -152,7 +173,7 @@ class IndexedDbStallWatch {
     }
     this.#checkedEventCount = this.#progress.events;
     this.#checkedAt = now;
-    this.#hiddenAtCheck = hidden;
+    this.#checkedVisibilityChanges = pageVisibilityChanges;
 
     if (this.#stalledChecks < 2) {
       this.#timer = setTimeout(this.#check, INDEXED_DB_STALL_CHECK_INTERVAL_MS);
@@ -664,8 +685,24 @@ function openRequestAsPromise<T>(
       resolve(__LEGIT_CAST__<T, unknown>(request.result));
     };
     request.onerror = () =>
-      reject(request.error ?? new Error('IndexedDB request failed.'));
+      reject(
+        getRequestError(request) ?? new Error('IndexedDB request failed.'),
+      );
   });
+}
+
+/**
+ * A request still pending when its transaction aborts fails with a generic
+ * `AbortError`; the transaction's error is then the real cause (a quota or
+ * constraint error from another request), which must not be mistaken for a
+ * lost connection.
+ */
+function getRequestError(request: IDBRequest): DOMException | null {
+  const error = request.error;
+  if (error?.name === 'AbortError') {
+    return request.transaction?.error ?? error;
+  }
+  return error;
 }
 
 function transactionDone(
@@ -699,7 +736,10 @@ async function iterateCursor<TCursor extends IDBCursor, T>(
   await new Promise<void>((resolve, reject) => {
     watch.rejecters.push(reject);
     request.onerror = () =>
-      reject(request.error ?? new Error('IndexedDB cursor request failed.'));
+      reject(
+        getRequestError(request) ??
+          new Error('IndexedDB cursor request failed.'),
+      );
     request.onsuccess = async () => {
       watch.progressed();
       const cursor = request.result;
@@ -747,54 +787,6 @@ type IndexedDbStructureInspection = {
   }>;
   version: number;
 };
-
-type IndexedDbMetaRecord = { k: string; v: unknown };
-
-async function getMaintenanceState(
-  database: IDBDatabase,
-): Promise<{ lastSuccessfulCleanupAt: number | null }> {
-  const transaction = database.transaction(INDEXED_DB_META_STORE, 'readonly');
-  const watch = new IndexedDbStallWatch(database.name, transaction);
-  const store = transaction.objectStore(INDEXED_DB_META_STORE);
-  const value = await openRequestAsPromise<IndexedDbMetaRecord | undefined>(
-    watch,
-    store.get(INDEXED_DB_MAINTENANCE_META_KEY),
-  );
-  await transactionDone(transaction, watch);
-
-  const recordValue = value?.v;
-  if (!isObject(recordValue)) {
-    return { lastSuccessfulCleanupAt: null };
-  }
-  const metadataRecord = toRecordValue(recordValue);
-  if (!('lca' in metadataRecord)) {
-    return { lastSuccessfulCleanupAt: null };
-  }
-
-  const lastSuccessfulCleanupAt = metadataRecord.lca;
-  return {
-    lastSuccessfulCleanupAt:
-      typeof lastSuccessfulCleanupAt === 'number' ||
-      lastSuccessfulCleanupAt === null
-        ? lastSuccessfulCleanupAt
-        : null,
-  };
-}
-
-async function setMaintenanceState(
-  database: IDBDatabase,
-  value: { lastSuccessfulCleanupAt: number | null },
-): Promise<void> {
-  const transaction = database.transaction(INDEXED_DB_META_STORE, 'readwrite');
-  const watch = new IndexedDbStallWatch(database.name, transaction);
-  transaction
-    .objectStore(INDEXED_DB_META_STORE)
-    .put({
-      k: INDEXED_DB_MAINTENANCE_META_KEY,
-      v: { lca: value.lastSuccessfulCleanupAt },
-    } satisfies IndexedDbMetaRecord);
-  await transactionDone(transaction, watch);
-}
 
 class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
   debugLogger?: TSDFDebugLogger;
@@ -1845,18 +1837,6 @@ class IndexedDbAsyncStorageDriver implements AsyncStorageDriver {
         ),
       });
     });
-  }
-
-  async readMaintenanceState(): Promise<{
-    lastSuccessfulCleanupAt: number | null;
-  }> {
-    return getMaintenanceState(await this.#getDatabase());
-  }
-
-  async writeMaintenanceState(value: {
-    lastSuccessfulCleanupAt: number | null;
-  }): Promise<void> {
-    await setMaintenanceState(await this.#getDatabase(), value);
   }
 
   async __resetForTests(): Promise<void> {
