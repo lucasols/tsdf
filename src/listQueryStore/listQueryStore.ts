@@ -180,6 +180,10 @@ type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
     items: ItemPayload[];
     status: 'success' | 'error' | 'skipped';
   };
+  /**
+   * Emitted when an offline temp item is reconciled to its final payload, in
+   * every tab of the session, not only the one that sent the creation.
+   */
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
@@ -2305,6 +2309,16 @@ export function createListQueryStore<
           for (const { queryKey } of queryMemberships) {
             publishQuerySnapshot(queryKey);
           }
+        },
+        emitTempEntityReconciled: (tempId, finalPayload) => {
+          storeEvents.emit('tempEntityReconciled', {
+            // WORKAROUND: Offline temp ids and final payloads are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when notifying listeners.
+            tempId: __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+            // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
+            finalPayload: __LEGIT_CAST__<ItemPayload, ValidPayload>(
+              finalPayload,
+            ),
+          });
         },
         captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
           if (offlineOverlaySessionKey !== sessionKey)

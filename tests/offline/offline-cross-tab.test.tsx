@@ -1,18 +1,23 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ValidPayload } from '../../src/main';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
 import { createMockBrowserOpfs } from '../mocks/mockBrowserOpfs';
 import { createSharedServerMockState } from '../mocks/serverMock';
+import { createSharedServerTableState } from '../mocks/serverTableMock';
 import { TEST_INITIAL_TIME, normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { getOpfsDirTree } from '../utils/persistentStorageOptimizationTestUtils';
 import type {
+  CreateUserOperations,
   UpdateValueConflictOperations,
   UpdateValueOperations,
 } from './offlineReplayTestShared';
 import {
+  collectionCreateInputSchema,
+  collectionSchema,
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
@@ -115,6 +120,7 @@ const sessionKey = 'cross-tab-session';
 let network = createOfflineNetworkMock();
 let serverCalls: string[] = [];
 let sharedServer = createSharedServerMockState(1);
+let sharedUsersServer = createSharedServerTableState<{ name: string }>({});
 const openTabs: Array<{ close: () => void }> = [];
 
 beforeEach(() => {
@@ -132,6 +138,7 @@ beforeEach(() => {
   network.install();
   serverCalls = [];
   sharedServer = createSharedServerMockState(1);
+  sharedUsersServer = createSharedServerTableState({});
   localStorage.clear();
 });
 
@@ -385,6 +392,111 @@ async function openNewVersionTab(name: string) {
           return value;
         },
         offline: { operation: 'updateValueV2', input: { value } },
+      });
+      await advanceTime(10);
+    },
+    close() {
+      env.apiStore.dispose();
+      sessionModule.__resetSessionOfflineCoordinatorRegistryForTests();
+      const index = openTabs.indexOf(tab);
+      if (index >= 0) openTabs.splice(index, 1);
+    },
+  };
+  openTabs.push(tab);
+  await advanceTime(50);
+  return tab;
+}
+
+/**
+ * Opens a simulated tab (see `openTab`) with a users collection whose offline
+ * `createUser` operation shows the new user under a temp id (`temp:<name>`)
+ * until the server assigns its final id (`users||<name>`).
+ */
+async function openUsersTab(name: string, options: { focused: boolean }) {
+  setDocumentHidden(!options.focused);
+  vi.resetModules();
+  const [
+    { createStoreManager },
+    { createCollectionStoreTestEnv },
+    sessionModule,
+  ] = await Promise.all([
+    import('../../src/storeManager'),
+    import('../mocks/collectionStoreTestEnv'),
+    import('../../src/persistentStorage/offline/sessionCoordinator'),
+  ]);
+
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { network: network.config },
+  });
+  const env = createCollectionStoreTestEnv<
+    { name: string },
+    CreateUserOperations
+  >(
+    {},
+    {
+      id: 'users',
+      getSessionKey: () => sessionKey,
+      storeManager,
+      sharedServerTableState: sharedUsersServer,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: collectionSchema,
+        payloadSchema: rc_string,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({
+                  value: { name: input.name },
+                }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: result.id,
+                  finalData: { value: { name: result.name } },
+                }),
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent create ${input.name}`);
+                const result = { id: `users||${input.name}`, name: input.name };
+                await env.serverTable.delayedSetItem(result.id, {
+                  name: result.name,
+                });
+                return result;
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const reconciledUsers: string[] = [];
+  env.apiStore.storeEvents.on('tempEntityReconciled', ({ payload }) => {
+    reconciledUsers.push(`${payload.tempId} -> ${payload.finalPayload}`);
+  });
+
+  const tab = {
+    name,
+    storeManager,
+    /** `tempEntityReconciled` events this tab's store emitted, in order. */
+    reconciledUsers,
+    getUserName(payload: string) {
+      return env.apiStore.getItemState(payload)?.data?.value.name ?? null;
+    },
+    /** Creates a user the way a "new user" form in this tab would. */
+    async queueCreate(userName: string) {
+      await env.apiStore.performMutation(null, {
+        mutation: async () => {
+          const result = { id: `users||${userName}`, name: userName };
+          await env.serverTable.delayedSetItem(result.id, { name: userName });
+          return result;
+        },
+        offline: { operation: 'createUser', input: { name: userName } },
       });
       await advanceTime(10);
     },
@@ -818,5 +930,51 @@ test('a tab whose own connectivity check fails stays offline until that check pa
 
     -> label: after the next edit ⋅ offline: ❌ ⋅ serverCalls: tab A sent doc = 2
     "
+  `);
+});
+
+test('the tab that created an item offline learns its final id when another tab sends it', async () => {
+  network.setOffline();
+  const tabA = await openUsersTab('A', { focused: true });
+  const tabB = await openUsersTab('B', { focused: false });
+  await blurWindow();
+
+  // While offline the user creates "Ada" in tab B, which shows her under a
+  // temp id until the server assigns the real one.
+  await tabB.queueCreate('Ada');
+  expect(tabB.getUserName('temp:Ada')).toBe('Ada');
+
+  // The user switches to tab A, which leads and sends tab B's creation on
+  // reconnect.
+  setDocumentHidden(false);
+  network.goOnline();
+  await advanceTime(3_000);
+  expect(serverCalls).toMatchInlineSnapshot(`['tab A sent create Ada']`);
+
+  // Tab B is told which id replaced its temp one, like the tab that sent it,
+  // so a detail view open on the temp user in tab B can switch to the real one.
+  expect({ tabA: tabA.reconciledUsers, tabB: tabB.reconciledUsers })
+    .toMatchInlineSnapshot(`
+    tabA: ['temp:Ada -> users||Ada']
+    tabB: ['temp:Ada -> users||Ada']
+  `);
+  // The user itself reaches tab B under the final id.
+  expect({
+    temp: tabB.getUserName('temp:Ada'),
+    final: tabB.getUserName('users||Ada'),
+  }).toMatchInlineSnapshot(`
+    final: 'Ada'
+    temp: null
+  `);
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: []
+      leader: '✅'
+      resolutions: []
+
+    tab B:
+      entities: []
+      leader: '❌'
+      resolutions: []
   `);
 });

@@ -121,10 +121,24 @@ type SessionResolutionMessage = BrowserTabsMessageMeta & {
   resolution: PersistedOfflineResolutionRecord | null;
 };
 
+/**
+ * A tab replayed the creation of a temp entity and the server assigned its
+ * final payload. The item data reaches the other tabs through the store's own
+ * tab sync; this message lets them map the temp payload to the final one, so
+ * a tab that queued the creation still learns where its temp entity went.
+ */
+type SessionTempReconciledMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-temp-reconciled';
+  storeName: string;
+  tempId: ValidPayload;
+  finalPayload: ValidPayload;
+};
+
 type OfflineSessionMessage =
   | SessionSnapshotMessage
   | SessionQueueEntryMessage
   | SessionResolutionMessage
+  | SessionTempReconciledMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -161,6 +175,11 @@ type SessionRegistration = {
   onRemoteResolutionChange?: (
     resolutionId: string,
     resolution: PersistedOfflineResolutionRecord | null,
+  ) => void;
+  /** Another tab reconciled a temp entity of the store to its final payload. */
+  onRemoteTempReconciled?: (
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
   ) => void;
 };
 
@@ -779,6 +798,12 @@ class SessionOfflineCoordinator {
               );
             return;
           }
+          if (message.kind === 'offline-temp-reconciled') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteTempReconciled?.(message.tempId, message.finalPayload);
+            return;
+          }
           this.#applyRemoteSnapshot(message);
         },
         undefined,
@@ -1069,6 +1094,22 @@ class SessionOfflineCoordinator {
       storeName,
       resolutionId,
       resolution,
+    });
+  }
+
+  /** Tells the other tabs that this tab reconciled a temp entity. */
+  publishTempReconciled(
+    storeName: string,
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-temp-reconciled',
+      storeName,
+      tempId,
+      finalPayload,
     });
   }
 

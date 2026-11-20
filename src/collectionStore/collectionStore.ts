@@ -234,7 +234,10 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
     items: ItemPayload[];
     status: 'success' | 'error' | 'skipped';
   };
-  /** Emitted when an offline temp item is reconciled to its final payload. */
+  /**
+   * Emitted when an offline temp item is reconciled to its final payload, in
+   * every tab of the session, not only the one that sent the creation.
+   */
   tempEntityReconciled: { tempId: ItemPayload; finalPayload: ItemPayload };
 };
 
@@ -1156,6 +1159,16 @@ export function createCollectionStore<
               storeEvents.emit('tempEntityReconciled', {
                 tempId: tempPayload,
                 finalPayload,
+              });
+            },
+            emitTempEntityReconciled: (tempId, finalPayload) => {
+              storeEvents.emit('tempEntityReconciled', {
+                // WORKAROUND: Offline temp ids and final payloads are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when notifying listeners.
+                tempId: __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+                // WORKAROUND: Same ValidPayload-to-ItemPayload boundary as above.
+                finalPayload: __LEGIT_CAST__<ItemPayload, ValidPayload>(
+                  finalPayload,
+                ),
               });
             },
             captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {

@@ -102,6 +102,14 @@ type OfflineStoreAdapter = {
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
   }) => void;
+  /**
+   * Another tab reconciled a temp entity of the store. The item data arrives
+   * through the store's tab sync, so this only notifies the store's listeners.
+   */
+  emitTempEntityReconciled?: (
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ) => void;
   captureQueuedMutationOverlays?: (args: {
     sessionKey: string;
     entityRefs: OfflineEntityRef[];
@@ -1017,6 +1025,12 @@ export function createOfflineStoreController<
             resolutions.delete(resolutionId);
           }
         });
+      },
+      onRemoteTempReconciled: (tempId, finalPayload) => {
+        // The replaying tab already rewrote and broadcast the queued records
+        // that referenced the temp entity; this tab only maps the temp payload
+        rememberResolvedEntityRef(tempId, finalPayload);
+        storeAdapter.emitTempEntityReconciled?.(tempId, finalPayload);
       },
     });
 
@@ -2178,6 +2192,11 @@ export function createOfflineStoreController<
         result: args.result,
         reconciliation,
       });
+      args.current.session.publishTempReconciled(
+        storeName,
+        tempId,
+        reconciliation.finalPayload,
+      );
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
         entryIdToSkip: args.entryIdToSkip,
@@ -2214,6 +2233,11 @@ export function createOfflineStoreController<
         result: args.result,
         reconciliation,
       });
+      args.current.session.publishTempReconciled(
+        storeName,
+        reconciliation.tempId,
+        reconciliation.finalPayload,
+      );
       await rebindQueuedEntriesAfterTempReconciliation({
         current: args.current,
         entryIdToSkip: args.entryIdToSkip,
