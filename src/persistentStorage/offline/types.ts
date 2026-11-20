@@ -1135,7 +1135,8 @@ export type OfflineOperationDefinition<
    * it.
    *
    * Every item a `create` references is treated as created by it: discarding
-   * a `create` without temp entity removes all of them. Return only the
+   * a `create` without temp entity removes all of them locally, without
+   * refetching them. Return only the
    * created items, change existing items in a separate `update` operation, and
    * reference the items the creation needs with `dependsOn`.
    */
