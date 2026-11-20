@@ -232,11 +232,15 @@ Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOf
 
 Deleting something created offline: give the delete operation `supersedes: { scope: 'same-entity', dropSelfIfTempLifecycleCancelled: true }`. A creation never sent (`isUnsentCreation && !creationAttempted`) is cancelled locally with its queued edits, its `dependsOn` dependents and the work of other stores declaring it in `cancelledWith`; an attempted creation is kept and the delete replays after it with the server id (treat not-found as success in `execute`). See `docs/offline.md`.
 
+Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.
+
 Conflict / retry: per-store `parseOfflineResolutionConflict(...)`, `resolveOfflineResolution(id, operation, action)`. For session-wide UI, `storeManager.resolveOfflineResolution(id, 'retry' | 'discard')` finds the owning store and returns a `Result` (`error.code` explains why it was not applied). Mutations for an entity whose offline creation waits for a resolution are never sent with the temp id: they become blocked resolutions that are retried or discarded with the creation.
 
 Recovery: while offline, `onTransportReconnect()` and focus revalidations only re-check connectivity; each attached store revalidates by itself once the session is back online, its queued mutations replayed and nothing in the store waits for a manual resolution — no manual invalidation needed on reconnect. Online mutations with an `offline` descriptor are queued (result `{ kind: 'queued' }`) while older queued mutations for the same entities (or the ones they `dependsOn`) are still pending.
 
 Uploads: `saveOfflineUpload`, `replaceOfflineUpload`, `loadOfflineUpload`, `deleteOfflineUpload`, `resolveOfflineUpload(s)` (return `Result` objects). `saveOfflineUpload({ id, file, metadata? })` persists optional per-upload `metadata` (JSON-safe `ValidPayload`) that the session `upload` transport receives and `OfflineUpload` entries expose; validate it before use. The shipped `opfsOfflineUploadAdapter` is one supported upload adapter.
+
+Multiple tabs of a session share one queue: only the leading (visible) tab replays, including mutations queued in other tabs, and each queued mutation is sent once. Create a session's stores in every tab so the leading tab can replay them.
 
 Docs: `docs/offline.md`.
 

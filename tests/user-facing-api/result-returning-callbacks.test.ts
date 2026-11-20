@@ -255,6 +255,59 @@ describe('Result-returning fetch functions', () => {
       'list result fetch failed',
     );
   });
+
+  test('a list query fetched in offset-pagination chunks keeps the app error returned by a failed chunk', async () => {
+    // An app error already in the `StoreError` shape is used as is, without
+    // going through `errorNormalizer`.
+    const authError: StoreError = {
+      code: 401,
+      id: 'authentication-required',
+      message: 'Session expired',
+      path: '/list/users',
+      method: 'GET',
+    };
+
+    const store = trackStore(
+      createListQueryStore<
+        { id: number; name: string },
+        { tableId: string },
+        string,
+        false,
+        true
+      >({
+        id: createStoreId('list-chunk-error'),
+        storeManager: createManager(),
+        // Loads of more than 2 items are split into chunks of 2.
+        offsetPagination: { maxInvalidationLimit: 2 },
+        fetchListFn: () => Promise.resolve(Result.err(authError)),
+      }),
+    );
+
+    const resultPromise = store.getQueryFromStateOrFetch(
+      { tableId: 'users' },
+      { size: 4 },
+    );
+    await flushAllTimers();
+    const result = await resultPromise;
+
+    // The app can still tell the session expired, exactly as it can when the
+    // list is fetched in a single request.
+    expect(
+      result.ok
+        ? null
+        : {
+            code: result.error.code,
+            id: result.error.id,
+            path: result.error.path,
+            method: result.error.method,
+          },
+    ).toMatchInlineSnapshot(`
+      code: 401
+      id: 'authentication-required'
+      method: 'GET'
+      path: '/list/users'
+    `);
+  });
 });
 
 describe('Result-returning mutations', () => {

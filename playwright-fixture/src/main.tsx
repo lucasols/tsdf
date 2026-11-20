@@ -8,6 +8,9 @@ import {
   createDocumentStore,
   createListQueryStore,
   createStoreManager,
+  type DefineDocumentOfflineOperations,
+  type DefineListQueryOfflineOperations,
+  type DefineOfflineOperation,
   type StorageAdapter,
   type StoreError,
   type TSDFDebugLogger,
@@ -75,7 +78,9 @@ type ScenarioName =
   | 'list'
   | 'persist-document'
   | 'persist-collection'
-  | 'persist-list';
+  | 'persist-list'
+  | 'offline-document'
+  | 'offline-list';
 
 function getQueryParams(): {
   pageId: string;
@@ -775,6 +780,279 @@ function PersistListScenario({
   );
 }
 
+type OfflineDocumentOperations = DefineDocumentOfflineOperations<
+  DocumentState,
+  { setValue: DefineOfflineOperation<{ value: number }> }
+>;
+
+function OfflineDocumentScenario({
+  pageId,
+  storeId,
+  sessionKey,
+  debugLogger,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+  debugLogger?: TSDFDebugLogger;
+}) {
+  const [{ store, storeManager }] = useState(() => {
+    // How long the server takes to answer a replayed mutation
+    const replayDelayMs = Number(
+      new URLSearchParams(window.location.search).get('replayDelayMs') ?? 0,
+    );
+    const manager = createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      debugLogger,
+      logger: debugLogger,
+      // Default browser detection (`navigator.onLine` + online/offline events)
+      offlineSession: { network: { enabled: true } },
+    });
+    const documentStore = createDocumentStore<
+      DocumentState,
+      OfflineDocumentOperations
+    >({
+      id: storeId,
+      storeManager: manager,
+      fetchFn: (signal) =>
+        requestJson<DocumentState>(pageId, '/api/document', { signal }),
+      lowPriorityThrottleMs: 10_000,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: documentSchema,
+        offline: {
+          operations: {
+            setValue: {
+              inputSchema: documentSchema,
+              kind: 'update',
+              execute: ({ input }) =>
+                requestJson<DocumentState>(pageId, '/api/document/mutate', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    value: input.value,
+                    delayMs: replayDelayMs,
+                  }),
+                }),
+              onSuccessExecute: ({ input }) => {
+                documentStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return { store: documentStore, storeManager: manager };
+  });
+
+  const document = store.useDocument({ returnRefetchingStatus: true });
+  const offlineStatus = storeManager.useOfflineStatus();
+  const offlineEntities = storeManager.useOfflineEntities();
+  const [nextValue, setNextValue] = useState('');
+
+  return (
+    <section>
+      <h1>Offline Document</h1>
+      <div data-testid="offline-doc-value">
+        {document.data ? String(document.data.value) : 'null'}
+      </div>
+      <div data-testid="offline-doc-status">{document.status}</div>
+      <div data-testid="offline-doc-pending-sync">
+        {document.pendingSync ? 'pending-sync' : 'synced'}
+      </div>
+      <div data-testid="offline-doc-offline-mode">
+        {offlineStatus.isOfflineMode ? 'offline' : 'online'}
+      </div>
+      <div data-testid="offline-doc-leadership">
+        {offlineStatus.isLeader ? 'leader' : 'follower'}
+      </div>
+      <div data-testid="offline-doc-pending-mutations">
+        {offlineEntities.reduce(
+          (total, entity) => total + entity.pendingMutations,
+          0,
+        )}
+      </div>
+      <input
+        data-testid="offline-doc-next-value"
+        onChange={(event) => setNextValue(event.target.value)}
+        type="number"
+        value={nextValue}
+      />
+      <button
+        data-testid="offline-doc-set-value"
+        onClick={() => {
+          const value = Number(nextValue);
+
+          void store.performMutation({
+            optimisticUpdate: () => {
+              store.updateState((draft) => {
+                draft.value = value;
+              });
+            },
+            mutation: () =>
+              requestJson<DocumentState>(pageId, '/api/document/mutate', {
+                method: 'POST',
+                body: JSON.stringify({ value }),
+              }),
+            offline: { operation: 'setValue', input: { value } },
+          });
+        }}
+        type="button"
+      >
+        set value
+      </button>
+    </section>
+  );
+}
+
+type OfflineListOperations = DefineListQueryOfflineOperations<
+  UserRow,
+  ListQueryPayload,
+  string,
+  { createUser: DefineOfflineOperation<{ name: string }, unknown, UserRow> }
+>;
+
+const createUserInputSchema = rc_object({ name: rc_string });
+
+function OfflineListScenario({
+  pageId,
+  storeId,
+  sessionKey,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+}) {
+  const [{ store, storeManager }] = useState(() => {
+    const manager = createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      // Default browser detection (`navigator.onLine` + online/offline events)
+      offlineSession: { network: { enabled: true } },
+    });
+    const listStore = createListQueryStore<
+      UserRow,
+      ListQueryPayload,
+      string,
+      false,
+      false,
+      OfflineListOperations
+    >({
+      id: storeId,
+      storeManager: manager,
+      fetchListFn: async (payload, size, { signal }) => {
+        const searchParams = new URLSearchParams({
+          tableId: payload.tableId,
+          limit: String(size),
+        });
+
+        return requestJson<{
+          items: Array<{ itemPayload: string; data: UserRow }>;
+          hasMore: boolean;
+        }>(pageId, `/api/list?${searchParams.toString()}`, { signal });
+      },
+      fetchItemFn: async (itemPayload, { signal }) => {
+        const [tableId, rowId] = itemPayload.split('||');
+
+        return requestJson<UserRow>(pageId, `/api/item/${tableId}/${rowId}`, {
+          signal,
+        });
+      },
+      lowPriorityThrottleMs: 10_000,
+      defaultQuerySize: 10,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: listItemSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryPayloadSchema,
+        offline: {
+          operations: {
+            createUser: {
+              inputSchema: createUserInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: { ...result },
+                }),
+              },
+              execute: ({ input }) =>
+                requestJson<UserRow>(pageId, '/api/item/users/create', {
+                  method: 'POST',
+                  body: JSON.stringify({ name: input.name }),
+                }),
+            },
+          },
+        },
+      },
+    });
+
+    return { store: listStore, storeManager: manager };
+  });
+
+  const query = store.useListQuery(
+    { tableId: 'users' },
+    { returnRefetchingStatus: true },
+  );
+  const offlineStatus = storeManager.useOfflineStatus();
+  const offlineEntities = storeManager.useOfflineEntities();
+  const pendingItems = store.usePendingOfflineItems({
+    selector: (item) => item.name,
+  });
+  const [newUserName, setNewUserName] = useState('');
+
+  return (
+    <section>
+      <h1>Offline List</h1>
+      <div data-testid="offline-list-names">
+        {query.items.map((item) => item.name).join(',') || 'null'}
+      </div>
+      <div data-testid="offline-list-status">{query.status}</div>
+      <div data-testid="offline-list-pending-names">
+        {pendingItems.items.join(',') || 'none'}
+      </div>
+      <div data-testid="offline-list-offline-mode">
+        {offlineStatus.isOfflineMode ? 'offline' : 'online'}
+      </div>
+      <div data-testid="offline-list-leadership">
+        {offlineStatus.isLeader ? 'leader' : 'follower'}
+      </div>
+      <div data-testid="offline-list-pending-mutations">
+        {offlineEntities.reduce(
+          (total, entity) => total + entity.pendingMutations,
+          0,
+        )}
+      </div>
+      <input
+        data-testid="offline-list-new-user-name"
+        onChange={(event) => setNewUserName(event.target.value)}
+        value={newUserName}
+      />
+      <button
+        data-testid="offline-list-create-user"
+        onClick={() => {
+          void store.performMutation(null, {
+            mutation: () =>
+              requestJson<UserRow>(pageId, '/api/item/users/create', {
+                method: 'POST',
+                body: JSON.stringify({ name: newUserName }),
+              }),
+            offline: { operation: 'createUser', input: { name: newUserName } },
+          });
+        }}
+        type="button"
+      >
+        create user
+      </button>
+    </section>
+  );
+}
+
 function App() {
   const {
     pageId,
@@ -850,6 +1128,21 @@ function App() {
           adapterKey={adapterKey}
           debugLogger={activeDebugLogger}
           disableRefetchOnMount={disableRefetchOnMount}
+        />
+      ) : null}
+      {scenario === 'offline-list' ? (
+        <OfflineListScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
+        />
+      ) : null}
+      {scenario === 'offline-document' ? (
+        <OfflineDocumentScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
+          debugLogger={activeDebugLogger}
         />
       ) : null}
       {scenario === 'persist-list' ? (
