@@ -1355,6 +1355,115 @@ test('when fields of a loaded list query are invalidated while offline, the list
   hook.unmount();
 });
 
+test('when cached fields are invalidated while offline, hooks that return the refetching status show the cached data as settled instead of a refetch that cannot run', async () => {
+  const env = createPartialUsersEnv('offline-partial-stale-refetching-status');
+  const usersQuery = { tableId: 'users' };
+
+  // Every field of the item is loaded online, so all hooks have cached data.
+  const renders = createLoggerStore();
+  const hook = renderHook(() => {
+    const query = env.apiStore.useListQuery(usersQuery, {
+      fields: ['name', 'age'],
+      returnRefetchingStatus: true,
+    });
+    const item = env.apiStore.useItem('users||1', {
+      fields: '*',
+      returnRefetchingStatus: true,
+    });
+
+    renders.add({
+      query: `${query.status} ${JSON.stringify(query.items)} loadingFields: ${JSON.stringify(query.loadingFields ?? null)}`,
+      item: `${item.status} ${JSON.stringify(item.data)} loadingFields: ${JSON.stringify(item.loadingFields ?? null)}`,
+    });
+  });
+  await flushAllTimers();
+
+  // The server copy changes, so the refetch after recovering is observable.
+  env.serverTable.updateItem('users||1', { age: 31 });
+
+  // `age` is invalidated while offline: its refetch cannot run, so the hooks
+  // must not report a `refetching` that would keep a refresh spinner visible
+  // for the whole offline period.
+  renders.addMark('offline, `age` invalidated');
+  act(() => {
+    network.goOffline();
+  });
+  await flushAllTimers();
+  act(() => {
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: 'users||1',
+      queryPayload: usersQuery,
+      fields: ['age'],
+    });
+  });
+  await flushAllTimers();
+
+  // Recovering refetches the invalidated field, which is when `refetching` is
+  // shown until the new data arrives.
+  renders.addMark('back online');
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  // Offline, each hook only shows `refetching` while the single refetch attempt
+  // of the invalidation runs (it is not sent), then settles on `success` with
+  // the cached data for the rest of the offline period.
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> query: loading [] loadingFields: null ⋅ item: loading null loadingFields: null
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: loading null loadingFields: null
+    └─
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: success {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+
+    >>> offline, \`age\` invalidated
+
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: success {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+    ┌─
+    ⋅ query: refetching [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: success {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: success {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: refetching {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: success {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+
+    >>> back online
+
+    ┌─
+    ⋅ query: refetching [{"name":"Ada","age":30}] loadingFields: null
+    ⋅ item: refetching {"name":"Ada","age":30,"id":1,"city":"London"} loadingFields: null
+    └─
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":31}] loadingFields: null
+    ⋅ item: refetching {"name":"Ada","age":31,"id":1,"city":"London"} loadingFields: null
+    └─
+    ┌─
+    ⋅ query: success [{"name":"Ada","age":31}] loadingFields: null
+    ⋅ item: success {"name":"Ada","age":31,"id":1,"city":"London"} loadingFields: null
+    └─
+    "
+  `);
+
+  hook.unmount();
+});
+
 test('when rows show partial data while their missing fields load, going offline keeps the partial data visible next to the offline error', async () => {
   const env = createPartialUsersEnv('offline-partial-show-partial');
   const usersQuery = { tableId: 'users' };

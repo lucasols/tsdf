@@ -882,6 +882,19 @@ export function useMultipleListQueries<
             }
           }
 
+          // Offline, the fetch effect does not schedule the refetch of stale or
+          // invalidated cached fields, so `refetching` would never settle: the
+          // cached items are shown as settled until recovering refetches them.
+          if (
+            status === 'refetching' &&
+            !hasMissingRequestedData &&
+            isOfflineMode &&
+            effectiveQuery.query.status === 'success'
+          ) {
+            status = 'success';
+            loadingFields = undefined;
+          }
+
           if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
@@ -1438,8 +1451,8 @@ export function useMultipleListQueries<
         // These fetches target an already loaded query, so failing offline
         // leaves it at `success` — which never trips the automatic retry
         // lockout. While offline they are not scheduled at all (they would be
-        // retried on every effect run); recovering from offline mode
-        // invalidates the store, which refetches them.
+        // retried on every effect run); this effect re-runs when offline mode
+        // ends (`isOfflineMode` dependency) and schedules them then.
         if (
           partialResources &&
           !shouldFetch &&

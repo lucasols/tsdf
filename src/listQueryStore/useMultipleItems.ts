@@ -504,6 +504,19 @@ export function useMultipleItems<
             status = 'success';
           }
 
+          // Offline, the fetch effect does not schedule the refetch of stale or
+          // invalidated cached fields, so `refetching` would never settle: the
+          // cached data is shown as settled until recovering refetches it.
+          if (
+            status === 'refetching' &&
+            !hasMissingRequestedData &&
+            isOfflineMode &&
+            itemQuery.status === 'success'
+          ) {
+            status = 'success';
+            loadingFields = undefined;
+          }
+
           if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
@@ -1111,8 +1124,9 @@ export function useMultipleItems<
             // This fetch targets an already loaded item, so failing offline
             // leaves the item at `success` — which never trips the automatic
             // retry lockout, and the fetch would be scheduled again on every
-            // effect run. While offline it is not scheduled at all; recovering
-            // from offline mode invalidates the store, which refetches it.
+            // effect run. While offline it is not scheduled at all; this effect
+            // re-runs when offline mode ends (`isOfflineMode` dependency) and
+            // schedules it then.
             if (
               (hasMissingFields || shouldFetchForInvalidation) &&
               !itemFetchIsActive &&
