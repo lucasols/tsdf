@@ -4,7 +4,11 @@ import { rc_object, rc_string } from 'runcheck';
 import { describe, expect, test } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 import {
   createStoreManagerForSession,
   createTasksEnv,
@@ -177,6 +181,84 @@ describe('list-query rows', () => {
     // Nothing is sent, and nothing is left for the user to resolve.
     expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('deleting a subtask with a client-generated id whose direct creation request failed still deletes it on the server', async () => {
+    const env = createTasksEnv(
+      'delete-client-id-after-direct-attempt-session',
+      'delete-client-id-after-direct-attempt-store',
+    );
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    // Online: the subtask is created with a direct request. The server
+    // creates it, but the connection drops before the answer arrives, so the
+    // creation is queued for replay.
+    let directCreation = Promise.resolve<unknown>(null);
+    act(() => {
+      directCreation = env.apiStore.performMutation('tasks||50', {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'tasks||50',
+            { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+            { addItemToQueries: { queries: [tasksQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: async () => {
+          await env.serverTable.delayedSetItem('tasks||50', {
+            id: 50,
+            name: 'Book flights',
+            parentId: 'tasks||1',
+          });
+          network.goOffline();
+          throw new Error('connection lost');
+        },
+        offline: {
+          operation: 'createSubtaskWithId',
+          input: { id: 50, name: 'Book flights', parentId: 'tasks||1' },
+        },
+      });
+    });
+    await resolveAfterAllTimers(directCreation);
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { id: 50, name: 'Book flights', parentId: 'tasks||1' }
+        operation: 'createSubtaskWithId'
+        syncState: 'pending'
+    `);
+
+    // Still offline, the user deletes the subtask.
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+
+    // Cancelling the creation locally would leave the subtask on the server:
+    // the delete is queued behind it instead.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { id: 50, name: 'Book flights', parentId: 'tasks||1' }
+        operation: 'createSubtaskWithId'
+        syncState: 'pending'
+      - input: { itemId: 'tasks||50' }
+        operation: 'deleteTask'
+        syncState: 'pending'
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    // The creation is sent again (it writes the same item), then the delete:
+    // the server no longer has the subtask.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createSubtaskWithId tasks||50', 'deleteTask tasks||50']`,
+    );
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget']`,
+    );
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
 
     list.unmount();
   });

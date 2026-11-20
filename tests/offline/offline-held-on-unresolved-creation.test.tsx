@@ -311,6 +311,11 @@ describe('tasks whose creation waits for a manual decision', () => {
           on: 'item:tasks||1'
           op: 'editTask'
       `);
+    // The rename merged into the held move shows right away, like any other
+    // queued edit.
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write final report', 'Review budget', 'Plan trip']`,
+    );
 
     // Back online the rename is sent; then the user sends the creation again,
     // and the move follows it with the id the server assigned.
@@ -396,6 +401,64 @@ describe('tasks whose creation waits for a manual decision', () => {
       pick(env.serverTable.getAll()['tasks||1'], ['parentId']),
     ).toMatchInlineSnapshot(`parentId: 'tasks||2'`);
     expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('a rename made after a held move was moved back out is merged into that move, not into an earlier queued rename', async () => {
+    const { env, list } = await createTaskWhoseCreationKeepsFailing(
+      'edit-after-released-move-session',
+      'edit-after-released-move-store',
+    );
+
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+
+    // Offline: rename an existing task, then rename it again while moving it
+    // under the task whose creation waits for a decision (held), then move it
+    // under a server task instead (the held edit is queued again, after the
+    // first rename), and rename it a last time.
+    await env.editTask({ itemId: 'tasks||1', name: 'Write draft' });
+    await env.editTask({
+      itemId: 'tasks||1',
+      name: 'Write trip report',
+      parentId: 'temp:Plan trip',
+    });
+    await env.editTask({ itemId: 'tasks||1', parentId: 'tasks||2' });
+    await env.editTask({ itemId: 'tasks||1', name: 'Write final report' });
+
+    // The last rename is merged into the newest queued edit: merged into the
+    // first one, it would be sent before the edit that still carries the
+    // second name, and the server would end up with that older name.
+    expect(env.getQueue()).toMatchInlineSnapshot(`
+      - input: { itemId: 'tasks||1', name: 'Write draft' }
+        operation: 'editTask'
+        syncState: 'pending'
+      - input: { itemId: 'tasks||1', name: 'Write final report', parentId: 'tasks||2' }
+        operation: 'editTask'
+        syncState: 'pending'
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(env.sentRequests.slice(3)).toMatchInlineSnapshot(`
+      - 'editTask tasks||1 {"name":"Write draft"}'
+      - 'editTask tasks||1 {"name":"Write final report","parentId":"tasks||2"}'
+    `);
+    // The server ends with what the user sees.
+    expect(pick(env.serverTable.getAll()['tasks||1'], ['name', 'parentId']))
+      .toMatchInlineSnapshot(`
+      name: 'Write final report'
+      parentId: 'tasks||2'
+    `);
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write final report', 'Review budget', 'Plan trip']`,
+    );
 
     list.unmount();
   });
@@ -557,6 +620,68 @@ describe('tasks whose creation waits for a manual decision', () => {
         tempIds: ['temp:Plan trip']
     `);
     expect(list.result.current.items).not.toContain('Book flights');
+
+    list.unmount();
+  });
+
+  test('a held subtask the user sends again on its own, after its parent was sent alone, still counts as never sent', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWhoseCreationKeepsFailing(
+        'retry-held-subtask-alone-session',
+        'retry-held-subtask-alone-store',
+      );
+
+    // The subtask creation waits behind the creation of its parent.
+    await env.createSubtask('Book flights', 'temp:Plan trip');
+    await flushAllTimers();
+
+    // The user sends only the parent creation again: the subtask stays a
+    // decision of its own, which no longer waits for anything.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTask',
+        { action: 'retry', scope: 'self' },
+      );
+    });
+    await flushAllTimers();
+    const heldSubtask = env.apiStore.getOfflineResolutions()[0];
+    if (!heldSubtask) throw new Error('Expected the held subtask creation');
+
+    // Offline, the user sends the subtask creation again: it is queued, and it
+    // was still never sent.
+    act(() => {
+      network.goOffline();
+    });
+    await flushAllTimers();
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        heldSubtask.id,
+        'createSubtask',
+        { action: 'retry' },
+      );
+    });
+    expect(
+      pick(env.apiStore.getItemOfflineState('temp:Book flights'), [
+        'isUnsentCreation',
+        'creationAttempted',
+      ]),
+    ).toMatchInlineSnapshot(`
+      creationAttempted: '❌'
+      isUnsentCreation: '✅'
+    `);
+
+    // So deleting it cancels the creation instead of sending it and then
+    // deleting it.
+    await env.deleteTask('temp:Book flights');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    expect(env.sentRequests.slice(3)).toMatchInlineSnapshot(
+      `['createTask "Plan trip"']`,
+    );
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
 
     list.unmount();
   });

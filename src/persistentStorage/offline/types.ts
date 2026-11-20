@@ -1097,7 +1097,8 @@ export type OfflineSupersedeConfig = {
    * manual resolution was never sent either, and is cancelled the same way.
    *
    * A creation that was already sent is not cancelled, since the server may
-   * have the entity: this operation is queued behind it and replays with the
+   * have the entity (this includes a `create` of a client-generated id queued
+   * after its direct online request failed): this operation is queued behind it and replays with the
    * final entity ref once the creation is confirmed. Its `execute` should
    * treat a not-found answer as success (catch the error and return). The
    * same applies to a `tempEntities` creation of several entities, which is

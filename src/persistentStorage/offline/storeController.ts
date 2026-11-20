@@ -631,6 +631,8 @@ export function createOfflineStoreController<
     attachedUploadIds?: OfflineAttachedUploadIds;
     tempIds?: ValidPayload[];
     entityRefs?: OfflineEntityRef[];
+    /** Queued after its direct online request failed: it may have been applied */
+    afterDirectAttempt?: boolean;
   };
 
   type PlannedQueuedMutation = {
@@ -1954,7 +1956,10 @@ export function createOfflineStoreController<
         continue;
       }
 
-      if (!candidate || compareQueueEntries(entry, candidate) < 0) {
+      // The newest one: merging into an older one would send the incoming
+      // change before the newer queued work of the entity, which could then
+      // overwrite it (e.g. held work queued again after another edit).
+      if (!candidate || compareQueueEntries(entry, candidate) > 0) {
         candidate = entry;
       }
     }
@@ -3278,8 +3283,17 @@ export function createOfflineStoreController<
 
       // The resolution being retried exhausted its attempts, so the server
       // may have applied it: its entry must not look "never sent", or it
-      // could be dropped or merged locally (see `isUnsentQueueEntry`).
-      if (entry && resolution.id === sentResolutionId) {
+      // could be dropped or merged locally (see `isUnsentQueueEntry`). Work
+      // blocked behind a dependency was never sent.
+      if (
+        entry &&
+        resolution.id === sentResolutionId &&
+        !(
+          resolution.kind === 'retry-exhausted' &&
+          resolution.lastReplayError.message ===
+            BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE
+        )
+      ) {
         entry.attempts = 1;
       }
 
@@ -3546,6 +3560,7 @@ export function createOfflineStoreController<
         attachedUploadIds,
         tempIds: preparedTempIds,
         entityRefs: preparedEntityRefs,
+        afterDirectAttempt,
       },
       queueOrder,
       workingQueue,
@@ -3880,6 +3895,16 @@ export function createOfflineStoreController<
         dependencyUploadIds.length > 0 ? dependencyUploadIds : undefined,
       tempIds,
     });
+    // The server may have created the item before the direct request failed:
+    // a delete must not cancel the creation locally, since the item has the
+    // id the delete targets. A temp entity has no such id, so this only
+    // applies to an id the app generated.
+    if (
+      afterDirectAttempt &&
+      getClientIdCreatedEntityKeys(nextEntry).length > 0
+    ) {
+      nextEntry.attempts = 1;
+    }
     workingQueue.set(nextEntry.id, nextEntry);
 
     return {
@@ -4042,10 +4067,13 @@ export function createOfflineStoreController<
         });
       }
 
-      if (plannedMutation.nextEntry) {
+      // Held work merged into keeps showing the merged change too.
+      const queuedWork =
+        plannedMutation.nextEntry ?? plannedMutation.replacedResolution;
+      if (queuedWork) {
         storeAdapter.captureQueuedMutationOverlays?.({
           sessionKey: current.sessionKey,
-          entityRefs: plannedMutation.nextEntry.entityRefs,
+          entityRefs: queuedWork.entityRefs,
         });
       }
     } catch (error) {
@@ -4574,7 +4602,10 @@ export function createOfflineStoreController<
 
     return {
       initialAction: getInitialOfflineMutationAction(current, prepared),
-      queueMutation: () => queuePreparedMutations(prepared),
+      queueMutation: (afterDirectAttempt) =>
+        queuePreparedMutations(
+          afterDirectAttempt ? { ...prepared, afterDirectAttempt } : prepared,
+        ),
       handleDirectSuccess: () =>
         clearOfflineStatusOnSuccess(prepared.currentSessionKey),
       classifyError: async (error) => {
