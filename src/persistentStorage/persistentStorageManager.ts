@@ -38,7 +38,15 @@ import {
   localPersistentStorage,
   type LocalStorageMetadataOptions,
 } from './storageAdapter';
-import { OFFLINE_SESSION_STATUS_STORE_NAME } from './storageEntryPrefixes';
+import {
+  COLLECTION_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+  OFFLINE_SESSION_STATUS_STORE_NAME,
+} from './storageEntryPrefixes';
 import type {
   AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
@@ -68,6 +76,7 @@ let localStorageMaintenanceRunning = false;
 let localStorageMaintenanceGeneration = 0;
 let localStorageGlobalMaintenanceRequested = false;
 let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
+let storesWithHandledLocalStorageLeftovers = new Set<string>();
 const scheduledAsyncMaintenance = new Map<
   string,
   {
@@ -221,6 +230,115 @@ function ensureAsyncNamespaceKind(
   if (persistedKind !== null) return persistedKind;
 
   throw new Error(`[tsdf] Unsupported async namespace kind: ${entryPrefix}`);
+}
+
+/** Namespaces holding work the user did offline that was not sent yet. */
+const UNSENT_OFFLINE_WORK_ENTRY_PREFIXES = [
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+];
+
+/** Manifest-backed namespaces that only hold refetchable or derived data. */
+const DISPOSABLE_ENTRY_PREFIXES = [
+  COLLECTION_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+];
+
+/**
+ * Removes what a store left in `localStorage` before it moved to an async
+ * adapter. Nothing reads, refreshes or releases those entries anymore: without
+ * this, they would only go away through the global expiry sweep, which never
+ * runs once no store uses `'local-sync'` and never removes offline-protected
+ * entries.
+ *
+ * Queued offline mutations and pending resolutions are never deleted: when
+ * the store still has any, all of its entries are kept as they are (the cached
+ * data backs that queued work) and their count is returned instead.
+ *
+ * Must run inside the managed `localStorage` lock, so a tab still running the
+ * previous adapter cannot queue work between the check and the removal.
+ */
+function removeStoreLeftoversFromLocalStorage(storageKey: string): number {
+  let unsentRecordsCount = 0;
+  for (const entryPrefix of UNSENT_OFFLINE_WORK_ENTRY_PREFIXES) {
+    unsentRecordsCount += localPersistentStorage.listManifestEntries(
+      `${storageKey}.${entryPrefix}.`,
+    ).length;
+  }
+  if (unsentRecordsCount > 0) return unsentRecordsCount;
+
+  const singleManifestKey =
+    localPersistentStorage.getManifestKeyForSingle(storageKey);
+  if (localPersistentStorage.readRaw(singleManifestKey) !== null) {
+    localPersistentStorage.clearManifest(singleManifestKey);
+  }
+
+  for (const entryPrefix of [
+    ...DISPOSABLE_ENTRY_PREFIXES,
+    ...UNSENT_OFFLINE_WORK_ENTRY_PREFIXES,
+  ]) {
+    localPersistentStorage.removeByPrefix(`${storageKey}.${entryPrefix}.`);
+  }
+
+  // List-query entries are self-describing and have no manifest to clear.
+  for (const queryStorageKey of localPersistentStorage.listRawKeys(
+    `${storageKey}.${LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX}.`,
+  )) {
+    localPersistentStorage.remove(queryStorageKey);
+  }
+
+  return 0;
+}
+
+/**
+ * Creates the per-handle check that detects `localStorage` entries left by a
+ * store that now persists through an async adapter.
+ *
+ * The check runs once per session key and reads one `localStorage` key: the
+ * manifest this handle would own under `'local-sync'`. Stores that never used
+ * `localStorage` stop there; only a hit schedules the actual cleanup.
+ */
+function createLocalStorageLeftoversCheck(
+  storeName: string,
+  getManifestKey: (storageKey: string) => string,
+  onPersistentStorageError: PersistentStorageErrorHandler | null | undefined,
+): (sessionKey: string) => void {
+  let checkedSessionKey: string | null = null;
+
+  return (sessionKey) => {
+    if (checkedSessionKey === sessionKey) return;
+    checkedSessionKey = sessionKey;
+
+    const storageKey = getStorageKey(sessionKey, storeName);
+    try {
+      if (localStorage.getItem(getManifestKey(storageKey)) === null) return;
+    } catch {
+      // `localStorage` is unavailable (e.g. site data blocked): there is
+      // nothing to clean, and the async adapter must still start.
+      return;
+    }
+
+    // Every handle of the store can detect the leftovers; handle them once.
+    if (storesWithHandledLocalStorageLeftovers.has(storageKey)) return;
+    storesWithHandledLocalStorageLeftovers.add(storageKey);
+
+    scheduleIdleCleanup(() => {
+      runLocalStorageMutation(() =>
+        removeStoreLeftoversFromLocalStorage(storageKey),
+      )
+        .then((unsentRecordsCount) => {
+          if (unsentRecordsCount === 0) return;
+
+          onPersistentStorageError?.(
+            new Error(
+              `[tsdf] Store "${storeName}" now uses an async persistentStorage adapter, but localStorage still holds ${unsentRecordsCount} unsent offline record(s) (queued mutations or pending resolutions) it wrote through 'local-sync'. They were kept, but they are only replayed while the store uses 'local-sync': roll the store back to 'local-sync' to replay them. This is reported on every page load until then.`,
+            ),
+          );
+        })
+        .catch(handleManagedLocalStorageBackgroundError);
+    });
+  };
 }
 
 /**
@@ -529,6 +647,12 @@ export function createPersistentStorageHandle<T>(
   const localCodec = toLocalStorageValueCodec(valueCodec);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const checkLocalStorageLeftovers = createLocalStorageLeftoversCheck(
+    config.storeName,
+    (storageKey) => localPersistentStorage.getManifestKeyForSingle(storageKey),
+    onPersistentStorageError,
+  );
+
   scheduleAdapterExpirationScan(adapter);
 
   function getKey(): string | false {
@@ -542,6 +666,8 @@ export function createPersistentStorageHandle<T>(
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
+
+    checkLocalStorageLeftovers(sessionKey);
 
     asyncAdapter.debugLogger = config.debugLogger;
     asyncAdapter.logger = config.logger;
@@ -1100,6 +1226,21 @@ export function createPersistentStorageNamespaceHandle<
     : undefined;
   const effectiveAsyncValueCodec = asyncValueCodec ?? valueCodec;
   const localCodec = toLocalStorageValueCodec(valueCodec);
+  // List-query query entries have no manifest under 'local-sync', so this
+  // handle has nothing to probe: the items handle detects the store's
+  // leftovers, and the cleanup removes its query entries too.
+  const checkLocalStorageLeftovers =
+    config.entryPrefix === LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX
+      ? null
+      : createLocalStorageLeftoversCheck(
+          config.storeName,
+          (storageKey) =>
+            localPersistentStorage.getManifestKeyForPrefix(
+              `${storageKey}.${config.entryPrefix}.`,
+            ),
+          onPersistentStorageError,
+        );
+
   scheduleAdapterExpirationScan(adapter);
 
   function getPrefix(): string | false {
@@ -1114,6 +1255,8 @@ export function createPersistentStorageNamespaceHandle<
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
+
+    checkLocalStorageLeftovers?.(sessionKey);
 
     asyncAdapter.debugLogger = config.debugLogger;
     asyncAdapter.logger = config.logger;
@@ -2521,6 +2664,7 @@ export function resetExpirationScanTracking(): void {
   scheduledAsyncMaintenance.clear();
   localStorageGlobalMaintenanceRequested = false;
   scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
+  storesWithHandledLocalStorageLeftovers = new Set<string>();
   localStorageExpirationScanScheduled = false;
   scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
   localStorageTouchTimestamps = new Map<string, number>();
