@@ -2,7 +2,9 @@ import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
+  CollectionOfflineOperationDefinition,
   DocumentOfflineOperationDefinition,
+  PersistentStorageSchema,
   ValidPayload,
 } from '../../src/main';
 import type { OfflineNetworkModeConfig } from '../../src/persistentStorage/offline/types';
@@ -468,7 +470,29 @@ async function openNewVersionTab(name: string) {
  * `createUser` operation shows the new user under a temp id (`temp:<name>`)
  * until the server assigns its final id (`users||<name>`).
  */
-async function openUsersTab(name: string, options: { focused: boolean }) {
+const renameUserInputSchema: PersistentStorageSchema<{
+  id: string;
+  name: string;
+}> = rc_object({ id: rc_string, name: rc_string });
+
+/** Renames a user. The server rejects every rename with a conflict. */
+type RenameUserOperations = {
+  renameUser: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { id: string; name: string },
+    { reason: string }
+  >;
+};
+
+async function openUsersTab(
+  name: string,
+  options: {
+    focused: boolean;
+    /** Users already loaded in the tab (from `sharedUsersServer`). */
+    loadedUsers?: string[];
+  },
+) {
   setDocumentHidden(!options.focused);
   vi.resetModules();
   const [
@@ -488,9 +512,14 @@ async function openUsersTab(name: string, options: { focused: boolean }) {
   });
   const env = createCollectionStoreTestEnv<
     { name: string },
-    CreateUserOperations
+    CreateUserOperations & RenameUserOperations
   >(
-    {},
+    Object.fromEntries(
+      (options.loadedUsers ?? []).map((payload) => [
+        payload,
+        sharedUsersServer.items.get(payload) ?? { name: 'missing' },
+      ]),
+    ),
     {
       id: 'users',
       getSessionKey: () => sessionKey,
@@ -525,6 +554,27 @@ async function openUsersTab(name: string, options: { focused: boolean }) {
                 return result;
               },
             },
+            renameUser: {
+              inputSchema: renameUserInputSchema,
+              kind: 'update',
+              getEntityRefs: ({ input }) => [input.id],
+              conflictHandling: {
+                schema: docConflictSchema,
+                detectConflict: () => ({ reason: 'server-changed' }),
+              },
+              execute: async ({ input }) => {
+                serverCalls.push(`tab ${name} sent rename ${input.name}`);
+                await env.serverTable.delayedUpdateItem(input.id, {
+                  name: input.name,
+                });
+                return { value: { name: input.name } };
+              },
+              onSuccessExecute: ({ input }) => {
+                env.apiStore.updateItemState(input.id, (draft) => {
+                  draft.value.name = input.name;
+                });
+              },
+            },
           },
         },
       },
@@ -543,6 +593,33 @@ async function openUsersTab(name: string, options: { focused: boolean }) {
     reconciledUsers,
     getUserName(payload: string) {
       return env.apiStore.getItemState(payload)?.data?.value.name ?? null;
+    },
+    /**
+     * Whether the user is marked for a refetch: set when the store is
+     * revalidated with no screen showing the user, so the next screen that
+     * shows it fetches it again.
+     */
+    isMarkedForRefetch(payload: string) {
+      return !!env.apiStore.getItemState(payload)?.refetchOnMount;
+    },
+    /** Renames a user offline, showing the new name right away. */
+    async queueRename(payload: string, userName: string) {
+      await env.apiStore.performMutation(payload, {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState(payload, (draft) => {
+            draft.value.name = userName;
+          });
+        },
+        mutation: async () => {
+          await env.serverTable.delayedUpdateItem(payload, { name: userName });
+          return { value: { name: userName } };
+        },
+        offline: {
+          operation: 'renameUser',
+          input: { id: payload, name: userName },
+        },
+      });
+      await advanceTime(10);
     },
     /** Creates a user the way a "new user" form in this tab would. */
     async queueCreate(userName: string) {
@@ -1227,5 +1304,127 @@ test('"+1" clicks queued at the same moment in two tabs all reach the server', a
       entities: []
       leader: '❌'
       resolutions: []
+  `);
+});
+
+test('an edit another tab turned into a conflict keeps showing in the tab that made it', async () => {
+  network.setOffline();
+  // Tab A keeps the focus and leads
+  await openTab('A', { focused: true });
+  const tabB = await openTab('B', { focused: false });
+  setDocumentHidden(false);
+
+  // The user edits in tab B while offline and sees the new value right away;
+  // the server will reject the edit with a conflict (negative values).
+  const tabBEnv = tabB.getEnv();
+  await tabBEnv.apiStore.performMutation({
+    optimisticUpdate: () => {
+      tabBEnv.apiStore.updateState((draft) => {
+        draft.value = -1;
+      });
+    },
+    mutation: async () => {
+      await tabBEnv.serverMock.delayedSetData(-1);
+      return -1;
+    },
+    offline: { operation: 'updateValue', input: { value: -1 } },
+  });
+  await advanceTime(10);
+
+  const tabBDoc = createLoggerStore();
+  function logTabB(label: string) {
+    tabBDoc.add({
+      label,
+      value: tabBEnv.store.state.data?.value,
+      // set when the store is revalidated with no screen showing it: the
+      // next screen that shows the document refetches it
+      refetchOnOpen: tabBEnv.store.state.refetchOnMount !== false,
+      resolutions: describeTabs(tabB)['tab B']?.resolutions.join(', '),
+    });
+  }
+  logTabB('edit queued in tab B');
+
+  // On reconnect tab A replays the edit and moves it to a conflict. Tab B
+  // still has a change waiting for the user's decision, so it must not
+  // refetch the document and replace the edit with the server value.
+  network.goOnline();
+  await advanceTime(10_000);
+  logTabB('after tab A replayed it');
+
+  expect(tabBDoc.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> label: edit queued in tab B ⋅ value: -1 ⋅ refetchOnOpen: ❌ ⋅ resolutions: ''
+    ┌─
+    ⋅ label: after tab A replayed it
+    ⋅ value: -1
+    ⋅ refetchOnOpen: ❌
+    ⋅ resolutions: doc: conflict
+    └─
+    "
+  `);
+});
+
+test('discarding a conflict in one tab refetches the user in the tab that made the change', async () => {
+  sharedUsersServer = createSharedServerTableState({
+    'users||Ada': { name: 'Ada' },
+    'users||Bob': { name: 'Bob' },
+  });
+  network.setOffline();
+  const loadedUsers = ['users||Ada', 'users||Bob'];
+  const tabA = await openUsersTab('A', { focused: true, loadedUsers });
+  const tabB = await openUsersTab('B', { focused: false, loadedUsers });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+
+  // The user renames both users in tab B while offline. On reconnect tab A
+  // replays both renames and the server rejects each with a conflict.
+  await tabB.queueRename('users||Ada', 'Ada local');
+  await tabB.queueRename('users||Bob', 'Bob local');
+  network.goOnline();
+  await advanceTime(10_000);
+
+  const tabBUsers = createLoggerStore();
+  function logTabB(label: string) {
+    tabBUsers.add({
+      label,
+      ada: tabB.getUserName('users||Ada'),
+      adaMarkedForRefetch: tabB.isMarkedForRefetch('users||Ada'),
+      bob: tabB.getUserName('users||Bob'),
+      bobMarkedForRefetch: tabB.isMarkedForRefetch('users||Bob'),
+    });
+  }
+  logTabB('both renames rejected');
+
+  // The user discards Ada's rename from tab A's offline panel; Bob's conflict
+  // still waits for a decision.
+  // (Ada's rename was queued first, so its conflict is listed first.)
+  const [adaConflict] = tabA.storeManager.getOfflineResolutions();
+  await tabA.storeManager.resolveOfflineResolution(
+    adaConflict?.id ?? 'missing',
+    'discard',
+  );
+  await advanceTime(3_000);
+  logTabB('Ada rename discarded in tab A');
+
+  // Tab B drops the discarded rename like tab A: Ada is refetched (here no
+  // screen shows it, so the next one that does fetches it), while Bob keeps
+  // the rename that still waits for a decision.
+  expect(tabBUsers.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ label: both renames rejected
+    ⋅ ada: Ada local
+    ⋅ adaMarkedForRefetch: ❌
+    ⋅ bob: Bob local
+    ⋅ bobMarkedForRefetch: ❌
+    └─
+    ┌─
+    ⋅ label: Ada rename discarded in tab A
+    ⋅ ada: Ada local
+    ⋅ adaMarkedForRefetch: ✅
+    ⋅ bob: Bob local
+    ⋅ bobMarkedForRefetch: ❌
+    └─
+    "
   `);
 });

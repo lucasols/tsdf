@@ -129,11 +129,32 @@ type SessionTempReconciledMessage = BrowserTabsMessageMeta & {
   finalPayload: ValidPayload;
 };
 
+/** Queued work the user discarded: what its refetch needs. */
+type DiscardedOfflineWork = Pick<
+  OfflineQueueEntry,
+  'operation' | 'input' | 'entityRefs'
+>;
+
+/**
+ * A tab discarded queued work of a store. Its optimistic changes cannot be
+ * rolled back locally, so every tab with the store refetches the entities it
+ * referenced, like the tab that discarded it. Sent after the removals of the
+ * discarded records.
+ */
+type SessionWorkDiscardedMessage = BrowserTabsMessageMeta & {
+  kind: 'offline-work-discarded';
+  storeName: string;
+  discardedWork: DiscardedOfflineWork[];
+  /** Temp entities the discard removed: there is nothing to refetch. */
+  removedTempEntityKeys: string[];
+};
+
 type OfflineSessionMessage =
   | SessionSnapshotMessage
   | SessionQueueEntryMessage
   | SessionResolutionMessage
   | SessionTempReconciledMessage
+  | SessionWorkDiscardedMessage
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage);
 
 type SessionReplayHead = {
@@ -178,6 +199,11 @@ type SessionRegistration = {
   onRemoteTempReconciled?: (
     tempId: ValidPayload,
     finalPayload: ValidPayload,
+  ) => void;
+  /** Another tab discarded queued work of the store. */
+  onRemoteWorkDiscarded?: (
+    discardedWork: DiscardedOfflineWork[],
+    removedTempEntityKeys: string[],
   ) => void;
 };
 
@@ -920,6 +946,15 @@ class SessionOfflineCoordinator {
               ?.onRemoteTempReconciled?.(message.tempId, message.finalPayload);
             return;
           }
+          if (message.kind === 'offline-work-discarded') {
+            this.#registrations
+              .get(message.storeName)
+              ?.onRemoteWorkDiscarded?.(
+                message.discardedWork,
+                message.removedTempEntityKeys,
+              );
+            return;
+          }
           this.#applyRemoteSnapshot(message);
         },
         undefined,
@@ -1226,6 +1261,22 @@ class SessionOfflineCoordinator {
       storeName,
       tempId,
       finalPayload,
+    });
+  }
+
+  /** Tells the other tabs that this tab discarded queued work of a store. */
+  publishWorkDiscarded(
+    storeName: string,
+    discardedWork: DiscardedOfflineWork[],
+    removedTempEntityKeys: string[],
+  ): void {
+    if (this.#disposed) return;
+
+    this.#browserTabs.coordinator.publish({
+      kind: 'offline-work-discarded',
+      storeName,
+      discardedWork,
+      removedTempEntityKeys,
     });
   }
 

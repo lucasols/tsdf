@@ -1127,6 +1127,16 @@ export function createOfflineStoreController<
           }
         });
       },
+      onRemoteWorkDiscarded: (discardedWork, removedTempEntityKeys) => {
+        // Sent after the removals of the discarded records, so this tab's
+        // remaining resolutions already exclude them
+        applyRecordChangeFromAnotherTab(() => {
+          revalidateDiscardedWork(
+            discardedWork,
+            new Set(removedTempEntityKeys),
+          );
+        });
+      },
       onRemoteTempReconciled: (tempId, finalPayload) => {
         // The replaying tab already rewrote and broadcast the queued records
         // that referenced the temp entity; this tab maps the temp payload and
@@ -2599,7 +2609,6 @@ export function createOfflineStoreController<
     }
 
     for (const dependentEntry of descendantQueueEntries.values()) {
-      await removeEntry(dependentEntry.id, args.current, true);
       await persistResolution(
         buildRetryExhaustedResolutionRecord(args.current, dependentEntry, {
           message: BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE,
@@ -2607,6 +2616,7 @@ export function createOfflineStoreController<
         args.current,
         true,
       );
+      await removeEntry(dependentEntry.id, args.current, true);
     }
   }
 
@@ -2615,8 +2625,12 @@ export function createOfflineStoreController<
     parentEntry: OfflineQueueEntry;
     parentResolution: PersistedOfflineResolutionRecord;
   }): Promise<void> {
-    await removeEntry(args.parentEntry.id, args.current, true);
+    // The resolution is saved before the entry is removed: the other tabs
+    // apply each change as it arrives, and in between they would see the
+    // store with nothing left to replay or decide on, and revalidate it over
+    // the change that now waits for the user's decision.
     await persistResolution(args.parentResolution, args.current, true);
+    await removeEntry(args.parentEntry.id, args.current, true);
     await promoteBlockedTempCreateDescendants({
       current: args.current,
       parentEntry: args.parentEntry,
@@ -2644,7 +2658,11 @@ export function createOfflineStoreController<
     const parentEntityKeys = getTempLifecycleEntityKeys(args.resolution);
     if (parentEntityKeys.length === 0) {
       refreshDerivedState(args.current);
-      revalidateDiscardedWork([args.resolution], new Set());
+      revalidateDiscardedWorkInEveryTab(
+        args.current,
+        [args.resolution],
+        new Set(),
+      );
       return;
     }
 
@@ -2699,7 +2717,39 @@ export function createOfflineStoreController<
         removedTempEntityKeys.add(entityKey);
       }
     }
+    revalidateDiscardedWorkInEveryTab(
+      args.current,
+      discardedWork,
+      removedTempEntityKeys,
+    );
+  }
+
+  /**
+   * {@link revalidateDiscardedWork} in this tab and in the other tabs with the
+   * store: each one may show the discarded optimistic changes.
+   */
+  function revalidateDiscardedWorkInEveryTab(
+    current: ActiveSessionState,
+    discardedWork: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'entityRefs'
+    >[],
+    removedTempEntityKeys: ReadonlySet<string>,
+  ): void {
     revalidateDiscardedWork(discardedWork, removedTempEntityKeys);
+
+    if (!discardedWork.some((workItem) => workItem.entityRefs.length > 0)) {
+      return;
+    }
+    current.session.publishWorkDiscarded(
+      storeName,
+      discardedWork.map(({ operation, input, entityRefs }) => ({
+        operation,
+        input,
+        entityRefs,
+      })),
+      [...removedTempEntityKeys],
+    );
   }
 
   /**
@@ -3866,13 +3916,15 @@ export function createOfflineStoreController<
 
         return { resolution: retryResolution, entry };
       });
-      for (const retryResolution of resolutionsToRetry) {
-        await removeResolution(retryResolution.id, current, true);
-      }
-
+      // Queued before the resolutions are removed, for the other tabs (see
+      // `persistManualResolutionChain`)
       for (const nextEntry of nextEntries) {
         if (!nextEntry.entry) continue;
         await persistEntry(nextEntry.entry, current, true);
+      }
+
+      for (const retryResolution of resolutionsToRetry) {
+        await removeResolution(retryResolution.id, current, true);
       }
 
       storeAdapter.captureQueuedMutationOverlays?.({
