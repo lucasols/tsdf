@@ -351,13 +351,13 @@ When the selected adapter does not support async preload, preload methods report
 
 Items and queries are stored and evicted separately, so a cached list query can outlive some of its rows: `maxItemBytes` evicts the least recently read item entries while the query entry stays, and an item entry that fails `schema` (or is now covered by `ignoreItems`) is discarded when it is read.
 
-A cached query is restored as a loaded query (`status: 'success'`, shown immediately and revalidated in the background) only when every row it was saved with can be restored. When rows are missing, the rows that are left are still restored, but the query is not restored as loaded (`wasLoaded: false`), so the shorter — or empty — list is never presented as the complete one:
+A cached query is restored as a loaded query (`status: 'success'`, shown immediately and revalidated in the background) when every row it was saved with can be restored, or when only its last rows are missing: like a list cut by `maxQuerySize`, the rows that are left are restored as a loaded list with `hasMore: true`. This is what happens to a list larger than `maxItemBytes`: the budget evicts its last rows right after it is saved.
+
+When a row before one of the rows that are left is missing, or no row is left, the rows that are left are still restored, but the query is not restored as loaded (`wasLoaded: false`), so the list with a gap — or an empty list — is never presented as the complete one:
 
 - Online, hooks report `status: 'loading'` and fetch the query right away, as for a query that was never cached. The remaining rows are available in `items` meanwhile (stores using [Partial Resources](./partial-resources.md) hide items while loading, as usual).
 - Offline, the fetch fails with the offline error: hooks report `status: 'error'` with `error.id === 'offline'` and the remaining rows in `items`, so a screen can show what is left of the list together with a notice that it is incomplete. `awaitListQueryFetch` returns the offline error instead of the incomplete list. A loaded list doesn't load more rows from such a cached list while offline (`loadMore` is skipped and `hasMore` is `false`), since its next rows may come after a missing one.
-- The stored query is left as it is until the list is fetched again, so the next start sees the same state. With `local-sync`, the query entry rewritten after an eviction lists only the rows that are left and is flagged (`"m": true`) as incomplete.
-
-`maxQuerySize` is different: it deliberately keeps only the first rows of a query and restores it as loaded with `hasMore: true`.
+- The stored query is left as it is until the list is fetched again, so the next start sees the same state. With `local-sync`, the query entry rewritten after an eviction lists only the rows that are left, and is flagged (`"m": true`) as incomplete unless only its last rows were evicted (then it is saved with `"h": true`).
 
 ## Clearing stored data
 

@@ -19,6 +19,7 @@ import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
+  range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -355,6 +356,105 @@ describe('opfs: list query store persistence', () => {
           fields: '*'
           pos: { limit: 50, offset: 0 }
         returned_items: 2
+    `);
+  });
+
+  test('a cached list larger than maxItemBytes is restored as a loaded list with the rows that fit and more rows to load', async () => {
+    const storeName = 'lq-opfs-list-over-item-budget';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey: 'sess1',
+    });
+    const users = range(1, 5).map((id) => ({ id, name: `User ${id}` }));
+
+    // The item budget fits only the first three rows of the users list.
+    const maxItemBytes = sumPersistedEntryBytes(
+      ...users
+        .slice(0, 3)
+        .map((user) =>
+          getAsyncListItemEntrySizeBytes(`users||${user.id}`, user),
+        ),
+    );
+    function startSession() {
+      return createEnv({
+        storeName,
+        sessionKey: 'sess1',
+        maxItemBytes,
+        offlineNetwork: network.config,
+        serverData: { users: structuredClone(users) },
+      });
+    }
+    function mountUsersListWithHasMore(env: ReturnType<typeof createEnv>) {
+      const renders = createLoggerStore({ arrays: 'all' });
+      const { unmount } = renderHook(() => {
+        const { items, status, error, hasMore } = env.apiStore.useListQuery(
+          usersListQuery,
+          { returnRefetchingStatus: true },
+        );
+        renders.add({
+          status,
+          error: error?.id ?? null,
+          names: items.map((item) => item.name),
+          hasMore,
+        });
+      });
+      return { renders, unmount };
+    }
+
+    // The whole list is loaded and saved: the budget evicts the last two
+    // rows right away, while the users query still lists every row.
+    const firstSession = startSession();
+    const usersList = renderHook(() =>
+      firstSession.apiStore.useListQuery(usersListQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(60_000);
+    await flushAllTimers();
+    usersList.unmount();
+    expect(listQueryScope.listStoredItemKeys().sort()).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||3']`,
+    );
+
+    // Only the end of the list is gone: an offline cold start shows the rows
+    // that are left as a loaded list (like a list cut by `maxQuerySize`),
+    // instead of the offline error.
+    network.setOffline();
+    const offlineSession = startSession();
+    const offlineUsersList = mountUsersListWithHasMore(offlineSession);
+    await flushAllTimers();
+    // Offline, `hasMore` only reports rows that can be read from the cache.
+    expect(offlineUsersList.renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: [] ⋅ hasMore: ❌
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ❌
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ❌
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ❌
+      "
+    `);
+    expect(
+      offlineSession.serverTable.getRequestHistory('all', {
+        includeTime: false,
+      }),
+    ).toMatchInlineSnapshot(`[]`);
+    offlineUsersList.unmount();
+
+    // Back online, a cold start shows the same rows right away and
+    // revalidates the list.
+    network.setOnline();
+    const onlineUsersList = mountUsersListWithHasMore(startSession());
+    await flushAllTimers();
+    expect(onlineUsersList.renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ error: null ⋅ names: [] ⋅ hasMore: ❌
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ✅
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ✅
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ names: [User 1, User 2, User 3, User 4, User 5]
+      ⋅ hasMore: ❌
+      └─
+      "
     `);
   });
 

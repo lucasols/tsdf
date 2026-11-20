@@ -199,6 +199,21 @@ function toItemState<
   };
 }
 
+/**
+ * Whether the rows left of a persisted list are its first rows, so only its
+ * end is missing (e.g. cut by the byte budget). Like `maxQuerySize`
+ * truncation, such a list is still a loaded list that has more pages.
+ */
+function isOnlyTailMissing(
+  remainingItemKeys: readonly string[],
+  persistedItemKeys: readonly string[],
+): boolean {
+  return (
+    remainingItemKeys.length > 0 &&
+    isStrictItemKeyPrefix(remainingItemKeys, persistedItemKeys)
+  );
+}
+
 function limitPersistedQueryItems(
   itemKeys: string[],
   hasMore: boolean,
@@ -1765,10 +1780,12 @@ export function setupListQueryPersistence<
    * Builds the state of a query restored from storage. A persisted query
    * lists the rows it had when it was saved. When some of them can no longer
    * be restored (evicted by the byte budget, discarded on read, ...), the rows
-   * that are left are still restored, but the query is not restored as loaded:
-   * it would be reported as a complete `success` with a shorter — or empty —
-   * list. A query that was not loaded is reported as `loading` and always
-   * fetched, and fails with the offline error while offline.
+   * that are left are still restored. If only the end of the list is missing,
+   * it is restored as loaded with more pages, like `maxQuerySize` truncation.
+   * Otherwise (a gap before a row that is left, or no row left) the query is
+   * not restored as loaded: it would be reported as a complete `success` with
+   * a list missing rows. A query that was not loaded is reported as `loading`
+   * and always fetched, and fails with the offline error while offline.
    */
   function createRestoredQueryState(
     queryKey: string,
@@ -1778,9 +1795,14 @@ export function setupListQueryPersistence<
     const hasAllRows =
       !persistedQuery.missingItems &&
       restoredItemKeys.length === persistedQuery.items.length;
+    const isTailMissing =
+      !hasAllRows &&
+      !persistedQuery.missingItems &&
+      isOnlyTailMissing(restoredItemKeys, persistedQuery.items);
+    const wasLoaded = hasAllRows || isTailMissing;
     const limitedQuery = limitPersistedQueryItems(
       restoredItemKeys,
-      persistedQuery.hasMore,
+      persistedQuery.hasMore || isTailMissing,
       maxQuerySize,
     );
 
@@ -1788,7 +1810,7 @@ export function setupListQueryPersistence<
     // can be re-read with every row back (e.g. the hook fallback after a
     // missing row is saved by another query) while the query in state is
     // still not loaded, and its stored entry must survive until it loads.
-    if (!hasAllRows) incompleteRestoredQueryKeys.add(queryKey);
+    if (!wasLoaded) incompleteRestoredQueryKeys.add(queryKey);
 
     return {
       error: null,
@@ -1796,8 +1818,8 @@ export function setupListQueryPersistence<
       items: limitedQuery.itemKeys,
       payload: persistedQuery.payload,
       refetchOnMount: 'lowPriority',
-      status: hasAllRows ? 'success' : 'loading',
-      wasLoaded: hasAllRows,
+      status: wasLoaded ? 'success' : 'loading',
+      wasLoaded,
     };
   }
 
@@ -2836,9 +2858,16 @@ export function setupListQueryPersistence<
         const filteredItems = queryData.items.filter((itemKey) =>
           keptItemKeys.has(itemKey),
         );
+        const hasMissingRows = filteredItems.length < queryData.items.length;
+        // Only the end of the list was cut: it stays a loaded list with more
+        // pages, like `maxQuerySize` truncation.
+        const isTailMissing =
+          hasMissingRows &&
+          !queryData.missingItems &&
+          isOnlyTailMissing(filteredItems, queryData.items);
         const limitedQuery = limitPersistedQueryItems(
           filteredItems,
-          queryData.hasMore,
+          queryData.hasMore || isTailMissing,
           maxQuerySize,
         );
 
@@ -2853,10 +2882,9 @@ export function setupListQueryPersistence<
           payload: queryData.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
-          // The rows that are left are not the whole list anymore: the entry
-          // records it, so the query is not restored as a loaded one.
-          ...(queryData.missingItems ||
-          filteredItems.length < queryData.items.length
+          // A row before the rows that are left is gone: the entry records
+          // it, so the query is not restored as a loaded one.
+          ...(queryData.missingItems || (hasMissingRows && !isTailMissing)
             ? { missingItems: true }
             : {}),
         };

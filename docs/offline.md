@@ -143,7 +143,7 @@ With [partial resources](./partial-resources.md), "cached" is decided per hook, 
 
 Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
 
-A cached list query that can no longer restore every row it was saved with is not a cached read: it is not reported as a complete `success`. Hooks return the rows that are left with `status: 'error'` and the offline error (`isOfflineStoreError(error)`), so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
+A cached list query that lost a row before one of the rows that are left (or every row) is not a cached read: it is not reported as a complete `success`. A list that only lost its last rows (e.g. to `maxItemBytes`) is still a cached read, with fewer rows. Hooks return the rows that are left with `status: 'error'` and the offline error (`isOfflineStoreError(error)`), so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
 
 Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
 

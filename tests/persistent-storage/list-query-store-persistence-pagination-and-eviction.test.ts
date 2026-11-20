@@ -18,6 +18,7 @@ import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
+  range,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
@@ -1271,10 +1272,12 @@ describe('localStorage: list query store persistence', () => {
     const sessionKey = 'sess1';
     const scope = persistentStore.scope(storeName, sessionKey).listQuery;
 
-    // "User 2" was cached by an older version of the app, in a shape the
-    // current schema rejects (no `name`), so it is discarded when read.
-    scope.seedItem('users', 1, { id: 1, name: 'User 1' });
-    scope.seedItem('users', 2, { id: 2, fullName: 'User 2' });
+    // "User 1" was cached by an older version of the app, in a shape the
+    // current schema rejects (no `name`), so it is discarded when read. It
+    // leaves a gap before "User 2" (a missing last row would still be restored
+    // as a loaded list with more rows to load).
+    scope.seedItem('users', 1, { id: 1, fullName: 'User 1' });
+    scope.seedItem('users', 2, { id: 2, name: 'User 2' });
     setCachedQuery(storeName, sessionKey, usersListQuery, [
       storeItemKey('users', 1),
       storeItemKey('users', 2),
@@ -1298,8 +1301,116 @@ describe('localStorage: list query store persistence', () => {
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ error: null ⋅ names: []
-      -> status: loading ⋅ error: null ⋅ names: [User 1]
+      -> status: loading ⋅ error: null ⋅ names: [User 2]
       -> status: success ⋅ error: null ⋅ names: [User 1, User 2]
+      "
+    `);
+  });
+
+  test('a cached list larger than maxItemBytes is restored as a loaded list with the rows that fit and more rows to load', async () => {
+    const storeName = 'lq-list-over-item-budget';
+    const users = range(1, 5).map((id) => ({ id, name: `User ${id}` }));
+
+    // The item budget fits only the first three rows of the users list.
+    const maxItemBytes = sumPersistedEntryBytes(
+      ...users
+        .slice(0, 3)
+        .map((user) =>
+          getLocalListItemEntrySizeBytes(
+            rawItemPayload('users', user.id),
+            user,
+          ),
+        ),
+    );
+    function startSession() {
+      return createEnv({
+        storeName,
+        sessionKey: 'sess1',
+        maxItemBytes,
+        offlineNetwork: network.config,
+        serverData: { users: structuredClone(users) },
+      });
+    }
+    function mountUsersListWithHasMore(env: ReturnType<typeof createEnv>) {
+      const renders = createLoggerStore({ arrays: 'all' });
+      const { unmount } = renderHook(() => {
+        const { items, status, error, hasMore } = env.apiStore.useListQuery(
+          usersListQuery,
+          { returnRefetchingStatus: true },
+        );
+        renders.add({
+          status,
+          error: error?.id ?? null,
+          names: items.map((item) => item.name),
+          hasMore,
+        });
+      });
+      return { renders, unmount };
+    }
+
+    // The whole list is loaded and saved: the budget cuts the last two rows
+    // right away. Only the end of the list is gone, so the entry is kept as a
+    // list with more rows to load, without the missing-rows marker (`m`).
+    const firstSession = startSession();
+    const usersList = renderHook(() =>
+      firstSession.apiStore.useListQuery(usersListQuery),
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    usersList.unmount();
+    expect(
+      listStoredKeys(`tsdf.sess1.${storeName}.li.`).sort(),
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2', '"users||3']`);
+    expect(
+      getParsedLocalStorageValue(
+        queryStorageKey(storeName, 'sess1', usersListQuery),
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689603810
+      h: '✅'
+      i: ['"users||1', '"users||2', '"users||3']
+      p: { tableId: 'users' }
+    `);
+
+    // An offline cold start shows the rows that fit as a loaded list with
+    // more rows to load (like a list cut by `maxQuerySize`), instead of the
+    // offline error.
+    network.setOffline();
+    const offlineSession = startSession();
+    const offlineUsersList = mountUsersListWithHasMore(offlineSession);
+    await flushAllTimers();
+    // Offline, `hasMore` only reports rows that can be read from the cache.
+    expect(offlineUsersList.renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ❌
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ❌
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ❌
+      "
+    `);
+    expect(
+      offlineSession.serverTable.getRequestHistory('all', {
+        includeTime: false,
+      }),
+    ).toMatchInlineSnapshot(`[]`);
+
+    offlineUsersList.unmount();
+
+    // Back online, a cold start shows the same rows right away and
+    // revalidates the list.
+    network.setOnline();
+    const onlineUsersList = mountUsersListWithHasMore(startSession());
+    await flushAllTimers();
+    expect(onlineUsersList.renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ✅
+      -> status: refetching ⋅ error: null ⋅ names: [User 1, User 2, User 3] ⋅ hasMore: ✅
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ names: [User 1, User 2, User 3, User 4, User 5]
+      ⋅ hasMore: ❌
+      └─
       "
     `);
   });
