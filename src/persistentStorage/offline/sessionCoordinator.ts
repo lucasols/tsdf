@@ -1686,8 +1686,10 @@ class SessionOfflineCoordinator {
   }
 
   isReplayBlocked(): boolean {
-    // Queued mutations wait for the session gate to reopen
-    if (!this.#isSessionEnabled()) return true;
+    // Queued mutations wait for the session gate to reopen. A closing noticed
+    // here (e.g. between two replayed entries) is applied, so the reopen is
+    // seen as one and resumes the replay
+    if (!this.#syncSessionGate()) return true;
     if (this.store.state.status.isOfflineMode) return true;
 
     const { network, outage } = this.store.state.status;
@@ -2006,6 +2008,9 @@ class SessionOfflineCoordinator {
       recoveryCheckAt?: number;
     } = {},
   ): void {
+    // Applied before the classification below is set: applying a flip
+    // re-derives it from the status
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isNetworkEnabled();
@@ -2047,6 +2052,8 @@ class SessionOfflineCoordinator {
     active: boolean,
     options: { recoveryCheckAt?: number } = {},
   ): void {
+    // Applied before the previous state is read below
+    this.#syncSessionGate();
     const wasEffectivelyOffline = this.store.state.status.isOfflineMode;
     const wasReplayBlocked = this.isReplayBlocked();
     const nextEnabled = this.#isOutageEnabled();

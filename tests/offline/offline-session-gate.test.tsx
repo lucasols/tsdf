@@ -1215,3 +1215,228 @@ test('mutations queued during an outage are replayed when the gate reopens, even
   );
   expect(env.serverMock.current).toMatchInlineSnapshot(`2`);
 });
+
+test('load more reaches the server once the gate closes, even while the browser is still offline', async () => {
+  const sessionKey = 'gate-closed-load-more';
+  const usersQuery = { tableId: 'users' } as const;
+  // The flag the app flips at runtime.
+  let offlineEnabled = true;
+  const env = createListQueryStoreTestEnv(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+        { id: 3, name: 'Linus' },
+      ],
+    },
+    {
+      defaultQuerySize: 2,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: {
+          enabled: () => offlineEnabled,
+          network: network.config,
+        },
+      }),
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: {} },
+      },
+    },
+  );
+
+  function getLoadedUserNames() {
+    const query = env.apiStore.getQueryState(usersQuery);
+    return {
+      names: (query?.items ?? []).map(
+        (itemKey) => env.store.state.items[itemKey]?.name,
+      ),
+      hasMore: query?.hasMore,
+    };
+  }
+
+  // -- Setup: the first page is loaded online and has more items --
+  env.scheduleFetch('highPriority', usersQuery);
+  await flushAllTimers();
+  expect(getLoadedUserNames()).toMatchInlineSnapshot(`
+    hasMore: '✅'
+    names: ['Ada', 'Grace']
+  `);
+
+  // -- The browser goes offline: the session enters offline mode --
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(true);
+  const listRequestsBefore = env.serverTable.getRequestHistory('list').length;
+
+  // -- The app closes the gate and calls nothing else --
+  offlineEnabled = false;
+
+  // Load more is a fetch: it reads the gate, so it is sent to the server
+  // like with no offline session, instead of paging the offline cache
+  expect(env.apiStore.loadMore(usersQuery)).toBe('triggered');
+  await flushAllTimers();
+
+  expect(env.serverTable.getRequestHistory('list')).toHaveLength(
+    listRequestsBefore + 1,
+  );
+  expect(getLoadedUserNames()).toMatchInlineSnapshot(`
+    hasMore: '❌'
+    names: ['Ada', 'Grace', 'Linus']
+  `);
+  // The closed gate is applied to the status too
+  expect(getGlobalOfflineStatusSummary(sessionKey).isOfflineMode).toBe(false);
+});
+
+test('queued mutations left behind when the gate closes mid-replay are replayed once it reopens', async () => {
+  network.setOffline();
+  const sessionKey = 'gate-closes-between-replays';
+  const storeName = 'gate-closes-between-replays-doc';
+  const replayedInputs: { value: number }[] = [];
+  // The flag the app flips at runtime.
+  let offlineEnabled = true;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: { enabled: () => offlineEnabled, network: network.config },
+  });
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => sessionKey,
+    storeManager,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            kind: 'update',
+            execute: async ({ input }: UpdateValueExecuteContext) => {
+              replayedInputs.push(input);
+              await env.serverMock.delayedSetData(input.value);
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  await Promise.resolve();
+
+  // -- Setup: two mutations queued while offline with the gate open --
+  for (const value of [2, 3]) {
+    await env.apiStore.performMutation({
+      mutation: async () => {
+        await env.serverMock.delayedSetData(value);
+        return value;
+      },
+      offline: { operation: 'updateValue', input: { value } },
+    });
+  }
+  expect(getSortedQueueSummary(sessionKey, storeName, ['input']))
+    .toMatchInlineSnapshot(`
+    - input: { value: 2 }
+    - input: { value: 3 }
+  `);
+
+  // -- The browser reconnects and the first replay request starts --
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(600);
+
+  // -- The app closes the gate while that request is in flight; it
+  // succeeds, and the second mutation waits for the gate --
+  offlineEnabled = false;
+  await flushAllTimers();
+
+  expect(replayedInputs).toMatchInlineSnapshot(`- value: 2`);
+  expect(
+    getSortedQueueSummary(sessionKey, storeName, ['input']),
+  ).toMatchInlineSnapshot(`- input: { value: 3 }`);
+
+  // -- The app reopens the gate and asks for it to apply right away --
+  offlineEnabled = true;
+  storeManager.setOfflineRuntimeConfig({}).unwrap();
+  await flushAllTimers();
+
+  // The mutation left behind is replayed
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
+    - value: 3
+  `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(env.serverMock.current).toMatchInlineSnapshot(`3`);
+});
+
+test('a request failing right after the gate reopens puts the session in network mode until the recovery check passes', async () => {
+  const sessionKey = 'gate-reopens-mid-fetch';
+  const usersQuery = { tableId: 'users' } as const;
+  const recoveryCheck = vi.fn(() => false);
+  // The flag the app flips at runtime: the offline layer starts turned off.
+  let offlineEnabled = false;
+  const storeManager = createStoreManager({
+    errorNormalizer: normalizeError,
+    getSessionKey: () => sessionKey,
+    offlineSession: {
+      enabled: () => offlineEnabled,
+      // The app recognizes the failure as a lost connection
+      classifyFailure: () => 'network' as const,
+      network: { ...network.config, recoveryCheck },
+    },
+  });
+  const env = createListQueryStoreTestEnv(
+    { users: [{ id: 1, name: 'Ada' }] },
+    {
+      getSessionKey: () => sessionKey,
+      storeManager,
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offline: { operations: {} },
+      },
+    },
+  );
+
+  // -- A list fetch starts with the gate closed --
+  env.serverTable.setNextListFetchError('connection reset');
+  env.scheduleFetch('highPriority', usersQuery);
+  await advanceTime(400);
+
+  // -- The app reopens the gate while the request is in flight, and the
+  // request fails --
+  offlineEnabled = true;
+  await advanceTime(600);
+
+  // The failure is classified with the gate open: network mode is active
+  expect(getGlobalOfflineStatusSummary(sessionKey)).toMatchInlineSnapshot(`
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+    outage: { active: '❌', enabled: '❌' }
+    sessionKey: 'gate-reopens-mid-fetch'
+  `);
+
+  // Reading the status re-checks the network: the browser still reports
+  // online, but the request failure keeps network mode until the recovery
+  // check says otherwise
+  expect(storeManager.getOfflineStatus().isOfflineMode).toBe(true);
+
+  // The recovery check runs on the network probe cadence (5s by default)
+  await advanceTime(6_000);
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+});

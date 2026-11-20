@@ -335,10 +335,15 @@ type OfflineSessionBaseConfig<TUploadRef extends ValidPayload = ValidPayload> =
      * storage untouched (and stay visible through the offline entities /
      * resolutions) and are replayed after the gate reopens while online.
      *
-     * It is read before every fetch and mutation, on browser online/offline
-     * events, before each recovery check and before replaying queued
-     * mutations, so it must be synchronous and cheap. A flip is picked up by the next of those; call
+     * It is read before every fetch and every mutation with an `offline`
+     * descriptor, on browser online/offline events, before each recovery
+     * check and before replaying queued mutations, so it must be synchronous
+     * and cheap. A flip is picked up by the next of those; call
      * `storeManager.setOfflineRuntimeConfig({})` to apply it right away.
+     *
+     * The tabs of a session key share its offline status and replay, so it
+     * must return the same value in every tab of that session key (to gate
+     * per workspace, include the workspace in the session key).
      * @default () => true
      */
     enabled?: () => boolean;

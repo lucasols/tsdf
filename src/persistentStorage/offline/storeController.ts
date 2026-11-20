@@ -4238,6 +4238,14 @@ export function createOfflineStoreController<
     const current = ensureActiveSession();
     if (!current) return false;
 
+    if (!isSessionEnabled()) {
+      // The fetch runs online: the closed gate is applied to the status too,
+      // for the fetches that read this without refreshing the network state
+      // first (`loadMore`)
+      void current.session.refreshNetworkState();
+      return false;
+    }
+
     return shouldTreatFutureOperationsAsOffline(current);
   }
 
