@@ -15,7 +15,10 @@ import {
 import { Result, unknownToError } from 't-result';
 import type { TSDFDebugLogger } from '../../debug';
 import type { ValidPayload } from '../../utils/storeShared';
-import { getNavigatorLockManager } from '../navigatorLocks';
+import {
+  getNavigatorLockManager,
+  warnIfNavigatorLockUnavailable,
+} from '../navigatorLocks';
 import type {
   OfflineAttachedUploadIds,
   OfflineMutationUploadsInput,
@@ -68,6 +71,8 @@ const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
  * replayed, before it may replay itself.
  */
 const REPLAY_HANDOFF_SETTLE_MS = 500;
+const REPLAY_LOCK_UNAVAILABLE_WARNING =
+  '[TSDF] navigator.locks is unavailable; with several tabs open, a queued offline mutation can be sent more than once.';
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
 
@@ -724,7 +729,9 @@ export function createOfflineStoreController<
     activeSession?.unregister?.();
     activeSession = null;
     resetReplayRetryState();
-    releaseHeldReplayLock();
+    // A running drain may still be sending an entry: it releases the lock
+    // itself once that request settles, so another tab cannot send it too.
+    if (!replayScheduled) releaseHeldReplayLock();
     resolvedEntityRefBySerializedRef.clear();
     queueEntries.clear();
     resolutions.clear();
@@ -3177,7 +3184,12 @@ export function createOfflineStoreController<
    */
   async function acquireReplayLock(current: ActiveSessionState): Promise<void> {
     const lockManager = getNavigatorLockManager();
-    if (lockManager === null) return;
+    if (lockManager === null) {
+      if (current.session.hasOtherTabs()) {
+        warnIfNavigatorLockUnavailable(REPLAY_LOCK_UNAVAILABLE_WARNING);
+      }
+      return;
+    }
 
     if (replayLockReleaseTimer !== null) {
       clearTimeout(replayLockReleaseTimer);

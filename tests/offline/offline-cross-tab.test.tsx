@@ -162,10 +162,17 @@ function setDocumentHidden(hidden: boolean) {
  *
  * With `uploads: true` the tab stores offline file uploads in OPFS, shared by
  * every tab like in a real browser (install it with `createMockBrowserOpfs`).
+ *
+ * `getIsOffline` replaces the app's connectivity check in this tab only.
  */
 async function openTab(
   name: string,
-  options: { focused: boolean; storeIds?: string[]; uploads?: boolean },
+  options: {
+    focused: boolean;
+    storeIds?: string[];
+    uploads?: boolean;
+    getIsOffline?: () => boolean;
+  },
 ) {
   setDocumentHidden(!options.focused);
   vi.resetModules();
@@ -185,7 +192,9 @@ async function openTab(
     errorNormalizer: normalizeError,
     getSessionKey: () => sessionKey,
     offlineSession: {
-      network: network.config,
+      network: options.getIsOffline
+        ? { ...network.config, getIsOffline: options.getIsOffline }
+        : network.config,
       ...(options.uploads
         ? {
             uploads: {
@@ -710,4 +719,39 @@ test('the file attached to an edit queued in another tab is kept when the edit e
   // Tab B, which saved the file, must not delete it while it applies tab A's
   // changes one at a time: retrying the conflict needs the file.
   expect(getOpfsDirTree(opfs)).toContain('binary.blob');
+});
+
+test('the leading tab keeps its queued edits while its own connectivity check still fails', async () => {
+  // The app's connectivity check also requires the tab's realtime connection,
+  // which each tab opens on its own.
+  const tabARealtimeConnected = false;
+  network.setOffline();
+  const tabA = await openTab('A', {
+    focused: true,
+    getIsOffline: () => !network.isOnline() || !tabARealtimeConnected,
+  });
+  const tabB = await openTab('B', { focused: false });
+  // Tab A keeps the focus and leads
+  setDocumentHidden(false);
+  await tabA.queueEdit(2);
+
+  // The browser is back online. Tab B's check passes and it tells the other
+  // tabs, but tab A's realtime connection is still down.
+  network.goOnline();
+  await advanceTime(3_000);
+
+  // Tab A trusts its own check over tab B's report: sending now would fail,
+  // so the edit stays queued.
+  expect(serverCalls).toMatchInlineSnapshot(`[]`);
+  expect(describeTabs(tabA, tabB)).toMatchInlineSnapshot(`
+    tab A:
+      entities: ['doc: pending']
+      leader: '✅'
+      resolutions: []
+
+    tab B:
+      entities: ['doc: pending']
+      leader: '❌'
+      resolutions: []
+  `);
 });

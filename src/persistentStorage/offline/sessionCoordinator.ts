@@ -663,6 +663,8 @@ class SessionOfflineCoordinator {
   #scheduledRecoveryMode: SessionRecoveryMode | null = null;
   #recoveryAttempt = 0;
   #classifiedNetworkActive = false;
+  /** Result of this tab's last `getIsOffline` check. */
+  #lastDetectedOffline = false;
   /** Tabs of this session that sent anything on the session channel. */
   #otherTabIds = new Set<string>();
   #networkEnabledOverride: boolean | undefined;
@@ -1441,6 +1443,7 @@ class SessionOfflineCoordinator {
     if (token !== this.#networkStateToken) {
       return this.store.state.status.network.active;
     }
+    this.#lastDetectedOffline = detectedOffline;
 
     if (!this.#isNetworkEnabled()) {
       if (
@@ -1653,6 +1656,7 @@ class SessionOfflineCoordinator {
     const initial = this.#getCurrentOfflineState();
 
     if (typeof initial === 'boolean') {
+      this.#lastDetectedOffline = initial;
       this.setNetworkActive(initial, { classified: false });
     }
   }
@@ -2281,10 +2285,11 @@ class SessionOfflineCoordinator {
     // This tab's own detection wins over another tab saying the network is
     // back: tabs do not get the browser's online event at the same instant,
     // and replaying on another tab's word would send requests that fail.
-    // Reads the browser state instead of calling `getIsOffline`, which may be
-    // an async probe and would run again on every snapshot of every tab.
+    // Uses the last `getIsOffline` result instead of calling it again: it may
+    // be an async probe and would run on every snapshot of every tab.
     const isDetectedOffline =
-      this.#isNetworkEnabled() && !this.#browserReportsOnline();
+      this.#isNetworkEnabled() &&
+      (this.#lastDetectedOffline || !this.#browserReportsOnline());
 
     this.store.setState(
       {
