@@ -20,6 +20,11 @@ const docSchema = rc_object({ value: rc_number, label: rc_string });
 const docConflictSchema = rc_object({ reason: rc_string });
 const setValueInputSchema = rc_object({ value: rc_number });
 const conflictResolutionSchema = z.object({ value: z.number() });
+// rejects negative values at runtime, a rule the `ValueInput` type can't express
+const conflictValueInputSchema = conflictResolutionSchema.refine(
+  (input) => input.value >= 0,
+  'Value must not be negative',
+);
 const patchDocAccumulationZodSchema = z
   .object({ value: z.number().optional(), label: z.string().optional() })
   .superRefine((input, ctx) => {
@@ -569,7 +574,7 @@ test('direct document store offline public api', async () => {
             },
           },
           conflictValue: {
-            inputSchema: setValueInputSchema,
+            inputSchema: conflictValueInputSchema,
             kind: 'update',
             getServerSnapshot: () => {
               conflictReplayOrder.push('getServerSnapshot');
@@ -877,6 +882,31 @@ test('direct document store offline public api', async () => {
   expect(conflictReplayOrder).toMatchInlineSnapshot(
     `['getServerSnapshot', 'detectConflict']`,
   );
+
+  // requeueing with an input the operation schema rejects fails without
+  // dropping the conflict, so the user can still resolve it
+  const invalidRequeueError = await act(async () => {
+    try {
+      await documentStore.resolveOfflineResolution(
+        conflict.id,
+        'conflictValue',
+        { action: 'requeue', input: { value: -1 } },
+      );
+      return null;
+    } catch (error) {
+      return error;
+    }
+  });
+  expect(invalidRequeueError).toMatchInlineSnapshot(`
+    Error#:
+      message: 'Invalid offline operation input for "conflictValue"'
+      name: 'Error'
+  `);
+  expect(
+    documentStore
+      .getOfflineResolutions()
+      .map((resolution) => resolution.id === conflict.id),
+  ).toMatchInlineSnapshot(`['✅']`);
 
   await act(async () => {
     await documentStore.resolveOfflineResolution(conflict.id, 'conflictValue', {

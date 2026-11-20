@@ -3650,15 +3650,16 @@ export function createOfflineStoreController<
     }
 
     if (action === 'requeue') {
+      // validated before the resolution is removed, so an invalid input
+      // throws without losing the change the user still has to resolve
+      const preparedMutation = prepareMutationWithSession(current, {
+        operation: operationName,
+        input: resolutionAction?.input,
+        tempIds: resolutionRecord.tempIds,
+        entityRefs: resolutionRecord.entityRefs,
+      });
       await removeResolution(resolutionId, current, true);
-      await queuePreparedMutations(
-        prepareMutationWithSession(current, {
-          operation: operationName,
-          input: resolutionAction?.input,
-          tempIds: resolutionRecord.tempIds,
-          entityRefs: resolutionRecord.entityRefs,
-        }),
-      );
+      await queuePreparedMutations(preparedMutation);
       return;
     }
 
