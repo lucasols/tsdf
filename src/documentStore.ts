@@ -253,7 +253,9 @@ export type DocumentStoreOptions<
   revalidateOnWindowFocus?: boolean | (() => boolean);
   /** Reconnect-specific cooldown. Defaults to 2,000ms. The first reconnect revalidates immediately;
    * additional reconnects within the cooldown are coalesced into one trailing
-   * revalidation. Set to `0` to disable this cooldown. */
+   * revalidation. Recovering from offline mode waits one cooldown for a
+   * reconnect before revalidating, so the two share one revalidation. Set to
+   * `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   /** Delay applied to medium-priority requests before they enter the scheduler. */
   mediumPriorityDelayMs?: number;

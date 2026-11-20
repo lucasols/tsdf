@@ -7,8 +7,10 @@ type StoreFocusLifecycle = {
   /**
    * The store recovered from offline mode (the session is online, its queued
    * mutations finished replaying and the store has nothing left waiting for
-   * a manual resolution): revalidates it. Reconnect and focus revalidations
-   * are dropped while offline, see below.
+   * a manual resolution): revalidates it. Real-time stores wait one transport
+   * reconnect cooldown first, so a transport reconnect in that window runs a
+   * single revalidation for both. Reconnect and focus revalidations are
+   * dropped while offline, see below.
    */
   onOfflineRecovery: () => void;
   reset: () => void;
@@ -215,9 +217,22 @@ export function createStoreFocusLifecycle(
   }
 
   function onOfflineRecovery(): void {
-    // Not gated by the cooldown: whatever was revalidated before the offline
-    // period / the replay is stale again. Unfocused tabs still wait for focus.
-    flushTransportReconnectRevalidate();
+    // Not gated by the last revalidation: whatever was revalidated before the
+    // offline period / the replay is stale again. Unfocused tabs still wait
+    // for focus.
+    if (!usesRealTimeUpdates || transportReconnectCooldownMs <= 0) {
+      flushTransportReconnectRevalidate();
+      return;
+    }
+
+    if (hasPendingReconnectRevalidateOnFocus) return;
+
+    // Real-time apps usually reconnect their transport right after the network
+    // comes back, and that reconnect revalidates the store anyway (it has to,
+    // updates sent while the transport was down are missed). Waiting one
+    // cooldown lets that reconnect flush this revalidation instead of
+    // revalidating twice; without a reconnect it runs when the cooldown ends.
+    scheduleTrailingTransportReconnectRevalidate();
   }
 
   reset();
