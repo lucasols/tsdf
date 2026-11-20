@@ -5,6 +5,7 @@ import type {
   ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
+import { FetchError } from '../mocks/testEnvUtils';
 import { parsePersistedObject, toRecord } from './offlineTestShared';
 
 export type CreateUserOperations = {
@@ -271,4 +272,27 @@ export function getSortedSessionQueueSummary(
     })
     .sort((left, right) => Number(left.queueOrder) - Number(right.queueOrder))
     .map(({ queueOrder: _, ...rest }) => rest);
+}
+
+export type CreateAndPatchListQueryUserOperations =
+  CreateListQueryUserOperations & PatchUserOperations;
+
+export function createReplayFailure(message: string) {
+  return new FetchError(message, { path: '/document', method: 'PATCH' });
+}
+
+export function getSingleQueuedMutationData(
+  sessionKey: string,
+  storeName: string,
+): { input: unknown; operation: unknown } {
+  const entries = getOfflineQueueEntries(sessionKey, storeName);
+  if (entries.length !== 1) {
+    throw new Error(
+      `Expected exactly one queued mutation for "${sessionKey}/${storeName}" but found ${entries.length}`,
+    );
+  }
+
+  const data = getOfflineQueueEntryData(entries[0]!);
+
+  return { input: data.input, operation: data.operation };
 }
