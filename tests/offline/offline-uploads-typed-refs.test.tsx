@@ -439,6 +439,158 @@ test('a queued mutation replays with a freshly uploaded ref when the ref stored 
   expect(env.serverMock.current).toBe(3);
 });
 
+test('a tab on the updated app does not resolve a file another tab sent and deleted to a ref of the previous version that fails its resolved ref schema', async () => {
+  createMockBrowserOpfs();
+  installInMemoryBroadcastChannel();
+  const sessionKey = 'offline-upload-ref-schema-released-session';
+  const storeId = 'offline-upload-ref-schema-released-doc';
+  const sentRefs: unknown[] = [];
+
+  network.setOffline();
+
+  // --- First tab: still running the previous app version, which resolves
+  // uploads to plain string refs. It has the form that saves the edit.
+  const previousVersionTab = createStoreManager({
+    getSessionKey: () => sessionKey,
+    errorNormalizer: normalizeError,
+    offlineSession: {
+      network: network.config,
+      uploads: {
+        adapter: opfsOfflineUploadAdapter,
+        upload: ({ id }) => Promise.resolve(`legacy-ref:${id}`),
+      },
+    },
+  });
+  const previousEnv = createDocumentStoreTestEnv<
+    number,
+    UploadDependencyOperations
+  >(1, {
+    id: storeId,
+    storeManager: previousVersionTab,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offline: {
+        operations: {
+          updateWithAttachment: {
+            inputSchema: rc_object({
+              attachmentId: rc_string,
+              value: rc_number,
+            }),
+            kind: 'update',
+            dependsOnUploads: ({ input }) => [input.attachmentId],
+            execute: (ctx) => {
+              sentRefs.push(
+                ctx.uploads.resolvedRefsById[ctx.input.attachmentId],
+              );
+              return { value: ctx.input.value };
+            },
+            onSuccessExecute: () => {},
+          },
+        },
+      },
+    },
+  });
+  // The first tab is the one in front, so it leads and sends queued edits.
+  await flushAllTimers();
+
+  // --- Second tab: opened in the background after a deploy, so it runs the
+  // updated app. A separate instance of the library stands for the separate
+  // tab.
+  setDocumentHidden(true);
+  vi.resetModules();
+  const updatedTabLib = await import('../../src/main');
+  const updatedTabSessionCoordinator =
+    await import('../../src/persistentStorage/offline/sessionCoordinator');
+
+  try {
+    const updatedVersionTab = updatedTabLib.createStoreManager({
+      getSessionKey: () => sessionKey,
+      errorNormalizer: normalizeError,
+      offlineSession: {
+        network: network.config,
+        uploads: {
+          adapter: updatedTabLib.opfsOfflineUploadAdapter,
+          upload: ({ id }) =>
+            Promise.resolve({
+              fileId: `file-${id}`,
+              url: `https://cdn.test/${id}`,
+            }),
+          resolvedRefSchema: uploadedFileRefSchema,
+        },
+      },
+    });
+    updatedVersionTab.getOfflineStatus();
+    await flushAllTimers();
+    // Every tab reads the same `document.hidden`; the background tab only
+    // had to start hidden to not take over leadership.
+    setDocumentHidden(false);
+
+    // While offline, the user picks a photo in the first tab and saves an
+    // edit that uses it.
+    (
+      await resolveAfterAllTimers(
+        previousVersionTab.saveOfflineUpload({
+          id: 'avatar',
+          file: new File(['avatar body'], 'avatar.png', {
+            type: 'image/png',
+            lastModified: 1,
+          }),
+        }),
+      )
+    ).unwrap();
+    await resolveAfterAllTimers(
+      previousEnv.apiStore.performMutation({
+        mutation: () => Promise.resolve({ value: 2 }),
+        offline: {
+          operation: 'updateWithAttachment',
+          input: { attachmentId: 'avatar', value: 2 },
+        },
+      }),
+    );
+    await flushAllTimers();
+
+    // On reconnect the first tab uploads the photo, sends the edit, and
+    // deletes the photo: no queued work uses it anymore.
+    await reconnect();
+    await flushAllTimers();
+    expect(sentRefs).toMatchInlineSnapshot(`['legacy-ref:avatar']`);
+
+    // The first tab still resolves the id to its own ref, for app data that
+    // holds it...
+    const previousTabResult = await resolveAfterAllTimers(
+      previousVersionTab.resolveOfflineUpload('avatar'),
+    );
+    expect(previousTabResult.unwrap()).toBe('legacy-ref:avatar');
+
+    // ...but the updated tab never hands out the previous version's ref,
+    // which fails its schema. The file is already deleted, so the id is
+    // unknown there.
+    const updatedTabResult = await resolveAfterAllTimers(
+      updatedVersionTab.resolveOfflineUpload('avatar'),
+    );
+    expect(
+      updatedTabResult.ok
+        ? updatedTabResult.value
+        : updatedTabResult.error.message,
+    ).toBe('Unknown offline upload "avatar"');
+  } finally {
+    setDocumentHidden(false);
+    // The second library instance is not covered by `resetSessionForTests`.
+    updatedTabSessionCoordinator.__resetSessionOfflineCoordinatorRegistryForTests();
+    vi.unstubAllGlobals();
+  }
+});
+
+function setDocumentHidden(hidden: boolean) {
+  Object.defineProperty(document, 'hidden', {
+    value: hidden,
+    writable: true,
+    configurable: true,
+  });
+}
+
 /**
  * Replaces the global `BroadcastChannel` with an in-memory one, so two
  * instances of the library can sync with each other like two browser tabs.

@@ -2818,7 +2818,14 @@ class SessionOfflineCoordinator {
       this.#uploads.delete(id);
       this.#uploadsRemovedWhileListing?.add(id);
     }
-    for (const [id, ref] of releasedRefs) this.#releasedUploadRefs.set(id, ref);
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    for (const [id, ref] of releasedRefs) {
+      // A ref failing the schema can't be uploaded again, since its file is
+      // deleted, so the id stays unknown here.
+      const parsedRef =
+        schema === undefined ? ref : parseRestoredUploadRef(schema, ref);
+      if (parsedRef !== undefined) this.#releasedUploadRefs.set(id, parsedRef);
+    }
 
     // The sender already published its uploads list. Rebuilding it from this
     // tab's records and publishing it would replace that list everywhere with
