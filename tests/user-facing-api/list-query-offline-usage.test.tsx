@@ -821,7 +821,7 @@ test('direct list-query store offline public api', async () => {
       network: { active: '❌', enabled: '✅' }
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'direct-list-query-offline-session'
-      updatedAt: 1735689619050
+      updatedAt: 1735689612000
     `);
 
     listHook.unmount();

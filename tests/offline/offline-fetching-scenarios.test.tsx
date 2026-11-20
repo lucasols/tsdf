@@ -1,3 +1,4 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
@@ -1312,10 +1313,14 @@ describe('offline fetching scenarios', () => {
       queries: []
     `);
 
-    const [queryResult, itemResult] = await Promise.all([
-      resolveAfterAllTimers(env.apiStore.awaitListQueryFetch(usersQuery)),
-      resolveAfterAllTimers(env.apiStore.awaitItemFetch('users||1')),
-    ]);
+    // Both reads start together, but their timers are flushed one after the
+    // other: two `resolveAfterAllTimers` calls running at the same time
+    // overlap their `act` scopes, which leaves React unable to render hooks in
+    // the tests that run after this one.
+    const queryResultPromise = env.apiStore.awaitListQueryFetch(usersQuery);
+    const itemResultPromise = env.apiStore.awaitItemFetch('users||1');
+    const queryResult = await resolveAfterAllTimers(queryResultPromise);
+    const itemResult = await resolveAfterAllTimers(itemResultPromise);
 
     expect({ itemResult, queryResult }).toMatchInlineSnapshot(`
       itemResult:
@@ -1379,5 +1384,315 @@ describe('offline fetching scenarios', () => {
     expect(
       env.serverTable.getRequestHistory('list', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('document async persistence: a hook mounted offline shows the cached storage data without an error', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-document-async-hook';
+    const storeName = 'offline-fetching-document-async-hook';
+    createOpfsPersistentStorageTestStore({
+      initialState: { storeName, sessionKey, document: { data: { value: 8 } } },
+    });
+
+    const env = createDocumentStoreTestEnv(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      storeManager: createStoreManager({
+        errorNormalizer: normalizeError,
+        getSessionKey: () => sessionKey,
+        offlineSession: { network: network.config },
+      }),
+      testScenario: 'idle',
+      persistentStorage: {
+        adapter: opfsPersistentStorage,
+        schema: docSchema,
+        offline: { operations: {} },
+      },
+    });
+    const renders = createLoggerStore();
+
+    // With an async adapter the state memory starts cold: the hook has to wait
+    // for the storage read, and the mount fetch that follows fails offline.
+    const hook = renderHook(() => {
+      const doc = env.apiStore.useDocument();
+      renders.add({
+        status: doc.status,
+        data: doc.data,
+        error: doc.error?.id ?? null,
+      });
+    });
+    await flushAllTimers();
+
+    // The refresh that could not run offline runs by itself after recovering.
+    renders.addMark('back online');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      -> status: success ⋅ data: {value:8} ⋅ error: null
+
+      >>> back online
+
+      -> status: success ⋅ data: {value:1} ⋅ error: null
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('collection async persistence: hooks mounted offline show cached storage items without an error and the offline error only for uncached items', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-collection-async-hook';
+    const storeName = 'offline-fetching-collection-async-hook';
+    createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        collection: [
+          { payload: 'users||1', data: { value: { name: 'Ada (cached)' } } },
+        ],
+      },
+    });
+
+    const env = createCollectionStoreTestEnv(
+      { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: opfsPersistentStorage,
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offline: { operations: {} },
+        },
+      },
+    );
+    const renders = createLoggerStore();
+
+    // Only the first user is in storage; the second one was never loaded.
+    const hook = renderHook(() => {
+      const cached = env.apiStore.useItem('users||1');
+      const uncached = env.apiStore.useItem('users||2');
+
+      renders.add({
+        cached: `${cached.status} (${cached.data?.value.name ?? 'no data'})`,
+        cachedError: cached.error?.id ?? null,
+        uncached: `${uncached.status} (${uncached.data?.value.name ?? 'no data'})`,
+        uncachedError: uncached.error?.id ?? null,
+      });
+    });
+    await flushAllTimers();
+
+    renders.addMark('back online');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ cached: loading (no data)
+      ⋅ cachedError: null
+      ⋅ uncached: loading (no data)
+      ⋅ uncachedError: null
+      └─
+      ┌─
+      ⋅ cached: success (Ada (cached))
+      ⋅ cachedError: null
+      ⋅ uncached: loading (no data)
+      ⋅ uncachedError: null
+      └─
+      ┌─
+      ⋅ cached: success (Ada (cached))
+      ⋅ cachedError: null
+      ⋅ uncached: error (no data)
+      ⋅ uncachedError: offline
+      └─
+
+      >>> back online
+
+      ┌─
+      ⋅ cached: success (Ada (cached))
+      ⋅ cachedError: null
+      ⋅ uncached: loading (no data)
+      ⋅ uncachedError: null
+      └─
+      ┌─
+      ⋅ cached: success (Ada)
+      ⋅ cachedError: null
+      ⋅ uncached: loading (no data)
+      ⋅ uncachedError: null
+      └─
+      ┌─
+      ⋅ cached: success (Ada)
+      ⋅ cachedError: null
+      ⋅ uncached: success (Grace)
+      ⋅ uncachedError: null
+      └─
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('list-query async persistence: hooks mounted offline show cached storage data without an error and the offline error only for uncached reads', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-fetching-list-query-async-hook';
+    const storeName = 'offline-fetching-list-query-async-hook';
+    const usersQuery = { tableId: 'users' } as const;
+    createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        listQuery: {
+          items: [
+            { tableId: 'users', id: 1, data: { id: 1, name: 'Ada (cached)' } },
+          ],
+          queries: [
+            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
+          ],
+        },
+      },
+    });
+
+    const env = createListQueryStoreTestEnv(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+        projects: [{ id: 1, name: 'Apollo' }],
+      },
+      {
+        id: storeName,
+        getSessionKey: () => sessionKey,
+        storeManager: createStoreManager({
+          errorNormalizer: normalizeError,
+          getSessionKey: () => sessionKey,
+          offlineSession: { network: network.config },
+        }),
+        testScenario: 'idle',
+        persistentStorage: {
+          adapter: opfsPersistentStorage,
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offline: { operations: {} },
+        },
+      },
+    );
+    const renders = createLoggerStore();
+
+    // The users query and its first user are in storage; the projects query
+    // and the second user were never loaded.
+    const hook = renderHook(() => {
+      const cachedQuery = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+      const uncachedQuery = env.apiStore.useListQuery(
+        { tableId: 'projects' },
+        { itemSelector: (item) => item.name },
+      );
+      const cachedItem = env.apiStore.useItem('users||1', {
+        selector: (item) => item?.name ?? 'no data',
+      });
+      const uncachedItem = env.apiStore.useItem('users||2', {
+        selector: (item) => item?.name ?? 'no data',
+      });
+
+      renders.add({
+        cachedQuery: `${cachedQuery.status} [${cachedQuery.items.join(', ')}] error: ${cachedQuery.error?.id ?? null}`,
+        uncachedQuery: `${uncachedQuery.status} [${uncachedQuery.items.join(', ')}] error: ${uncachedQuery.error?.id ?? null}`,
+        cachedItem: `${cachedItem.status} (${cachedItem.data}) error: ${cachedItem.error?.id ?? null}`,
+        uncachedItem: `${uncachedItem.status} (${uncachedItem.data}) error: ${uncachedItem.error?.id ?? null}`,
+      });
+    });
+    await flushAllTimers();
+
+    // Recovering loads the uncached reads and refreshes the cached ones
+    // without a remount.
+    renders.addMark('back online');
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ cachedQuery: loading [] error: null
+      ⋅ uncachedQuery: loading [] error: null
+      ⋅ cachedItem: loading (no data) error: null
+      ⋅ uncachedItem: loading (no data) error: null
+      └─
+      ┌─
+      ⋅ cachedQuery: loading [] error: null
+      ⋅ uncachedQuery: loading [] error: null
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: loading (no data) error: null
+      └─
+      ┌─
+      ⋅ cachedQuery: success [Ada (cached)] error: null
+      ⋅ uncachedQuery: loading [] error: null
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: loading (no data) error: null
+      └─
+      ┌─
+      ⋅ cachedQuery: success [Ada (cached)] error: null
+      ⋅ uncachedQuery: error [] error: offline
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: loading (no data) error: null
+      └─
+      ┌─
+      ⋅ cachedQuery: success [Ada (cached)] error: null
+      ⋅ uncachedQuery: error [] error: offline
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: error (no data) error: offline
+      └─
+
+      >>> back online
+
+      ┌─
+      ⋅ cachedQuery: success [Ada (cached)] error: null
+      ⋅ uncachedQuery: error [] error: offline
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: error (no data) error: offline
+      └─
+      ┌─
+      ⋅ cachedQuery: success [Ada (cached)] error: null
+      ⋅ uncachedQuery: loading [] error: null
+      ⋅ cachedItem: success (Ada (cached)) error: null
+      ⋅ uncachedItem: error (no data) error: offline
+      └─
+      ┌─
+      ⋅ cachedQuery: success [Ada, Grace] error: null
+      ⋅ uncachedQuery: loading [] error: null
+      ⋅ cachedItem: success (Ada) error: null
+      ⋅ uncachedItem: success (Grace) error: null
+      └─
+      ┌─
+      ⋅ cachedQuery: success [Ada, Grace] error: null
+      ⋅ uncachedQuery: success [Apollo] error: null
+      ⋅ cachedItem: success (Ada) error: null
+      ⋅ uncachedItem: success (Grace) error: null
+      └─
+      "
+    `);
+
+    hook.unmount();
   });
 });

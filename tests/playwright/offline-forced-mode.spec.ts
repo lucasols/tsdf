@@ -286,9 +286,9 @@ test('forced offline mode is shared by every tab of the session', async ({
   });
   await resetServerRequests(request, fixtureScopeId);
 
-  // An edit is queued, and every tab sees it pending. It is made in the last
-  // opened tab because that is the tab leading the session: replay is done by
-  // the leader, from its own queue.
+  // An edit is queued in the last opened tab (the one leading the session),
+  // and every tab sees it pending. Edits queued in the other tabs reach the
+  // leader's queue too; `offline-cross-tab.test.tsx` covers that case.
   await pageC.getByTestId('offline-doc-mutate').click();
   for (const page of [pageA, pageB, pageC]) {
     await expectOfflineState(page, {

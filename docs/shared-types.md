@@ -16,6 +16,10 @@ type StoreError = {
 };
 ```
 
+### isOfflineStoreError
+
+`isOfflineStoreError(error)` tells whether a `StoreError` (or a `StoreFetchError`) is the error TSDF reports for a fetch that could not complete because the offline session is in offline mode, narrowing it to `OfflineStoreError` (`{ code: 0, id: 'offline', message: 'Offline' }`). See [Reading While Offline](./offline.md#reading-while-offline).
+
 ## StoreFetchError
 
 An `Error` subclass returned by `awaitFetch` methods. Contains the same fields as `StoreError` plus a `type` indicating why the fetch failed:

@@ -109,6 +109,40 @@ A mutation is also queued while online when older mutations for the same entitie
 
 Queued mutations and pending resolutions are persisted through the store's own `persistentStorage.adapter`, and the cached entries they reference are protected from cache expiry until the queue is replayed or discarded. They are not migrated when a store's adapter changes: let the queue drain first. See [Changing a store's adapter](./persistent-storage.md#changing-a-stores-adapter).
 
+## Reading While Offline
+
+While the session is in offline mode, fetches are not sent to the server. What a document, item or query reports depends on whether it has data to return:
+
+- **Cached data** (loaded earlier, or restored from persistent storage): the cached data stays visible with `status: 'success'` and `error: null`. A refetch attempted offline leaves it that way, so there is no offline error to hide in the UI.
+- **Nothing cached**: the read fails with `status: 'error'` and the offline error `{ code: 0, id: 'offline', message: 'Offline' }`. This is the only offline state the app has to explain to the user.
+
+Use `isOfflineStoreError(error)` to recognise that error instead of comparing `error.id` by hand. It matches the whole error shape, so an app error whose `errorNormalizer` also uses the `'offline'` id is not mistaken for it, and it narrows the error to the exported `OfflineStoreError` type:
+
+```tsx
+import { isOfflineStoreError } from 'tsdf';
+
+function UserName({ id }: { id: number }) {
+  const { data, error, isLoading } = userStore.useItem({ id });
+
+  if (isLoading) return <Spinner />;
+  if (isOfflineStoreError(error)) return <NotAvailableOffline />;
+  if (error) return <ErrorMessage error={error} />;
+
+  return <span>{data?.name}</span>;
+}
+```
+
+It also accepts the `StoreFetchError` returned by the `awaitFetch` methods, which resolve with the cached data while offline and with the offline error only when nothing is cached.
+
+With [partial resources](./partial-resources.md), "cached" is decided per hook, by the `fields` it requests:
+
+- A hook whose requested fields are all cached is a cached read: `status: 'success'`, `error: null`. Fields that were loaded and later invalidated count as cached — they stay visible and are refreshed after recovering.
+- A hook requesting fields that were never loaded has nothing usable to return for them, so it reports `status: 'error'` with the offline error, without attempting a fetch. Its data stays hidden as it would be while loading (`data: null`, `items: []`), or stays visible with `loadingFields` when `showPartialAsRefetching` is enabled.
+
+Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
+
+Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
+
 ## Revalidation After Recovering
 
 While the session is in offline mode, automatic revalidations that could only fail are held: `onTransportReconnect()` signals and window-focus revalidations only re-check connectivity (`network.getIsOffline`) instead of refetching, and cached data stays visible. When the re-check finds the connection back, the session leaves offline mode and the stores revalidate as described below.
@@ -203,14 +237,14 @@ The behavior is the same as calling the owning store's `resolveOfflineResolution
 
 Failures are returned as a `Result` instead of thrown. `result.error` is an `OfflineResolutionActionError` with the `resolutionId`, the owning `storeName` (when known), and a `code`:
 
-| `code`                   | Meaning                                                                                                                                                                                                                                                                       |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resolution-not-found`   | No resolution with this id in the active session, e.g. it was already resolved or the session is logged out. It is also returned when another tab created the record after this tab's store loaded its resolutions; act on it from the tab that created it or after a reload. |
-| `store-not-registered`   | The owning store was not created with this manager (yet). Resolutions are shared by the whole session, including other tabs, so a record can be listed before its store exists here.                                                                                          |
-| `retry-not-supported`    | `retry` was requested for a `conflict` record. Conflicts are resolved with `discard`, or with `requeue` / `commit` on the store API.                                                                                                                                          |
-| `resolution-blocked`     | The record is blocked by parent resolutions (`blockedByResolutionIds`). Resolve the parents first.                                                                                                                                                                            |
-| `offline-not-configured` | The manager was created without `offlineSession`.                                                                                                                                                                                                                             |
-| `action-failed`          | The owning store failed while applying the action. The original error is in `error.cause`.                                                                                                                                                                                    |
+| `code`                   | Meaning                                                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `resolution-not-found`   | No resolution with this id in the active session, e.g. it was already resolved (possibly from another tab) or the session is logged out.                                             |
+| `store-not-registered`   | The owning store was not created with this manager (yet). Resolutions are shared by the whole session, including other tabs, so a record can be listed before its store exists here. |
+| `retry-not-supported`    | `retry` was requested for a `conflict` record. Conflicts are resolved with `discard`, or with `requeue` / `commit` on the store API.                                                 |
+| `resolution-blocked`     | The record is blocked by parent resolutions (`blockedByResolutionIds`). Resolve the parents first.                                                                                   |
+| `offline-not-configured` | The manager was created without `offlineSession`.                                                                                                                                    |
+| `action-failed`          | The owning store failed while applying the action. The original error is in `error.cause`.                                                                                           |
 
 ## Reading Offline State
 
@@ -242,6 +276,24 @@ Each store also exposes scoped APIs:
 - `parseOfflineResolutionConflict(...)`
 
 List-query stores additionally expose `usePendingOfflineItems(...)`, which returns pending creates/updates and pending deletes without mounting or fetching a query.
+
+## Multiple Tabs
+
+Tabs of the same session share one offline queue. Every tab can queue mutations and every tab shows the same pending state, but only one tab sends the queued work:
+
+- The **leading tab** replays the queue: the visible tab, or the one that was visible most recently. `useOfflineStatus().isLeader` tells whether the current tab leads.
+- A mutation queued in any other tab is sent by the leading tab after the connection recovers, in the order the mutations were queued across tabs. No reload or tab switch is needed.
+- Every queued mutation is sent once. A cross-tab lock (Web Locks API) keeps two tabs from replaying a store's queue at the same time, and a tab drops an entry as soon as another tab reports it as sent, so it does not send it again when it leads later. Where the Web Locks API is unavailable (pages served over plain `http` other than `localhost`), this guarantee does not hold and TSDF logs a warning. It also only holds between tabs running the same app version (`getAppVersion`) and the same TSDF release: tabs on different versions do not see each other's messages, so after a deploy an old tab and a new tab can both send the same queued mutation.
+- When the leading tab sends a temp-entity creation queued in another tab, every tab with the store emits `tempEntityReconciled`, so a view that follows the temp id can switch to the final one in any tab.
+- When the leading tab is closed or hidden, a visible tab takes over. When the previous tab was replaying or just did, the new one first waits for the mutation that tab is sending to finish, then up to a second more, so it learns what that tab already sent before it starts.
+
+Things to keep in mind:
+
+- A tab can only replay the operations of stores it has created. Create the stores of a session in every tab (the usual module-level setup) so the leading tab can replay all of them.
+- `accumulation` only merges into mutations queued in the same tab. Mutations queued in different tabs are sent as separate requests.
+- Leadership follows visibility. If every remaining tab is hidden, queued work waits until one of them becomes visible.
+- While offline, each tab shows its own optimistic changes. Tabs converge once the queue is replayed and the data is fetched again.
+- Tabs coordinate through browser messages, which cannot give a strict guarantee when a tab is closed or frozen in the middle of a hand-off. For mutations that must never run twice (for example payments), also make the server endpoint idempotent.
 
 ## Runtime Controls
 
@@ -378,4 +430,4 @@ await storeManager.saveOfflineUpload({
 - It is persisted with the upload record, so it survives reloads, is passed to the `upload` transport both on replay and on `resolveOfflineUpload(s)`, and is exposed as `metadata` on the `OfflineUpload` entries returned by `getOfflineUploads()` / `useOfflineUploads()`.
 - Because it is read back from storage, it is typed as an unvalidated `ValidPayload`: parse it with a schema before using it, as above. Uploads staged without metadata reach the transport with `metadata: undefined`, so handle that case explicitly. This includes the ones persisted by older versions and files attached directly to a mutation with its `upload` option, which can't carry metadata.
 - `saveOfflineUpload` stores exactly the metadata it receives. `replaceOfflineUpload` keeps the metadata already saved for that id unless new `metadata` is passed. Both fail while that upload is queued or being sent.
-- Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` field together with the rest of the record.
+- Custom `OfflineUploadAdapter` implementations must persist and restore the record's `metadata` and `storeName` fields together with the rest of the record. `storeName` marks which store queued a file attached to a mutation. That file is removed once nothing in that store's queue uses it, and only while that store is created in the tab, so a store created later (for example on a code-split screen) still finds its files.

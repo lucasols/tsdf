@@ -1072,7 +1072,7 @@ test('the default OPFS offline persistence keeps the raw file paths and JSON pay
       .toMatchInlineSnapshot(`
         d:
           n: { a: 1, e: 1 }
-          u: 1735689600003
+          u: 1735689600000
       `);
     expect(
       getParsedOpfsFileData(

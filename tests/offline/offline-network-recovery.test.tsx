@@ -286,14 +286,14 @@ test('browser offline events stop classified-network probing and hand control to
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
 
   // Once the browser reports itself offline, detected network mode should take
-  // over without changing the visible offline state.
-  env.addTimelineComments('beforeNextAction', [
-    'the browser reports offline and takes over network mode detection',
-  ]);
+  // over without changing the offline status at all.
   await act(async () => {
     network.goOffline();
     await Promise.resolve();
   });
+  env.addTimelineComments('afterLastAction', [
+    'the browser reports offline and takes over network mode detection: no status change',
+  ]);
 
   expect(statusHook.result.current).toMatchInlineSnapshot(`
     isForcedOffline: '❌'
@@ -304,7 +304,7 @@ test('browser offline events stop classified-network probing and hand control to
     network: { active: '✅', enabled: '✅' }
     outage: { active: '❌', enabled: '❌' }
     sessionKey: 'classified-network-browser-offline-session'
-    updatedAt: 1735689600075
+    updatedAt: 1735689600060
   `);
 
   // After the browser takeover, the classified probe loop must remain stopped.
@@ -314,16 +314,14 @@ test('browser offline events stop classified-network probing and hand control to
   expect(getGlobalOfflineStatus(sessionKey)).toEqual(statusHook.result.current);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time | ui                                                               |
-    0    | "offlineMode:off network:off lastCheck:none updated:0 probes:0"  | ui-initialized
-    10ms | "offlineMode:off network:off lastCheck:none updated:10 probes:0" | ui-changed
-    .    | "offlineMode:off network:off lastCheck:none updated:10 probes:0" | 🔴 >fetch-started
-    .    | "offlineMode:off network:off lastCheck:none updated:10 probes:0" | 🔴 <fetch-error (value: "error")
-    .    | "offlineMode:on network:on lastCheck:none updated:10 probes:0"   | ui-changed
-    60ms | "offlineMode:on network:on lastCheck:none updated:10 probes:0"   | -- wait for the first classified-network probe before the browser reports offline
-    .    | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"     | ui-changed
-    75ms | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"     | -- the browser reports offline and takes over network mode detection
-    .    | "offlineMode:on network:on lastCheck:60 updated:75 probes:1"     | ui-changed
+    time | ui                                                              |
+    0    | "offlineMode:off network:off lastCheck:none updated:0 probes:0" | ui-initialized
+    10ms | "offlineMode:off network:off lastCheck:none updated:0 probes:0" | 🔴 >fetch-started
+    .    | "offlineMode:off network:off lastCheck:none updated:0 probes:0" | 🔴 <fetch-error (value: "error")
+    .    | "offlineMode:on network:on lastCheck:none updated:10 probes:0"  | ui-changed
+    60ms | "offlineMode:on network:on lastCheck:none updated:10 probes:0"  | -- wait for the first classified-network probe before the browser reports offline
+    .    | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"    | ui-changed
+    .    | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"    | -- the browser reports offline and takes over network mode detection: no status change
     "
   `);
   statusHook.unmount();
@@ -433,18 +431,16 @@ test('coming back online after browser-driven network takeover clears the interr
   expect(getGlobalOfflineStatus(sessionKey)).toEqual(statusHook.result.current);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time | ui                                                               |
-    0    | "offlineMode:off network:off lastCheck:none updated:0 probes:0"  | ui-initialized
-    10ms | "offlineMode:off network:off lastCheck:none updated:10 probes:0" | ui-changed
-    .    | "offlineMode:off network:off lastCheck:none updated:10 probes:0" | 🔴 >fetch-started
-    .    | "offlineMode:off network:off lastCheck:none updated:10 probes:0" | 🔴 <fetch-error (value: "error")
-    .    | "offlineMode:on network:on lastCheck:none updated:10 probes:0"   | ui-changed
-    60ms | "offlineMode:on network:on lastCheck:none updated:10 probes:0"   | -- wait for the first classified-network probe before the browser starts driving connectivity
-    .    | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"     | ui-changed
-    75ms | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"     | -- the browser reports offline and takes over network mode detection
-    .    | "offlineMode:on network:on lastCheck:60 updated:75 probes:1"     | ui-changed
-    .    | "offlineMode:on network:on lastCheck:60 updated:75 probes:1"     | -- the browser reports online and clears the interrupted classified-network state
-    .    | "offlineMode:off network:off lastCheck:60 updated:75 probes:1"   | ui-changed
+    time | ui                                                              |
+    0    | "offlineMode:off network:off lastCheck:none updated:0 probes:0" | ui-initialized
+    10ms | "offlineMode:off network:off lastCheck:none updated:0 probes:0" | 🔴 >fetch-started
+    .    | "offlineMode:off network:off lastCheck:none updated:0 probes:0" | 🔴 <fetch-error (value: "error")
+    .    | "offlineMode:on network:on lastCheck:none updated:10 probes:0"  | ui-changed
+    60ms | "offlineMode:on network:on lastCheck:none updated:10 probes:0"  | -- wait for the first classified-network probe before the browser starts driving connectivity
+    .    | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"    | ui-changed
+    75ms | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"    | -- the browser reports offline and takes over network mode detection
+    .    | "offlineMode:on network:on lastCheck:60 updated:60 probes:1"    | -- the browser reports online and clears the interrupted classified-network state
+    .    | "offlineMode:off network:off lastCheck:60 updated:75 probes:1"  | ui-changed
     "
   `);
   statusHook.unmount();
