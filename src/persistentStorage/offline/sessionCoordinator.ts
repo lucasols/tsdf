@@ -2436,7 +2436,10 @@ class SessionOfflineCoordinator {
   }
 
   #getCurrentOfflineState(): boolean | Promise<boolean> {
-    if (this.#forcedOffline) return true;
+    // Forced mode is a simulated network loss, so it only counts while network
+    // mode is enabled. With the mode off the real detection is what lets a
+    // session that was forced offline leave network mode.
+    if (this.#forcedOffline && this.#isNetworkEnabled()) return true;
 
     return (this.#canonicalConfig.getIsOffline ?? defaultGetIsOffline)();
   }

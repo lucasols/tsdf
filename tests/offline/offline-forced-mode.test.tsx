@@ -670,6 +670,92 @@ test('forced offline mode only takes effect while network mode is enabled', asyn
   `);
 });
 
+test('turning network mode off while forced offline mode is on ends the simulated network loss until the mode is turned back on', async () => {
+  const sessionKey = 'forced-offline-network-turned-off-session';
+  const storeName = 'forced-offline-network-turned-off-doc';
+
+  // The app is online with the document cached. Offline mode is forced and
+  // the user edits the document, which is queued.
+  const page = createOfflineDocumentPage({
+    sessionKey,
+    storeName,
+    testScenario: 'loaded',
+  });
+  const { env, storeManager } = page;
+  const screen = page.renderScreen();
+  await flushAllTimers();
+  await act(async () => {
+    (await storeManager.setForcedOfflineMode(true)).unwrap();
+  });
+  await act(() => page.setValue(2));
+  env.clearTimeline();
+
+  // --- Network mode is turned off at runtime (e.g. the app stops offering
+  // offline support to this user).
+  env.addTimelineComments('beforeNextAction', [
+    'network mode is turned off at runtime',
+  ]);
+  act(() => {
+    storeManager
+      .setOfflineRuntimeConfig({ network: { enabled: false } })
+      .unwrap();
+  });
+  await flushAllTimers();
+
+  // Forced mode is a simulated network loss, and no network loss is admitted
+  // while the mode is off: the real network is up, so the session leaves
+  // offline mode (the flag stays recorded) and the queued edit is sent.
+  expect(summarizeStatus(screen.result.current.status)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '❌'
+    network: { active: '❌', enabled: '❌' }
+  `);
+  expect(env.serverMock.current).toBe(2);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  // --- Network mode is turned back on: the recorded flag applies again.
+  env.addTimelineComments('beforeNextAction', [
+    'network mode is turned back on',
+  ]);
+  act(() => {
+    storeManager
+      .setOfflineRuntimeConfig({ network: { enabled: true } })
+      .unwrap();
+  });
+  await flushAllTimers();
+
+  expect(summarizeStatus(screen.result.current.status)).toMatchInlineSnapshot(`
+    isForcedOffline: '✅'
+    isOfflineMode: '✅'
+    network: { active: '✅', enabled: '✅' }
+  `);
+
+  // - mode turned off: the status flips, the queued edit is replayed once and
+  //   the store revalidates once (the normal recovery after the queue drained)
+  // - mode turned back on: the session goes offline again and nothing else
+  //   reaches the server
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui                                                    |
+    12s    | -                                                     | -- timeline-cleared
+    .      | -                                                     | -- network mode is turned off at runtime
+    .      | "value:2 success pendingSync | offline:off forced:on" | ui-changed
+    .      | "value:2 success pendingSync | offline:off forced:on" | offline:updateValue replay-started
+    13.2s  | "value:2 success pendingSync | offline:off forced:on" | server-data-changed (value: 2)
+    .      | "value:2 success pendingSync | offline:off forced:on" | offline:updateValue replay-finished
+    .      | "value:2 success | offline:off forced:on"             | ui-changed
+    13.21s | "value:2 refetching | offline:off forced:on"          | ui-changed
+    .      | "value:2 refetching | offline:off forced:on"          | 🟠 >fetch-started
+    14.01s | "value:2 refetching | offline:off forced:on"          | 🟠 <fetch-finished (value: 2)
+    .      | "value:2 success | offline:off forced:on"             | ui-changed
+    15.01s | "value:2 success | offline:off forced:on"             | -- network mode is turned back on
+    .      | "value:2 success | offline:on forced:on"              | ui-changed
+    "
+  `);
+
+  screen.unmount();
+});
+
 test('forced offline mode has no effect while the session gate is closed and applies again once it reopens', async () => {
   const sessionKey = 'forced-offline-session-gate-session';
   const storeName = 'forced-offline-session-gate-doc';
