@@ -871,14 +871,15 @@ test('a reused "up" never decides recovery: entering outage mode drops it and re
   // `classifyFailure` answered on its own: no health request.
   expect(health.check).toHaveBeenCalledTimes(1);
 
-  // -- The recovery check runs inside the reuse window of the "up" --
-  session.log.addMark('recovery check inside the reuse window');
+  // -- The recovery check runs 1s after the "up", well inside its 30s --
+  session.log.addMark('recovery check 1s after the "up"');
   await advanceTime(
     healthRecoveryProbe.initialIntervalMs + HEALTH_CHECK_DURATION_MS,
   );
 
-  // The recovery check asked the health endpoint instead of trusting the
-  // "up" from a second ago, so the outage is still active.
+  // Entering outage mode dropped the "up" from a second ago, so the recovery
+  // check had nothing to reuse: it asked the health endpoint, and the outage
+  // is still active.
   expect(health.check).toHaveBeenCalledTimes(2);
   expect(getGlobalOfflineStatusSummary(sessionKey).outage)
     .toMatchInlineSnapshot(`
@@ -922,7 +923,7 @@ test('a reused "up" never decides recovery: entering outage mode drops it and re
 
     -> at: 160ms ⋅ session: offline (outage) ⋅ healthChecks: 1
 
-    >>> recovery check inside the reuse window
+    >>> recovery check 1s after the "up"
 
     -> at: 1260ms ⋅ session: offline (outage) ⋅ healthChecks: 2
 

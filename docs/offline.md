@@ -178,10 +178,10 @@ healthCheck: {
 },
 ```
 
-Inside the window a failure is left to its request without asking the check, so an outage that starts inside it is only noticed by the first failure after it ends: keep it short. The reuse never decides recovery:
+Inside the window a failure is left to its request without asking the check, so an outage that starts inside it is only noticed by the first failure after it ends. Until then its failures get the handling of [a failure that belongs to the request](#up-means-the-failure-belongs-to-the-request): a direct mutation fails with its own error instead of being queued, and a queued mutation being replayed goes through `classifyRetryableFailure` and the `replayRetry` budget, and can end in a `retry-exhausted` resolution instead of staying queued until the backend recovers. Keep the window short. The reuse never decides recovery:
 
 - only an `'up'` answer to a failure classification starts the window, and only failure classification reads it. Recovery checks always run the check, and their answers are not reused;
-- the window ends when the session enters an offline mode (for any reason, including the browser going offline or another tab entering one), and when a failure's check answers `'outage'` or `'unreachable'`, or gives no answer.
+- the window ends early when the session enters an offline mode, for any reason, including the browser going offline or another tab entering one.
 
 A failure that arrives while a check is in flight still waits for that call rather than reusing an older answer.
 

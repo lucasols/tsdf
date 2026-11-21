@@ -2219,7 +2219,8 @@ class SessionOfflineCoordinator {
       const health = await this.#checkHealth(healthCheck);
 
       // Only an `up` received while the session is still online starts the
-      // reuse window; any other answer, or none, ends it
+      // reuse window. The check only ran because no window was live, so any
+      // other answer, or none, just drops the expired timestamp
       this.#healthUpForFailuresAt =
         reuseUpMs > 0 &&
         health === 'up' &&
