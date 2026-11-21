@@ -678,4 +678,11 @@ export type PersistedListQueryData = {
   items: string[];
   /** Whether the query has additional pages available. */
   hasMore: boolean;
+  /**
+   * Set when rows before the end of `items` were dropped because their item
+   * entries were evicted from storage. Such a query is restored with the rows
+   * it still has, but not as a loaded query. A query that only lost its last
+   * rows is saved with `hasMore: true` instead.
+   */
+  missingItems?: boolean;
 };

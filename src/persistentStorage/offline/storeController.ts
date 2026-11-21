@@ -14,6 +14,10 @@ import {
 } from 'runcheck';
 import { Result, unknownToError } from 't-result';
 import type { TSDFDebugLogger } from '../../debug';
+import type {
+  ItemLoadedFields,
+  ListQueryAddItemToQueries,
+} from '../../listQueryStore/types';
 import type { ValidPayload } from '../../utils/storeShared';
 import {
   getNavigatorLockManager,
@@ -82,19 +86,30 @@ const REPLAY_LOCK_UNAVAILABLE_WARNING =
 const BLOCKED_DEPENDENCY_RESOLUTION_MESSAGE =
   'Blocked by unresolved dependency';
 
-type OfflineStoreAdapter = {
+/**
+ * List-query placement declared for a pending temp entity. Stores without
+ * queries never receive it.
+ */
+type PendingTempEntityListOptions<TQueryPayload extends ValidPayload> = {
+  addToQueries?: ListQueryAddItemToQueries<TQueryPayload, ValidPayload>;
+  loadedFields?: ItemLoadedFields;
+};
+
+type OfflineStoreAdapter<TQueryPayload extends ValidPayload> = {
   getEntityRefs?: (args: {
     operationName: string;
     input: unknown;
   }) => unknown[];
   normalizeEntityRefs?: (entityRefs: unknown[]) => OfflineEntityRef[];
   getProtectedCacheKeys: (entityRefs: OfflineEntityRef[]) => string[];
-  applyPendingEntity?: (args: {
-    operationName: string;
-    input: unknown;
-    tempId: ValidPayload;
-    pendingEntity: unknown;
-  }) => void;
+  applyPendingEntity?: (
+    args: {
+      operationName: string;
+      input: unknown;
+      tempId: ValidPayload;
+      pendingEntity: unknown;
+    } & PendingTempEntityListOptions<TQueryPayload>,
+  ) => void;
   rollbackPendingEntity?: (args: {
     operationName: string;
     input: unknown;
@@ -108,6 +123,16 @@ type OfflineStoreAdapter = {
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
   }) => void;
+  /**
+   * Loads the temp items and the queries they are declared into that are only
+   * in persistent storage (after a restart), so `applyPendingEntity` and
+   * `reconcileTempEntity` reach them in memory. Returns `undefined` when
+   * everything is already in memory.
+   */
+  loadTempEntities?: (
+    tempIds: ValidPayload[],
+    addToQueries: ListQueryAddItemToQueries<TQueryPayload, ValidPayload>[],
+  ) => Promise<unknown> | undefined;
   /**
    * Another tab reconciled a temp entity of the store. The final item's data
    * arrives through the store's tab sync; this applies what only this tab
@@ -545,6 +570,7 @@ export function createOfflineStoreController<
     string,
     AnyOfflineOperationDefinition<__LEGIT_ANY__>
   >,
+  TQueryPayload extends ValidPayload = ValidPayload,
 >(
   storeName: string,
   storeType: OfflineStoreType,
@@ -552,7 +578,7 @@ export function createOfflineStoreController<
   onPersistentStorageError: ((error: unknown) => void) | undefined,
   debugLogger: TSDFDebugLogger | undefined,
   adapter: StorageAdapter,
-  storeAdapter: OfflineStoreAdapter,
+  storeAdapter: OfflineStoreAdapter<TQueryPayload>,
   offlineSession: OfflineSession,
   operations: TOperations,
 ): OfflineStoreController<TOperations> {
@@ -615,7 +641,10 @@ export function createOfflineStoreController<
     entityRefs?: OfflineEntityRef[];
   };
 
-  type PendingTempEntity = { tempId: ValidPayload; pendingEntity: unknown };
+  type PendingTempEntity = {
+    tempId: ValidPayload;
+    pendingEntity: unknown;
+  } & PendingTempEntityListOptions<TQueryPayload>;
 
   type PreparedQueuedMutation = {
     currentSessionKey: string;
@@ -2368,6 +2397,18 @@ export function createOfflineStoreController<
     if (!tempEntity && !tempEntities) return;
     if (!storeAdapter.reconcileTempEntity) return;
 
+    // The server already applied the mutation, so a failed storage read, or a
+    // throwing `addToQueries` filter, must not fail the replay: the temp items
+    // are then reconciled from memory.
+    try {
+      await storeAdapter.loadTempEntities?.(
+        args.tempIds,
+        getReplayedTempEntityQueries(tempEntity, args.input, args.tempIds),
+      );
+    } catch {
+      // ignored, see above
+    }
+
     if (tempEntity) {
       const tempId = args.tempIds[0];
       if (tempId === undefined) return;
@@ -2417,7 +2458,6 @@ export function createOfflineStoreController<
           finalData: reconciliation.finalData,
         })),
     });
-
     for (const reconciliation of reconciliations) {
       args.current.session.publishTempReconciled(
         storeName,
@@ -2438,6 +2478,48 @@ export function createOfflineStoreController<
         finalPayload: reconciliation.finalPayload,
       });
     }
+  }
+
+  /**
+   * The queries a replayed temp entity was declared into, so the lists that
+   * are only in persistent storage are loaded and receive the final entity.
+   * Only a `tempEntity` declaration is computed again, never the batch
+   * builder: the server already applied the mutation, so app code must not
+   * run (or throw) again here.
+   */
+  function getReplayedTempEntityQueries(
+    tempEntity: AnyOfflineOperationDefinition['tempEntity'],
+    input: unknown,
+    tempIds: ValidPayload[],
+  ): ListQueryAddItemToQueries<TQueryPayload, ValidPayload>[] {
+    const tempId = tempIds[0];
+    if (!tempEntity?.addToQueries || tempId === undefined) return [];
+    try {
+      const addToQueries =
+        typeof tempEntity.addToQueries === 'function'
+          ? tempEntity.addToQueries(input, tempId)
+          : tempEntity.addToQueries;
+      return addToQueries ? [addToQueries] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Loads the queries the pending entities are declared into that are only in
+   * persistent storage, so they receive the entities. Returns `undefined`
+   * when there is nothing to load.
+   */
+  function loadPendingEntityQueries(
+    pendingEntities: PendingTempEntity[],
+  ): Promise<unknown> | undefined {
+    const addToQueries = pendingEntities.flatMap((pendingEntity) =>
+      pendingEntity.addToQueries ? [pendingEntity.addToQueries] : [],
+    );
+    if (addToQueries.length === 0) return undefined;
+    // The lists only show the entity: a failed read must not fail the
+    // mutation
+    return storeAdapter.loadTempEntities?.([], addToQueries)?.catch(() => {});
   }
 
   async function persistEntry(
@@ -3266,6 +3348,11 @@ export function createOfflineStoreController<
                 validatedInput,
                 tempIds[0],
               ),
+              addToQueries:
+                typeof tempEntity.addToQueries === 'function'
+                  ? tempEntity.addToQueries(validatedInput, tempIds[0])
+                  : tempEntity.addToQueries,
+              loadedFields: tempEntity.loadedFields,
             },
           ]
         : tempEntities && tempIds
@@ -3278,6 +3365,8 @@ export function createOfflineStoreController<
                 .map((entry) => ({
                   tempId: castTempLifecyclePayload(entry.tempId),
                   pendingEntity: entry.pendingEntity,
+                  addToQueries: entry.addToQueries,
+                  loadedFields: entry.loadedFields,
                 })),
             })
           : [];
@@ -3403,11 +3492,8 @@ export function createOfflineStoreController<
       throw new Error('Missing queue order for prepared offline mutation');
     }
     let plannedMutation: PlannedQueuedMutation;
-    // An async accumulation merge lets the replay pick up or send the entry
-    // being merged into before it is committed. Merging into it then would
-    // drop the incoming input or send the existing one twice, so the mutation
-    // is planned again. The check runs with no `await` before the commit below.
-    do {
+    let pendingEntityQueriesLoaded = false;
+    for (;;) {
       plannedMutation = await planPreparedMutation({
         current,
         preparedMutation,
@@ -3415,11 +3501,31 @@ export function createOfflineStoreController<
         workingQueue: new Map(queueEntries),
         replacedResolutionId,
       });
-    } while (
-      plannedMutation.accumulatedEntry &&
-      queueEntries.get(plannedMutation.accumulatedEntry.id) !==
-        plannedMutation.accumulatedEntry
-    );
+      // The queue may change while the lists of the pending entities are
+      // loaded, so the mutation is planned again after it.
+      if (!pendingEntityQueriesLoaded) {
+        pendingEntityQueriesLoaded = true;
+        const loading = loadPendingEntityQueries(
+          plannedMutation.pendingEntities,
+        );
+        if (loading) {
+          await loading;
+          continue;
+        }
+      }
+      // An async accumulation merge lets the replay pick up or send the entry
+      // being merged into before it is committed. Merging into it then would
+      // drop the incoming input or send the existing one twice, so the
+      // mutation is planned again. The check runs with no `await` before the
+      // commit below.
+      if (
+        !plannedMutation.accumulatedEntry ||
+        queueEntries.get(plannedMutation.accumulatedEntry.id) ===
+          plannedMutation.accumulatedEntry
+      ) {
+        break;
+      }
+    }
 
     const persistedMutations: AppliedQueuedMutation[] = [];
     const persistedUploadIds: string[] = [];
@@ -3488,6 +3594,8 @@ export function createOfflineStoreController<
             input: plannedMutation.validatedInput,
             tempId: pendingEntity.tempId,
             pendingEntity: pendingEntity.pendingEntity,
+            addToQueries: pendingEntity.addToQueries,
+            loadedFields: pendingEntity.loadedFields,
           });
         }
 

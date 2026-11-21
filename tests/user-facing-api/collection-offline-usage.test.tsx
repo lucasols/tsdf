@@ -1,3 +1,4 @@
+import { typingTest } from '@ls-stack/utils/typingTestUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_array, rc_boolean, rc_object, rc_string } from 'runcheck';
@@ -64,6 +65,16 @@ const validCollectionTempEntity: NonNullable<
 };
 
 void validCollectionTempEntity;
+
+// Collections have no queries, so their temp entities cannot declare the
+// list-query-only options.
+typingTest.expectTypesAreEqual<
+  Pick<
+    NonNullable<DirectCollectionOfflineOperations['createTodo']['tempEntity']>,
+    'addToQueries' | 'loadedFields'
+  >,
+  { addToQueries?: never; loadedFields?: never }
+>();
 
 const invalidCollectionPendingTempEntity: NonNullable<
   DirectCollectionOfflineOperations['createTodo']['tempEntity']

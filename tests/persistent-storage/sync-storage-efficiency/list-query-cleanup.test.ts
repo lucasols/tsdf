@@ -238,7 +238,8 @@ describe('sync storage efficiency: list-query', () => {
 
     // The stale comparison schedules a fresh pass. That pass must remove the
     // dangling item reference even though the item was evicted by the prior
-    // pass rather than the retry itself.
+    // pass rather than the retry itself. The rewritten entry records that it
+    // no longer lists every row of the query (`m`).
     expect(idleCallbacks.size).toBe(1);
     await runNextIdleCallback(() => 50);
     expect({
@@ -250,6 +251,7 @@ describe('sync storage efficiency: list-query', () => {
         a: 1735689600001
         h: '✅'
         i: ['"users||2']
+        m: '✅'
         p: { tableId: 'users' }
     `);
   });
@@ -340,9 +342,12 @@ describe('sync storage efficiency: list-query', () => {
     expect(idleCallbacks.size).toBe(1);
     await runNextIdleCallback(() => 50);
 
+    // The retried rewrite drops the evicted row and records that the entry no
+    // longer lists every row of the query (`m`).
     expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
       a: 1735689600001
       i: ['"users||2']
+      m: '✅'
       p: { tableId: 'users' }
     `);
   });
@@ -1000,6 +1005,7 @@ describe('sync storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
       items: ['"users||2']
+      missingItems: '✅'
       payload: { tableId: 'users' }
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -1031,7 +1037,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.34 kb -> 0.23 kb
       .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
-           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.14 kb
       "
     `);
   });
@@ -1122,6 +1128,7 @@ describe('sync storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
       items: ['"users||2']
+      missingItems: '✅'
 
       payload:
         filters:
@@ -1135,6 +1142,7 @@ describe('sync storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
       items: ['"users||3']
+      missingItems: '✅'
 
       payload:
         filters:
@@ -1170,9 +1178,9 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
            |    └ (items index) | 0.44 kb -> 0.34 kb
       .    | ✍️ #7 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
-           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb -> 0.23 kb
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb -> 0.25 kb
       .    | ✍️ #8 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
-           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb -> 0.22 kb
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb -> 0.24 kb
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);

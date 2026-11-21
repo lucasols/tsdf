@@ -220,6 +220,8 @@ With [partial resources](./partial-resources.md), "cached" is decided per hook, 
 
 Both can be mounted for the same item or query at the same time: the hook waiting for missing fields does not disturb the one reading cached fields.
 
+A cached list query that lost a row before one of the rows that are left (or every row) is not a cached read: it is not reported as a complete `success`. A list that only lost its last rows (e.g. to `maxItemBytes`) is still a cached read, with fewer rows. Hooks return the rows that are left with `status: 'error'` and the offline error (`isOfflineStoreError(error)`), so the screen can show them together with a notice that the list is incomplete. See [Cached list queries that lost rows](./persistent-storage.md#cached-list-queries-that-lost-rows).
+
 Both kinds of reads are refetched once the session recovers (see below): reads that failed offline load, and cached reads get refreshed.
 
 ## Revalidation After Recovering
@@ -259,6 +261,51 @@ Optional replay behavior:
 Queued mutations and resolutions whose operation the running deploy doesn't define (for example ones queued by a newer deploy in another tab) stay in storage, together with their uploads, but that deploy neither lists nor replays them. A deploy that defines the operation picks them up and sends or resolves them. Apps are expected to reload tabs running an old deploy: TSDF doesn't coordinate the order of offline work between deploys, so an old tab can send its own edits around the work it keeps. Records of an operation removed from the app for good also stay in storage until the session's storage is cleared (`clearSessionStorage`), so keep an operation defined until its queued work is likely gone.
 
 Create flows for collection and list-query stores can use `tempEntity` or `tempEntities` to insert optimistic entities with temporary payloads and reconcile them to final server payloads after replay. Document stores do not support temp entities.
+
+### Temp Entities in List Queries
+
+In a list-query store the pending entity is inserted as an item only, so it is not part of any list unless `optimisticListUpdates` rules match it. Declare `addToQueries` to add it to the lists that should show it while the mutation is queued:
+
+```ts
+createUser: {
+  inputSchema: createUserInputSchema,
+  kind: 'create',
+  getEntityRefs: ({ input }) => [`temp:${input.clientId}`],
+  tempEntity: {
+    buildPendingEntity: (input) => ({ id: input.clientId, name: input.name }),
+    // Same shape as the `addItemToQueries` option of `addItemToState`,
+    // or a function of the mutation input that returns it
+    addToQueries: (input) => ({
+      queries: { teamId: input.teamId },
+      appendTo: 'start',
+    }),
+    reconcileServerEntity: (result) => ({
+      finalPayload: result.id,
+      finalData: result,
+    }),
+  },
+  execute: ({ input }) => api.createUser(input),
+},
+```
+
+- The entity is added to the queries when the mutation is queued, so `optimisticUpdate` does not need to call `addItemToState` for it. A mutation that runs online right away is never queued and creates no pending entity.
+- `queries` follows `addItemToState`, except that queries saved in persistent storage but not loaded yet (after a restart, before a screen reads them) are loaded first, so the row also reaches them. A filter function only matches the queries the app session already knows, so prefer query payloads.
+- The membership is stored with the queries, so the row is still in its lists after the app restarts with the mutation queued.
+- When replay succeeds, the final server entity takes the place of the temp one in every query that still contains it. The declared queries that are only in persistent storage are loaded first: the function form of `addToQueries` runs again for this, so it should only depend on its arguments. Discarding the queued mutation removes the row from its lists.
+- While the mutation is pending, a list refetch that does not return the row keeps it rendered at its last known position. This memory does not survive an app restart.
+
+With `tempEntities`, each entry returned by `buildPendingEntities` declares its own `addToQueries`. The builder does not run again at replay, so a declared query that is only in persistent storage when the mutation is replayed gets the final entities on its next fetch.
+
+With [partial resources](./partial-resources.md), the pending entity has no loaded-fields metadata, so only `inferFields` can vouch for it. Declare `loadedFields` (for example `'*'`) when the pending entity should count as loaded for hooks that read those fields: it cannot be fetched from the server before the mutation is replayed. The entity keeps the same loaded fields when it is reconciled to its final payload, so a `finalData` returned by the reconcile hook must hold at least those fields; omit `finalData` to keep the pending entity's data instead.
+
+```ts
+tempEntity: {
+  buildPendingEntity: (input) => ({ id: input.clientId, name: input.name }),
+  addToQueries: { queries: { teamId: 'team-1' }, appendTo: 'start' },
+  loadedFields: '*',
+  // ...
+},
+```
 
 ## Conflict Resolution
 

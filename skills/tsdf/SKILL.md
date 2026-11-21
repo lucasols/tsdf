@@ -228,6 +228,8 @@ type UserOps = DefineListQueryOfflineOperations<
 
 Each operation declares `kind: 'create' | 'update' | 'delete'`, an `inputSchema`, `getEntityRefs`, `execute`, and optionally `onSuccessExecute`. Use the `offline` option on `performMutation(...)` to route a mutation through the queue (returns `OfflineMutationResult<T>` with `kind: 'online' | 'queued'`).
 
+Offline creates: `tempEntity` / `tempEntities` (Collection and List Query) insert a pending entity under a temp payload and reconcile it to the server payload after replay. In List Query stores, `addToQueries` puts the pending entity in the lists that should show it (no manual `addItemToState`), and `loadedFields` declares its loaded fields when partial resources are enabled.
+
 Reading state: `storeManager.useOfflineStatus()`, `useOfflineEntities()`, `useOfflineResolutions()`, `useOfflineUploads()`, plus per-store `useOfflineEntities()` / `useOfflineResolutions()` / `usePendingOfflineItems(...)` (List Query). For per-row sync badges use `useItemOfflineState(payload)` / `getItemOfflineState(payload)` (Collection, List Query): `null` or `{ syncState, pendingMutations, requiresResolution, isUnsentCreation }`, re-rendering only when that item's state changes.
 
 Reads while offline: cached data stays `status: 'success'` with `error: null`; only reads with nothing cached fail, with the offline error — detect it with `isOfflineStoreError(error)` instead of comparing `error.id`.

@@ -1163,6 +1163,19 @@ export function createCollectionStore<
                 finalPayload,
               });
             },
+            loadTempEntities: async (tempIds) => {
+              if (!persistence?.hasAsyncPreload) return;
+              const unloadedItemKeys = filterAndMap(tempIds, (tempId) => {
+                const itemKey = getItemKey(
+                  // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when loading queued temp entities.
+                  __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+                );
+                return Object.hasOwn(store.state, itemKey) ? false : itemKey;
+              });
+              if (unloadedItemKeys.length > 0) {
+                await persistence.preloadItems(unloadedItemKeys);
+              }
+            },
             applyTempReconciliationFromAnotherTab: (tempId, finalPayload) => {
               storeEvents.emit('tempEntityReconciled', {
                 // WORKAROUND: Offline temp ids and final payloads are stored as generic ValidPayload values, so this collection adapter has to narrow them back to ItemPayload when notifying listeners.
