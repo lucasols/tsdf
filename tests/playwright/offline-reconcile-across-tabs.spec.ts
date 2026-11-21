@@ -182,14 +182,24 @@ test.describe('a record created offline is saved while several tabs are open', (
     ).toHaveText('temp:Carol=Carol');
 
     // A tab opened later starts from what is saved on the device, so wait
-    // until the new record is saved there.
+    // until the list with the new record is saved there. The queued creation
+    // is saved right away under keys that also hold the temp id, the list
+    // (`.lq.`) and its rows (`.li.`) only a moment later: a tab opened in
+    // between has no list to show while offline.
     await expect
       .poll(() =>
-        creatorPage.evaluate(() =>
-          Object.keys(window.localStorage).some((key) =>
-            key.includes('temp:Carol'),
-          ),
-        ),
+        creatorPage.evaluate(() => {
+          const keys = Object.keys(window.localStorage);
+          const rowIsSaved = keys.some(
+            (key) => key.includes('.li.') && key.includes('temp:Carol'),
+          );
+          const listHasRow = keys.some(
+            (key) =>
+              key.includes('.lq.') &&
+              (window.localStorage.getItem(key) ?? '').includes('temp:Carol'),
+          );
+          return rowIsSaved && listHasRow;
+        }),
       )
       .toBe(true);
 
