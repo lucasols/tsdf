@@ -186,4 +186,6 @@ When the `upload` transport fails, `resolveOfflineUpload(s)` returns `Result.err
 
 Staged uploads are deleted automatically when the last queued mutation or resolution record that depends on them leaves the queue (replayed, discarded, superseded or cancelled). `deleteOfflineUpload(id)` is only needed for uploads no queued mutation used, which otherwise expire after a week online, and it returns an error while queued work still references the upload. See [Offline: Upload lifecycle](./offline.md#upload-lifecycle).
 
+The ref type returned by `resolveOfflineUpload(s)` and exposed as `OfflineUpload.resolvedRef` is inferred from the `upload` transport of `offlineSession.uploads`, as long as the manager is not annotated with the plain `StoreManager` type. `StoreManagerUploadRef<typeof storeManager>` extracts it, for example to type the upload refs of offline operations. `offlineSession.uploads.resolvedRefSchema` optionally validates refs restored from storage or received from other tabs; a ref that fails it is dropped and its upload goes back to `pending`. See [Offline: Upload refs](./offline.md#upload-refs).
+
 Most upload methods return `Result` objects so UI can branch on `result.ok` without catching thrown errors.

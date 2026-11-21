@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   Result,
   type Result as ResultType,
@@ -215,6 +214,28 @@ export type StoreManager<TUploadRef extends ValidPayload = ValidPayload> = {
    */
   onTransportReconnect: () => void;
 } & StoreManagerOfflineApi<TUploadRef>;
+
+/**
+ * Upload ref type of a store manager, as inferred from the `upload` transport
+ * in its `offlineSession.uploads` config.
+ *
+ * Pass it as the last type argument of `DefineDocumentOfflineOperations`,
+ * `DefineCollectionOfflineOperations` or `DefineListQueryOfflineOperations` so
+ * `execute` reads typed refs from `ctx.uploads.resolvedRefsById`.
+ *
+ * @example
+ * ```ts
+ * type UploadRef = StoreManagerUploadRef<typeof storeManager>;
+ *
+ * type Operations = DefineDocumentOfflineOperations<
+ *   UserDoc,
+ *   { setAvatar: DefineOfflineOperation<{ avatarUploadId: string }> },
+ *   UploadRef
+ * >;
+ * ```
+ */
+export type StoreManagerUploadRef<TStoreManager extends StoreManager> =
+  TStoreManager extends StoreManager<infer TUploadRef> ? TUploadRef : never;
 
 type RegisteredStore = {
   id: string;
@@ -701,20 +722,12 @@ export function getOrCreateStoreManagerBrowserTabsPresence(
   return { priority: presence.priority, tabId: presence.tabId };
 }
 
-export function resolveStoreManagerOfflineSession<
-  TUploadRef extends ValidPayload = ValidPayload,
->(
-  storeManager: StoreManager<TUploadRef>,
+export function resolveStoreManagerOfflineSession(
+  storeManager: StoreManager,
   storeName: string,
   usesOfflineStorage: boolean,
-): OfflineSession<TUploadRef> | null {
-  // WORKAROUND: The manager registry stores sessions behind a shared
-  // non-generic weak map, and this rebind restores the caller's known upload-ref
-  // type when reading its own session back out.
-  const offlineSession = __LEGIT_CAST__<
-    OfflineSession<TUploadRef> | undefined,
-    OfflineSession | undefined
-  >(storeManagerOfflineSessionRegistry.get(storeManager));
+): OfflineSession | null {
+  const offlineSession = storeManagerOfflineSessionRegistry.get(storeManager);
   if (!usesOfflineStorage) return null;
 
   if (!offlineSession) {

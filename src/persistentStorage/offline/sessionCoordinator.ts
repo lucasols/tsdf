@@ -18,7 +18,9 @@ import type { ValidPayload } from '../../utils/storeShared';
 import { parseCompactLocalStorageEntry } from '../compactLocalStorageEntry';
 import { registerOfflineUploadAdapterForSession } from '../offlineUploadRegistry';
 import {
+  applyRestoredUploadRef,
   createStoredUploadRecord,
+  parseRestoredUploadRef,
   stripStoredUploadFile,
 } from '../offlineUploadsShared';
 import type {
@@ -695,38 +697,21 @@ function sameUploadsConfig(
   return (
     left?.adapter === right?.adapter &&
     left?.upload === right?.upload &&
+    left?.resolvedRefSchema === right?.resolvedRefSchema &&
     (left?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY) ===
       (right?.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY)
   );
 }
 
-function eraseOfflineSession<TUploadRef extends ValidPayload>(
-  session: OfflineSession<TUploadRef>,
-): OfflineSession {
-  // WORKAROUND: Offline sessions are runtime-identical regardless of the
-  // upload-ref generic, but the coordinator registry stores them behind a
-  // single shared map keyed by session identity.
-  return __LEGIT_CAST__<OfflineSession, OfflineSession<TUploadRef>>(session);
-}
-
-function eraseUploadsConfig<TUploadRef extends ValidPayload>(
-  uploads: OfflineSessionUploadsConfig<TUploadRef> | undefined,
-): OfflineSessionUploadsConfig | undefined {
-  // WORKAROUND: The coordinator keeps one upload-config slot per session and
-  // treats the upload-ref generic as compile-time only, so this boundary erases
-  // the specific ref type when crossing into the shared runtime registry.
-  return __LEGIT_CAST__<
-    OfflineSessionUploadsConfig | undefined,
-    OfflineSessionUploadsConfig<TUploadRef> | undefined
-  >(uploads);
-}
-
 function castUploads<TUploadRef extends ValidPayload>(
   uploads: readonly OfflineUpload[],
 ): readonly OfflineUpload<TUploadRef>[] {
-  // WORKAROUND: The coordinator stores uploads in one shared runtime shape, and
-  // the session API rebinds that same data back to the caller's compile-time
-  // upload-ref generic.
+  // WORKAROUND: The coordinator is shared per session key, so it stores refs
+  // as ValidPayload and the session API rebinds them to the caller's upload-ref
+  // generic. Refs returned by the session transport have that type by
+  // construction; refs restored from storage or received from other tabs are
+  // parsed with `uploads.resolvedRefSchema` when they enter the coordinator,
+  // and are only as trustworthy as the stored data when no schema is set.
   return __LEGIT_CAST__<
     readonly OfflineUpload<TUploadRef>[],
     readonly OfflineUpload[]
@@ -736,18 +721,14 @@ function castUploads<TUploadRef extends ValidPayload>(
 function castResolvedUploadRef<TUploadRef extends ValidPayload>(
   resolvedRef: ValidPayload,
 ): TUploadRef {
-  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
-  // boundary, and the session API rebinds that same known-safe value back to
-  // the caller's compile-time upload-ref generic.
+  // WORKAROUND: Same rebind as `castUploads`, for a single resolved ref.
   return __LEGIT_CAST__<TUploadRef, ValidPayload>(resolvedRef);
 }
 
 function castResolvedUploadRefs<TUploadRef extends ValidPayload>(
   resolvedRefsById: Record<string, ValidPayload>,
 ): Record<string, TUploadRef> {
-  // WORKAROUND: Upload resolution persists refs at the shared ValidPayload
-  // boundary, and the session API rebinds that same known-safe map back to the
-  // caller's compile-time upload-ref generic.
+  // WORKAROUND: Same rebind as `castUploads`, for a map of resolved refs.
   return __LEGIT_CAST__<
     Record<string, TUploadRef>,
     Record<string, ValidPayload>
@@ -847,6 +828,14 @@ class SessionOfflineCoordinator {
   #referencedUploadIds = new Set<string>();
   #uploadQueue: ReturnType<typeof createAsyncQueue<ValidPayload>>;
   #uploadPromisesById = new Map<string, Promise<ValidPayload>>();
+  /**
+   * Validation outcome of the refs in the latest remote snapshot, so a ref
+   * repeated across snapshots is parsed once per record version.
+   */
+  #remoteUploadRefValidations = new Map<
+    string,
+    { updatedAt: number; parsedRef: ValidPayload | undefined }
+  >();
   /**
    * Uploads released by work that left the queue but not deleted yet: a store
    * had not reported its references, or the upload was still being sent.
@@ -2365,7 +2354,10 @@ class SessionOfflineCoordinator {
       this.#uploads = new Map([
         ...uploads
           .filter((upload) => !removedWhileListing.has(upload.id))
-          .map((upload) => [upload.id, upload] as const),
+          .map(
+            (upload) =>
+              [upload.id, this.#validateRestoredUpload(upload)] as const,
+          ),
         ...this.#uploads,
       ]);
       this.#syncUploadsState();
@@ -2393,12 +2385,55 @@ class SessionOfflineCoordinator {
     // A save during the load already persisted a newer record; keep it.
     const current = this.#uploads.get(id);
     if (current) return current;
-    if (loaded) {
-      this.#uploads.set(id, loaded);
-      this.#syncUploadsState();
-    }
+    if (!loaded) return null;
 
-    return loaded;
+    const validated = this.#validateRestoredUpload(loaded);
+    this.#uploads.set(id, validated);
+    this.#syncUploadsState();
+
+    return validated;
+  }
+
+  /**
+   * Checks the ref of an upload record restored from the adapter against the
+   * configured `resolvedRefSchema`. Records enter `#uploads` once, so each
+   * stored ref is parsed once.
+   */
+  #validateRestoredUpload(
+    upload: OfflineStoredUploadRecord,
+  ): OfflineStoredUploadRecord {
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    if (schema === undefined || upload.resolvedRef === undefined) return upload;
+
+    return applyRestoredUploadRef(
+      upload,
+      parseRestoredUploadRef(schema, upload.resolvedRef),
+    );
+  }
+
+  /** Checks the refs published by another tab against `resolvedRefSchema`. */
+  #validateRemoteUploads(uploads: OfflineUpload[]): OfflineUpload[] {
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    if (schema === undefined) return uploads;
+
+    const previousValidations = this.#remoteUploadRefValidations;
+    this.#remoteUploadRefValidations = new Map();
+
+    return uploads.map((upload) => {
+      if (upload.resolvedRef === undefined) return upload;
+
+      const previous = previousValidations.get(upload.id);
+      const validation =
+        previous?.updatedAt === upload.updatedAt
+          ? previous
+          : {
+              updatedAt: upload.updatedAt,
+              parsedRef: parseRestoredUploadRef(schema, upload.resolvedRef),
+            };
+      this.#remoteUploadRefValidations.set(upload.id, validation);
+
+      return applyRestoredUploadRef(upload, validation.parsedRef);
+    });
   }
 
   async #waitForUploadRemoval(id: string): Promise<void> {
@@ -2842,7 +2877,14 @@ class SessionOfflineCoordinator {
       this.#uploads.delete(id);
       this.#uploadsRemovedWhileListing?.add(id);
     }
-    for (const [id, ref] of releasedRefs) this.#releasedUploadRefs.set(id, ref);
+    const schema = this.#uploadsConfig?.resolvedRefSchema;
+    for (const [id, ref] of releasedRefs) {
+      // A ref failing the schema can't be uploaded again, since its file is
+      // deleted, so the id stays unknown here.
+      const parsedRef =
+        schema === undefined ? ref : parseRestoredUploadRef(schema, ref);
+      if (parsedRef !== undefined) this.#releasedUploadRefs.set(id, parsedRef);
+    }
 
     // The sender already published its uploads list. Rebuilding it from this
     // tab's records and publishing it would replace that list everywhere with
@@ -3203,7 +3245,7 @@ class SessionOfflineCoordinator {
         // snapshot may have been taken before it saw this tab's latest one.
         // The snapshot only fills in stores this tab has not loaded.
         ...this.#buildItemLists(),
-        uploads: message.uploads,
+        uploads: this.#validateRemoteUploads(message.uploads),
       },
       { action: 'offline-session-remote' },
     );
@@ -3570,16 +3612,10 @@ export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
   defaultStatusBySession.clear();
 }
 
-export function getOfflineSessionUploadsConfig<TUploadRef extends ValidPayload>(
-  session: OfflineSession<TUploadRef>,
-): OfflineSessionUploadsConfig<TUploadRef> | undefined {
-  // WORKAROUND: Reading from the shared weak map loses the compile-time upload
-  // ref generic, so the session API rebinds the stored config to the caller's
-  // known upload-ref type.
-  return __LEGIT_CAST__<
-    OfflineSessionUploadsConfig<TUploadRef> | undefined,
-    unknown
-  >(uploadsConfigByOfflineSession.get(eraseOfflineSession(session)));
+export function getOfflineSessionUploadsConfig(
+  session: OfflineSession,
+): OfflineSessionUploadsConfig | undefined {
+  return uploadsConfigByOfflineSession.get(session);
 }
 
 export function getOfflineSessionAppVersion(
@@ -3621,7 +3657,7 @@ export function createOfflineSession<
         ? { appVersion: args.appVersion }
         : undefined),
       ...(import.meta.env.DEV ? { debugLogger: args.debugLogger } : undefined),
-      uploads: eraseUploadsConfig(uploads),
+      uploads,
       bootstrapStatusFromLocalStorage,
     });
   }
@@ -3633,7 +3669,7 @@ export function createOfflineSession<
         ? resolveOfflineSessionScope(false, inactiveScope)
         : activeSessionKey,
       activeSessionKey === false ? undefined : config,
-      eraseUploadsConfig(activeSessionKey === false ? undefined : uploads),
+      activeSessionKey === false ? undefined : uploads,
       activeSessionKey !== false,
       import.meta.env.DEV ? args.debugLogger : undefined,
       args.appVersion,
@@ -3781,11 +3817,10 @@ export function createOfflineSession<
     },
   };
 
-  uploadsConfigByOfflineSession.set(
-    eraseOfflineSession(session),
-    eraseUploadsConfig(uploads),
-  );
-  appVersionByOfflineSession.set(eraseOfflineSession(session), args.appVersion);
+  // The upload ref type is only produced by a session and its uploads config,
+  // never consumed, so typed ones are stored as their default-typed form.
+  uploadsConfigByOfflineSession.set(session, uploads);
+  appVersionByOfflineSession.set(session, args.appVersion);
 
   return session;
 }

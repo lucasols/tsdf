@@ -1,4 +1,5 @@
 import type { ValidPayload } from '../utils/storeShared';
+import type { StandardSchemaLike } from './types';
 
 /**
  * Lifecycle state for a session-scoped offline upload.
@@ -82,7 +83,10 @@ export type OfflineUpload<TResolvedRef extends ValidPayload = ValidPayload> = {
   createdAt: number;
   /** Epoch timestamp for the latest upload metadata change. */
   updatedAt: number;
-  /** Final server-side reference after upload completes. */
+  /**
+   * Final server-side reference after upload completes, as returned by the
+   * session `upload` transport.
+   */
   resolvedRef?: TResolvedRef;
   /** Latest upload progress snapshot. */
   progress?: OfflineUploadProgress;
@@ -164,6 +168,25 @@ export type OfflineUploadTransportContext = {
   onProgress: (progress: OfflineUploadProgress) => void;
 };
 
+/**
+ * Schema accepted by `offlineSession.uploads.resolvedRefSchema`.
+ *
+ * Takes the same schemas as an operation `inputSchema`: a `runcheck` type or a
+ * Standard Schema v1 (zod, valibot, ...). It is typed only by what the schema
+ * outputs, which keeps a store manager with a typed upload ref assignable to
+ * the default `StoreManager`.
+ */
+export type OfflineUploadRefSchema<
+  TResolvedRef extends ValidPayload = ValidPayload,
+> =
+  | StandardSchemaLike<TResolvedRef>
+  | {
+      /** `runcheck` schemas are matched through their `parse` method. */
+      parse: (
+        input: unknown,
+      ) => { ok: true; value: TResolvedRef } | { ok: false; errors: string[] };
+    };
+
 /** Upload handling config for an offline session. */
 export type OfflineSessionUploadsConfig<
   TResolvedRef extends ValidPayload = ValidPayload,
@@ -172,6 +195,10 @@ export type OfflineSessionUploadsConfig<
   adapter: OfflineUploadAdapter;
   /**
    * Upload transport that returns the final server-side file reference.
+   *
+   * Its return type is the upload ref type of the whole session:
+   * `createStoreManager` infers it, so `resolveOfflineUpload(s)` and the
+   * `OfflineUpload` entries of that manager are typed with it.
    *
    * Reject (throw) to report a failure. When the upload runs as a dependency
    * of a replayed operation, the thrown error goes through the session's
@@ -183,6 +210,21 @@ export type OfflineSessionUploadsConfig<
    * apart.
    */
   upload: (ctx: OfflineUploadTransportContext) => Promise<TResolvedRef>;
+  /**
+   * Schema for the ref returned by `upload`.
+   *
+   * Refs returned by `upload` are trusted, but a ref can also come back from
+   * the upload adapter after a reload or from another browser tab, possibly
+   * written by a different app version. When this schema is set, those refs
+   * are parsed once when they enter the session. A ref that fails is dropped
+   * and its upload goes back to `pending`, so the still-staged file is uploaded
+   * again the next time the ref is needed instead of a malformed ref reaching
+   * `execute`, `resolveOfflineUpload(s)`, or the upload status APIs.
+   *
+   * Without a schema, restored refs are exposed as they were stored. Async
+   * Standard Schemas are not supported: every restored ref fails them.
+   */
+  resolvedRefSchema?: OfflineUploadRefSchema<TResolvedRef>;
   /** Maximum number of concurrent upload transports. */
   concurrency?: number;
 };
@@ -198,6 +240,10 @@ export type OfflineOperationUploadsContext<
 > = {
   /** Locally staged files by upload id. */
   filesById: Record<string, File>;
-  /** Final uploaded refs by upload id. */
+  /**
+   * Final uploaded refs by upload id, for the ids returned by
+   * `dependsOnUploads`. Typed with the upload ref type of the operation
+   * definition.
+   */
   resolvedRefsById: Record<string, TResolvedRef>;
 };
