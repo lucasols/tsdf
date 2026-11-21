@@ -285,9 +285,10 @@ type SessionRegistration = {
    * Called when a creation of another store of the session started or
    * stopped waiting for a manual resolution, so the store reports again the
    * resolutions its work is held behind. Only registered by stores with
-   * `cancelledWith` operations.
+   * `cancelledWith` operations. `isRemoteChange` tells that another tab made
+   * the change, and already published and persisted what follows from it.
    */
-  onCreationResolutionsChanged?: () => void;
+  onCreationResolutionsChanged?: (isRemoteChange?: boolean) => void;
   /** Another tab saved or removed (`null`) a queue entry of the store. */
   onRemoteQueueEntryChange?: (
     entryId: string,
@@ -1456,8 +1457,10 @@ class SessionOfflineCoordinator {
     getEntityKey: (entityRef: ValidPayload) => string | undefined,
     minQueueOrder: number,
   ): Promise<void> {
-    const pendingRequeues: Promise<void>[] = [];
-
+    // One store at a time: a store that queues its work again releases in
+    // turn the work held behind it, and work held behind creations of two
+    // stores released together (e.g. a comment and a file of the same task)
+    // must be queued again only once, by the last of them.
     for (const registration of this.#registrations.values()) {
       if (
         registration.storeName === sourceStoreName ||
@@ -1466,21 +1469,17 @@ class SessionOfflineCoordinator {
         continue;
       }
 
-      pendingRequeues.push(
-        registration.onCreationsReleased(
+      try {
+        await registration.onCreationsReleased(
           sourceStoreName,
           releasedEntityKeys,
           getEntityKey,
           minQueueOrder,
-        ),
-      );
-    }
-
-    // The source store already applied its decision: a store that fails to
-    // queue its held work again is reported without failing it.
-    for (const result of await Promise.allSettled(pendingRequeues)) {
-      if (result.status === 'rejected') {
-        this.#onPersistentStorageError?.(result.reason);
+        );
+      } catch (error) {
+        // The source store already applied its decision: a store that fails
+        // to queue its held work again is reported without failing it.
+        this.#onPersistentStorageError?.(error);
       }
     }
   }
@@ -1490,10 +1489,13 @@ class SessionOfflineCoordinator {
    * work is held behind, after a creation of `sourceStoreName` started or
    * stopped waiting for a manual resolution.
    */
-  notifyCreationResolutionsChanged(sourceStoreName: string): void {
+  notifyCreationResolutionsChanged(
+    sourceStoreName: string,
+    isRemoteChange?: boolean,
+  ): void {
     for (const registration of this.#registrations.values()) {
       if (registration.storeName !== sourceStoreName) {
-        registration.onCreationResolutionsChanged?.();
+        registration.onCreationResolutionsChanged?.(isRemoteChange);
       }
     }
   }

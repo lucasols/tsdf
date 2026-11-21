@@ -1992,7 +1992,10 @@ export function createOfflineStoreController<
     // changed it (a decision, a replay, another tab, the hydration).
     if (creationResolutionIds !== publishedCreationResolutionIds) {
       publishedCreationResolutionIds = creationResolutionIds;
-      sessionState.session.notifyCreationResolutionsChanged(storeName);
+      sessionState.session.notifyCreationResolutionsChanged(
+        storeName,
+        isRemoteChange,
+      );
     }
   }
 
@@ -3112,9 +3115,11 @@ export function createOfflineStoreController<
   /**
    * The creations of another store that wait for a manual resolution
    * changed: reports again which of them the resolutions of this store are
-   * held behind (see `getExternalCreationResolutionIds`).
+   * held behind (see `getExternalCreationResolutionIds`). Like that change,
+   * it is not published or persisted again when another tab made it
+   * (`isRemoteChange`).
    */
-  function refreshExternalCreationBlockers(): void {
+  function refreshExternalCreationBlockers(isRemoteChange?: boolean): void {
     const current = activeSession;
     if (
       !current ||
@@ -3124,7 +3129,7 @@ export function createOfflineStoreController<
       return;
     }
 
-    refreshDerivedState(current);
+    refreshDerivedState(current, isRemoteChange);
   }
 
   /**

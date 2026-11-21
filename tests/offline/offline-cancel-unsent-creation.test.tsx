@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_object, rc_string } from 'runcheck';
+import { rc_array, rc_object, rc_string } from 'runcheck';
 import { describe, expect, test } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -1310,6 +1310,7 @@ describe('items of other stores', () => {
       tasks,
       comments,
       storeManager,
+      tasksStoreName,
       commentsStoreName,
       sentRequests,
       addComment,
@@ -2064,6 +2065,180 @@ describe('items of other stores', () => {
     expect(reactions.serverTable.getAll()).toMatchInlineSnapshot(
       `reactions||r1: { commentId: 'comments||c1', emoji: 'thumbs-up' }`,
     );
+    expect(env.storeManager.getOfflineResolutions()).toMatchInlineSnapshot(
+      `[]`,
+    );
+  });
+
+  test('work that belongs to items of two stores, both held behind the same failed task creation, is sent only once after the user sends the task creation again', async () => {
+    type LinkedItem = { belongsTo: string[] };
+    type LinkedItemInput = {
+      id: string;
+      belongsTo: { storeName: string; id: string }[];
+    };
+    type LinkedItemsOperations = {
+      addWithId: CollectionOfflineOperationDefinition<
+        { value: LinkedItem },
+        string,
+        LinkedItemInput,
+        unknown
+      >;
+    };
+
+    network.setOffline();
+    const sessionKey = 'held-shared-descendant-retry';
+    const env = createTasksAndCommentsEnv(sessionKey);
+
+    /**
+     * One more store of the session, whose items are added with a
+     * client-generated id and declared `cancelledWith` the items of other
+     * stores they belong to. Its requests are logged with the ones of the
+     * comments store, to assert the order they are sent in.
+     */
+    function createLinkedItemsStore(name: string) {
+      const storeName = `${sessionKey}-${name}`;
+      const linkedItems = createCollectionStoreTestEnv<
+        LinkedItem,
+        LinkedItemsOperations
+      >(
+        {},
+        {
+          id: storeName,
+          getSessionKey: () => sessionKey,
+          storeManager: env.storeManager,
+          testScenario: 'loaded',
+          persistentStorage: {
+            adapter: 'local-sync',
+            schema: rc_object({
+              value: rc_object({ belongsTo: rc_array(rc_string) }),
+            }),
+            payloadSchema: rc_string,
+            offline: {
+              operations: {
+                addWithId: {
+                  inputSchema: rc_object({
+                    id: rc_string,
+                    belongsTo: rc_array(
+                      rc_object({ storeName: rc_string, id: rc_string }),
+                    ),
+                  }),
+                  kind: 'create',
+                  getEntityRefs: ({ input }) => [input.id],
+                  cancelledWith: ({ input }) =>
+                    input.belongsTo.map((parent) => ({
+                      storeName: parent.storeName,
+                      entityRef: parent.id,
+                    })),
+                  execute: async ({ input }) => {
+                    env.sentRequests.push(`add ${input.id}`);
+                    await linkedItems.serverTable.delayedSetItem(input.id, {
+                      belongsTo: input.belongsTo.map((parent) => parent.id),
+                    });
+                  },
+                  onSuccessExecute: () => {},
+                },
+              },
+            },
+          },
+        },
+      );
+
+      function add(id: string, belongsTo: LinkedItemInput['belongsTo']) {
+        const value = { belongsTo: belongsTo.map((parent) => parent.id) };
+        return act(async () => {
+          await linkedItems.apiStore.performMutation(id, {
+            optimisticUpdate: () => {
+              linkedItems.apiStore.addItemToState(id, { value });
+            },
+            mutation: () => linkedItems.serverTable.delayedSetItem(id, value),
+            offline: { operation: 'addWithId', input: { id, belongsTo } },
+          });
+        });
+      }
+
+      return { storeName, add, env: linkedItems };
+    }
+
+    // Files attached to a task, and quotes of a file inside a comment: a
+    // quote belongs to both its comment and its file.
+    const files = createLinkedItemsStore('files');
+    const quotes = createLinkedItemsStore('quotes');
+
+    // Offline: create task 50, comment on it, attach a file to it and quote
+    // the file in the comment.
+    await env.tasks.createTaskWithId(50, 'Plan trip');
+    // Mutations of different stores replay in the order they were made.
+    await advanceTime(1_000);
+    await env.addCommentWithId(
+      'comments||c1',
+      'See the itinerary',
+      'tasks||50',
+    );
+    await advanceTime(1_000);
+    await files.add('files||f1', [
+      { storeName: env.tasksStoreName, id: 'tasks||50' },
+    ]);
+    await advanceTime(1_000);
+    await quotes.add('quotes||q1', [
+      { storeName: env.commentsStoreName, id: 'comments||c1' },
+      { storeName: files.storeName, id: 'files||f1' },
+    ]);
+
+    // Back online, the task creation fails on every attempt (3) until it
+    // asks for a manual decision.
+    env.tasks.faults.createTaskWithId.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    const failedCreation = env.tasks.apiStore.getOfflineResolutions()[0];
+    if (failedCreation?.operation !== 'createTaskWithId') {
+      throw new Error('Expected the failed task creation');
+    }
+
+    // Nothing is sent for a task the server does not have: the comment and
+    // the file wait for the task, and the quote for both of them.
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(
+      [
+        ...files.env.apiStore.getOfflineResolutions(),
+        ...quotes.env.apiStore.getOfflineResolutions(),
+      ].map((resolution) =>
+        pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+      ),
+    ).toMatchInlineSnapshot(`
+      - { blockedBy: 1, op: 'addWithId' }
+      - { blockedBy: 2, op: 'addWithId' }
+    `);
+
+    // The user asks to send the task creation again.
+    await act(async () => {
+      await env.tasks.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // The comment and the file are released together by the task, and each
+    // of them releases the quote: the quote is still sent only once, after
+    // both.
+    expect([...env.tasks.sentRequests.slice(3), ...env.sentRequests])
+      .toMatchInlineSnapshot(`
+        - 'createTaskWithId tasks||50'
+        - 'addCommentWithId comments||c1 "See the itinerary" to tasks||50'
+        - 'add files||f1'
+        - 'add quotes||q1'
+      `);
+    expect(quotes.env.serverTable.getAll()).toMatchInlineSnapshot(`
+      quotes||q1:
+        belongsTo: ['comments||c1', 'files||f1']
+    `);
     expect(env.storeManager.getOfflineResolutions()).toMatchInlineSnapshot(
       `[]`,
     );
