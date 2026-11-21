@@ -543,15 +543,16 @@ export type ItemOfflineState = {
   /** Whether the item is waiting for a manual resolution. */
   requiresResolution: boolean;
   /**
-   * Whether the item was created offline through a `tempEntity` /
-   * `tempEntities` operation and the server has not confirmed it yet, so it is
-   * still tracked under its temporary payload. Creations queued without a temp
-   * entity (e.g. with a client-generated id) report `false`. It stays `true`
-   * while the creation itself is being sent, so the server may already have
-   * it while `syncState` is `syncing` or `needs-confirmation`; only with
-   * `syncState: 'pending'` has it not been sent yet. Once the server entity is
-   * reconciled, the temporary payload has no state anymore and the final
-   * payload reports any mutation still queued with `isUnsentCreation: false`.
+   * Whether the item was created offline and the server has not confirmed
+   * its creation yet: a `tempEntity` / `tempEntities` creation still tracked
+   * under its temporary payload, or a `create` without temp entity (an item
+   * with a client-generated id) still queued or waiting for a manual
+   * resolution. It stays `true` while the creation itself is being sent, so
+   * the server may already have it while `syncState` is `syncing` or
+   * `needs-confirmation`; only with `syncState: 'pending'` has it not been
+   * sent yet. Once the server entity is reconciled (or the creation of a
+   * client-generated id succeeds), the mutations still queued for the item
+   * report `isUnsentCreation: false`.
    */
   isUnsentCreation: boolean;
   /**
@@ -564,12 +565,14 @@ export type ItemOfflineState = {
    * with an operation that cancels pending creations (see
    * {@link OfflineSupersedeConfig.dropSelfIfTempLifecycleCancelled}) sends
    * nothing, unless one operation created it together with other entities
-   * (see that option). A creation queued after its direct online request
-   * failed, or sent again with `requeue` after a conflict, also reports
-   * `false`: an earlier request may have created a server item, but the
-   * temporary payload can't target it, so the delete still only discards
-   * local work and that server item is left as is. Always `false` for items
-   * that are not unsent creations.
+   * (see that option). A temp entity whose creation was queued after its
+   * direct online request failed, or sent again with `requeue` after a
+   * conflict, also reports `false`: an earlier request may have created a
+   * server item, but the temporary payload can't target it, so the delete
+   * still only discards local work and that server item is left as is. An
+   * item with a client-generated id reports `true` in that case: the delete
+   * can target its id, so it is sent after the creation. Always `false` for
+   * items that are not unsent creations.
    */
   creationAttempted: boolean;
 };
@@ -624,6 +627,12 @@ export type GlobalOfflineEntity = {
  */
 export type InternalGlobalOfflineEntity = GlobalOfflineEntity & {
   payload?: ValidPayload;
+  /**
+   * Set while a `create` without temp entity (an item with a client-generated
+   * id) of the entity waits to be confirmed by the server, in the queue or in
+   * a manual resolution (see {@link ItemOfflineState.isUnsentCreation}).
+   */
+  isClientIdCreation?: true;
 };
 
 /** Reference to an entity participating in offline sync tracking. */

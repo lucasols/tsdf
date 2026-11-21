@@ -1614,7 +1614,7 @@ export function createOfflineStoreController<
     const blockedResolutionIdsByResolutionId = new Map<string, Set<string>>();
 
     for (const entry of queueEntries.values()) {
-      for (const entityKey of getTempLifecycleEntityKeys(entry)) {
+      for (const entityKey of getCreatedEntityKeys(entry)) {
         dependencySourcesByEntityKey.set(entityKey, {
           entityKey,
           sourceType: 'queue',
@@ -1623,7 +1623,7 @@ export function createOfflineStoreController<
     }
 
     for (const resolution of resolutions.values()) {
-      for (const entityKey of getTempLifecycleEntityKeys(resolution)) {
+      for (const entityKey of getCreatedEntityKeys(resolution)) {
         dependencySourcesByEntityKey.set(entityKey, {
           entityKey,
           resolutionId: resolution.id,
@@ -1736,8 +1736,9 @@ export function createOfflineStoreController<
     const sessionState = session;
     const dependencySnapshot = createResolutionDependencySnapshot();
     const entitiesByKey = new Map<string, InternalGlobalOfflineEntity>();
-    // Temp entities whose creation is not "never sent" anymore. Kept out of
-    // the entities so that hooks reading them do not re-render when a
+    // Unsent creations (temp entities, or items created with a
+    // client-generated id) whose creation is not "never sent" anymore. Kept
+    // out of the entities so that hooks reading them do not re-render when a
     // creation starts being sent.
     const attemptedCreationEntityKeys = new Set<string>();
 
@@ -1764,6 +1765,7 @@ export function createOfflineStoreController<
 
     for (const entry of queueEntries.values()) {
       const operationKind = getOperationLifecycleKind(entry.operation);
+      const clientIdCreatedEntityKeys = getClientIdCreatedEntityKeys(entry);
       for (const ref of entry.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
         const childResolutionIds =
@@ -1778,6 +1780,9 @@ export function createOfflineStoreController<
           tempIds: entry.tempIds,
           entityKey: ref.entityKey,
         });
+        const isClientIdCreation = clientIdCreatedEntityKeys.includes(
+          ref.entityKey,
+        );
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -1803,9 +1808,15 @@ export function createOfflineStoreController<
               input: entry.input,
               entityKey: ref.entityKey,
             }) ?? existing?.payload,
+          ...(isClientIdCreation || existing?.isClientIdCreation
+            ? { isClientIdCreation: true }
+            : {}),
         });
 
-        if (tempId !== undefined && !isUnsentQueueEntry(entry)) {
+        if (
+          (tempId !== undefined || isClientIdCreation) &&
+          !isUnsentQueueEntry(entry)
+        ) {
           attemptedCreationEntityKeys.add(ref.entityKey);
         }
       }
@@ -1813,6 +1824,8 @@ export function createOfflineStoreController<
 
     for (const resolution of resolutions.values()) {
       const operationKind = getOperationLifecycleKind(resolution.operation);
+      const clientIdCreatedEntityKeys =
+        getClientIdCreatedEntityKeys(resolution);
       for (const ref of resolution.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
         const childResolutionIds =
@@ -1827,6 +1840,9 @@ export function createOfflineStoreController<
           tempIds: resolution.tempIds,
           entityKey: ref.entityKey,
         });
+        const isClientIdCreation = clientIdCreatedEntityKeys.includes(
+          ref.entityKey,
+        );
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -1847,6 +1863,9 @@ export function createOfflineStoreController<
               input: resolution.input,
               entityKey: ref.entityKey,
             }) ?? existing?.payload,
+          ...(isClientIdCreation || existing?.isClientIdCreation
+            ? { isClientIdCreation: true }
+            : {}),
         });
 
         // A creation held for a manual resolution cannot be cancelled
@@ -1854,7 +1873,7 @@ export function createOfflineStoreController<
         // behind another creation waiting for a decision was never sent: a
         // delete still cancels it (see `findHeldWorkResolutions`).
         if (
-          tempId !== undefined &&
+          (tempId !== undefined || isClientIdCreation) &&
           !isHeldWorkResolution(resolution, dependencySnapshot)
         ) {
           attemptedCreationEntityKeys.add(ref.entityKey);
@@ -2205,7 +2224,7 @@ export function createOfflineStoreController<
     dependencySource: TempLifecycleDependencySource;
   }): boolean {
     if (
-      getTempLifecycleEntityKeys(args.workItem).includes(
+      getCreatedEntityKeys(args.workItem).includes(
         args.dependencySource.entityKey,
       )
     ) {
@@ -2822,7 +2841,7 @@ export function createOfflineStoreController<
         }
 
         descendantQueueEntries.set(entry.id, entry);
-        for (const descendantEntityKey of getTempLifecycleEntityKeys(entry)) {
+        for (const descendantEntityKey of getCreatedEntityKeys(entry)) {
           if (seenEntityKeys.has(descendantEntityKey)) continue;
 
           seenEntityKeys.add(descendantEntityKey);
@@ -2851,9 +2870,7 @@ export function createOfflineStoreController<
         }
 
         descendantResolutions.set(resolution.id, resolution);
-        for (const descendantEntityKey of getTempLifecycleEntityKeys(
-          resolution,
-        )) {
+        for (const descendantEntityKey of getCreatedEntityKeys(resolution)) {
           if (seenEntityKeys.has(descendantEntityKey)) continue;
 
           seenEntityKeys.add(descendantEntityKey);
@@ -2909,7 +2926,7 @@ export function createOfflineStoreController<
     >,
   ): boolean {
     for (const resolution of resolutions.values()) {
-      for (const entityKey of getTempLifecycleEntityKeys(resolution)) {
+      for (const entityKey of getCreatedEntityKeys(resolution)) {
         if (
           workItemDependsOnDependencySource({
             workItem,
@@ -3043,6 +3060,23 @@ export function createOfflineStoreController<
       .map((entityRef) => entityRef.entityKey);
   }
 
+  /**
+   * Keys of the items a creation adds to the store before the server has
+   * them: its temp entities, or the items a `create` without temp entity adds
+   * with a client-generated id. Work on them waits for that creation.
+   */
+  function getCreatedEntityKeys(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'tempIds' | 'entityRefs'
+    >,
+  ): string[] {
+    const tempEntityKeys = getTempLifecycleEntityKeys(workItem);
+    return tempEntityKeys.length > 0
+      ? tempEntityKeys
+      : getClientIdCreatedEntityKeys(workItem);
+  }
+
   async function promoteBlockedTempCreateDescendants(args: {
     current: ActiveSessionState;
     parentEntry: OfflineQueueEntry;
@@ -3050,7 +3084,7 @@ export function createOfflineStoreController<
   }): Promise<void> {
     const descendantQueueEntries = new Map<string, OfflineQueueEntry>();
 
-    for (const entityKey of getTempLifecycleEntityKeys(args.parentEntry)) {
+    for (const entityKey of getCreatedEntityKeys(args.parentEntry)) {
       const descendants = collectTempCreateDescendants({
         parentEntityKey: entityKey,
         parentResolutionId: args.parentResolutionId,
@@ -3140,8 +3174,10 @@ export function createOfflineStoreController<
     // The descendants of temp entities are collected recursively. An item
     // created with a client-generated id by a creation that was never sent is
     // dropped as well, so the work queued on it is collected the same way. A
-    // creation that was sent may exist on the server: the work on its item
-    // waits for its own decision.
+    // queued creation that was sent may exist on the server: the work queued
+    // on its item is not dropped with it. A dropped creation resolution holds
+    // the work on its item (see `isHeldBehindTempCreateResolution`), which
+    // goes with it.
     const parentEntityKeys: string[] = [];
     const unsentClientIdEntityKeys = new Set<string>();
     function addUnsentClientIdCreation(
@@ -3162,6 +3198,8 @@ export function createOfflineStoreController<
           : isHeldBehindTempCreateResolution(tempCreate)
       ) {
         addUnsentClientIdCreation(tempCreate);
+      } else if (!('syncState' in tempCreate)) {
+        parentEntityKeys.push(...getClientIdCreatedEntityKeys(tempCreate));
       }
     }
 
@@ -3537,7 +3575,7 @@ export function createOfflineStoreController<
       PersistedOfflineResolutionRecord
     >();
 
-    for (const entityKey of getTempLifecycleEntityKeys(args.resolution)) {
+    for (const entityKey of getCreatedEntityKeys(args.resolution)) {
       const descendants = collectTempCreateDescendants({
         parentEntityKey: entityKey,
         parentResolutionId: args.resolution.id,
@@ -4931,7 +4969,7 @@ export function createOfflineStoreController<
     // queued again once the entity is created or kept, like after a retry.
     const heldDescendantIds =
       (action === 'requeue' || action === 'commit') &&
-      getTempLifecycleEntityKeys(resolutionRecord).length > 0
+      getCreatedEntityKeys(resolutionRecord).length > 0
         ? collectRetryResolutionChain({
             resolution: resolutionRecord,
             scope: 'self-and-descendants',
@@ -4994,7 +5032,27 @@ export function createOfflineStoreController<
       // The replacement input declared its own dependencies: uploads it kept
       // are still referenced, the ones it dropped are not.
       await deleteOrphanedDependencyUploads(current, [resolutionRecord]);
-      await requeueHeldDescendants();
+      // A replacement that creates another item (e.g. with a new
+      // client-generated id after an "id taken" conflict) does not create the
+      // one the held work targets: that work is not sent on its own, it is
+      // left for the user to decide.
+      const replacementEntityKeys = getClientIdCreatedEntityKeys({
+        operation: operationName,
+        entityRefs: resolveNormalizedRefs(
+          getOperationRawEntityRefs(
+            operation,
+            operationName,
+            preparedMutation.validatedInput,
+          ),
+        ),
+      });
+      if (
+        getClientIdCreatedEntityKeys(resolutionRecord).every((entityKey) =>
+          replacementEntityKeys.includes(entityKey),
+        )
+      ) {
+        await requeueHeldDescendants();
+      }
       return;
     }
 

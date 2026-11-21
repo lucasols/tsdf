@@ -103,6 +103,13 @@ type TasksOperations = {
     { id: number; name: string; parentId: string },
     { reason: string }
   >;
+  createTaskWithId: ListQueryOfflineOperationDefinition<
+    TaskRow,
+    ListQueryParams,
+    string,
+    { id: number; name: string },
+    { reason: string }
+  >;
   renameTask: ListQueryOfflineOperationDefinition<
     TaskRow,
     ListQueryParams,
@@ -143,6 +150,7 @@ const taskRowSchema = rc_object({
   parentId: rc_string.optionalKey(),
 });
 const subtaskInputSchema = rc_object({ name: rc_string, parentId: rc_string });
+const taskWithIdInputSchema = rc_object({ id: rc_number, name: rc_string });
 const subtaskWithIdInputSchema = rc_object({
   id: rc_number,
   name: rc_string,
@@ -163,12 +171,14 @@ export const tasksQuery = { tableId: 'tasks' } as const;
  * - a subtask, or an existing task moved under another one, declares its
  *   parent task with `dependsOn`
  * - `createSubtaskWithId` creates a subtask whose id (`tasks||<id>`) the app
- *   generates on the client, so it needs no temp row
+ *   generates on the client, so it needs no temp row; `createTaskWithId` does
+ *   the same for a top-level task
  * - when `conflicts.createTask` (or `conflicts.createSubtask`) is set, the
  *   replay of a task (or subtask) creation reports a conflict (the server
  *   already has a task with that name) instead of sending it; with
- *   `conflicts.createSubtaskWithId` the replay of `createSubtaskWithId`
- *   reports that the server already has a task with that id
+ *   `conflicts.createSubtaskWithId` (or `conflicts.createTaskWithId`) the
+ *   replay of `createSubtaskWithId` (or `createTaskWithId`) reports that the
+ *   server already has a task with that id
  * - `editTask` sends a partial change of a task (name and/or parent); the
  *   offline edits of the same task are merged into one request
  * - deleting a task supersedes its queued edits and, when the task was
@@ -185,14 +195,15 @@ export function createTasksEnv(
 ) {
   let nextTaskId = 3;
   const sentRequests: string[] = [];
-  const faults: Record<'createTask' | 'deleteTask', NetworkFault[]> = {
-    createTask: [],
-    deleteTask: [],
-  };
+  const faults: Record<
+    'createTask' | 'createTaskWithId' | 'deleteTask',
+    NetworkFault[]
+  > = { createTask: [], createTaskWithId: [], deleteTask: [] };
   const conflicts = {
     createTask: false,
     createSubtask: false,
     createSubtaskWithId: false,
+    createTaskWithId: false,
   };
 
   async function createOnServer(input: { name: string; parentId?: string }) {
@@ -300,6 +311,30 @@ export function createTasksEnv(
                 const itemId = `tasks||${input.id}`;
                 sentRequests.push(`createSubtaskWithId ${itemId}`);
                 await env.serverTable.delayedSetItem(itemId, input);
+              },
+              onSuccessExecute: () => {},
+            },
+            createTaskWithId: {
+              inputSchema: taskWithIdInputSchema,
+              kind: 'create',
+              getEntityRefs: ({ input }) => [`tasks||${input.id}`],
+              conflictHandling: {
+                schema: rc_object({ reason: rc_string }),
+                detectConflict: () =>
+                  conflicts.createTaskWithId ? { reason: 'id-taken' } : false,
+              },
+              execute: async ({ input }) => {
+                const itemId = `tasks||${input.id}`;
+                sentRequests.push(`createTaskWithId ${itemId}`);
+                const fault = faults.createTaskWithId.shift();
+                if (fault === 'request-lost') {
+                  throw new Error('connection lost');
+                }
+
+                await env.serverTable.delayedSetItem(itemId, input);
+                if (fault === 'response-lost') {
+                  throw new Error('connection lost');
+                }
               },
               onSuccessExecute: () => {},
             },
@@ -463,6 +498,23 @@ export function createTasksEnv(
     });
   }
 
+  function createTaskWithId(id: number, name: string) {
+    return act(async () => {
+      await env.apiStore.performMutation(`tasks||${id}`, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            `tasks||${id}`,
+            { id, name },
+            { addItemToQueries: { queries: [tasksQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () =>
+          env.serverTable.delayedSetItem(`tasks||${id}`, { id, name }),
+        offline: { operation: 'createTaskWithId', input: { id, name } },
+      });
+    });
+  }
+
   function renameTask(itemId: string, name: string) {
     return act(async () => {
       await env.apiStore.performMutation(itemId, {
@@ -556,6 +608,7 @@ export function createTasksEnv(
     createTask,
     createSubtask,
     createSubtaskWithId,
+    createTaskWithId,
     renameTask,
     moveTask,
     editTask,

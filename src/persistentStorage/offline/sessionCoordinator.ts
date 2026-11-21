@@ -84,8 +84,14 @@ import {
 function stripInternalEntityPayload(
   entity: InternalGlobalOfflineEntity,
 ): GlobalOfflineEntity {
-  if (!('payload' in entity)) return entity;
-  const { payload: _payload, ...publicEntity } = entity;
+  if (!('payload' in entity) && !('isClientIdCreation' in entity)) {
+    return entity;
+  }
+  const {
+    payload: _payload,
+    isClientIdCreation: _isClientIdCreation,
+    ...publicEntity
+  } = entity;
   return publicEntity;
 }
 

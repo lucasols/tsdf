@@ -7,6 +7,7 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import {
   advanceTime,
   flushAllTimers,
+  pick,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import {
@@ -162,6 +163,18 @@ describe('list-query rows', () => {
     await env.createSubtaskWithId(51, 'Compare prices', 'tasks||50');
     await env.renameTask('tasks||51', 'Compare flight prices');
 
+    // The subtask was never sent: its offline state tells the app that it
+    // only exists locally, so deleting it sends nothing.
+    expect(
+      pick(env.apiStore.getItemOfflineState('tasks||50'), [
+        'isUnsentCreation',
+        'creationAttempted',
+      ]),
+    ).toMatchInlineSnapshot(`
+      creationAttempted: '❌'
+      isUnsentCreation: '✅'
+    `);
+
     await env.deleteTask('tasks||50');
     await flushAllTimers();
 
@@ -226,6 +239,17 @@ describe('list-query rows', () => {
       - input: { id: 50, name: 'Book flights', parentId: 'tasks||1' }
         operation: 'createSubtaskWithId'
         syncState: 'pending'
+    `);
+    // The server has not confirmed the subtask yet, but the failed request
+    // may have created it: its creation counts as attempted.
+    expect(
+      pick(env.apiStore.getItemOfflineState('tasks||50'), [
+        'isUnsentCreation',
+        'creationAttempted',
+      ]),
+    ).toMatchInlineSnapshot(`
+      creationAttempted: '✅'
+      isUnsentCreation: '✅'
     `);
 
     // Still offline, the user deletes the subtask.

@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import {
   createTasksEnv,
   network,
@@ -684,6 +684,374 @@ describe('tasks whose creation waits for a manual decision', () => {
     expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
 
     list.unmount();
+  });
+});
+
+describe('tasks created with a client-generated id whose creation waits for a manual decision', () => {
+  /**
+   * Creates task 50 offline with an id the app generates on the client (no
+   * temp row) and renames it before it is sent. Back online, its creation
+   * fails on every attempt (3) until it asks for a manual decision: the
+   * server never got the task.
+   */
+  async function createTaskWithIdWhoseCreationKeepsFailing(sessionKey: string) {
+    network.setOffline();
+    const env = createTasksEnv(sessionKey, `${sessionKey}-tasks`);
+    const list = env.renderTaskList();
+    await flushAllTimers();
+
+    env.addTimelineComments('beforeNextAction', [
+      'offline: create task 50 and rename it',
+    ]);
+    await env.createTaskWithId(50, 'Plan trip');
+    await advanceTime(1_000);
+    await env.renameTask('tasks||50', 'Plan summer trip');
+
+    env.faults.createTaskWithId.push(
+      'request-lost',
+      'request-lost',
+      'request-lost',
+    );
+    env.addTimelineComments('beforeNextAction', [
+      'back online: the creation keeps failing until it needs a decision',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    const failedCreation = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'createTaskWithId');
+    if (!failedCreation) throw new Error('Expected the failed task creation');
+
+    return { env, list, failedCreation };
+  }
+
+  test('the edits of a task created with a client-generated id wait for its failed creation, made before or after the failure, and are sent after it once the user sends it again', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWithIdWhoseCreationKeepsFailing('client-id-retry');
+
+    // Online again, the user renames the task a second time.
+    env.addTimelineComments('beforeNextAction', [
+      'online: rename the task whose creation waits for a decision',
+    ]);
+    await env.renameTask('tasks||50', 'Plan winter trip');
+    await flushAllTimers();
+
+    // The server does not have task 50: neither rename is sent (the first
+    // one was queued behind the creation, the second one is made after it
+    // failed). Both wait for the decision about the creation, so the user
+    // has one thing to decide: the creation, which holds the renames.
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineResolutions().map(summarizeResolution))
+      .toMatchInlineSnapshot(`
+        - blocks: 2
+          error: 'connection lost'
+          input: 'id: 50, name: "Plan trip"'
+          kind: 'retry-exhausted'
+          on: 'item:tasks||50'
+          op: 'createTaskWithId'
+        - blockedBy: 1
+          error: 'Blocked by unresolved dependency'
+          input: 'itemId: "tasks||50", name: "Plan summer trip"'
+          kind: 'retry-exhausted'
+          on: 'item:tasks||50'
+          op: 'renameTask'
+        - blockedBy: 1
+          error: 'Blocked by unresolved dependency'
+          input: 'itemId: "tasks||50", name: "Plan winter trip"'
+          kind: 'retry-exhausted'
+          on: 'item:tasks||50'
+          op: 'renameTask'
+      `);
+    // The user keeps seeing the last name, and the task reports that its
+    // creation was sent but the server has not confirmed it.
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget', 'Plan winter trip']`,
+    );
+    expect(env.apiStore.getItemOfflineState('tasks||50'))
+      .toMatchInlineSnapshot(`
+        creationAttempted: '✅'
+        isUnsentCreation: '✅'
+        pendingMutations: 0
+        requiresResolution: '✅'
+        syncState: 'resolution-required'
+      `);
+
+    env.addTimelineComments('beforeNextAction', [
+      'the user asks to send the creation again',
+    ]);
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // The creation goes first, then the renames in the order they were made.
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'renameTask tasks||50 to "Plan summer trip"'
+      - 'renameTask tasks||50 to "Plan winter trip"'
+    `);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget', '50: Plan winter trip']`,
+    );
+    expect(env.apiStore.getItemOfflineState('tasks||50')).toMatchInlineSnapshot(
+      `null`,
+    );
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | tasks                                         |
+      0      | Write report, Review budget                   | [tasks] ui-initialized
+      3.01s  | Write report, Review budget                   | -- offline: create task 50 and rename it
+      .      | Write report, Review budget, Plan trip        | [tasks] ui-changed
+      .      | Write report, Review budget, Plan trip        | offline:createTaskWithId queued
+      4.01s  | Write report, Review budget, Plan summer trip | [tasks] ui-changed
+      .      | Write report, Review budget, Plan summer trip | offline:renameTask queued
+      .      | Write report, Review budget, Plan summer trip | -- back online: the creation keeps failing until it needs a decision
+      .      | Write report, Review budget, Plan summer trip | offline:createTaskWithId replay-started
+      9.01s  | Write report, Review budget, Plan summer trip | offline:createTaskWithId replay-started
+      14.01s | Write report, Review budget, Plan summer trip | offline:createTaskWithId replay-started
+      .      | Write report, Review budget, Plan summer trip | offline:createTaskWithId resolution-required
+      .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
+      .      | Write report, Review budget, Plan summer trip | -- online: rename the task whose creation waits for a decision
+      .      | Write report, Review budget, Plan summer trip | offline:renameTask resolution-required
+      .      | Write report, Review budget, Plan winter trip | [tasks] ui-changed
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask queued
+      15.01s | Write report, Review budget, Plan winter trip | -- the user asks to send the creation again
+      .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-started
+      16.21s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"id":50,"name":"Plan trip"})
+      .      | Write report, Review budget, Plan winter trip | offline:createTaskWithId replay-finished
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-started
+      17.41s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan summer trip"})
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-finished
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-started
+      18.61s | Write report, Review budget, Plan winter trip | [tasks||50] server-data-changed (value: {"name":"Plan winter trip"})
+      .      | Write report, Review budget, Plan winter trip | offline:renameTask replay-finished
+      18.62s | Write report, Review budget, Plan winter trip | 🔴 >list-fetch-started
+      19.42s | Write report, Review budget, Plan winter trip | 🔴 <list-fetch-finished (value: {"count":3})
+      "
+    `);
+
+    list.unmount();
+  });
+
+  test('discarding the failed creation of a task with a client-generated id drops the renames held behind it and removes the task, without sending or fetching anything for it', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWithIdWhoseCreationKeepsFailing('client-id-discard');
+    await env.renameTask('tasks||50', 'Plan winter trip');
+    await flushAllTimers();
+    env.serverTable.clearFetchHistory();
+
+    env.addTimelineComments('beforeNextAction', [
+      'the user discards the creation',
+    ]);
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'discard' },
+      );
+    });
+    await flushAllTimers();
+
+    // Only the 3 failed creation attempts were ever sent, and nothing is left
+    // to send or decide: the renames went with the creation.
+    expect(env.sentRequests).toMatchInlineSnapshot(`
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+      - 'createTaskWithId tasks||50'
+    `);
+    expect(env.getQueue()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    // The task is removed instead of being refetched: the server does not
+    // have it, so a refetch would only fail.
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(list.result.current.items).toMatchInlineSnapshot(
+      `['Write report', 'Review budget']`,
+    );
+    expect(env.apiStore.getItemOfflineState('tasks||50')).toMatchInlineSnapshot(
+      `null`,
+    );
+
+    list.unmount();
+  });
+
+  test('an edit made while the creation waits is merged into the held edit, and a delete replaces both: sent again, the task is created and then deleted', async () => {
+    const { env, list, failedCreation } =
+      await createTaskWithIdWhoseCreationKeepsFailing('client-id-merge');
+
+    // Online: two edits of the task, which are normally merged into one
+    // request. The second one is merged into the first, held one.
+    await env.editTask({ itemId: 'tasks||50', name: 'Plan summer trip' });
+    await env.editTask({ itemId: 'tasks||50', parentId: 'tasks||1' });
+    await flushAllTimers();
+
+    expect(env.sentRequests.slice(3)).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'input', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - input: 'id: 50, name: "Plan trip"'
+        op: 'createTaskWithId'
+      - blockedBy: 1
+        input: 'itemId: "tasks||50", name: "Plan summer trip"'
+        op: 'renameTask'
+      - blockedBy: 1
+        input: 'itemId: "tasks||50", name: "Plan summer trip", parentId: "tasks||1"'
+        op: 'editTask'
+    `);
+
+    // The delete supersedes the held edits of the task. The creation may have
+    // reached the server, so it is kept: the delete waits behind it.
+    await env.deleteTask('tasks||50');
+    await flushAllTimers();
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - op: 'createTaskWithId'
+      - { blockedBy: 1, op: 'deleteTask' }
+    `);
+
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        failedCreation.id,
+        'createTaskWithId',
+        { action: 'retry' },
+      );
+    });
+    await flushAllTimers();
+
+    // No edit is sent: only the creation and the delete.
+    expect(env.sentRequests.slice(3)).toMatchInlineSnapshot(
+      `['createTaskWithId tasks||50', 'deleteTask tasks||50']`,
+    );
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+
+    list.unmount();
+  });
+
+  test('a rename held while the creation waits for a conflict decision is sent to the task the user keeps from the server', async () => {
+    network.setOffline();
+    const env = createTasksEnv('client-id-commit', 'client-id-commit-tasks');
+    await env.createTaskWithId(50, 'Plan trip');
+
+    // On reconnect the replay finds a task with that id on the server and
+    // reports a conflict instead of sending the creation.
+    env.conflicts.createTaskWithId = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createTaskWithId = false;
+    const conflict = env.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+
+    // A rename made while the conflict waits for a decision is held behind it.
+    await env.renameTask('tasks||50', 'Plan summer trip');
+    await flushAllTimers();
+    expect(env.sentRequests).toMatchInlineSnapshot(`[]`);
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['kind', 'op', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`
+      - { kind: 'conflict', op: 'createTaskWithId' }
+      - { blockedBy: 1, kind: 'retry-exhausted', op: 'renameTask' }
+    `);
+
+    // The task another device created with that id: the user keeps it.
+    env.serverTable.setItem('tasks||50', { id: 50, name: 'Plan trip' });
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        conflict.id,
+        'createTaskWithId',
+        { action: 'commit' },
+      );
+    });
+    await flushAllTimers();
+
+    // Nothing is created: the held rename is sent to the server task.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['renameTask tasks||50 to "Plan summer trip"']`,
+    );
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.getServerTasks()).toMatchInlineSnapshot(
+      `['1: Write report', '2: Review budget', '50: Plan summer trip']`,
+    );
+  });
+  test('a rename held while the creation waits for a conflict decision is not sent when the user creates the task under another id', async () => {
+    network.setOffline();
+    const env = createTasksEnv('client-id-new-id', 'client-id-new-id-tasks');
+    await env.createTaskWithId(50, 'Plan trip');
+    await advanceTime(1_000);
+    await env.renameTask('tasks||50', 'Plan summer trip');
+
+    // On reconnect the server already has a task with id 50 (of another
+    // user): the creation reports a conflict, and the rename waits behind it.
+    env.conflicts.createTaskWithId = true;
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+    env.conflicts.createTaskWithId = false;
+    const conflict = env.apiStore.getOfflineResolutions()[0];
+    if (conflict?.kind !== 'conflict') {
+      throw new Error('Expected the task creation conflict');
+    }
+
+    // The user creates the task again, with a new id.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(
+        conflict.id,
+        'createTaskWithId',
+        { action: 'requeue', input: { id: 51, name: 'Plan trip' } },
+      );
+    });
+    await flushAllTimers();
+
+    // The rename targets task 50, which the replacement does not create: it
+    // is not sent to the task the server has under that id. It is left for
+    // the user to send or discard, and no longer waits for anything.
+    expect(env.sentRequests).toMatchInlineSnapshot(
+      `['createTaskWithId tasks||51']`,
+    );
+    expect(
+      env.apiStore
+        .getOfflineResolutions()
+        .map((resolution) =>
+          pick(summarizeResolution(resolution), ['op', 'on', 'blockedBy']),
+        ),
+    ).toMatchInlineSnapshot(`- { on: 'item:tasks||50', op: 'renameTask' }`);
   });
 });
 
