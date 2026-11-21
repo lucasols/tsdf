@@ -17,6 +17,7 @@ export {
   type CreateStoreManagerOptions,
   type DynamicRealtimeThrottleMs,
   type StoreManager,
+  type StoreManagerUploadRef,
 } from './storeManager';
 export type { RemovedStore } from './persistentStorage/removedStoresCleanup';
 export type {
@@ -120,6 +121,7 @@ export type {
   OfflineUpload,
   OfflineUploadAdapter,
   OfflineUploadProgress,
+  OfflineUploadRefSchema,
   OfflineUploadSource,
   OfflineUploadState,
   OfflineUploadTransportContext,

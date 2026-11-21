@@ -500,7 +500,7 @@ type InternalCollectionOfflineOperations<
 > &
   ([ItemState | ItemPayload] extends [never] ? never : unknown);
 
-type CollectionOfflineOperationsConfig<
+export type CollectionOfflineOperationsConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;

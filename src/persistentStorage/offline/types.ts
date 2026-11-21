@@ -1682,6 +1682,7 @@ type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
  *
  * @typeParam State - Document state type for the owning store.
  * @typeParam TOptions - Operation typing options, usually created with {@link DefineOfflineOperation}.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
@@ -1732,6 +1733,7 @@ export type DocumentOfflineOperationDefinition<
  *
  * @typeParam State - Document state type for the owning store.
  * @typeParam TOperations - Operation map where each key declares its input, replay result, and optional conflict payload.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
@@ -1806,6 +1808,7 @@ export type CollectionOfflineEntityRef<ItemPayload extends ValidPayload> =
  * When `tempEntity` or `tempEntities` is provided, the pending builders must
  * return `ItemState`, and the reconciliation hooks must return an
  * `ItemPayload` plus optional `ItemState` replacement data.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  */
 export type CollectionOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -1864,6 +1867,7 @@ export type CollectionOfflineOperationDefinition<
  * @typeParam ItemState - Collection item state type for the owning store.
  * @typeParam ItemPayload - Collection payload type for the owning store.
  * @typeParam TOperations - Operation map where each key declares its input, optional conflict payload, and optional temp-result type.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
@@ -1925,6 +1929,7 @@ export type ListQueryOfflineEntityRef<ItemPayload extends ValidPayload> =
  * `ItemPayload` plus optional `ItemState` replacement data. The pending
  * entities can declare `addToQueries` to show up in list queries while the
  * mutation is queued, and `loadedFields` when partial resources are enabled.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  */
 export type ListQueryOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -1988,6 +1993,7 @@ export type ListQueryOfflineOperationDefinition<
  * @typeParam QueryPayload - Query payload type used by the list store.
  * @typeParam ItemPayload - Item payload type used by the list store.
  * @typeParam TOperations - Operation map where each key declares its input, optional conflict payload, and optional temp-result type.
+ * @typeParam TUploadRef - Upload ref type read from `ctx.uploads.resolvedRefsById` in `execute`. Pass `StoreManagerUploadRef<typeof storeManager>` to use the type inferred from the manager's upload transport. Defaults to the untyped `ValidPayload`.
  *
  * @example
  * ```ts
